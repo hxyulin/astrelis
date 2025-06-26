@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = [ "crates/astrelis","crates/astrelis-core", "crates/astrelis-framework", "examples/gui-app"]
+default-members = []
+
+[workspace.package]
+version = "0.0.1"
+rust-version = "1.87.0"
+edition = "2024"
+authors = ["hxyulin <hxyulin@proton.me>"]
+
+[workspace.dependencies]
+astrelis = { path = "crates/astrelis", version = "0.0.1" }
+astrelis-core = { path = "crates/astrelis-core", version = "0.0.1" }
+astrelis-framework= { path = "crates/astrelis-framework", version = "0.0.1" }
+
+log = "0.4.27"
+puffin = "0.19.1"
