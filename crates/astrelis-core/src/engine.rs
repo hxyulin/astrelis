@@ -1,6 +1,6 @@
 use winit::event_loop::ActiveEventLoop;
 
-use crate::{Window, WindowOpts};
+use crate::{graphics::GraphicsContextOpts, Window, WindowOpts};
 
 pub struct Engine {}
 
@@ -16,8 +16,8 @@ impl Engine {
 }
 
 impl<'a> EngineCtx<'a> {
-    pub fn create_window(&self, opts: WindowOpts) -> Window {
-        Window::new(self.event_loop, opts)
+    pub fn create_window(&self, opts: WindowOpts, graphics_opts: GraphicsContextOpts) -> Window {
+        Window::new(self.event_loop, opts, graphics_opts)
     }
 
     pub fn request_shutdown(&self) {

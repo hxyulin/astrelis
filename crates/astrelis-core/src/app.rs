@@ -2,8 +2,10 @@ use std::marker::PhantomData;
 
 use crate::{
     EngineCtx,
+    config::{BenchmarkMode, Config},
     engine::Engine,
     event::{Event, HandleStatus},
+    profiling::{profile_function, profile_scope},
 };
 
 pub trait App {
@@ -11,13 +13,27 @@ pub trait App {
 }
 
 pub trait AppHandler {
+    #[allow(unused_variables)]
+    fn shutdown(&mut self, ctx: EngineCtx) {}
     fn update(&mut self, ctx: EngineCtx);
     fn on_event(&mut self, ctx: EngineCtx, event: &Event) -> HandleStatus;
 }
 
-pub fn run_app<T: App>() {
+pub fn run_app<T: App>(cfg: Config) {
     use winit::event_loop::{ControlFlow, EventLoop};
     env_logger::init();
+    // Initialize profiler, in the future make this an option
+    match cfg.benchmark {
+        BenchmarkMode::WithWebsever => {
+            puffin::set_scopes_on(true);
+            let server_addr = format!("127.0.0.1:{}", puffin_http::DEFAULT_PORT);
+            let _puffin_server =
+                Box::leak(Box::new(puffin_http::Server::new(&server_addr).unwrap()));
+            log::info!("Run this to view profiling data:  'puffin_viewer --url {server_addr}'");
+        }
+        BenchmarkMode::On => puffin::set_scopes_on(true),
+        BenchmarkMode::Off => {}
+    }
 
     let event_loop = EventLoop::new().expect("failed to create event loop");
     // TODO: Make configurable
@@ -61,7 +77,8 @@ where
     T: App,
 {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        log::debug!("intializing app...");
+        profile_function!();
+        log::debug!("initializing app...");
         // We initialize the app during the resumed event
         let ctx = EngineCtx {
             engine: &mut self.engine,
@@ -70,7 +87,16 @@ where
         self.app = T::init(ctx);
     }
 
-    fn exiting(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {}
+    fn exiting(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+        log::debug!("deinitializing app");
+        let ctx = EngineCtx {
+            engine: &mut self.engine,
+            event_loop: event_loop,
+        };
+        self.app.shutdown(ctx);
+        // We drop the old app here
+        self.app = Box::new(NullApp);
+    }
 
     fn window_event(
         &mut self,
@@ -78,15 +104,19 @@ where
         _window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
+        profile_function!();
         let ctx = EngineCtx {
             engine: &mut self.engine,
             event_loop: event_loop,
         };
 
         if let winit::event::WindowEvent::RedrawRequested = event {
+            puffin::GlobalProfiler::lock().new_frame();
+            profile_scope!("app_update");
             self.app.update(ctx);
         } else if let Some(event) = Event::from_winit(event) {
-            let HandleStatus { handled, consumed } = self.app.on_event(ctx, &event);
+            profile_scope!("app_event");
+            let HandleStatus { handled, consumed: _ } = self.app.on_event(ctx, &event);
             match event {
                 Event::CloseRequested if !handled => event_loop.exit(),
                 _ => {}

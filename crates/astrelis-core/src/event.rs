@@ -5,8 +5,8 @@ pub use winit::keyboard::*;
 
 #[derive(Debug, Clone)]
 pub enum Event {
-    Moved(PhysicalPosition<i32>),
-    Resized(PhysicalSize<u32>),
+    WindowMoved(PhysicalPosition<i32>),
+    WindowResized(PhysicalSize<u32>),
     ScaleFactorChanged(f64),
     Focused(bool),
     CloseRequested,
@@ -58,24 +58,50 @@ impl HandleStatus {
     }
 }
 
-impl From<winit::event::KeyEvent> for KeyEvent {
-    fn from(event: winit::event::KeyEvent) -> Self {
-        Self {
-            physical_key: event.physical_key,
-            logical_key: event.logical_key,
-            text: event.text,
-            location: event.location,
-            state: event.state,
-            repeat: event.repeat,
-            is_synthetic: false,
-        }
-    }
-}
-
 impl Event {
     pub(crate) fn from_winit(event: winit::event::WindowEvent) -> Option<Self> {
         match event {
+            WinitEvent::Moved(pos) => Some(Event::WindowMoved(pos)),
+            WinitEvent::Resized(size) => Some(Event::WindowResized(size)),
+            WinitEvent::ScaleFactorChanged {
+                scale_factor,
+                inner_size_writer: _,
+            } => Some(Event::ScaleFactorChanged(scale_factor)),
+            WinitEvent::Focused(focus) => Some(Event::Focused(focus)),
             WinitEvent::CloseRequested => Some(Event::CloseRequested),
+            WinitEvent::MouseInput {
+                device_id: _,
+                state,
+                button,
+            } => match state {
+                ElementState::Pressed => Some(Event::MouseButtonDown(button)),
+                ElementState::Released => Some(Event::MouseButtonUp(button)),
+            },
+            WinitEvent::MouseWheel {
+                device_id: _,
+                delta,
+                phase: _,
+            } => Some(Event::MouseScrolled(delta)),
+            WinitEvent::CursorMoved {
+                device_id: _,
+                position,
+            } => Some(Event::MouseMoved(position)),
+            WinitEvent::CursorEntered { device_id: _ } => Some(Event::MouseEntered),
+            WinitEvent::CursorLeft { device_id: _ } => Some(Event::MouseLeft),
+            WinitEvent::KeyboardInput {
+                device_id: _,
+                event,
+                is_synthetic,
+            } => Some(Event::KeyInput(KeyEvent {
+                physical_key: event.physical_key,
+                logical_key: event.logical_key,
+                location: event.location,
+                repeat: event.repeat,
+                text: event.text,
+                state: event.state,
+
+                is_synthetic,
+            })),
             unknown => {
                 log::warn!("unhandled window event: {:?}", unknown);
                 None

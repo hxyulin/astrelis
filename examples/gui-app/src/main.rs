@@ -1,43 +1,117 @@
 use astrelis_framework::{
-    App, AppHandler, EngineCtx, Window, WindowOpts,
-    event::{Event, HandleStatus},
+    App, AppHandler, EngineCtx, Extent3D, Window, WindowOpts,
+    config::{BenchmarkMode, Config},
+    egui,
+    event::{Event, HandleStatus, KeyCode},
+    graphics::{
+        Framebuffer, GraphicsContextOpts, TextureUsages, egui::EguiContext,
+        renderer::SimpleRenderer,
+    },
+    input::InputSystem,
+    math::{Vec2, Vec4},
+    profiling::profile_scope,
     run_app,
 };
 
 fn main() {
-    run_app::<GuiApp>();
+    let mut config = Config::default();
+    config.benchmark = BenchmarkMode::WithWebsever;
+    run_app::<GuiApp>(config);
 }
 
 struct GuiApp {
     window: Window,
+    renderer: SimpleRenderer,
+    egui: EguiContext,
+    inputs: InputSystem,
+    fb: Framebuffer,
 }
 
 impl App for GuiApp {
     fn init(ctx: EngineCtx) -> Box<dyn AppHandler> {
-        let window = ctx.create_window(WindowOpts::default());
-        Box::new(Self { window })
-    }
-}
+        let opts = WindowOpts::default();
+        let window = ctx.create_window(opts, GraphicsContextOpts::default());
+        let renderer = SimpleRenderer::new(&window);
+        let egui = EguiContext::new(&window);
+        let fb = Framebuffer::new(
+            &window,
+            Extent3D {
+                width: 400,
+                height: 400,
+                depth: 1,
+            },
+            TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+        );
 
-impl GuiApp {
-    pub fn shutdown(&mut self, ctx: EngineCtx) {
-        log::info!("shutting down GUI Application");
-        // Save user changes, and request to shutdown
-        ctx.request_shutdown();
+        Box::new(Self {
+            window,
+            renderer,
+            egui,
+            inputs: InputSystem::new(),
+            fb,
+        })
     }
 }
 
 impl AppHandler for GuiApp {
+    fn shutdown(&mut self, _ctx: EngineCtx) {
+        log::info!("saving work...");
+    }
+
     fn on_event(&mut self, ctx: EngineCtx, event: &Event) -> HandleStatus {
-        log::info!("received event from engine: {:?}", event);
+        // We handle egui events before our own events
+        if self.egui.on_event(&self.window, event).consumed {
+            return HandleStatus::consumed();
+        }
+
+        self.inputs.on_event(&event);
+
         match event {
-            Event::CloseRequested => self.shutdown(ctx),
+            Event::CloseRequested => ctx.request_shutdown(),
+            Event::WindowResized(new_size) => self.window.resized(*new_size),
             _ => {}
         }
         HandleStatus::ignored()
     }
 
-    fn update(&mut self, ctx: EngineCtx) {
-        self.window.request_redraw();
+    fn update(&mut self, _ctx: EngineCtx) {
+        let mut render_ctx = self.window.begin_render();
+
+        let texture = self.egui.update_texture(&render_ctx, &self.fb);
+
+        self.egui.ui(&render_ctx, |ctx| {
+            profile_scope!("egui_update");
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.label("Test");
+                if ui.button("Test Button").clicked() {
+                    println!("button clicked!");
+                }
+                let size = egui::Vec2::new(400.0, 400.0);
+                ui.image((texture, size));
+            });
+        });
+
+        if self.inputs.is_key_pressed(&KeyCode::Space) {
+            println!("Space pressed");
+        }
+
+        self.renderer
+            .submit_quad(Vec2::new(0.0, 0.0), 0.0, Vec2::new(0.5, 0.5), Vec4::ONE);
+
+        self.renderer.render(&mut render_ctx, Some(&self.fb));
+
+        // egui needs to be updated using the 'ui' function before it can draw,
+        // but this is not explicitly required by the type checker to allow for more
+        // flexibility, if the UI is updated after the render, and it is rendered the next frame
+        self.egui.render(&mut render_ctx);
+
+        self.inputs.new_frame();
+    }
+}
+
+impl Drop for GuiApp {
+    fn drop(&mut self) {
+        // You could also deinitialize here, but 'shutdown' is guarantted to be called
+        log::info!("you can also shutdown here");
     }
 }
