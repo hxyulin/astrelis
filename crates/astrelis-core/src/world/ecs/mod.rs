@@ -1,3 +1,4 @@
+use crate::profiling::profile_function;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
@@ -16,7 +17,7 @@ pub struct Registry {
     comps: HashMap<TypeId, Box<dyn Any>>,
 }
 
-pub trait Component: Any + Default {}
+pub trait Component: Any {}
 
 impl Registry {
     pub fn new() -> Self {
@@ -30,19 +31,22 @@ impl Registry {
     where
         Q: QueryDef<'a>,
     {
+        profile_function!();
         Q::make(self)
     }
 
     pub fn new_entity(&mut self) -> Entity {
+        profile_function!();
         self.next += 1;
         Entity(self.next - 1)
     }
 
     fn get_or_create_storage<T: Component>(&mut self) -> &mut Storage<T> {
-        let ty = T::default().type_id();
+        profile_function!();
+        let ty = TypeId::of::<T>();
         if self.comps.contains_key(&ty) {
             self.comps
-                .get_mut(&T::default().type_id())
+                .get_mut(&ty)
                 .unwrap()
                 .as_mut()
                 .downcast_mut::<Storage<T>>()
@@ -59,18 +63,33 @@ impl Registry {
     }
 
     pub fn add_component<T: Component>(&mut self, ent: Entity, comp: T) {
+        profile_function!();
         let storage = self.get_or_create_storage::<T>();
         storage.insert(ent, comp);
     }
 
     pub fn get_component<T: Component>(&self, ent: Entity) -> Option<&T> {
+        profile_function!();
         let storage = self.get_storage::<T>()?;
         storage.get(ent)
     }
 
+    pub fn remove_component<T: Component>(&mut self, ent: Entity) -> Option<T> {
+        profile_function!();
+        let storage = self.get_storage_mut::<T>()?;
+        storage.remove(ent)
+    }
+
     pub fn get_storage<T: Component>(&self) -> Option<&Storage<T>> {
-        let registry = self.comps.get(&T::default().type_id())?;
+        profile_function!();
+        let registry = self.comps.get(&TypeId::of::<T>())?;
         Some(registry.as_ref().downcast_ref::<Storage<T>>().unwrap())
+    }
+
+    pub fn get_storage_mut<T: Component>(&mut self) -> Option<&mut Storage<T>> {
+        profile_function!();
+        let registry = self.comps.get_mut(&TypeId::of::<T>())?;
+        Some(registry.as_mut().downcast_mut::<Storage<T>>().unwrap())
     }
 }
 
@@ -78,7 +97,8 @@ impl Registry {
 pub struct IndexSlot(NonZeroU64);
 
 impl IndexSlot {
-    pub const fn new(generation: u32, idx: u32) -> Self {
+    pub fn new(generation: u32, idx: u32) -> Self {
+        profile_function!();
         Self(unsafe {
             NonZeroU64::new(((generation as u64) << 32) | (idx as u64 + 1)).unwrap_unchecked()
         })
@@ -121,6 +141,7 @@ impl<T> SparseSet<T> {
     }
 
     pub fn push(&mut self, data: T) -> IndexSlot {
+        profile_function!();
         if let Some(idx) = self.free.pop() {
             let entry = self.vec.get_mut(idx as usize).unwrap();
             entry.data = MaybeUninit::new(data);
@@ -133,6 +154,7 @@ impl<T> SparseSet<T> {
     }
 
     pub fn get(&self, idx: IndexSlot) -> &T {
+        profile_function!();
         let entry = self.vec.get(idx.index() as usize).unwrap();
         assert_eq!(
             entry.generation,
@@ -143,6 +165,7 @@ impl<T> SparseSet<T> {
     }
 
     pub fn remove(&mut self, idx: IndexSlot) -> T {
+        profile_function!();
         let index = idx.index();
         let entry = self.vec.get_mut(index as usize).unwrap();
         assert_eq!(
@@ -176,12 +199,14 @@ impl<T> Storage<T> {
     /// Gets a component based on the entity
     /// This is constant time
     pub fn get(&self, ent: Entity) -> Option<&T> {
+        profile_function!();
         let idx = self.ids.get(ent.0 as usize)?.as_ref()?;
         // If idx exists, it should exist in comps
         Some(self.comps.get(*idx))
     }
 
     pub fn insert(&mut self, ent: Entity, comp: T) {
+        profile_function!();
         let idx = self.comps.push(comp);
         let ent = ent.0 as usize;
         if ent >= self.ids.len() {
@@ -192,6 +217,7 @@ impl<T> Storage<T> {
     }
 
     pub fn remove(&mut self, ent: Entity) -> Option<T> {
+        profile_function!();
         let idx = self.ids.remove(ent.0 as usize)?;
         Some(self.comps.remove(idx))
     }
@@ -310,9 +336,9 @@ mod test {
             .expect("should get a Query2<C1, C2>");
         let results: Vec<_> = qs.collect();
         assert_eq!(results.len(), 2);
-        assert_eq!(results, vec![
-            (e1, &C1(11), &C2(20)),
-            (e2, &C1(12), &C2(21)),
-        ])
+        assert_eq!(
+            results,
+            vec![(e1, &C1(11), &C2(20)), (e2, &C1(12), &C2(21)),]
+        )
     }
 }
