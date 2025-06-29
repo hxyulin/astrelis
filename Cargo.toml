@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = [ "crates/astrelis","crates/astrelis-core", "crates/astrelis-framework", "examples/gui-app"]
-default-members = []
+members = [ "crates/astrelis","crates/astrelis-core", "crates/astrelis-core-macros", "crates/astrelis-framework", "examples/gui-app", "examples/roguerun"]
+default-members = ["crates/astrelis", "crates/astrelis-core", "crates/astrelis-core-macros", "crates/astrelis-framework"]
 
 [workspace.package]
 version = "0.0.1"

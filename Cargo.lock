@@ -181,6 +181,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-core-macros"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "astrelis-framework"
 version = "0.0.1"
 dependencies = [
@@ -600,6 +609,14 @@ dependencies = [
 
 [[package]]
 name = "example-gui-app"
+version = "0.0.1"
+dependencies = [
+ "astrelis-framework",
+ "log",
+]
+
+[[package]]
+name = "example-rogerun"
 version = "0.0.1"
 dependencies = [
  "astrelis-framework",

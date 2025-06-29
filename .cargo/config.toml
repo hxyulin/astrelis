@@ -1,2 +1,2 @@
 [env]
-RUST_LOG="trace,wgpu_core=info,naga=info,wgpu_hal=info"
+RUST_LOG="trace,wgpu_core=info,naga=info,wgpu_hal=info,calloop=info"

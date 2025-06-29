@@ -1,0 +1,10 @@
+[package]
+name = "example-rogerun"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+astrelis-framework.workspace = true
+log.workspace = true

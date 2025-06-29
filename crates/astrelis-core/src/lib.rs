@@ -3,6 +3,7 @@ pub mod event;
 pub mod graphics;
 pub mod profiling;
 pub mod input;
+pub mod world;
 
 mod app;
 mod window;

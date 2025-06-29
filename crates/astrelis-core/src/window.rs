@@ -76,6 +76,8 @@ impl<'window> RenderContext<'window> {
         window.context.begin_render();
         Self { window }
     }
+
+    pub fn finish(self) {}
 }
 
 impl Drop for RenderContext<'_> {

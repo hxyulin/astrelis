@@ -2,7 +2,7 @@ use crate::{graphics::Framebuffer, profiling::profile_function};
 use bytemuck::offset_of;
 use glam::{Vec2, Vec4};
 use puffin::profile_scope;
-use wgpu::util::DeviceExt;
+use wgpu::{include_wgsl, util::DeviceExt};
 
 use crate::{RenderContext, Window};
 
@@ -69,10 +69,7 @@ impl SimpleRenderer {
             entries: &[],
         });
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("SimpleRenderer Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("simple_renderer.wgsl").into()),
-        });
+        let shader = device.create_shader_module(include_wgsl!("simple_renderer.wgsl"));
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("SimpleRenderer Pipeline Layout"),
