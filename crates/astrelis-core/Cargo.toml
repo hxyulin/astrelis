@@ -18,3 +18,16 @@ glam = { version = "0.30.4", features = ["bytemuck"] }
 egui = "=0.31.1"
 egui-wgpu = "=0.31.1"
 puffin_http = "0.16.1"
+static_assertions = "1.1.0"
+rand = "0.9.1"
+
+[dev-dependencies]
+criterion = { version = "0.6.0", features = ["html_reports"] }
+
+[[bench]]
+name = "ecs"
+harness = false
+
+[[bench]]
+name = "sparse_set"
+harness = false

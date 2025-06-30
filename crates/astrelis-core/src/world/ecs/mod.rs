@@ -1,12 +1,16 @@
-use crate::profiling::profile_function;
+use crate::{
+    alloc::{IndexSlot, SparseSet},
+    profiling::profile_function,
+};
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    mem::MaybeUninit,
-    num::NonZeroU64,
+    fmt::Debug,
 };
 
+mod component;
 mod query;
+pub use component::*;
 pub use query::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -17,14 +21,18 @@ pub struct Registry {
     comps: HashMap<TypeId, Box<dyn Any>>,
 }
 
-pub trait Component: Any {}
-
 impl Registry {
     pub fn new() -> Self {
         Self {
             next: 0,
             comps: HashMap::new(),
         }
+    }
+
+    pub fn spawn<C: ComponentRef>(&mut self, comps: C) -> Entity {
+        let ent = self.new_entity();
+        comps.add_components(ent, self);
+        ent
     }
 
     pub fn query<'a, Q>(&'a self) -> Option<<Q as QueryDef<'a>>::Query>
@@ -93,97 +101,6 @@ impl Registry {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct IndexSlot(NonZeroU64);
-
-impl IndexSlot {
-    pub fn new(generation: u32, idx: u32) -> Self {
-        profile_function!();
-        Self(unsafe {
-            NonZeroU64::new(((generation as u64) << 32) | (idx as u64 + 1)).unwrap_unchecked()
-        })
-    }
-
-    pub fn generation(&self) -> u32 {
-        (self.0.get() >> 32) as u32
-    }
-
-    pub fn index(&self) -> u32 {
-        (self.0.get() & u32::MAX as u64) as u32 - 1
-    }
-}
-
-pub struct Entry<T> {
-    generation: u32,
-    data: MaybeUninit<T>,
-}
-
-impl<T> Entry<T> {
-    pub const fn new(data: T) -> Self {
-        Self {
-            generation: 0,
-            data: MaybeUninit::new(data),
-        }
-    }
-}
-
-pub struct SparseSet<T> {
-    vec: Vec<Entry<T>>,
-    free: Vec<u32>,
-}
-
-impl<T> SparseSet<T> {
-    pub const fn new() -> Self {
-        Self {
-            vec: Vec::new(),
-            free: Vec::new(),
-        }
-    }
-
-    pub fn push(&mut self, data: T) -> IndexSlot {
-        profile_function!();
-        if let Some(idx) = self.free.pop() {
-            let entry = self.vec.get_mut(idx as usize).unwrap();
-            entry.data = MaybeUninit::new(data);
-            IndexSlot::new(entry.generation, idx)
-        } else {
-            let idx = self.vec.len();
-            self.vec.push(Entry::new(data));
-            IndexSlot::new(0, idx as u32)
-        }
-    }
-
-    pub fn get(&self, idx: IndexSlot) -> &T {
-        profile_function!();
-        let entry = self.vec.get(idx.index() as usize).unwrap();
-        assert_eq!(
-            entry.generation,
-            idx.generation(),
-            "invalid generation, use after free!"
-        );
-        unsafe { entry.data.assume_init_ref() }
-    }
-
-    pub fn remove(&mut self, idx: IndexSlot) -> T {
-        profile_function!();
-        let index = idx.index();
-        let entry = self.vec.get_mut(index as usize).unwrap();
-        assert_eq!(
-            entry.generation,
-            idx.generation(),
-            "invalid generation, use after free!"
-        );
-        let data = unsafe { entry.data.assume_init_read() };
-        entry.generation += 1;
-        entry.data = MaybeUninit::uninit();
-        self.free.push(index);
-        data
-    }
-}
-
-// TODO: replace with static_assertions crate
-const _IDX_SLOT_SIZE_CHECK: usize = size_of::<IndexSlot>() - size_of::<Option<IndexSlot>>();
-
 pub struct Storage<T> {
     ids: Vec<Option<IndexSlot>>,
     comps: SparseSet<T>,
@@ -210,8 +127,12 @@ impl<T> Storage<T> {
         let idx = self.comps.push(comp);
         let ent = ent.0 as usize;
         if ent >= self.ids.len() {
-            // TODO: Maybe optimize performance, resize by a fixed size
-            self.ids.resize(ent + 1, None);
+            let mut new_len = self.ids.len();
+            while new_len <= ent {
+                // + 1 to account for edge case of 1 * 3 / 2 = 1
+                new_len = new_len * 3 / 2 + 1;
+            }
+            self.ids.resize(new_len, None);
         }
         self.ids[ent] = Some(idx);
     }
@@ -226,35 +147,6 @@ impl<T> Storage<T> {
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[test]
-    fn test_sparse_set_push() {
-        let mut set = SparseSet::<u8>::new();
-        let idx = set.push(15);
-        assert_eq!(idx.generation(), 0);
-        assert_eq!(idx.index(), 0);
-        assert_eq!(*set.get(idx), 15);
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_sparse_set_uaf() {
-        let mut set = SparseSet::<u8>::new();
-        let _ = set.push(15);
-        // Create index slot with invalid generation
-        let idx = IndexSlot::new(1, 0);
-        let _ = set.get(idx);
-    }
-
-    #[test]
-    fn test_sparse_set_remove() {
-        let mut set = SparseSet::<u8>::new();
-        let idx = set.push(15);
-        set.remove(idx.clone());
-        let new_idx = set.push(45);
-        assert_eq!(idx.index(), new_idx.index());
-        assert_ne!(idx.generation(), new_idx.generation());
-    }
 
     #[test]
     fn test_storage_insert() {
@@ -295,10 +187,24 @@ mod test {
     impl Component for C2 {}
 
     #[test]
+    fn test_spawn1() {
+        let mut reg = Registry::new();
+
+        let e0 = reg.spawn(C1(13));
+        let e1 = reg.spawn((C2(11),));
+        let res0: Vec<_> = reg.query::<C1>().unwrap().collect();
+        assert_eq!(res0.len(), 1);
+        assert_eq!(res0[0], (e0, &C1(13)));
+
+        let res1: Vec<_> = reg.query::<C2>().unwrap().collect();
+        assert_eq!(res1.len(), 1);
+        assert_eq!(res1[0], (e1, &C2(11)));
+    }
+
+    #[test]
     fn test_query1() {
         let mut reg = Registry::new();
 
-        // create three entities: only two get C1
         let e0 = reg.new_entity();
         let _e1 = reg.new_entity();
         let e2 = reg.new_entity();
@@ -306,11 +212,9 @@ mod test {
         reg.add_component(e0, C1(10));
         reg.add_component(e2, C1(30));
 
-        // query for all (Entity, &C1) pairs
         let qs = reg.query::<C1>().expect("should get a Query1<C1>");
         let results: Vec<_> = qs.collect();
 
-        // We expect exactly the two we inserted, in order of entity ID:
         assert_eq!(results.len(), 2);
         assert_eq!(results, vec![(e0, &C1(10)), (e2, &C1(30))]);
     }

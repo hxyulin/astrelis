@@ -4,6 +4,7 @@ pub mod graphics;
 pub mod profiling;
 pub mod input;
 pub mod world;
+pub mod alloc;
 
 mod app;
 mod window;
