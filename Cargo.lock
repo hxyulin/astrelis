@@ -185,6 +185,7 @@ dependencies = [
  "puffin_http",
  "rand",
  "static_assertions",
+ "thiserror 2.0.12",
  "wgpu",
  "winit",
 ]

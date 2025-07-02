@@ -116,7 +116,10 @@ where
             self.app.update(ctx);
         } else if let Some(event) = Event::from_winit(event) {
             profile_scope!("app_event");
-            let HandleStatus { handled, consumed: _ } = self.app.on_event(ctx, &event);
+            let HandleStatus {
+                handled,
+                consumed: _,
+            } = self.app.on_event(ctx, &event);
             match event {
                 Event::CloseRequested if !handled => event_loop.exit(),
                 _ => {}

@@ -111,10 +111,14 @@ impl EguiContext {
         self.state.on_event(window, event)
     }
 
-    pub fn update_texture<T: AsRef<Window>>(&mut self, window: T, fb: &Framebuffer) -> egui::TextureId {
+    pub fn update_texture<T: AsRef<Window>>(
+        &mut self,
+        window: T,
+        fb: &Framebuffer,
+    ) -> egui::TextureId {
         self.renderer.register_native_texture(
             &window.as_ref().context.device,
-            &fb.view,
+            &fb.color.view,
             wgpu::FilterMode::Linear,
         )
     }

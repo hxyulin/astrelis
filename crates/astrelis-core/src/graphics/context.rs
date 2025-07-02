@@ -1,17 +1,25 @@
 use std::sync::Arc;
 
-use crate::profiling::{profile_function, profile_scope};
-pub use wgpu::Backends;
+use crate::{
+    graphics::texture::Texture,
+    profiling::{profile_function, profile_scope},
+};
+pub use wgpu::{Backends, PresentMode};
 use winit::{dpi::PhysicalSize, window::Window};
 
 pub struct GraphicsContextOpts {
     backends: Backends,
+    present_mode: PresentMode,
 }
 
 impl Default for GraphicsContextOpts {
     fn default() -> Self {
         let backends = Backends::from_env().unwrap_or(Backends::all());
-        Self { backends }
+        let present_mode = PresentMode::AutoVsync;
+        Self {
+            backends,
+            present_mode,
+        }
     }
 }
 
@@ -35,12 +43,24 @@ pub struct GraphicsContext {
     pub(super) queue: wgpu::Queue,
     pub(super) config: wgpu::SurfaceConfiguration,
     pub(super) sample_count: u32,
+    pub(super) depth: Texture,
 
     pub(super) backend: wgpu::Backend,
     pub(super) frame: Option<GraphicsContextFrame>,
 
     reconfigure: PendingReconfigure,
 }
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum GraphicsContextCreationError {
+    #[error(transparent)]
+    CreateSurfaceError(#[from] wgpu::CreateSurfaceError),
+    #[error("no adapter available")]
+    NoAdapter,
+    #[error(transparent)]
+    RequestDeviceError(#[from] wgpu::RequestDeviceError),
+}
+
 pub(super) struct GraphicsContextFrame {
     pub(super) texture: wgpu::SurfaceTexture,
     pub(super) view: wgpu::TextureView,
@@ -50,7 +70,10 @@ pub(super) struct GraphicsContextFrame {
 }
 
 impl GraphicsContext {
-    pub fn new(window: Arc<Window>, opts: GraphicsContextOpts) -> Result<Self, String> {
+    pub fn new(
+        window: Arc<Window>,
+        opts: GraphicsContextOpts,
+    ) -> Result<Self, GraphicsContextCreationError> {
         profile_function!();
         use wgpu::{Instance, InstanceDescriptor, RequestAdapterOptions};
         let instance = Instance::new(&InstanceDescriptor {
@@ -59,16 +82,14 @@ impl GraphicsContext {
         });
 
         let size = window.inner_size();
-        let surface = instance
-            .create_surface(window.clone())
-            .map_err(|e| format!("failed to create surface: {:?}", e))?;
+        let surface = instance.create_surface(window.clone())?;
 
         let adapter = pollster::block_on(instance.request_adapter(&RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::default(),
             force_fallback_adapter: false,
             compatible_surface: Some(&surface),
         }))
-        .expect("failed to request adapter");
+        .ok_or(GraphicsContextCreationError::NoAdapter)?;
 
         let backend = adapter.get_info().backend;
         let device_features = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
@@ -85,8 +106,7 @@ impl GraphicsContext {
                 memory_hints: wgpu::MemoryHints::MemoryUsage,
             },
             None,
-        ))
-        .map_err(|e| format!("Failed to request device: {:?}", e))?;
+        ))?;
 
         let surface_caps = surface.get_capabilities(&adapter);
         let surface_format = surface_caps
@@ -100,7 +120,7 @@ impl GraphicsContext {
             .unwrap();
         config.format = surface_format;
         // TODO: configure vsync
-        config.present_mode = wgpu::PresentMode::AutoVsync;
+        config.present_mode = opts.present_mode;
         surface.configure(&device, &config);
 
         let format_features = config.format.guaranteed_format_features(device_features);
@@ -116,6 +136,8 @@ impl GraphicsContext {
         // We only support sample count of 1, no MSAA is supported yet
         let sample_count = 1;
 
+        let depth = Texture::create_depth_texture(&device, &config);
+
         Ok(Self {
             window,
             instance,
@@ -126,6 +148,7 @@ impl GraphicsContext {
             queue,
             config,
             sample_count,
+            depth,
 
             backend,
             frame: None,
@@ -163,7 +186,10 @@ impl GraphicsContext {
             .frame
             .take()
             .expect("you need to call begin_render first");
-        debug_assert!(frame.passes > 0, "at least 1 pass is required to render a frame");
+        debug_assert!(
+            frame.passes > 0,
+            "at least 1 pass is required to render a frame"
+        );
         frame.texture.present();
     }
 

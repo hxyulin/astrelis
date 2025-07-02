@@ -1,18 +1,17 @@
 use astrelis_core::world::{Component, Registry};
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
-pub struct CompA(pub usize);
+pub struct CompA(pub u64);
 
 impl Component for CompA {}
 
 fn criterion_benchmark(c: &mut Criterion) {
-    const SIZES: &[usize] = &[256, 512, 1024, 2048, 4096, 8192, 16384, 32768];
+    let mut g = c.benchmark_group("ecs-comp");
 
-    for size in SIZES {
-        let size = *size;
-
-        c.bench_function(&format!("insert-{}", size), |b| {
+    for &size in &[256, 512, 1024, 2048, 4096, 8192, 16384, 32768] {
+        g.throughput(criterion::Throughput::Elements(size));
+        g.bench_with_input(BenchmarkId::new("insert", size), &size, |b, &size| {
             b.iter_batched(
                 || Registry::new(),
                 |mut reg| {
@@ -25,19 +24,26 @@ fn criterion_benchmark(c: &mut Criterion) {
             );
         });
 
-        let mut registry = Registry::new();
-        for i in 0..size {
-            let ent = registry.new_entity();
-            registry.add_component(ent, CompA(i));
-        }
-        c.bench_function(&format!("query1-{}", size), move |b| {
-            b.iter(|| {
-                let mut iter = registry.query::<CompA>().unwrap();
-                while let Some(next) = iter.next() {
-                    black_box(next);
-                }
-            })
-        });
+        let base_registry = {
+            let mut r = Registry::new();
+            for i in 0..size {
+                let e = r.new_entity();
+                r.add_component(e, CompA(i));
+            }
+            r
+        };
+        g.bench_with_input(
+            BenchmarkId::new("query1", size),
+            &base_registry,
+            |b, registry| {
+                b.iter(|| {
+                    let mut it = registry.query::<CompA>().unwrap();
+                    while let Some((ent, comp)) = it.next() {
+                        black_box((ent, comp.0));
+                    }
+                })
+            },
+        );
     }
 }
 

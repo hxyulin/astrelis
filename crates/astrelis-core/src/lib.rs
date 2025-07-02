@@ -1,20 +1,20 @@
+pub mod alloc;
 pub mod config;
 pub mod event;
 pub mod graphics;
-pub mod profiling;
 pub mod input;
+pub mod profiling;
 pub mod world;
-pub mod alloc;
 
 mod app;
-mod window;
 mod engine;
 mod geometry;
+mod window;
 
 pub use app::{App, AppHandler, run_app};
-pub use window::*;
 pub use engine::*;
 pub use geometry::*;
+pub use window::*;
 
-pub use glam as math;
 pub use egui;
+pub use glam as math;

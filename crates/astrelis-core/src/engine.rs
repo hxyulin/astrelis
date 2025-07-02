@@ -1,6 +1,6 @@
 use winit::event_loop::ActiveEventLoop;
 
-use crate::{graphics::GraphicsContextOpts, Window, WindowOpts};
+use crate::{Window, WindowOpts, graphics::GraphicsContextOpts};
 
 pub struct Engine {}
 

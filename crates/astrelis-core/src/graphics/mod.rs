@@ -1,9 +1,11 @@
-pub mod renderer;
 pub mod egui;
 pub mod image;
-mod material;
+pub mod renderer;
+pub mod target;
+
 mod context;
-mod target;
-pub use material::*;
+mod material;
+mod texture;
 pub use context::*;
+pub use material::*;
 pub use target::*;
