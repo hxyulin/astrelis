@@ -1,12 +1,7 @@
 use astrelis_framework::{
-    App, AppHandler, EngineCtx, Extent3D, Window, WindowOpts,
-    config::{BenchmarkMode, Config},
-    event::{Event, HandleStatus},
-    graphics::{Framebuffer, GraphicsContextOpts, TextureUsages, renderer::SimpleRenderer},
-    input::InputSystem,
-    math::{Vec2, Vec4},
-    run_app,
-    world::{Component, Registry},
+    config::{BenchmarkMode, Config}, event::{Event, HandleStatus}, graphics::{
+        renderer::SimpleRenderer, Framebuffer, FramebufferOpts, GraphicsContextOpts, TextureFormat, TextureUsages
+    }, input::InputSystem, math::{Vec2, Vec4}, run_app, world::{Component, Registry}, App, AppHandler, EngineCtx, Extent3D, Window, WindowOpts
 };
 
 fn main() {
@@ -30,12 +25,17 @@ impl App for RoguerunApp {
         let renderer = SimpleRenderer::new(&window);
         let fb = Framebuffer::new(
             &window,
-            Extent3D {
-                width: 400,
-                height: 400,
-                depth: 1,
+            FramebufferOpts {
+                extent: Extent3D {
+                    width: 400,
+                    height: 400,
+                    depth: 1,
+                },
+                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+                depth: true,
+                format: TextureFormat::Bgra8UnormSrgb,
+                sample_count: 1,
             },
-            TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
         );
 
         Box::new(Self {
@@ -75,7 +75,7 @@ impl AppHandler for RoguerunApp {
         self.renderer
             .submit_quad(Vec2::new(0.0, 0.0), 0.0, Vec2::new(0.5, 0.5), Vec4::ONE);
 
-        self.renderer.render(&mut render_ctx, Some(&self.fb));
+        self.renderer.render(&mut render_ctx, );
 
         self.inputs.new_frame();
     }

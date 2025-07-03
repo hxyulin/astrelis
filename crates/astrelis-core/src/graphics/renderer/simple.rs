@@ -1,5 +1,5 @@
 use crate::{
-    graphics::{Framebuffer, texture::Texture},
+    graphics::{RenderableSurface, texture::Texture},
     profiling::profile_function,
 };
 use bytemuck::offset_of;
@@ -175,7 +175,10 @@ impl SimpleRenderer {
     /// Renders the submitted meshes
     /// If a framebuffer is provided, it renders to the framebuffer, otherwise it renders on a
     /// surface
-    pub fn render(&mut self, ctx: &mut RenderContext, fb: Option<&Framebuffer>) {
+    pub fn render<'a, 'b>(&mut self, ctx: &mut RenderContext, target: RenderableSurface<'b>)
+    where
+        'a: 'b,
+    {
         profile_function!();
         let frame = ctx.window.context.frame.as_mut().unwrap();
         frame.passes += 1;
@@ -185,19 +188,10 @@ impl SimpleRenderer {
             label: Some("SimpleRenderer Command Encoder"),
         });
 
-        let view = match &fb {
-            Some(fb) => &fb.color.view,
-            None => &frame.view,
-        };
-        let depth = match &fb {
-            Some(fb) => &fb.depth.view,
-            None => &ctx.window.context.depth.view,
-        };
-
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("SimpleRenderer Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
+                view: target.get_color(&ctx.window.context),
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color::RED),
@@ -205,7 +199,8 @@ impl SimpleRenderer {
                 },
             })],
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth,
+                // TODO: Actually cehck if it exists
+                view: target.get_depth(&ctx.window.context).unwrap(),
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
                     store: wgpu::StoreOp::Store,

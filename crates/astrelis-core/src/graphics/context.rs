@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use crate::{
-    graphics::texture::Texture,
-    profiling::{profile_function, profile_scope},
+    graphics::{Framebuffer, texture::Texture},
+    profiling::profile_function,
 };
+use wgpu::SurfaceTexture;
 pub use wgpu::{Backends, PresentMode};
 use winit::{dpi::PhysicalSize, window::Window};
 
@@ -31,6 +32,32 @@ impl PendingReconfigure {
     const fn new() -> Self {
         Self { resize: None }
     }
+}
+
+pub enum RenderableSurface<'a> {
+    WindowSurface,
+    Framebuffer(&'a Framebuffer),
+}
+
+impl<'a> RenderableSurface<'a> {
+    pub(crate) fn get_color(&'a self, ctx: &'a GraphicsContext) -> &'a wgpu::TextureView {
+        match self {
+            Self::WindowSurface => &ctx.frame.as_ref().unwrap().surface.view,
+            Self::Framebuffer(fb) => &fb.color.view(),
+        }
+    }
+
+    pub(crate) fn get_depth(&'a self, ctx: &'a GraphicsContext) -> Option<&'a wgpu::TextureView> {
+        match self {
+            Self::WindowSurface => Some(&ctx.depth.view),
+            Self::Framebuffer(fb) => Some(&fb.depth.as_ref()?.view()),
+        }
+    }
+}
+
+pub struct Surface {
+    pub(crate) texture: SurfaceTexture,
+    pub(crate) view: wgpu::TextureView,
 }
 
 pub struct GraphicsContext {
@@ -62,8 +89,7 @@ pub enum GraphicsContextCreationError {
 }
 
 pub(super) struct GraphicsContextFrame {
-    pub(super) texture: wgpu::SurfaceTexture,
-    pub(super) view: wgpu::TextureView,
+    pub(super) surface: Surface,
     // We need to keep track, because if there are multiple passes, we need to not clear the frame,
     // or if there is none, we need to submit an arbitrary command buffer.
     pub(super) passes: usize,
@@ -174,8 +200,10 @@ impl GraphicsContext {
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         self.frame.replace(GraphicsContextFrame {
-            texture: frame,
-            view,
+            surface: Surface {
+                texture: frame,
+                view,
+            },
             passes: 0,
         });
     }
@@ -190,7 +218,7 @@ impl GraphicsContext {
             frame.passes > 0,
             "at least 1 pass is required to render a frame"
         );
-        frame.texture.present();
+        frame.surface.texture.present();
     }
 
     /// This should be called to resize the surface for the new resolution

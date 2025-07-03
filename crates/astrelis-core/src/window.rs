@@ -7,7 +7,7 @@ pub use winit::{
 use winit::{event_loop::ActiveEventLoop, window::Window as WinitWindow};
 
 use crate::{
-    graphics::{GraphicsContext, GraphicsContextOpts},
+    graphics::{GraphicsContext, GraphicsContextOpts, Surface},
     profiling::{profile_function, profile_scope},
 };
 
