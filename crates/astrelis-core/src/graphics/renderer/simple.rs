@@ -198,14 +198,15 @@ impl SimpleRenderer {
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                // TODO: Actually cehck if it exists
-                view: target.get_depth(&ctx.window.context).unwrap(),
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
+            depth_stencil_attachment: target.get_depth(&ctx.window.context).map(|view| {
+                wgpu::RenderPassDepthStencilAttachment {
+                    view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }
             }),
             occlusion_query_set: None,
             timestamp_writes: None,

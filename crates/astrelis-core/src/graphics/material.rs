@@ -15,6 +15,12 @@ impl Color {
     }
 }
 
+impl Into<Vec4> for Color {
+    fn into(self) -> Vec4 {
+        self.0
+    }
+}
+
 pub struct Material {
     diffuse_color: Color,
 }

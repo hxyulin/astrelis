@@ -25,7 +25,8 @@ impl TexView {
 }
 
 pub struct FramebufferOpts {
-    pub format: wgpu::TextureFormat,
+    /// The TextureFormat of the framebuffer, use None for the same format as the window
+    pub format: Option<wgpu::TextureFormat>,
     pub depth: bool,
     pub sample_count: u32,
     pub extent: Extent3D<u32>,
@@ -51,6 +52,8 @@ impl Framebuffer {
         } = opts;
 
         let size: wgpu::Extent3d = extent.into();
+        let format = format.unwrap_or(window.context.config.format);
+
         let color = TexView::new(
             &window.context.device,
             &wgpu::TextureDescriptor {

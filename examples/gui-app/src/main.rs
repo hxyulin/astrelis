@@ -34,8 +34,7 @@ impl App for GuiApp {
                 },
                 usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
                 depth: true,
-                // TODO: Use window api
-                format: TextureFormat::Bgra8UnormSrgb,
+                format: None,
                 sample_count: 1,
             },
         );

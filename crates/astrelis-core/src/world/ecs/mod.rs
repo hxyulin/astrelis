@@ -10,8 +10,10 @@ use std::{
 
 mod component;
 mod query;
+mod transform;
 pub use component::*;
 pub use query::*;
+pub use transform::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Entity(u64);

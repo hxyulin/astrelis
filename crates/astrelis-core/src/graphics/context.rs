@@ -145,7 +145,6 @@ impl GraphicsContext {
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .unwrap();
         config.format = surface_format;
-        // TODO: configure vsync
         config.present_mode = opts.present_mode;
         surface.configure(&device, &config);
 
