@@ -21,6 +21,7 @@ puffin_http = "0.16.1"
 static_assertions = "1.1.0"
 rand = "0.9.1"
 thiserror = "2.0.12"
+lazy_static = "1.5.0"
 
 [dev-dependencies]
 criterion = { version = "0.6.0", features = ["html_reports"] }

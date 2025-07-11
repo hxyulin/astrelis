@@ -175,10 +175,7 @@ impl SimpleRenderer {
     /// Renders the submitted meshes
     /// If a framebuffer is provided, it renders to the framebuffer, otherwise it renders on a
     /// surface
-    pub fn render<'a, 'b>(&mut self, ctx: &mut RenderContext, target: RenderableSurface<'b>)
-    where
-        'a: 'b,
-    {
+    pub fn render(&mut self, ctx: &mut RenderContext, target: RenderableSurface<'_>) {
         profile_function!();
         let frame = ctx.window.context.frame.as_mut().unwrap();
         frame.passes += 1;

@@ -72,6 +72,17 @@ impl<T> SparseSet<T> {
         unsafe { entry.data.assume_init_ref() }
     }
 
+    pub fn get_mut(&mut self, idx: IndexSlot) -> &mut T {
+        profile_function!();
+        let entry = self.vec.get_mut(idx.index() as usize).unwrap();
+        assert_eq!(
+            entry.generation,
+            idx.generation(),
+            "invalid generation, use after free!"
+        );
+        unsafe { entry.data.assume_init_mut() }
+    }
+
     pub fn remove(&mut self, idx: IndexSlot) -> T {
         profile_function!();
         let index = idx.index();

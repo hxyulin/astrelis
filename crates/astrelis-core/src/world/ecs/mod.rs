@@ -37,7 +37,7 @@ impl Registry {
         ent
     }
 
-    pub fn query<'a, Q>(&'a self) -> Option<<Q as QueryDef<'a>>::Query>
+    pub fn query<'a, Q>(&'a self) -> <Q as QueryDef<'a>>::Query
     where
         Q: QueryDef<'a>,
     {
@@ -194,11 +194,11 @@ mod test {
 
         let e0 = reg.spawn(C1(13));
         let e1 = reg.spawn((C2(11),));
-        let res0: Vec<_> = reg.query::<C1>().unwrap().collect();
+        let res0: Vec<_> = reg.query::<C1>().collect();
         assert_eq!(res0.len(), 1);
         assert_eq!(res0[0], (e0, &C1(13)));
 
-        let res1: Vec<_> = reg.query::<C2>().unwrap().collect();
+        let res1: Vec<_> = reg.query::<C2>().collect();
         assert_eq!(res1.len(), 1);
         assert_eq!(res1[0], (e1, &C2(11)));
     }
@@ -214,7 +214,7 @@ mod test {
         reg.add_component(e0, C1(10));
         reg.add_component(e2, C1(30));
 
-        let qs = reg.query::<C1>().expect("should get a Query1<C1>");
+        let qs = reg.query::<C1>();
         let results: Vec<_> = qs.collect();
 
         assert_eq!(results.len(), 2);
@@ -237,9 +237,7 @@ mod test {
         reg.add_component(e2, C2(21));
         reg.add_component(e3, C2(22));
 
-        let qs = reg
-            .query::<(C1, C2)>()
-            .expect("should get a Query2<C1, C2>");
+        let qs = reg.query::<(C1, C2)>();
         let results: Vec<_> = qs.collect();
         assert_eq!(results.len(), 2);
         assert_eq!(

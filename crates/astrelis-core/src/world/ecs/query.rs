@@ -1,11 +1,11 @@
 use super::{Component, Entity, Registry, Storage};
 
 pub trait Query<'a>: Sized + Iterator {
-    fn fetch(reg: &'a Registry) -> Option<Self>;
+    fn fetch(reg: &'a Registry) -> Self;
 }
 
 pub struct Query1<'a, T> {
-    store: &'a Storage<T>,
+    store: Option<&'a Storage<T>>,
     pos: usize,
 }
 
@@ -16,13 +16,15 @@ where
     type Item = (Entity, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.pos < self.store.ids.len() {
-            let ent_index = self.pos;
-            self.pos += 1;
+        if let Some(store) = self.store {
+            while self.pos < store.ids.len() {
+                let ent_index = self.pos;
+                self.pos += 1;
 
-            if let Some(slot) = self.store.ids[ent_index] {
-                let comp = self.store.comps.get(slot);
-                return Some((Entity(ent_index as u64), comp));
+                if let Some(slot) = store.ids[ent_index] {
+                    let comp = store.comps.get(slot);
+                    return Some((Entity(ent_index as u64), comp));
+                }
             }
         }
         None
@@ -33,9 +35,9 @@ impl<'a, T> Query<'a> for Query1<'a, T>
 where
     T: Component,
 {
-    fn fetch(reg: &'a Registry) -> Option<Self> {
-        let store = reg.get_storage::<T>()?;
-        Some(Self { store, pos: 0 })
+    fn fetch(reg: &'a Registry) -> Self {
+        let store = reg.get_storage::<T>();
+        Self { store, pos: 0 }
     }
 }
 
@@ -47,7 +49,7 @@ macro_rules! query_impl {
             $( $ty: Component ),+
         {
             inner: $old<'a, $($ty),+>,
-            store: &'a Storage<$new>,
+            store: Option<&'a Storage<$new>>,
         }
 
         impl<'a, $new, $($ty),+> Iterator for $name<'a, $new, $($ty),+>
@@ -58,15 +60,17 @@ macro_rules! query_impl {
             type Item = (Entity, &'a $new, $(&'a $ty),+);
 
             fn next(&mut self) -> Option<Self::Item> {
-                #[allow(non_snake_case)]
-                while let Some((ent, $($ty),+)) = self.inner.next() {
-                    let ent_idx = ent.0 as usize;
-                    if self.store.ids.len() <= ent_idx {
-                        continue;
-                    }
-                    if let Some(slot) = self.store.ids[ent_idx] {
-                        let comp = self.store.comps.get(slot);
-                        return Some((ent, comp, $($ty),+));
+                if let Some(store) = self.store {
+                    #[allow(non_snake_case)]
+                    while let Some((ent, $($ty),+)) = self.inner.next() {
+                        let ent_idx = ent.0 as usize;
+                        if store.ids.len() <= ent_idx {
+                            continue;
+                        }
+                        if let Some(slot) = store.ids[ent_idx] {
+                            let comp = store.comps.get(slot);
+                            return Some((ent, comp, $($ty),+));
+                        }
                     }
                 }
                 None
@@ -78,12 +82,12 @@ macro_rules! query_impl {
             $new: Component,
             $( $ty: Component ),+
         {
-            fn fetch(reg: &'a Registry) -> Option<Self> {
-                let inner = $old::fetch(reg)?;
-                let store = reg.get_storage::<$new>()?;
-                Some(Self {
+            fn fetch(reg: &'a Registry) -> Self {
+                let inner = $old::fetch(reg);
+                let store = reg.get_storage::<$new>();
+                Self {
                     inner, store
-                })
+                }
             }
         }
     }
@@ -95,7 +99,7 @@ query_impl!(Query4, Query3, A, B, C, D);
 
 pub trait QueryDef<'a> {
     type Query: Query<'a>;
-    fn make(reg: &'a Registry) -> Option<Self::Query>;
+    fn make(reg: &'a Registry) -> Self::Query;
 }
 
 macro_rules! querydef_impl {
@@ -104,7 +108,7 @@ macro_rules! querydef_impl {
             where $( $ty: Component ),+
         {
             type Query = $name<'a, $($ty),+>;
-            fn make(reg: &'a Registry) -> Option<Self::Query> {
+            fn make(reg: &'a Registry) -> Self::Query {
                 $name::fetch(reg)
             }
         }
@@ -123,7 +127,7 @@ where
 {
     type Query = Query1<'a, T>;
 
-    fn make(reg: &'a Registry) -> Option<Self::Query> {
+    fn make(reg: &'a Registry) -> Self::Query {
         Query1::fetch(reg)
     }
 }
