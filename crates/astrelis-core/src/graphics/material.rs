@@ -7,7 +7,8 @@ use crate::{
     world::Component,
 };
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Zeroable)]
+#[repr(transparent)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Zeroable, bytemuck::NoUninit)]
 pub struct Color([f32; 4]);
 
 impl Color {
@@ -29,7 +30,8 @@ impl Into<Vec4> for Color {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::NoUninit)]
 pub struct Material {
     pub diffuse_color: Color,
     pub shader: ShaderHandle,
@@ -54,11 +56,11 @@ impl MaterialManager {
         }
     }
 
-    pub fn create_mesh(&mut self, mat: Material) -> MatHandle {
+    pub fn create_mat(&mut self, mat: Material) -> MatHandle {
         MatHandle(self.mats.push(mat))
     }
 
-    pub fn get_mesh(&self, handle: MatHandle) -> &Material {
+    pub fn get_mat(&self, handle: MatHandle) -> &Material {
         self.mats.get(handle.0)
     }
 

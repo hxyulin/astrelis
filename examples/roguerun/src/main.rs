@@ -1,7 +1,15 @@
 use astrelis_framework::{
-    config::{BenchmarkMode, Config}, event::{Event, HandleStatus}, graphics::{
-        renderer::SimpleRenderer, Framebuffer, FramebufferOpts, GraphicsContextOpts, TextureFormat, TextureUsages
-    }, input::InputSystem, math::{Vec2, Vec4}, run_app, world::{Component, Registry}, App, AppHandler, EngineCtx, Extent3D, Window, WindowOpts
+    App, AppHandler, EngineCtx, Extent3D, Window, WindowOpts,
+    config::{BenchmarkMode, Config},
+    event::{Event, HandleStatus},
+    graphics::{
+        Framebuffer, FramebufferOpts, GraphicsContextOpts, TextureFormat, TextureUsages,
+        renderer::SimpleRenderer,
+    },
+    input::InputSystem,
+    math::{Vec2, Vec4},
+    run_app,
+    world::{Component, Registry},
 };
 
 fn main() {
@@ -33,7 +41,7 @@ impl App for RoguerunApp {
                 },
                 usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
                 depth: true,
-                format: TextureFormat::Bgra8UnormSrgb,
+                format: None,
                 sample_count: 1,
             },
         );
@@ -48,7 +56,7 @@ impl App for RoguerunApp {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Transform {
     translation: Vec2,
     rotation: f32,
@@ -75,7 +83,7 @@ impl AppHandler for RoguerunApp {
         self.renderer
             .submit_quad(Vec2::new(0.0, 0.0), 0.0, Vec2::new(0.5, 0.5), Vec4::ONE);
 
-        self.renderer.render(&mut render_ctx, );
+        self.renderer.render(&mut render_ctx);
 
         self.inputs.new_frame();
     }

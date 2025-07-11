@@ -1,7 +1,8 @@
 use crate::profiling::profile_function;
 use std::{mem::MaybeUninit, num::NonZeroU64};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bytemuck::NoUninit)]
 pub struct IndexSlot(NonZeroU64);
 
 impl IndexSlot {

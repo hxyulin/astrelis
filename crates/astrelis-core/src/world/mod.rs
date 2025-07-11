@@ -6,6 +6,15 @@ pub use ecs::*;
 pub use manager::*;
 
 pub struct Scene {
-    name: String,
-    registry: Registry,
+    pub name: String,
+    pub registry: Registry,
+}
+
+impl Scene {
+    pub fn new(name: String) -> Self {
+        Self {
+            name,
+            registry: Registry::new(),
+        }
+    }
 }

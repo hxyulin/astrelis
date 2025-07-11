@@ -7,7 +7,8 @@ use crate::{
     graphics::Material,
 };
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, bytemuck::NoUninit)]
 pub struct ShaderHandle(IndexSlot);
 
 pub enum ShaderSource {
@@ -237,24 +238,19 @@ pub struct BindGroupEntry {
 
 impl ShaderModule {}
 
-lazy_static::lazy_static! {
-    static ref MATERIAL_SHADER: Shader = {
-        let source = ShaderSource::String(Cow::Borrowed(include_str!("renderer/material.wgsl")));
-        let bind_groups = vec![
-            BindGroup {
-                entries: vec![
-                    BindGroupEntry {
-                        ty: BindingType::Buffer {
-                            ty: BufferBindingType::Uniform { ty: UniformType::Builtin(BuiltinUniform::Material)
-                            },
-                            size: std::mem::size_of::<Material>(),
-                        }
-                    }
-                ]
-            }
-        ];
-        Shader::new(source, bind_groups)
-    };
+pub fn material_shader() -> Shader {
+    let source = ShaderSource::String(Cow::Borrowed(include_str!("renderer/material.wgsl")));
+    let bind_groups = vec![BindGroup {
+        entries: vec![BindGroupEntry {
+            ty: BindingType::Buffer {
+                ty: BufferBindingType::Uniform {
+                    ty: UniformType::Builtin(BuiltinUniform::Material),
+                },
+                size: std::mem::size_of::<Material>(),
+            },
+        }],
+    }];
+    Shader::new(source, bind_groups)
 }
 
 pub struct ShaderManager {
@@ -266,6 +262,10 @@ impl ShaderManager {
         Self {
             shaders: SparseSet::new(),
         }
+    }
+
+    pub fn create_shader(&mut self, shader: Shader) -> ShaderHandle {
+        ShaderHandle(self.shaders.push(shader))
     }
 
     pub fn get_shader(&self, handle: ShaderHandle) -> &Shader {

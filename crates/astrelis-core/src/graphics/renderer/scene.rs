@@ -1,18 +1,25 @@
 use std::collections::HashMap;
 
-use glam::Mat4;
+use glam::{Mat4, Vec4};
+use puffin::profile_scope;
+use wgpu::{DepthStencilState, VertexAttribute, util::DeviceExt};
 
 use crate::{
+    Engine, RenderContext, Window,
     graphics::{
-        mesh::{MeshComponent, MeshHandle}, shader::{PipelineCache, PipelineCacheEntry}, MatHandle, Material, MaterialComponent, RenderableSurface
-    }, world::{Registry, Transform}, Engine, RenderContext, Window
+        MatHandle, Material, MaterialComponent, RenderableSurface,
+        mesh::{GpuMesh, MeshComponent, MeshHandle, Vertex},
+        shader::{PipelineCache, PipelineCacheEntry},
+        texture::Texture,
+    },
+    world::{GlobalTransform, Registry},
 };
 
 type RenderKey = (MeshHandle, MatHandle);
 /// A Renderer for a Scene
 pub struct SceneRenderer {
     instance_buffer: wgpu::Buffer,
-    render_list: HashMap<RenderKey, Vec<Transform>>,
+    render_list: HashMap<RenderKey, Vec<GlobalTransform>>,
     pipeline_cache: PipelineCache,
     uniform_buffer: wgpu::Buffer,
 }
@@ -47,9 +54,9 @@ impl SceneRenderer {
         }
     }
 
-    pub fn encode_scene(&mut self, reg: Registry) {
+    pub fn encode_scene(&mut self, reg: &Registry) {
         for (_ent, mesh, mat, transform) in
-            reg.query::<(MeshComponent, MaterialComponent, Transform)>()
+            reg.query::<(MeshComponent, MaterialComponent, GlobalTransform)>()
         {
             let hdl = (mesh.0, mat.0);
             if let Some(transforms) = self.render_list.get_mut(&hdl) {
@@ -63,9 +70,11 @@ impl SceneRenderer {
     pub fn render(
         &mut self,
         engine: &mut Engine,
-        ctx: &RenderContext,
+        ctx: &mut RenderContext,
         target: RenderableSurface<'_>,
     ) {
+        let frame = ctx.window.context.frame.as_mut().unwrap();
+        frame.passes += 1;
         let device = &ctx.window.context.device;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("SceneRenderer Command Encoder"),
@@ -101,40 +110,149 @@ impl SceneRenderer {
                 transforms.len() < Self::INSTANCE_BUF_SIZE,
                 "TODO: Allow multiple draw calls"
             );
-            let mat = engine.mats.get_mesh(mat);
-            let PipelineCacheEntry {
-                pipeline,
-                bind_groups,
-            } = self.pipeline_cache.get_or_create_pipeline(mat.shader, || {
-                use crate::graphics::shader::{BuiltinUniform, ShaderResources, UniformType};
 
-                let shader = engine.shaders.get_shader_mut(mat.shader);
-                shader.create_pipeline(
-                    device,
-                    ShaderResources {
-                        resources: HashMap::from([(
-                            UniformType::Builtin(BuiltinUniform::Material),
-                            self.uniform_buffer.as_entire_binding(),
-                        )]),
-                        targets: &[Some(ctx.window.context.config.format.into())],
-                        // TODO: Implement the rest
-                        ..Default::default()
-                    },
-                )
+            let mut copy_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("SceneRenderer Copy Encoder"),
             });
 
-            render_pass.set_pipeline(pipeline);
-            for (binding, bind_group) in bind_groups {
-                // Currently only support using the entire buffer
-                render_pass.set_bind_group(*binding, bind_group, &[]);
-            }
-            // TODO: Bind our vertex and index buffers
+            {
+                let mat = engine.mats.get_mat(mat);
+                profile_scope!("setup_mat");
 
-            // Make this a seperate scope, to facilitate easier refactoring when multirendering is
-            // supported:
-            // Write our batch to instance buffer
-            // Set instance buffer and render
-            // render
+                let PipelineCacheEntry {
+                    pipeline,
+                    bind_groups,
+                } = self.pipeline_cache.get_or_create_pipeline(mat.shader, || {
+                    use crate::graphics::shader::{BuiltinUniform, ShaderResources, UniformType};
+
+                    let shader = engine.shaders.get_shader_mut(mat.shader);
+                    shader.create_pipeline(
+                        device,
+                        ShaderResources {
+                            resources: HashMap::from([(
+                                UniformType::Builtin(BuiltinUniform::Material),
+                                self.uniform_buffer.as_entire_binding(),
+                            )]),
+                            targets: &[Some(ctx.window.context.config.format.into())],
+                            vertex_buffers: &[
+                                Vertex::buffer_layout(),
+                                wgpu::VertexBufferLayout {
+                                    array_stride: size_of::<GlobalTransform>() as u64,
+                                    step_mode: wgpu::VertexStepMode::Instance,
+                                    attributes: &[
+                                        VertexAttribute {
+                                            format: wgpu::VertexFormat::Float32x4,
+                                            offset: 0,
+                                            shader_location: 2,
+                                        },
+                                        VertexAttribute {
+                                            format: wgpu::VertexFormat::Float32x4,
+                                            offset: size_of::<Vec4>() as u64,
+                                            shader_location: 3,
+                                        },
+                                        VertexAttribute {
+                                            format: wgpu::VertexFormat::Float32x4,
+                                            offset: (2 * size_of::<Vec4>()) as u64,
+                                            shader_location: 4,
+                                        },
+                                        VertexAttribute {
+                                            format: wgpu::VertexFormat::Float32x4,
+                                            offset: (3 * size_of::<Vec4>()) as u64,
+                                            shader_location: 5,
+                                        },
+                                    ],
+                                },
+                            ],
+                            // TODO: Don't hardcode
+                            depth_stencil: Some(DepthStencilState {
+                                format: Texture::DEPTH_FORMAT,
+                                depth_write_enabled: true,
+                                bias: wgpu::DepthBiasState::default(),
+                                stencil: wgpu::StencilState::default(),
+                                depth_compare: wgpu::CompareFunction::Less,
+                            }),
+                            // TODO: Implement the rest
+                            ..Default::default()
+                        },
+                    )
+                });
+
+                let staging_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Material Staging Buffer"),
+                    contents: bytemuck::bytes_of(mat),
+                    usage: wgpu::BufferUsages::COPY_SRC,
+                });
+
+                copy_encoder.copy_buffer_to_buffer(
+                    &staging_buffer,
+                    0,
+                    &self.uniform_buffer,
+                    0,
+                    size_of::<Material>() as u64,
+                );
+
+                render_pass.set_pipeline(pipeline);
+                for (binding, bind_group) in bind_groups {
+                    // Currently only support using the entire buffer
+                    render_pass.set_bind_group(*binding, bind_group, &[]);
+                }
+            }
+
+            let mesh = engine.meshes.get_mesh_mut(mesh);
+            let GpuMesh {
+                vertex,
+                index,
+                vertex_count,
+            } = mesh.get_or_create_gpumesh(|mesh| GpuMesh::from_mesh(mesh, device));
+
+            {
+                profile_scope!("setup_mesh");
+
+                render_pass.set_vertex_buffer(0, vertex.slice(..));
+                render_pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
+            }
+
+            let batches = transforms.len().div_ceil(Self::INSTANCE_BUF_SIZE);
+            for i in 0..batches {
+                profile_scope!("render_batch");
+                let start = i * Self::INSTANCE_BUF_SIZE;
+                let max = if i + 1 < batches {
+                    (i + 1) * Self::INSTANCE_BUF_SIZE
+                } else {
+                    transforms.len()
+                };
+                let batch_count = max - start;
+                assert!(batch_count <= Self::INSTANCE_BUF_SIZE);
+
+                let staging_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Transform Staging Buffer"),
+                    contents: bytemuck::cast_slice(&transforms[start..max]),
+                    usage: wgpu::BufferUsages::COPY_SRC,
+                });
+
+                copy_encoder.copy_buffer_to_buffer(
+                    &staging_buffer,
+                    0,
+                    &self.instance_buffer,
+                    (start * std::mem::size_of::<GlobalTransform>()) as u64,
+                    (batch_count * std::mem::size_of::<GlobalTransform>()) as u64,
+                );
+
+                render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                render_pass.draw_indexed(0..*vertex_count as u32, 0, 0..batch_count as u32);
+            }
+
+            {
+                profile_scope!("submit_copy_encoder");
+                ctx.window.context.queue.submit(Some(copy_encoder.finish()));
+            }
+        }
+
+        drop(render_pass);
+
+        {
+            profile_scope!("submit_encoder");
+            ctx.window.context.queue.submit(Some(encoder.finish()));
         }
     }
 }

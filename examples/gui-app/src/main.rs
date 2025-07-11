@@ -1,7 +1,21 @@
 use astrelis_framework::{
-    config::{BenchmarkMode, Config}, egui, event::{Event, HandleStatus, KeyCode}, graphics::{
-        egui::EguiContext, renderer::SimpleRenderer, Framebuffer, FramebufferOpts, GraphicsContextOpts, RenderableSurface, TextureFormat, TextureUsages
-    }, input::InputSystem, math::{Vec2, Vec4}, profiling::profile_scope, run_app, App, AppHandler, EngineCtx, Extent3D, Window, WindowOpts
+    App, AppHandler, EngineCtx, Extent3D, Window, WindowOpts,
+    config::{BenchmarkMode, Config},
+    egui,
+    event::{Event, HandleStatus, KeyCode},
+    graphics::{
+        Color, Framebuffer, FramebufferOpts, GraphicsContextOpts, MatHandle, Material,
+        MaterialComponent, RenderableSurface, TextureUsages,
+        egui::EguiContext,
+        mesh::{Mesh, MeshComponent, MeshHandle, MeshSource, Vertex},
+        renderer::SceneRenderer,
+        shader::material_shader,
+    },
+    input::InputSystem,
+    math::{Quat, Vec2, Vec3, Vec4},
+    profiling::profile_scope,
+    run_app,
+    world::{GlobalTransform, Scene, Transform},
 };
 
 fn main() {
@@ -12,17 +26,21 @@ fn main() {
 
 struct GuiApp {
     window: Window,
-    renderer: SimpleRenderer,
+    renderer: SceneRenderer,
     egui: EguiContext,
     inputs: InputSystem,
     fb: Framebuffer,
+
+    scene: Scene,
+    material: MatHandle,
+    mesh: MeshHandle,
 }
 
 impl App for GuiApp {
-    fn init(ctx: EngineCtx) -> Box<dyn AppHandler> {
+    fn init(mut ctx: EngineCtx) -> Box<dyn AppHandler> {
         let opts = WindowOpts::default();
         let window = ctx.create_window(opts, GraphicsContextOpts::default());
-        let renderer = SimpleRenderer::new(&window);
+        let renderer = SceneRenderer::new(&window);
         let egui = EguiContext::new(&window);
         let fb = Framebuffer::new(
             &window,
@@ -39,12 +57,51 @@ impl App for GuiApp {
             },
         );
 
+        let mesh = ctx.engine_mut().meshes.create_mesh(Mesh::new(
+            "Square".to_string(),
+            MeshSource::Memory(
+                vec![
+                    Vertex {
+                        pos: Vec3::new(-0.5, -0.5, 0.0),
+                        texcoord: Vec2::new(0.0, 0.0),
+                    },
+                    Vertex {
+                        pos: Vec3::new(0.5, -0.5, 0.0),
+                        texcoord: Vec2::new(1.0, 0.0),
+                    },
+                    Vertex {
+                        pos: Vec3::new(0.5, 0.5, 0.0),
+                        texcoord: Vec2::new(1.0, 1.0),
+                    },
+                    Vertex {
+                        pos: Vec3::new(-0.5, 0.5, 0.0),
+                        texcoord: Vec2::new(0.0, 1.0),
+                    },
+                ],
+                vec![
+                    0, 1, 2, // Triangle 1: bottom right
+                    0, 2, 3, // Triangle 2: top left
+                ],
+            ),
+        ));
+
+        let shader = ctx.engine_mut().shaders.create_shader(material_shader());
+
+        let material = ctx.engine_mut().mats.create_mat(Material {
+            diffuse_color: Color::WHITE,
+            shader,
+        });
+
         Box::new(Self {
             window,
             renderer,
             egui,
             inputs: InputSystem::new(),
             fb,
+
+            scene: Scene::new("Default Scene".to_string()),
+            mesh,
+            material,
         })
     }
 }
@@ -70,7 +127,7 @@ impl AppHandler for GuiApp {
         HandleStatus::ignored()
     }
 
-    fn update(&mut self, _ctx: EngineCtx) {
+    fn update(&mut self, mut ctx: EngineCtx) {
         let mut render_ctx = self.window.begin_render();
 
         let texture = self.egui.update_texture(&render_ctx, &self.fb);
@@ -79,8 +136,18 @@ impl AppHandler for GuiApp {
             profile_scope!("egui_update");
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.label("Test");
-                if ui.button("Test Button").clicked() {
-                    println!("button clicked!");
+                if ui.button("Add Object").clicked() {
+                    let transform = Transform {
+                        position: Vec3::ZERO,
+                        scale: Vec3::ONE,
+                        rotation: Quat::IDENTITY,
+                    };
+                    self.scene.registry.spawn((
+                        transform,
+                        GlobalTransform::from_transform(&transform),
+                        MaterialComponent(self.material),
+                        MeshComponent(self.mesh),
+                    ));
                 }
                 let size = egui::Vec2::new(400.0, 400.0);
                 ui.image((texture, size));
@@ -91,10 +158,13 @@ impl AppHandler for GuiApp {
             println!("Space pressed");
         }
 
-        self.renderer
-            .submit_quad(Vec2::new(0.0, 0.0), 0.0, Vec2::new(0.5, 0.5), Vec4::ONE);
+        self.renderer.encode_scene(&self.scene.registry);
 
-        self.renderer.render(&mut render_ctx, RenderableSurface::Framebuffer(&self.fb));
+        self.renderer.render(
+            ctx.engine_mut(),
+            &mut render_ctx,
+            RenderableSurface::Framebuffer(&self.fb),
+        );
 
         // egui needs to be updated using the 'ui' function before it can draw,
         // but this is not explicitly required by the type checker to allow for more

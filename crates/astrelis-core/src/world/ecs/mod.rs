@@ -188,6 +188,14 @@ mod test {
     struct C2(u32);
     impl Component for C2 {}
 
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct C3(u32);
+    impl Component for C3 {}
+
+    #[derive(Debug, Default, PartialEq, Eq)]
+    struct C4(u32);
+    impl Component for C4 {}
+
     #[test]
     fn test_spawn1() {
         let mut reg = Registry::new();

@@ -218,8 +218,7 @@ impl SimpleRenderer {
             label: Some("SimpleRenderer Copy Encoder"),
         });
 
-        let batches =
-            (self.quad_instances.len() as f32 / Self::INSTANCE_BUF_SIZE as f32).ceil() as usize;
+        let batches = self.quad_instances.len().div_ceil(Self::INSTANCE_BUF_SIZE);
         for i in 0..batches {
             profile_scope!("render batch");
             let start = i * Self::INSTANCE_BUF_SIZE;

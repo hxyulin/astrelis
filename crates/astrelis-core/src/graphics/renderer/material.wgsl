@@ -29,10 +29,10 @@ fn vs_main(input: Vertex, instance: InstanceData) -> VertexOutput {
     var out: VertexOutput;
 
     let model: mat4x4<f32> = mat4x4<f32>(
-        input.transform_c1,
-        input.transform_c2,
-        input.transform_c3,
-        input.transform_c4,
+        instance.transform_c1,
+        instance.transform_c2,
+        instance.transform_c3,
+        instance.transform_c4,
     );
 
     out.position = model * vec4<f32>(input.position, 1.0);

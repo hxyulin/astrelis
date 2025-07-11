@@ -34,4 +34,12 @@ impl<'a> EngineCtx<'a> {
     pub fn request_shutdown(&self) {
         self.event_loop.exit();
     }
+
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    pub fn engine_mut(&mut self) -> &mut Engine {
+        &mut self.engine
+    }
 }
