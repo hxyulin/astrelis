@@ -11,9 +11,14 @@ struct InstanceData {
     @location(5) transform_c4: vec4<f32>,
 };
 
+struct Camera {
+    projection: mat4x4<f32>,
+    view: mat4x4<f32>,
+};
+
 struct Material {
     diffuse_color: vec4<f32>,
-}
+};
 
 @group(0) @binding(0)
 var<uniform> mat: Material;

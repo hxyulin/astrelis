@@ -37,6 +37,9 @@ pub struct Material {
     pub shader: ShaderHandle,
 }
 
+impl Material {
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct MaterialComponent(pub MatHandle);
 

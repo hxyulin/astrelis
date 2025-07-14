@@ -1,4 +1,4 @@
-use bytemuck::offset_of;
+use astrelis_core_macros::ShaderBufferCompatible;
 use glam::{Vec2, Vec3};
 use wgpu::util::DeviceExt;
 
@@ -8,36 +8,10 @@ use crate::{
 };
 
 #[repr(C)]
-#[derive(Debug, Clone, Default, Copy, bytemuck::NoUninit, bytemuck::Zeroable)]
+#[derive(Debug, Clone, Default, Copy, bytemuck::NoUninit, bytemuck::Zeroable, ShaderBufferCompatible)]
 pub struct Vertex {
     pub pos: Vec3,
     pub texcoord: Vec2,
-}
-
-impl Vertex {
-    pub fn buffer_layout() -> wgpu::VertexBufferLayout<'static> {
-        // NIGHTLY: we are using the compile_time offset_of feature
-        assert_eq!(offset_of!(Vertex, pos), 0);
-        assert_eq!(offset_of!(Vertex, texcoord), size_of::<Vec3>());
-
-        static ATTRIBUTES: &[wgpu::VertexAttribute] = &[
-            wgpu::VertexAttribute {
-                offset: 0,
-                shader_location: 0,
-                format: wgpu::VertexFormat::Float32x3,
-            },
-            wgpu::VertexAttribute {
-                offset: size_of::<Vec3>() as u64,
-                shader_location: 1,
-                format: wgpu::VertexFormat::Float32x2,
-            },
-        ];
-        wgpu::VertexBufferLayout {
-            array_stride: size_of::<Self>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: ATTRIBUTES,
-        }
-    }
 }
 
 pub enum MeshSource {

@@ -13,6 +13,7 @@ winit = "=0.30.11"
 log.workspace = true
 puffin.workspace = true
 bytemuck.workspace = true
+astrelis-core-macros.workspace = true
 pollster = "0.4.0"
 glam = { version = "0.30.4", features = ["bytemuck"] }
 egui = "=0.31.1"

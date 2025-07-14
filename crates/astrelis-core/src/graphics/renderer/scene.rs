@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
-use glam::{Mat4, Vec4};
-use puffin::profile_scope;
-use wgpu::{DepthStencilState, VertexAttribute, util::DeviceExt};
+use glam::Mat4;
+use puffin::{profile_function, profile_scope};
+use wgpu::{DepthStencilState, util::DeviceExt};
 
 use crate::{
     Engine, RenderContext, Window,
     graphics::{
         MatHandle, Material, MaterialComponent, RenderableSurface,
         mesh::{GpuMesh, MeshComponent, MeshHandle, Vertex},
-        shader::{PipelineCache, PipelineCacheEntry},
+        shader::{PipelineCache, PipelineCacheEntry, ShaderBufferCompatible},
         texture::Texture,
     },
     world::{GlobalTransform, Registry},
@@ -73,6 +73,7 @@ impl SceneRenderer {
         ctx: &mut RenderContext,
         target: RenderableSurface<'_>,
     ) {
+        profile_function!();
         let frame = ctx.window.context.frame.as_mut().unwrap();
         frame.passes += 1;
         let device = &ctx.window.context.device;
@@ -135,33 +136,9 @@ impl SceneRenderer {
                             )]),
                             targets: &[Some(ctx.window.context.config.format.into())],
                             vertex_buffers: &[
-                                Vertex::buffer_layout(),
-                                wgpu::VertexBufferLayout {
-                                    array_stride: size_of::<GlobalTransform>() as u64,
-                                    step_mode: wgpu::VertexStepMode::Instance,
-                                    attributes: &[
-                                        VertexAttribute {
-                                            format: wgpu::VertexFormat::Float32x4,
-                                            offset: 0,
-                                            shader_location: 2,
-                                        },
-                                        VertexAttribute {
-                                            format: wgpu::VertexFormat::Float32x4,
-                                            offset: size_of::<Vec4>() as u64,
-                                            shader_location: 3,
-                                        },
-                                        VertexAttribute {
-                                            format: wgpu::VertexFormat::Float32x4,
-                                            offset: (2 * size_of::<Vec4>()) as u64,
-                                            shader_location: 4,
-                                        },
-                                        VertexAttribute {
-                                            format: wgpu::VertexFormat::Float32x4,
-                                            offset: (3 * size_of::<Vec4>()) as u64,
-                                            shader_location: 5,
-                                        },
-                                    ],
-                                },
+                                Vertex::buffer_layout(0).get_wgpu(wgpu::VertexStepMode::Vertex),
+                                GlobalTransform::buffer_layout(2)
+                                    .get_wgpu(wgpu::VertexStepMode::Instance),
                             ],
                             // TODO: Don't hardcode
                             depth_stencil: Some(DepthStencilState {

@@ -1,6 +1,10 @@
-use glam::{Mat4, Quat, Vec3};
+use astrelis_core_macros::ShaderBufferCompatible;
+use glam::{Mat4, Quat, Vec3, Vec4};
 
-use crate::world::Component;
+use crate::{
+    graphics::shader::{BufferLayout, ShaderBufferCompatible},
+    world::Component,
+};
 
 /// A basic component object
 /// Every in-scene object should have this
@@ -33,6 +37,39 @@ impl GlobalTransform {
             transform.rotation,
             transform.position,
         );
+    }
+}
+
+// TODO: We currently don't support Mat4
+impl ShaderBufferCompatible for GlobalTransform {
+    fn buffer_layout(base_location: u32) -> BufferLayout {
+        let attributes = vec![
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: 0,
+                shader_location: base_location,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: size_of::<Vec4>() as u64,
+                shader_location: base_location + 1,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: (2 * size_of::<Vec4>()) as u64,
+                shader_location: base_location + 2,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: (3 * size_of::<Vec4>()) as u64,
+                shader_location: base_location + 3,
+            },
+        ];
+
+        BufferLayout {
+            attributes,
+            size: size_of::<Self>() as u64,
+        }
     }
 }
 

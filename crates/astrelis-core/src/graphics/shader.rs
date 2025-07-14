@@ -302,3 +302,50 @@ impl PipelineCache {
         self.pipeline_cache.get(&handle).unwrap()
     }
 }
+
+pub struct BufferLayout {
+    pub attributes: Vec<wgpu::VertexAttribute>,
+    pub size: u64,
+}
+
+impl BufferLayout {
+    pub fn get_wgpu(&self, step_mode: wgpu::VertexStepMode) -> wgpu::VertexBufferLayout<'_> {
+        wgpu::VertexBufferLayout {
+            array_stride: self.size,
+            step_mode,
+            attributes: self.attributes.as_slice(),
+        }
+    }
+}
+
+pub trait ShaderBufferCompatible {
+    fn buffer_layout(base_position: u32) -> BufferLayout;
+}
+
+pub trait AsVertexFormat {
+    fn vertex_format() -> wgpu::VertexFormat;
+}
+
+impl AsVertexFormat for f32 {
+    fn vertex_format() -> wgpu::VertexFormat {
+        wgpu::VertexFormat::Float32
+    }
+}
+
+impl AsVertexFormat for glam::Vec2 {
+    fn vertex_format() -> wgpu::VertexFormat {
+        wgpu::VertexFormat::Float32x2
+    }
+}
+
+impl AsVertexFormat for glam::Vec3 {
+    fn vertex_format() -> wgpu::VertexFormat {
+        wgpu::VertexFormat::Float32x3
+    }
+}
+
+impl AsVertexFormat for glam::Vec4 {
+    fn vertex_format() -> wgpu::VertexFormat {
+        wgpu::VertexFormat::Float32x4
+    }
+}

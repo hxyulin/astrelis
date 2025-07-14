@@ -1,7 +1,19 @@
 [workspace]
 resolver = "3"
-members = [ "crates/astrelis","crates/astrelis-core", "crates/astrelis-core-macros", "crates/astrelis-framework", "examples/gui-app", "examples/roguerun"]
-default-members = ["crates/astrelis", "crates/astrelis-core", "crates/astrelis-core-macros", "crates/astrelis-framework"]
+members = [
+    "crates/astrelis",
+    "crates/astrelis-core",
+    "crates/astrelis-core-macros",
+    "crates/astrelis-framework",
+    "examples/gui-app",
+    "examples/roguerun",
+]
+default-members = [
+    "crates/astrelis",
+    "crates/astrelis-core",
+    "crates/astrelis-core-macros",
+    "crates/astrelis-framework",
+]
 
 [workspace.package]
 version = "0.0.1"
@@ -12,7 +24,8 @@ authors = ["hxyulin <hxyulin@proton.me>"]
 [workspace.dependencies]
 astrelis = { path = "crates/astrelis", version = "0.0.1" }
 astrelis-core = { path = "crates/astrelis-core", version = "0.0.1" }
-astrelis-framework= { path = "crates/astrelis-framework", version = "0.0.1" }
+astrelis-core-macros = { path = "crates/astrelis-core-macros", version = "0.0.1" }
+astrelis-framework = { path = "crates/astrelis-framework", version = "0.0.1" }
 
 log = "0.4.27"
 puffin = "0.19.1"

@@ -108,6 +108,7 @@ impl App for GuiApp {
 
 impl AppHandler for GuiApp {
     fn shutdown(&mut self, _ctx: EngineCtx) {
+        // Here this will be called when gracefully shutdown
         log::info!("saving work...");
     }
 
@@ -177,7 +178,9 @@ impl AppHandler for GuiApp {
 
 impl Drop for GuiApp {
     fn drop(&mut self) {
-        // You could also deinitialize here, but 'shutdown' is guarantted to be called
+        // You could also deinitialize here, but 'shutdown' is guarantted to be called if the
+        // program does not panic
         log::info!("you can also shutdown here");
+        // This is called even if the program panics (unwinding)
     }
 }

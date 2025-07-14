@@ -173,6 +173,7 @@ version = "0.0.1"
 name = "astrelis-core"
 version = "0.0.1"
 dependencies = [
+ "astrelis-core-macros",
  "bytemuck",
  "criterion",
  "egui",
@@ -195,6 +196,7 @@ dependencies = [
 name = "astrelis-core-macros"
 version = "0.0.1"
 dependencies = [
+ "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn",
