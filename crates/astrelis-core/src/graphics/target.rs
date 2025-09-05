@@ -33,7 +33,25 @@ pub struct FramebufferOpts {
     pub usage: TextureUsages,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ViewConfig {
+    pub extent: wgpu::Extent3d,
+    pub format: wgpu::TextureFormat,
+    pub sample_count: u32,
+}
+
+impl Default for ViewConfig {
+    fn default() -> Self {
+        Self {
+            extent: Default::default(),
+            format: TextureFormat::Depth32Float,
+            sample_count: 1,
+        }
+    }
+}
+
 pub struct Framebuffer {
+    pub config: ViewConfig,
     pub(crate) color: TexView,
     pub(crate) depth: Option<TexView>,
     pub(crate) msaa: Option<TexView>,
@@ -41,6 +59,14 @@ pub struct Framebuffer {
 
 impl Framebuffer {
     pub fn new(window: &Window, opts: FramebufferOpts) -> Self {
+        Self::new_internal(&window.context.device, &window.context.config, opts)
+    }
+
+    pub fn new_internal(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        opts: FramebufferOpts,
+    ) -> Self {
         profile_function!();
 
         let FramebufferOpts {
@@ -52,10 +78,10 @@ impl Framebuffer {
         } = opts;
 
         let size: wgpu::Extent3d = extent.into();
-        let format = format.unwrap_or(window.context.config.format);
+        let format = format.unwrap_or(config.format);
 
         let color = TexView::new(
-            &window.context.device,
+            &device,
             &wgpu::TextureDescriptor {
                 label: None,
                 size,
@@ -71,7 +97,7 @@ impl Framebuffer {
 
         let depth = if depth {
             Some(TexView::new(
-                &window.context.device,
+                &device,
                 &wgpu::TextureDescriptor {
                     label: None,
                     size,
@@ -90,7 +116,7 @@ impl Framebuffer {
 
         let msaa = if sample_count > 1 {
             Some(TexView::new(
-                &window.context.device,
+                &device,
                 &wgpu::TextureDescriptor {
                     label: None,
                     size,
@@ -107,7 +133,18 @@ impl Framebuffer {
             None
         };
 
-        Self { color, depth, msaa }
+        let config = ViewConfig {
+            extent: extent.into(),
+            format,
+            sample_count,
+        };
+
+        Self {
+            color,
+            depth,
+            msaa,
+            config,
+        }
     }
 }
 

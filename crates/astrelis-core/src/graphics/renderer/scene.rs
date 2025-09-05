@@ -7,7 +7,7 @@ use wgpu::{DepthStencilState, util::DeviceExt};
 use crate::{
     Engine, RenderContext, Window,
     graphics::{
-        MatHandle, Material, MaterialComponent, RenderableSurface,
+        MatHandle, Material, MaterialComponent, RenderTarget, ViewConfig,
         mesh::{GpuMesh, MeshComponent, MeshHandle, Vertex},
         shader::{PipelineCache, PipelineCacheEntry, ShaderBufferCompatible},
         texture::Texture,
@@ -16,8 +16,10 @@ use crate::{
 };
 
 type RenderKey = (MeshHandle, MatHandle);
+
 /// A Renderer for a Scene
 pub struct SceneRenderer {
+    cur_render_fmt: ViewConfig,
     instance_buffer: wgpu::Buffer,
     render_list: HashMap<RenderKey, Vec<GlobalTransform>>,
     pipeline_cache: PipelineCache,
@@ -26,8 +28,6 @@ pub struct SceneRenderer {
 
 impl SceneRenderer {
     pub const INSTANCE_BUF_SIZE: usize = 1024;
-
-    // TODO: Use pipeline cache
 
     pub fn new(window: &Window) -> Self {
         let device = &window.context.device;
@@ -47,6 +47,7 @@ impl SceneRenderer {
         });
 
         Self {
+            cur_render_fmt: ViewConfig::default(),
             instance_buffer,
             uniform_buffer,
             render_list: HashMap::new(),
@@ -67,12 +68,14 @@ impl SceneRenderer {
         }
     }
 
-    pub fn render(
-        &mut self,
-        engine: &mut Engine,
-        ctx: &mut RenderContext,
-        target: RenderableSurface<'_>,
-    ) {
+    pub fn render(&mut self, engine: &mut Engine, ctx: &mut RenderContext, target: RenderTarget) {
+        {
+            let config = target.get_config(&ctx.window.context);
+            if self.cur_render_fmt != config {
+                self.cur_render_fmt = config;
+                self.pipeline_cache.clear();
+            }
+        }
         profile_function!();
         let frame = ctx.window.context.frame.as_mut().unwrap();
         frame.passes += 1;
@@ -148,8 +151,11 @@ impl SceneRenderer {
                                 stencil: wgpu::StencilState::default(),
                                 depth_compare: wgpu::CompareFunction::Less,
                             }),
-                            // TODO: Implement the rest
-                            ..Default::default()
+                            multisample: wgpu::MultisampleState {
+                                count: 1,
+                                mask: !0,
+                                alpha_to_coverage_enabled: false,
+                            },
                         },
                     )
                 });

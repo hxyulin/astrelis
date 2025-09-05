@@ -20,7 +20,7 @@ pub trait AppHandler {
 }
 
 pub fn run_app<T: App>(cfg: Config) {
-    use winit::event_loop::{ControlFlow, EventLoop};
+    use winit::event_loop::EventLoop;
     env_logger::init();
     // Initialize profiler, in the future make this an option
     match cfg.benchmark {
@@ -36,8 +36,7 @@ pub fn run_app<T: App>(cfg: Config) {
     }
 
     let event_loop = EventLoop::new().expect("failed to create event loop");
-    // TODO: Make configurable
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(cfg.control_flow);
     let mut app = AppHandlerProxy::<T>::new();
     log::debug!("starting application...");
     event_loop.run_app(&mut app).expect("failed to run app");

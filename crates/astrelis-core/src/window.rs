@@ -7,7 +7,7 @@ pub use winit::{
 use winit::{event_loop::ActiveEventLoop, window::Window as WinitWindow};
 
 use crate::{
-    graphics::{GraphicsContext, GraphicsContextOpts, Surface},
+    graphics::{Framebuffer, FramebufferOpts, GraphicsContext, GraphicsContextOpts, RenderTargetId, Surface},
     profiling::{profile_function, profile_scope},
 };
 
@@ -64,6 +64,10 @@ impl Window {
 
     pub fn resized(&mut self, new_size: PhysicalSize<u32>) {
         self.context.resized(new_size);
+    }
+
+    pub fn create_framebuffer(&mut self, opts: FramebufferOpts) -> RenderTargetId {
+        self.context.create_framebuffer(opts)
     }
 }
 

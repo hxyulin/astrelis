@@ -5,7 +5,7 @@ use crate::{
     RenderContext, Window,
     event::Event,
     graphics::{
-        Framebuffer,
+        Framebuffer, RenderTargetId,
         egui::state::{EventResponse, State},
     },
 };
@@ -34,7 +34,7 @@ impl EguiContext {
             &window.context.device,
             window.context.config.format,
             None,
-            window.context.sample_count,
+            window.context.sample_count(),
             false,
         );
 
@@ -114,11 +114,11 @@ impl EguiContext {
     pub fn update_texture<T: AsRef<Window>>(
         &mut self,
         window: T,
-        fb: &Framebuffer,
+        fb: RenderTargetId,
     ) -> egui::TextureId {
         self.renderer.register_native_texture(
             &window.as_ref().context.device,
-            &fb.color.view,
+            &window.as_ref().context.get_framebuffer(fb).color.view,
             wgpu::FilterMode::Linear,
         )
     }

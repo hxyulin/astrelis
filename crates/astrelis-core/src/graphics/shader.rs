@@ -288,6 +288,10 @@ impl PipelineCache {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.pipeline_cache.clear();
+    }
+
     pub fn get_or_create_pipeline<F>(
         &mut self,
         handle: ShaderHandle,

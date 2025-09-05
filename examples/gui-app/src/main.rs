@@ -4,15 +4,15 @@ use astrelis_framework::{
     egui,
     event::{Event, HandleStatus, KeyCode},
     graphics::{
-        Color, Framebuffer, FramebufferOpts, GraphicsContextOpts, MatHandle, Material,
-        MaterialComponent, RenderableSurface, TextureUsages,
+        Color, FramebufferOpts, GraphicsContextOpts, MatHandle, Material,
+        MaterialComponent, RenderTarget, RenderTargetId, TextureUsages,
         egui::EguiContext,
         mesh::{Mesh, MeshComponent, MeshHandle, MeshSource, Vertex},
         renderer::SceneRenderer,
         shader::material_shader,
     },
     input::InputSystem,
-    math::{Quat, Vec2, Vec3, Vec4},
+    math::{Quat, Vec2, Vec3},
     profiling::profile_scope,
     run_app,
     world::{GlobalTransform, Scene, Transform},
@@ -29,7 +29,7 @@ struct GuiApp {
     renderer: SceneRenderer,
     egui: EguiContext,
     inputs: InputSystem,
-    fb: Framebuffer,
+    fb: RenderTargetId,
 
     scene: Scene,
     material: MatHandle,
@@ -39,23 +39,20 @@ struct GuiApp {
 impl App for GuiApp {
     fn init(mut ctx: EngineCtx) -> Box<dyn AppHandler> {
         let opts = WindowOpts::default();
-        let window = ctx.create_window(opts, GraphicsContextOpts::default());
+        let mut window = ctx.create_window(opts, GraphicsContextOpts::default());
         let renderer = SceneRenderer::new(&window);
         let egui = EguiContext::new(&window);
-        let fb = Framebuffer::new(
-            &window,
-            FramebufferOpts {
-                extent: Extent3D {
-                    width: 400,
-                    height: 400,
-                    depth: 1,
-                },
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-                depth: true,
-                format: None,
-                sample_count: 1,
+        let fb = window.create_framebuffer(FramebufferOpts {
+            extent: Extent3D {
+                width: 400,
+                height: 400,
+                depth: 1,
             },
-        );
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+            depth: true,
+            format: None,
+            sample_count: 1,
+        });
 
         let mesh = ctx.engine_mut().meshes.create_mesh(Mesh::new(
             "Square".to_string(),
@@ -131,7 +128,7 @@ impl AppHandler for GuiApp {
     fn update(&mut self, mut ctx: EngineCtx) {
         let mut render_ctx = self.window.begin_render();
 
-        let texture = self.egui.update_texture(&render_ctx, &self.fb);
+        let texture = self.egui.update_texture(&render_ctx, self.fb);
 
         self.egui.ui(&render_ctx, |ctx| {
             profile_scope!("egui_update");
@@ -164,7 +161,7 @@ impl AppHandler for GuiApp {
         self.renderer.render(
             ctx.engine_mut(),
             &mut render_ctx,
-            RenderableSurface::Framebuffer(&self.fb),
+            RenderTarget::Target(self.fb),
         );
 
         // egui needs to be updated using the 'ui' function before it can draw,

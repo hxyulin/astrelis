@@ -46,4 +46,37 @@ impl Texture {
             sampler,
         }
     }
+
+    pub fn create_msaa_texture(
+        dev: &wgpu::Device,
+        conf: &wgpu::SurfaceConfiguration,
+        sample_count: u32,
+    ) -> Self {
+        let size = wgpu::Extent3d {
+            width: conf.width.max(1),
+            height: conf.height.max(1),
+            depth_or_array_layers: 1,
+        };
+
+        let desc = wgpu::TextureDescriptor {
+            label: Some("msaa_color_texture"),
+            size,
+            mip_level_count: 1,
+            sample_count,
+            dimension: wgpu::TextureDimension::D2,
+            format: conf.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        };
+
+        let texture = dev.create_texture(&desc);
+        let view = texture.create_view(&Default::default());
+        let sampler = dev.create_sampler(&Default::default());
+
+        Self {
+            texture,
+            view,
+            sampler,
+        }
+    }
 }

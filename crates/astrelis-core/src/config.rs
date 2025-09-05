@@ -1,13 +1,17 @@
+pub use winit::event_loop::ControlFlow;
+
 /// Configurations for the Astrelis Game Engine
 #[derive(Debug)]
 pub struct Config {
     pub benchmark: BenchmarkMode,
+    pub control_flow: ControlFlow,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
             benchmark: BenchmarkMode::Off,
+            control_flow: ControlFlow::Poll,
         }
     }
 }

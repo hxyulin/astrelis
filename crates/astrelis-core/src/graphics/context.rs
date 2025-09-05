@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    graphics::{Framebuffer, texture::Texture},
+    alloc::{IndexSlot, SparseSet},
+    graphics::{Framebuffer, FramebufferOpts, ViewConfig, texture::Texture},
     profiling::profile_function,
 };
 use wgpu::SurfaceTexture;
@@ -11,15 +12,15 @@ use winit::{dpi::PhysicalSize, window::Window};
 pub struct GraphicsContextOpts {
     backends: Backends,
     present_mode: PresentMode,
+    multisample: bool,
 }
 
 impl Default for GraphicsContextOpts {
     fn default() -> Self {
-        let backends = Backends::from_env().unwrap_or(Backends::all());
-        let present_mode = PresentMode::AutoVsync;
         Self {
-            backends,
-            present_mode,
+            backends: Backends::from_env().unwrap_or(Backends::all()),
+            present_mode: PresentMode::AutoVsync,
+            multisample: false,
         }
     }
 }
@@ -34,23 +35,41 @@ impl PendingReconfigure {
     }
 }
 
-pub enum RenderableSurface<'a> {
-    WindowSurface,
-    Framebuffer(&'a Framebuffer),
+pub enum RenderTarget {
+    Window,
+    Target(RenderTargetId),
 }
 
-impl<'a> RenderableSurface<'a> {
-    pub(crate) fn get_color(&'a self, ctx: &'a GraphicsContext) -> &'a wgpu::TextureView {
+impl RenderTarget {
+    pub(crate) fn get_config(&self, ctx: &GraphicsContext) -> ViewConfig {
         match self {
-            Self::WindowSurface => &ctx.frame.as_ref().unwrap().surface.view,
-            Self::Framebuffer(fb) => &fb.color.view(),
+            Self::Window => ViewConfig {
+                extent: wgpu::Extent3d {
+                    width: ctx.config.width,
+                    height: ctx.config.height,
+                    depth_or_array_layers: 1,
+                },
+                format: ctx.config.format,
+                sample_count: ctx.sample_count(),
+            },
+            Self::Target(fb) => ctx.get_framebuffer(*fb).config,
         }
     }
 
-    pub(crate) fn get_depth(&'a self, ctx: &'a GraphicsContext) -> Option<&'a wgpu::TextureView> {
+    pub(crate) fn get_color<'a>(&self, ctx: &'a GraphicsContext) -> &'a wgpu::TextureView {
         match self {
-            Self::WindowSurface => Some(&ctx.depth.view),
-            Self::Framebuffer(fb) => Some(&fb.depth.as_ref()?.view()),
+            Self::Window => &ctx.frame.as_ref().unwrap().surface.view,
+            Self::Target(fb) => ctx.get_framebuffer(*fb).color.view(),
+        }
+    }
+
+    pub(crate) fn get_depth<'a>(
+        &'a self,
+        ctx: &'a GraphicsContext,
+    ) -> Option<&'a wgpu::TextureView> {
+        match self {
+            Self::Window => Some(&ctx.depth.view),
+            Self::Target(fb) => Some(ctx.get_framebuffer(*fb).depth.as_ref()?.view()),
         }
     }
 }
@@ -60,8 +79,15 @@ pub struct Surface {
     pub(crate) view: wgpu::TextureView,
 }
 
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy)]
+pub struct RenderTargetId(IndexSlot);
+
+#[allow(dead_code)]
 pub struct GraphicsContext {
     pub(crate) window: Arc<Window>,
+    pub(crate) framebuffers: SparseSet<Framebuffer>,
+
     pub(super) instance: wgpu::Instance,
     pub(super) surface: wgpu::Surface<'static>,
     pub(super) adapter: wgpu::Adapter,
@@ -69,13 +95,18 @@ pub struct GraphicsContext {
     pub(super) device_features: wgpu::Features,
     pub(super) queue: wgpu::Queue,
     pub(super) config: wgpu::SurfaceConfiguration,
-    pub(super) sample_count: u32,
     pub(super) depth: Texture,
 
     pub(super) backend: wgpu::Backend,
     pub(super) frame: Option<GraphicsContextFrame>,
 
+    multisample: Option<MultisampleState>,
     reconfigure: PendingReconfigure,
+}
+
+pub struct MultisampleState {
+    pub sample_count: u32,
+    pub texture: Texture,
 }
 
 #[derive(thiserror::Error, Debug, Clone)]
@@ -149,17 +180,19 @@ impl GraphicsContext {
         surface.configure(&device, &config);
 
         let format_features = config.format.guaranteed_format_features(device_features);
-        /*
-                let sample_count = format_features
-                    .flags
-                    .supported_sample_counts()
-                    .iter()
-                    .max()
-                    .cloned()
-                    .unwrap_or(1);
-        */
-        // We only support sample count of 1, no MSAA is supported yet
-        let sample_count = 1;
+        let multisample = opts.multisample.then(|| {
+            let sample_count = format_features
+                .flags
+                .supported_sample_counts()
+                .iter()
+                .max()
+                .cloned()
+                .unwrap_or(1);
+            MultisampleState {
+                sample_count,
+                texture: Texture::create_msaa_texture(&device, &config, sample_count),
+            }
+        });
 
         let depth = Texture::create_depth_texture(&device, &config);
 
@@ -172,13 +205,18 @@ impl GraphicsContext {
             device_features,
             queue,
             config,
-            sample_count,
             depth,
+            multisample,
 
             backend,
             frame: None,
             reconfigure: PendingReconfigure::new(),
+            framebuffers: SparseSet::new(),
         })
+    }
+
+    pub fn get_framebuffer(&self, id: RenderTargetId) -> &Framebuffer {
+        self.framebuffers.get(id.0)
     }
 
     pub fn begin_render(&mut self) {
@@ -223,5 +261,21 @@ impl GraphicsContext {
     /// This should be called to resize the surface for the new resolution
     pub fn resized(&mut self, new_size: PhysicalSize<u32>) {
         self.reconfigure.resize = Some(new_size);
+    }
+
+    /// Internal API
+    pub(crate) fn sample_count(&self) -> u32 {
+        self.multisample
+            .as_ref()
+            .map(|msaa| msaa.sample_count)
+            .unwrap_or(1)
+    }
+
+    pub(crate) fn create_framebuffer(&mut self, opts: FramebufferOpts) -> RenderTargetId {
+        RenderTargetId(self.framebuffers.push(Framebuffer::new_internal(
+            &self.device,
+            &self.config,
+            opts,
+        )))
     }
 }

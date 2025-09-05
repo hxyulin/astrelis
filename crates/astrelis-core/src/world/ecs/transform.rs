@@ -1,4 +1,3 @@
-use astrelis_core_macros::ShaderBufferCompatible;
 use glam::{Mat4, Quat, Vec3, Vec4};
 
 use crate::{

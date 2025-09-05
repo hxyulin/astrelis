@@ -1,5 +1,5 @@
 use crate::{
-    graphics::{RenderableSurface, texture::Texture},
+    graphics::{RenderTarget, texture::Texture},
     profiling::profile_function,
 };
 use bytemuck::offset_of;
@@ -144,7 +144,7 @@ impl SimpleRenderer {
                 bias: wgpu::DepthBiasState::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: window.context.sample_count,
+                count: window.context.sample_count(),
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
@@ -175,7 +175,7 @@ impl SimpleRenderer {
     /// Renders the submitted meshes
     /// If a framebuffer is provided, it renders to the framebuffer, otherwise it renders on a
     /// surface
-    pub fn render(&mut self, ctx: &mut RenderContext, target: RenderableSurface<'_>) {
+    pub fn render(&mut self, ctx: &mut RenderContext, target: RenderTarget) {
         profile_function!();
         let frame = ctx.window.context.frame.as_mut().unwrap();
         frame.passes += 1;
