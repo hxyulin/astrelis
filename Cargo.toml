@@ -1,34 +1,55 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/astrelis",
-    "crates/astrelis-core",
-    "crates/astrelis-core-macros",
-    "crates/astrelis-framework",
-    "examples/gui-app",
-    "examples/roguerun",
-    "examples/egui-demo",
+  "crates/astrelis",
+  "crates/astrelis-assets",
+  "crates/astrelis-audio",
+  "crates/astrelis-core",
+  "crates/astrelis-ecs", "crates/astrelis-egui",
+  "crates/astrelis-input",
+  "crates/astrelis-render",
+  "crates/astrelis-scene",
+  "crates/astrelis-text",
+  "crates/astrelis-ui",
+  "crates/astrelis-winit",
 ]
 default-members = [
-    "crates/astrelis",
-    "crates/astrelis-core",
-    "crates/astrelis-core-macros",
-    "crates/astrelis-framework",
+  "crates/astrelis",
+  "crates/astrelis-assets",
+  "crates/astrelis-audio",
+  "crates/astrelis-core",
+  "crates/astrelis-ecs",
+  "crates/astrelis-input",
+  "crates/astrelis-render",
+  "crates/astrelis-scene",
+  "crates/astrelis-text",
+  "crates/astrelis-ui",
+  "crates/astrelis-winit",
 ]
 
 [workspace.package]
 version = "0.0.1"
-rust-version = "1.87.0"
+rust-version = "1.90.0"
 edition = "2024"
 authors = ["hxyulin <hxyulin@proton.me>"]
 
 [workspace.dependencies]
 astrelis = { path = "crates/astrelis", version = "0.0.1" }
+astrelis-assets = { path = "crates/astrelis-assets", version = "0.0.1" }
+astrelis-audio = { path = "crates/astrelis-audio", version = "0.0.1" }
 astrelis-core = { path = "crates/astrelis-core", version = "0.0.1" }
-astrelis-core-macros = { path = "crates/astrelis-core-macros", version = "0.0.1" }
-astrelis-framework = { path = "crates/astrelis-framework", version = "0.0.1" }
+astrelis-ecs = { path = "crates/astrelis-ecs", version = "0.0.1" }
+astrelis-input = { path = "crates/astrelis-input", version = "0.0.1" }
+astrelis-render = { path = "crates/astrelis-render", version = "0.0.1" }
+astrelis-scene = { path = "crates/astrelis-scene", version = "0.0.1" }
+astrelis-text = { path = "crates/astrelis-text", version = "0.0.1" }
+astrelis-ui = { path = "crates/astrelis-ui", version = "0.0.1" }
+astrelis-winit = { path = "crates/astrelis-winit", version = "0.0.1" }
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
 puffin = "0.19.1"
 bytemuck = "1.23.1"
+glam = { version = "0.30.9", features = ["mint"] }
+mint = "0.5.9"

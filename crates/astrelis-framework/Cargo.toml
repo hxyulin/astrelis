@@ -1,9 +1,0 @@
-[package]
-name = "astrelis-framework"
-version.workspace = true
-rust-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-
-[dependencies]
-astrelis-core.workspace = true

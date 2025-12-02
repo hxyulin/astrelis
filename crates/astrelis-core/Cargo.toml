@@ -6,32 +6,9 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
-wgpu = "24.0.3"
-winit = "=0.30.11"
-
 tracing.workspace = true
-tracing-subscriber.workspace = true
 puffin.workspace = true
-bytemuck.workspace = true
-astrelis-core-macros.workspace = true
-pollster = "0.4.0"
-glam = { version = "0.30.4", features = ["bytemuck"] }
-egui = "=0.31.1"
-egui-wgpu = "=0.31.1"
-puffin_http = "0.16.1"
-static_assertions = "1.1.0"
-rand = "0.9.1"
-thiserror = "2.0.12"
-lazy_static = "1.5.0"
-cosmic-text = "0.12"
-
-[dev-dependencies]
-criterion = { version = "0.6.0", features = ["html_reports"] }
-
-[[bench]]
-name = "ecs"
-harness = false
-
-[[bench]]
-name = "sparse_set"
-harness = false
+glam.workspace = true
+mint.workspace = true
+bytemuck = { workspace = true, features = ["derive"] }
+tracing-subscriber.workspace = true

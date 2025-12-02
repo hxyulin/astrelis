@@ -1,0 +1,14 @@
+[package]
+name = "astrelis-render"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[dependencies]
+tracing.workspace = true
+astrelis-core.workspace = true
+astrelis-winit.workspace = true
+wgpu = { version = "=27.0.1", features = ["wgsl"] }
+pollster = "0.4.0"
+bytemuck = "1.14"
