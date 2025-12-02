@@ -103,7 +103,7 @@ impl Event {
                 is_synthetic,
             })),
             unknown => {
-                log::warn!("unhandled window event: {:?}", unknown);
+                tracing::warn!("unhandled window event: {:?}", unknown);
                 None
             }
         }

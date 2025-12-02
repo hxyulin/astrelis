@@ -45,6 +45,20 @@ impl Registry {
         Q::make(self)
     }
 
+    pub fn query_mut<'a, Q>(&'a mut self) -> <Q as QueryDefMut<'a>>::Query
+    where
+        Q: QueryDefMut<'a>,
+    {
+        profile_function!();
+        Q::make_mut(self)
+    }
+
+    pub fn clear(&mut self) {
+        profile_function!();
+        self.comps.clear();
+        self.next = 0;
+    }
+
     pub fn new_entity(&mut self) -> Entity {
         profile_function!();
         self.next += 1;
@@ -115,6 +129,7 @@ impl<T> Storage<T> {
             comps: SparseSet::new(),
         }
     }
+
     /// Gets a component based on the entity
     /// This is constant time
     pub fn get(&self, ent: Entity) -> Option<&T> {
@@ -122,6 +137,15 @@ impl<T> Storage<T> {
         let idx = self.ids.get(ent.0 as usize)?.as_ref()?;
         // If idx exists, it should exist in comps
         Some(self.comps.get(*idx))
+    }
+
+    /// Gets a mutable component based on the entity
+    /// This is constant time
+    pub fn get_mut(&mut self, ent: Entity) -> Option<&mut T> {
+        profile_function!();
+        let idx = self.ids.get(ent.0 as usize)?.as_ref()?;
+        // If idx exists, it should exist in comps
+        Some(self.comps.get_mut(*idx))
     }
 
     pub fn insert(&mut self, ent: Entity, comp: T) {

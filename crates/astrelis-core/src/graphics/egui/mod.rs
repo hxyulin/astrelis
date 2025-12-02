@@ -5,7 +5,7 @@ use crate::{
     RenderContext, Window,
     event::Event,
     graphics::{
-        Framebuffer, RenderTargetId,
+        RenderTargetId,
         egui::state::{EventResponse, State},
     },
 };
@@ -109,6 +109,56 @@ impl EguiContext {
 
     pub fn on_event(&mut self, window: &Window, event: &Event) -> EventResponse {
         self.state.on_event(window, event)
+    }
+
+    /// Render using the new API - must be called outside of render pass scope
+    pub fn render_into_pass(&mut self, frame: &mut crate::graphics::FrameContext, window: &Window) {
+        profile_function!();
+        if self.full_output.is_none() {
+            return;
+        }
+
+        let full_output = self.full_output.take().unwrap();
+        self.state
+            .handle_platform_output(window, full_output.platform_output);
+
+        let tris = self
+            .context
+            .tessellate(full_output.shapes, full_output.pixels_per_point);
+
+        for (id, image_delta) in &full_output.textures_delta.set {
+            self.renderer
+                .update_texture(frame.device(), frame.queue(), *id, image_delta);
+        }
+
+        let screen_descriptor = ScreenDescriptor {
+            size_in_pixels: [frame.context().config.width, frame.context().config.height],
+            pixels_per_point: window.window.scale_factor() as f32,
+        };
+
+        // Update buffers using encoder directly
+        let device = frame.device();
+        let queue = frame.queue();
+        {
+            let mut encoder = frame.encoder();
+            let encoder_ref = encoder.as_mut().unwrap();
+            self.renderer
+                .update_buffers(device, queue, encoder_ref, &tris, &screen_descriptor);
+        }
+
+        // Create a render pass for egui
+        let mut pass = frame
+            .render_pass()
+            .label("Egui Pass")
+            .color_attachment(crate::graphics::RenderTarget::Window)
+            .color_load(crate::graphics::LoadOp::Load, None)
+            .begin();
+
+        self.renderer.render(pass.pass(), &tris, &screen_descriptor);
+
+        for x in &full_output.textures_delta.free {
+            self.renderer.free_texture(x)
+        }
     }
 
     pub fn update_texture<T: AsRef<Window>>(

@@ -22,6 +22,26 @@ impl Color {
     pub const fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         Color([r, g, b, a])
     }
+
+    pub fn r(&self) -> f32 {
+        self.0[0]
+    }
+
+    pub fn g(&self) -> f32 {
+        self.0[1]
+    }
+
+    pub fn b(&self) -> f32 {
+        self.0[2]
+    }
+
+    pub fn a(&self) -> f32 {
+        self.0[3]
+    }
+
+    pub fn as_array(&self) -> [f32; 4] {
+        self.0
+    }
 }
 
 impl Into<Vec4> for Color {
@@ -37,8 +57,7 @@ pub struct Material {
     pub shader: ShaderHandle,
 }
 
-impl Material {
-}
+impl Material {}
 
 #[derive(Debug, Clone, Copy)]
 pub struct MaterialComponent(pub MatHandle);

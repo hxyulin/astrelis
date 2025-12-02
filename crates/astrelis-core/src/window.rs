@@ -7,7 +7,9 @@ pub use winit::{
 use winit::{event_loop::ActiveEventLoop, window::Window as WinitWindow};
 
 use crate::{
-    graphics::{Framebuffer, FramebufferOpts, GraphicsContext, GraphicsContextOpts, RenderTargetId, Surface},
+    graphics::{
+        FrameContext, FramebufferOpts, GraphicsContext, GraphicsContextOpts, RenderTargetId,
+    },
     profiling::{profile_function, profile_scope},
 };
 
@@ -62,6 +64,12 @@ impl Window {
         RenderContext::new(self)
     }
 
+    /// Begin a new frame with the new rendering API
+    pub fn begin_frame(&mut self) -> FrameContext<'_> {
+        profile_function!();
+        self.context.begin_frame()
+    }
+
     pub fn resized(&mut self, new_size: PhysicalSize<u32>) {
         self.context.resized(new_size);
     }
@@ -69,10 +77,19 @@ impl Window {
     pub fn create_framebuffer(&mut self, opts: FramebufferOpts) -> RenderTargetId {
         self.context.create_framebuffer(opts)
     }
+
+    pub fn size(&self) -> (u32, u32) {
+        let size = self.window.inner_size();
+        (size.width, size.height)
+    }
+
+    pub fn graphics(&self) -> &GraphicsContext {
+        &self.context
+    }
 }
 
 pub struct RenderContext<'window> {
-    pub(crate) window: &'window mut Window,
+    pub window: &'window mut Window,
 }
 
 impl<'window> RenderContext<'window> {
@@ -82,6 +99,11 @@ impl<'window> RenderContext<'window> {
     }
 
     pub fn finish(self) {}
+
+    /// Get the current frame's surface view for rendering
+    pub fn get_surface_view(&self) -> &wgpu::TextureView {
+        self.window.context.get_surface_view()
+    }
 }
 
 impl Drop for RenderContext<'_> {

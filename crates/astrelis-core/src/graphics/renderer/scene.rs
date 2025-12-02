@@ -7,7 +7,7 @@ use wgpu::{DepthStencilState, util::DeviceExt};
 use crate::{
     Engine, RenderContext, Window,
     graphics::{
-        MatHandle, Material, MaterialComponent, RenderTarget, ViewConfig,
+        MatHandle, Material, MaterialComponent, RenderPassRecorder, RenderTarget, ViewConfig,
         mesh::{GpuMesh, MeshComponent, MeshHandle, Vertex},
         shader::{PipelineCache, PipelineCacheEntry, ShaderBufferCompatible},
         texture::Texture,
@@ -236,6 +236,117 @@ impl SceneRenderer {
         {
             profile_scope!("submit_encoder");
             ctx.window.context.queue.submit(Some(encoder.finish()));
+        }
+    }
+
+    /// Render using the new API
+    pub fn render_pass(
+        &mut self,
+        engine: &mut Engine,
+        pass: &mut RenderPassRecorder,
+        target: RenderTarget,
+    ) {
+        {
+            let config = target.get_config(pass.frame().context());
+            if self.cur_render_fmt != config {
+                self.cur_render_fmt = config;
+                self.pipeline_cache.clear();
+            }
+        }
+        profile_function!();
+
+        for ((mesh, mat), transforms) in self.render_list.drain() {
+            assert!(
+                transforms.len() < Self::INSTANCE_BUF_SIZE,
+                "TODO: Allow multiple draw calls"
+            );
+
+            {
+                let mat = engine.mats.get_mat(mat);
+                profile_scope!("setup_mat");
+
+                let PipelineCacheEntry {
+                    pipeline,
+                    bind_groups,
+                } = self.pipeline_cache.get_or_create_pipeline(mat.shader, || {
+                    use crate::graphics::shader::{BuiltinUniform, ShaderResources, UniformType};
+
+                    let shader = engine.shaders.get_shader_mut(mat.shader);
+                    shader.create_pipeline(
+                        pass.frame().device(),
+                        ShaderResources {
+                            resources: HashMap::from([(
+                                UniformType::Builtin(BuiltinUniform::Material),
+                                self.uniform_buffer.as_entire_binding(),
+                            )]),
+                            targets: &[Some(pass.frame().context().config.format.into())],
+                            vertex_buffers: &[
+                                Vertex::buffer_layout(0).get_wgpu(wgpu::VertexStepMode::Vertex),
+                                GlobalTransform::buffer_layout(2)
+                                    .get_wgpu(wgpu::VertexStepMode::Instance),
+                            ],
+                            depth_stencil: Some(DepthStencilState {
+                                format: Texture::DEPTH_FORMAT,
+                                depth_write_enabled: true,
+                                bias: wgpu::DepthBiasState::default(),
+                                stencil: wgpu::StencilState::default(),
+                                depth_compare: wgpu::CompareFunction::Less,
+                            }),
+                            multisample: wgpu::MultisampleState {
+                                count: 1,
+                                mask: !0,
+                                alpha_to_coverage_enabled: false,
+                            },
+                        },
+                    )
+                });
+
+                // Upload material uniforms
+                pass.frame()
+                    .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(mat));
+
+                pass.set_pipeline(pipeline);
+                for (binding, bind_group) in bind_groups {
+                    pass.set_bind_group(*binding, bind_group, &[]);
+                }
+            }
+
+            let mesh = engine.meshes.get_mesh_mut(mesh);
+            let GpuMesh {
+                vertex,
+                index,
+                vertex_count,
+            } = mesh.get_or_create_gpumesh(|mesh| GpuMesh::from_mesh(mesh, pass.frame().device()));
+
+            {
+                profile_scope!("setup_mesh");
+                pass.set_vertex_buffer(0, vertex.slice(..));
+                pass.set_index_buffer(index.slice(..), wgpu::IndexFormat::Uint32);
+            }
+
+            let batches = transforms.len().div_ceil(Self::INSTANCE_BUF_SIZE);
+            for i in 0..batches {
+                profile_scope!("render_batch");
+                let start = i * Self::INSTANCE_BUF_SIZE;
+                let max = if i + 1 < batches {
+                    (i + 1) * Self::INSTANCE_BUF_SIZE
+                } else {
+                    transforms.len()
+                };
+                let batch_count = max - start;
+                assert!(batch_count <= Self::INSTANCE_BUF_SIZE);
+
+                // Upload transforms
+                let data = bytemuck::cast_slice(&transforms[start..max]);
+                pass.frame().write_buffer(
+                    &self.instance_buffer,
+                    (start * std::mem::size_of::<GlobalTransform>()) as u64,
+                    data,
+                );
+
+                pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+                pass.draw_indexed(0..*vertex_count as u32, 0, 0..batch_count as u32);
+            }
         }
     }
 }

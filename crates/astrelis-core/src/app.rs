@@ -21,7 +21,9 @@ pub trait AppHandler {
 
 pub fn run_app<T: App>(cfg: Config) {
     use winit::event_loop::EventLoop;
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     // Initialize profiler, in the future make this an option
     match cfg.benchmark {
         BenchmarkMode::WithWebsever => {
@@ -29,7 +31,7 @@ pub fn run_app<T: App>(cfg: Config) {
             let server_addr = format!("127.0.0.1:{}", puffin_http::DEFAULT_PORT);
             let _puffin_server =
                 Box::leak(Box::new(puffin_http::Server::new(&server_addr).unwrap()));
-            log::info!("Run this to view profiling data:  'puffin_viewer --url {server_addr}'");
+            tracing::info!("Run this to view profiling data:  'puffin_viewer --url {server_addr}'");
         }
         BenchmarkMode::On => puffin::set_scopes_on(true),
         BenchmarkMode::Off => {}
@@ -38,7 +40,7 @@ pub fn run_app<T: App>(cfg: Config) {
     let event_loop = EventLoop::new().expect("failed to create event loop");
     event_loop.set_control_flow(cfg.control_flow);
     let mut app = AppHandlerProxy::<T>::new();
-    log::debug!("starting application...");
+    tracing::debug!("starting application...");
     event_loop.run_app(&mut app).expect("failed to run app");
 }
 
@@ -77,7 +79,7 @@ where
 {
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
         profile_function!();
-        log::debug!("initializing app...");
+        tracing::debug!("initializing app...");
         // We initialize the app during the resumed event
         let ctx = EngineCtx {
             engine: &mut self.engine,
@@ -87,7 +89,7 @@ where
     }
 
     fn exiting(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-        log::debug!("deinitializing app");
+        tracing::debug!("deinitializing app");
         let ctx = EngineCtx {
             engine: &mut self.engine,
             event_loop: event_loop,

@@ -96,33 +96,120 @@ impl<T> SparseSet<T> {
         let data = unsafe { entry.data.assume_init_read() };
         entry.generation += 1;
         entry.data = MaybeUninit::uninit();
-        self.free.push(index);
+
+        // Insert in sorted position for efficient iteration
+        let pos = self.free.binary_search(&index).unwrap_or_else(|e| e);
+        self.free.insert(pos, index);
         data
     }
 
+    pub fn contains(&self, idx: IndexSlot) -> bool {
+        profile_function!();
+        if let Some(entry) = self.vec.get(idx.index() as usize) {
+            entry.generation == idx.generation()
+        } else {
+            false
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.vec.len() - self.free.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn clear(&mut self) {
+        self.vec.clear();
+        self.free.clear();
+    }
+
     pub fn iter(&self) -> SparseSetIter<'_, T> {
-        SparseSetIter { set: self, idx: 0 }
+        SparseSetIter {
+            set: self,
+            idx: 0,
+            free_idx: 0,
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> SparseSetIterMut<'_, T> {
+        SparseSetIterMut {
+            vec: &mut self.vec,
+            free: &self.free,
+            idx: 0,
+            free_idx: 0,
+        }
     }
 }
 
 pub struct SparseSetIter<'a, T> {
     set: &'a SparseSet<T>,
     idx: usize,
+    free_idx: usize,
 }
 
 impl<'a, T> Iterator for SparseSetIter<'a, T> {
-    type Item = &'a T;
+    type Item = (IndexSlot, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while self.set.free.contains(&(self.idx as u32)) {
+        // Skip freed slots efficiently by checking sorted free list
+        loop {
+            // Advance past freed indices
+            while self.free_idx < self.set.free.len()
+                && self.set.free[self.free_idx] == self.idx as u32
+            {
+                self.idx += 1;
+                self.free_idx += 1;
+            }
+
+            if self.idx >= self.set.vec.len() {
+                return None;
+            }
+
+            let entry_idx = self.idx;
             self.idx += 1;
+            let entry = &self.set.vec[entry_idx];
+            let slot = IndexSlot::new(entry.generation, entry_idx as u32);
+            // SAFETY: The data isn't freed, which means it is initialized
+            let data = unsafe { entry.data.assume_init_ref() };
+            return Some((slot, data));
         }
-        if self.idx >= self.set.vec.len() {
-            return None;
+    }
+}
+
+pub struct SparseSetIterMut<'a, T> {
+    vec: &'a mut Vec<Entry<T>>,
+    free: &'a Vec<u32>,
+    idx: usize,
+    free_idx: usize,
+}
+
+impl<'a, T> Iterator for SparseSetIterMut<'a, T> {
+    type Item = (IndexSlot, &'a mut T);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // Skip freed slots efficiently by checking sorted free list
+        loop {
+            // Advance past freed indices
+            while self.free_idx < self.free.len() && self.free[self.free_idx] == self.idx as u32 {
+                self.idx += 1;
+                self.free_idx += 1;
+            }
+
+            if self.idx >= self.vec.len() {
+                return None;
+            }
+
+            let entry_idx = self.idx;
+            self.idx += 1;
+
+            // SAFETY: We only hand out each mutable reference once
+            let entry = unsafe { &mut *(self.vec.as_mut_ptr().add(entry_idx)) };
+            let slot = IndexSlot::new(entry.generation, entry_idx as u32);
+            let data = unsafe { entry.data.assume_init_mut() };
+            return Some((slot, data));
         }
-        self.idx += 1;
-        // SAFETY: The data isn't freeed, which means it is initialized
-        Some(unsafe { self.set.vec[self.idx - 1].data.assume_init_ref() })
     }
 }
 
@@ -170,10 +257,44 @@ mod tests {
         }
         set.remove(IndexSlot::new(0, 0));
         set.remove(IndexSlot::new(0, 1));
-        let iter_collected: Vec<_> = set.iter().collect();
+        let iter_collected: Vec<_> = set.iter().map(|(_, val)| val).collect();
         assert_eq!(iter_collected.len(), 98);
         for i in 2..100 {
-            assert_eq!(iter_collected[i - 2], &(i as u8));
+            assert_eq!(*iter_collected[i - 2], i as u8);
         }
+    }
+
+    #[test]
+    fn test_sparse_set_len() {
+        let mut set = SparseSet::<u8>::new();
+        assert_eq!(set.len(), 0);
+        assert!(set.is_empty());
+
+        let idx1 = set.push(10);
+        let idx2 = set.push(20);
+        assert_eq!(set.len(), 2);
+        assert!(!set.is_empty());
+
+        set.remove(idx1);
+        assert_eq!(set.len(), 1);
+
+        set.remove(idx2);
+        assert_eq!(set.len(), 0);
+        assert!(set.is_empty());
+    }
+
+    #[test]
+    fn test_sparse_set_contains() {
+        let mut set = SparseSet::<u8>::new();
+        let idx = set.push(42);
+
+        assert!(set.contains(idx));
+
+        set.remove(idx);
+        assert!(!set.contains(idx));
+
+        // Old generation should not be valid
+        let old_idx = IndexSlot::new(0, idx.index());
+        assert!(!set.contains(old_idx));
     }
 }

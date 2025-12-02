@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::{
     alloc::{IndexSlot, SparseSet},
-    graphics::{Framebuffer, FramebufferOpts, ViewConfig, texture::Texture},
+    graphics::{Framebuffer, FramebufferOpts, ViewConfig, frame::FrameContext, texture::Texture},
     profiling::profile_function,
 };
 use wgpu::SurfaceTexture;
@@ -35,6 +35,7 @@ impl PendingReconfigure {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum RenderTarget {
     Window,
     Target(RenderTargetId),
@@ -102,6 +103,9 @@ pub struct GraphicsContext {
 
     multisample: Option<MultisampleState>,
     reconfigure: PendingReconfigure,
+
+    pub(crate) buffer_pool: BufferPool,
+    pub(crate) frame_number: u64,
 }
 
 pub struct MultisampleState {
@@ -212,6 +216,8 @@ impl GraphicsContext {
             frame: None,
             reconfigure: PendingReconfigure::new(),
             framebuffers: SparseSet::new(),
+            buffer_pool: BufferPool::new(),
+            frame_number: 0,
         })
     }
 
@@ -256,6 +262,12 @@ impl GraphicsContext {
             "at least 1 pass is required to render a frame"
         );
         frame.surface.texture.present();
+
+        // Increment frame counter and cleanup buffer pool
+        self.frame_number += 1;
+        if self.frame_number % 60 == 0 {
+            self.buffer_pool.trim(&self.device, self.frame_number);
+        }
     }
 
     /// This should be called to resize the surface for the new resolution
@@ -277,5 +289,124 @@ impl GraphicsContext {
             &self.config,
             opts,
         )))
+    }
+
+    /// Get a reference to the device
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// Get a reference to the queue
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Get a reference to the surface configuration
+    pub fn surface_config(&self) -> &wgpu::SurfaceConfiguration {
+        &self.config
+    }
+
+    /// Get the current frame's surface view for rendering
+    pub fn get_surface_view(&self) -> &wgpu::TextureView {
+        &self
+            .frame
+            .as_ref()
+            .expect("frame should be available during render")
+            .surface
+            .view
+    }
+
+    /// Begin a new frame with the new API (returns FrameContext)
+    pub fn begin_frame(&mut self) -> FrameContext<'_> {
+        profile_function!();
+
+        // Configure surface if needed
+        let mut configure_needed = false;
+        if let Some(new_size) = self.reconfigure.resize {
+            self.config.width = new_size.width;
+            self.config.height = new_size.height;
+            configure_needed = true;
+        }
+        if configure_needed {
+            self.surface.configure(&self.device, &self.config);
+        }
+
+        // Get surface texture
+        let frame = self.surface.get_current_texture().unwrap();
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.frame.replace(GraphicsContextFrame {
+            surface: Surface {
+                texture: frame,
+                view,
+            },
+            passes: 0,
+        });
+
+        FrameContext::new(self)
+    }
+
+    /// Allocate a staging buffer from the pool
+    pub fn allocate_staging_buffer(&mut self, size: u64) -> wgpu::Buffer {
+        self.buffer_pool
+            .allocate(&self.device, size, self.frame_number)
+    }
+
+    /// Return a staging buffer to the pool
+    pub fn free_staging_buffer(&mut self, buffer: wgpu::Buffer) {
+        self.buffer_pool.free(buffer, self.frame_number);
+    }
+
+    /// Get current frame number
+    pub fn frame_number(&self) -> u64 {
+        self.frame_number
+    }
+}
+
+/// Pool for reusing staging buffers across frames
+pub struct BufferPool {
+    free_buffers: Vec<(wgpu::Buffer, u64, u64)>, // (buffer, size, last_used_frame)
+}
+
+impl BufferPool {
+    pub fn new() -> Self {
+        Self {
+            free_buffers: Vec::new(),
+        }
+    }
+
+    pub fn allocate(&mut self, device: &wgpu::Device, size: u64, frame: u64) -> wgpu::Buffer {
+        // Try to find a suitable buffer
+        if let Some(idx) = self
+            .free_buffers
+            .iter()
+            .position(|(_, buf_size, _)| *buf_size >= size)
+        {
+            let (buffer, _, _) = self.free_buffers.swap_remove(idx);
+            return buffer;
+        }
+
+        // Create new buffer
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::MAP_WRITE,
+            mapped_at_creation: false,
+        })
+    }
+
+    pub fn free(&mut self, buffer: wgpu::Buffer, frame: u64) {
+        let size = buffer.size();
+        self.free_buffers.push((buffer, size, frame));
+    }
+
+    pub fn trim(&mut self, device: &wgpu::Device, current_frame: u64) {
+        // Remove buffers unused for 60 frames
+        self.free_buffers
+            .retain(|(_, _, last_used)| current_frame - *last_used < 60);
+
+        // Log pool stats
+        tracing::trace!(free_buffers = self.free_buffers.len(), "BufferPool stats");
     }
 }

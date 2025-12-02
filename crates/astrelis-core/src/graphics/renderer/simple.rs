@@ -1,5 +1,5 @@
 use crate::{
-    graphics::{RenderTarget, texture::Texture},
+    graphics::{RenderPassRecorder, RenderTarget, texture::Texture},
     profiling::profile_function,
 };
 use bytemuck::offset_of;
@@ -10,12 +10,13 @@ use wgpu::{include_wgsl, util::DeviceExt};
 use crate::{RenderContext, Window};
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Default, bytemuck::Zeroable)]
+#[derive(Debug, Clone, Copy, Default, bytemuck::Zeroable, bytemuck::Pod)]
 struct QuadInstance {
     translation: Vec2,
     rotation: f32,
     scale: Vec2,
-    color: Vec4,
+    // We can't use Vec4 because it is using a simd type
+    color: [f32; 4],
 }
 
 pub struct SimpleRenderer {
@@ -168,11 +169,11 @@ impl SimpleRenderer {
             translation,
             rotation,
             scale,
-            color,
+            color: color.into(),
         });
     }
 
-    /// Renders the submitted meshes
+    /// Renders the submitted meshes (old API)
     /// If a framebuffer is provided, it renders to the framebuffer, otherwise it renders on a
     /// surface
     pub fn render(&mut self, ctx: &mut RenderContext, target: RenderTarget) {
@@ -265,5 +266,43 @@ impl SimpleRenderer {
             profile_scope!("submit encoder");
             ctx.window.context.queue.submit(Some(encoder.finish()));
         }
+    }
+
+    /// Renders the submitted meshes (new API)
+    pub fn render_pass(&mut self, pass: &mut RenderPassRecorder) {
+        profile_function!();
+
+        if self.quad_instances.is_empty() {
+            return;
+        }
+
+        // Upload instance data
+        let contents = bytemuck::cast_slice(&self.quad_instances);
+        pass.frame()
+            .write_buffer(&self.instance_buffer, 0, contents);
+
+        // Setup pipeline and draw
+        pass.set_pipeline(&self.render_pipeline);
+        pass.set_bind_group(0, &self.bind_group, &[]);
+        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+        pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+
+        let batches = self.quad_instances.len().div_ceil(Self::INSTANCE_BUF_SIZE);
+        for i in 0..batches {
+            profile_scope!("render batch");
+            let start = i * Self::INSTANCE_BUF_SIZE;
+            let max = if i + 1 < batches {
+                (i + 1) * Self::INSTANCE_BUF_SIZE
+            } else {
+                self.quad_instances.len()
+            };
+            let batch_count = max - start;
+            assert!(batch_count <= Self::INSTANCE_BUF_SIZE);
+
+            pass.draw_indexed(0..6, 0, 0..batch_count as u32);
+        }
+
+        self.quad_instances.clear();
     }
 }

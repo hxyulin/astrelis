@@ -2,6 +2,7 @@ use winit::event_loop::ActiveEventLoop;
 
 use crate::{
     Window, WindowOpts,
+    assets::AssetManager,
     graphics::{GraphicsContextOpts, MaterialManager, mesh::MeshManager, shader::ShaderManager},
 };
 
@@ -9,6 +10,7 @@ pub struct Engine {
     pub shaders: ShaderManager,
     pub mats: MaterialManager,
     pub meshes: MeshManager,
+    pub assets: AssetManager,
 }
 
 impl Engine {
@@ -17,6 +19,7 @@ impl Engine {
             shaders: ShaderManager::new(),
             mats: MaterialManager::new(),
             meshes: MeshManager::new(),
+            assets: AssetManager::new(),
         }
     }
 }

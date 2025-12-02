@@ -8,4 +8,5 @@ publish = false
 
 [dependencies]
 astrelis-framework.workspace = true
-log.workspace = true
+tracing.workspace = true
+rand = "0.9.1"

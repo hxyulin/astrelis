@@ -1,9 +1,11 @@
 pub mod alloc;
+pub mod assets;
 pub mod config;
 pub mod event;
 pub mod graphics;
 pub mod input;
 pub mod profiling;
+pub mod text;
 pub mod world;
 
 mod app;
