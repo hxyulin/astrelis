@@ -132,10 +132,14 @@ impl Egui {
             if response.consumed {
                 any_consumed = true;
             }
-            astrelis_winit::event::HandleStatus {
-                handled: response.repaint || response.consumed,
-                consumed: response.consumed,
+            let mut status = astrelis_winit::event::HandleStatus::empty();
+            if response.repaint || response.consumed {
+                status |= astrelis_winit::event::HandleStatus::HANDLED;
             }
+            if response.consumed {
+                status |= astrelis_winit::event::HandleStatus::CONSUMED;
+            }
+            status
         });
 
         any_consumed

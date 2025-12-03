@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use astrelis_core::profiling::profile_function;
+use astrelis_core::profiling::{profile_function, profile_scope};
 use astrelis_winit::window::WinitWindow;
 
 use crate::context::GraphicsContext;
@@ -92,10 +92,12 @@ impl Drop for FrameContext {
         }
 
         if let Some(encoder) = self.encoder.take() {
+            profile_scope!("submit_commands");
             self.context.queue.submit(std::iter::once(encoder.finish()));
         }
 
         if let Some(surface) = self.surface.take() {
+            profile_scope!("present_surface");
             surface.texture.present();
         }
 

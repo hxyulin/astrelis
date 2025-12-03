@@ -4,11 +4,28 @@ version.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 authors.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
 
 [dependencies]
 tracing.workspace = true
 puffin.workspace = true
+puffin_http.workspace = true
 glam.workspace = true
 mint.workspace = true
 bytemuck = { workspace = true, features = ["derive"] }
 tracing-subscriber.workspace = true
+ahash.workspace = true
+static_assertions = "1.1"
+
+[dev-dependencies]
+criterion.workspace = true
+
+[[bench]]
+name = "collections"
+harness = false
+
+[[bench]]
+name = "sparse_set"
+harness = false

@@ -4,22 +4,36 @@ version.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 authors.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
 
 [dependencies]
-astrelis-render = { path = "../astrelis-render" }
+astrelis-core.workspace = true
+astrelis-render.workspace = true
 
 # Text rendering
-cosmic-text = "0.12"
-
-# Math
-glam = "0.29"
+cosmic-text.workspace = true
 
 # Utilities
-bytemuck = { version = "1.14", features = ["derive"] }
-tracing = "0.1"
-sys-locale = "0.3"
+bytemuck.workspace = true
+tracing.workspace = true
+sys-locale.workspace = true
+fxhash = "0.2.1"
 
 [dev-dependencies]
-astrelis-core = { path = "../astrelis-core" }
-astrelis-winit = { path = "../astrelis-winit" }
-pollster = "0.3"
+astrelis-winit.workspace = true
+pollster.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "text_rendering"
+harness = false
+
+[[bench]]
+name = "text_measurement"
+harness = false
+
+[[bench]]
+name = "text_pipeline"
+harness = false

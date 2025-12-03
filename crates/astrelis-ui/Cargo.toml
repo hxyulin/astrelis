@@ -4,5 +4,42 @@ version.workspace = true
 rust-version.workspace = true
 edition.workspace = true
 authors.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
 
 [dependencies]
+astrelis-core.workspace = true
+astrelis-render.workspace = true
+astrelis-text.workspace = true
+astrelis-winit.workspace = true
+
+# Layout engine
+taffy.workspace = true
+
+# Utilities
+tracing.workspace = true
+indexmap.workspace = true
+bytemuck.workspace = true
+bitflags.workspace = true
+fxhash = "0.2.1"
+
+[dev-dependencies]
+pollster.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "ui_tree"
+harness = false
+
+[[bench]]
+name = "ui_layout"
+harness = false
+
+[[bench]]
+name = "ui_incremental"
+harness = false
+
+[[bench]]
+name = "ui_dirty_flags"
+harness = false

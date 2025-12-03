@@ -1,9 +1,10 @@
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 
+use astrelis_core::geometry::Size;
 pub use winit::dpi::PhysicalSize;
 pub use winit::window::Fullscreen;
 pub use winit::window::Window as WinitWindow;
-use winit::{error::OsError, event_loop::ActiveEventLoop, window::WindowAttributes};
+use winit::{error::OsError, event_loop::ActiveEventLoop};
 
 pub struct WindowDescriptor {
     pub title: String,
@@ -34,11 +35,35 @@ impl Window {
         self.window.id()
     }
 
+    pub fn size(&self) -> Size<u32> {
+        let physical_size = self.window.inner_size();
+        let scale_factor = self.window.scale_factor();
+        Size {
+            width: (physical_size.width as f64 / scale_factor) as u32,
+            height: (physical_size.height as f64 / scale_factor) as u32,
+        }
+    }
+
+    pub fn inner_size(&self) -> PhysicalSize<u32> {
+        self.window.inner_size()
+    }
+
+    pub fn scale_factor(&self) -> f64 {
+        self.window.scale_factor()
+    }
+
+    pub fn platform_dpi() -> f64 {
+        #[cfg(target_os = "macos")]
+        return 2.0;
+        #[cfg(not(target_os = "macos"))]
+        return 1.0;
+    }
+
     pub(crate) fn new(
         event_loop: &ActiveEventLoop,
         descriptor: WindowDescriptor,
     ) -> Result<Self, OsError> {
-        let mut attributes = WindowAttributes::new()
+        let mut attributes = WinitWindow::default_attributes()
             .with_title(descriptor.title)
             .with_resizable(descriptor.resizeable)
             .with_visible(descriptor.visible)

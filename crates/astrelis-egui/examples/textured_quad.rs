@@ -8,6 +8,7 @@ use astrelis_winit::{
     window::{PhysicalSize, WindowBackend, WindowDescriptor},
 };
 
+#[allow(dead_code)]
 struct TexturedQuadApp {
     _context: &'static GraphicsContext,
     window: RenderableWindow,

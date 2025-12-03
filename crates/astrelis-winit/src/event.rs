@@ -1,3 +1,4 @@
+use astrelis_core::geometry::{Pos, Size};
 pub use winit::dpi::{PhysicalPosition, PhysicalSize};
 pub use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent as WinitEvent};
 pub use winit::keyboard::*;
@@ -8,14 +9,14 @@ use std::collections::VecDeque;
 pub struct EventQueue {
     /// Pending events for this frame
     pending: VecDeque<Event>,
-    
+
     /// High-priority events (processed first)
     priority: VecDeque<Event>,
-    
+
     /// Deduplicated events (only last value kept)
-    latest_mouse_pos: Option<PhysicalPosition<f64>>,
+    latest_mouse_pos: Option<Pos<f64>>,
     latest_scale_factor: Option<f64>,
-    
+
     /// Statistics
     stats: EventStats,
 }
@@ -30,17 +31,17 @@ impl EventQueue {
             stats: EventStats::default(),
         }
     }
-    
+
     /// Push event to queue (called from winit handler)
     pub fn push(&mut self, event: Event) {
         self.stats.events_received += 1;
-        
+
         match event {
             // High priority - process immediately
             Event::CloseRequested | Event::WindowResized(_) | Event::Focused(_) => {
                 self.priority.push_back(event);
             }
-            
+
             // Deduplicate - only keep latest
             Event::MouseMoved(pos) => {
                 self.latest_mouse_pos = Some(pos);
@@ -48,23 +49,21 @@ impl EventQueue {
             Event::ScaleFactorChanged(scale) => {
                 self.latest_scale_factor = Some(scale);
             }
-            
+
             // Normal priority
             _ => {
                 self.pending.push_back(event);
             }
         }
     }
-    
+
     /// Process all events and return batch
     pub fn drain(&mut self) -> EventBatch {
-        let mut events = Vec::with_capacity(
-            self.priority.len() + self.pending.len() + 2
-        );
-        
+        let mut events = Vec::with_capacity(self.priority.len() + self.pending.len() + 2);
+
         // Priority events first
         events.extend(self.priority.drain(..));
-        
+
         // Deduplicated events
         if let Some(pos) = self.latest_mouse_pos.take() {
             events.push(Event::MouseMoved(pos));
@@ -72,22 +71,28 @@ impl EventQueue {
         if let Some(scale) = self.latest_scale_factor.take() {
             events.push(Event::ScaleFactorChanged(scale));
         }
-        
+
         // Regular events
         events.extend(self.pending.drain(..));
-        
+
         self.stats.events_processed += events.len();
         self.stats.events_dropped = self.stats.events_received - self.stats.events_processed;
-        
+
         EventBatch { events }
     }
-    
+
     pub fn stats(&self) -> &EventStats {
         &self.stats
     }
-    
+
     pub fn reset_stats(&mut self) {
         self.stats = EventStats::default();
+    }
+}
+
+impl Default for EventQueue {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -99,11 +104,11 @@ impl EventBatch {
     pub fn iter(&self) -> impl Iterator<Item = &Event> {
         self.events.iter()
     }
-    
+
     pub fn len(&self) -> usize {
         self.events.len()
     }
-    
+
     pub fn is_empty(&self) -> bool {
         self.events.is_empty()
     }
@@ -114,7 +119,7 @@ impl EventBatch {
     {
         self.events.retain(|event| {
             let status = handler(event);
-            !status.consumed
+            !status.is_consumed()
         });
     }
 }
@@ -129,14 +134,14 @@ pub struct EventStats {
 #[derive(Debug, Clone)]
 pub enum Event {
     WindowMoved(PhysicalPosition<i32>),
-    WindowResized(PhysicalSize<u32>),
+    WindowResized(Size<u32>),
     ScaleFactorChanged(f64),
     Focused(bool),
     CloseRequested,
     MouseButtonDown(MouseButton),
     MouseButtonUp(MouseButton),
     MouseScrolled(MouseScrollDelta),
-    MouseMoved(PhysicalPosition<f64>),
+    MouseMoved(Pos<f64>),
     MouseEntered,
     MouseLeft,
     KeyInput(KeyEvent),
@@ -153,39 +158,44 @@ pub struct KeyEvent {
     pub is_synthetic: bool,
 }
 
-pub struct HandleStatus {
-    pub handled: bool,
-    pub consumed: bool,
+bitflags::bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct HandleStatus: u8 {
+        const HANDLED = 0b00000001;
+        const CONSUMED = 0b00000010;
+    }
 }
 
 impl HandleStatus {
+    pub const fn is_consumed(&self) -> bool {
+        self.contains(Self::CONSUMED)
+    }
+
+    pub const fn is_handled(&self) -> bool {
+        self.contains(Self::HANDLED)
+    }
+
     pub const fn consumed() -> Self {
-        Self {
-            handled: true,
-            consumed: true,
-        }
+        Self::from_bits_truncate(Self::HANDLED.bits() | Self::CONSUMED.bits())
     }
 
     pub const fn handled() -> Self {
-        Self {
-            handled: true,
-            consumed: false,
-        }
+        Self::from_bits_truncate(Self::HANDLED.bits())
     }
 
     pub const fn ignored() -> Self {
-        Self {
-            handled: false,
-            consumed: false,
-        }
+        Self::empty()
     }
 }
 
 impl Event {
-    pub(crate) fn from_winit(event: winit::event::WindowEvent) -> Option<Self> {
+    pub(crate) fn from_winit(event: winit::event::WindowEvent, scale_factor: f64) -> Option<Self> {
         match event {
             WinitEvent::Moved(pos) => Some(Event::WindowMoved(pos)),
-            WinitEvent::Resized(size) => Some(Event::WindowResized(size)),
+            WinitEvent::Resized(size) => Some(Event::WindowResized(Size {
+                width: (size.width as f64 / scale_factor) as u32,
+                height: (size.height as f64 / scale_factor) as u32,
+            })),
             WinitEvent::ScaleFactorChanged {
                 scale_factor,
                 inner_size_writer: _,
@@ -208,7 +218,10 @@ impl Event {
             WinitEvent::CursorMoved {
                 device_id: _,
                 position,
-            } => Some(Event::MouseMoved(position)),
+            } => Some(Event::MouseMoved(Pos {
+                x: position.x / scale_factor,
+                y: position.y / scale_factor,
+            })),
             WinitEvent::CursorEntered { device_id: _ } => Some(Event::MouseEntered),
             WinitEvent::CursorLeft { device_id: _ } => Some(Event::MouseLeft),
             WinitEvent::KeyboardInput {
@@ -225,6 +238,8 @@ impl Event {
 
                 is_synthetic,
             })),
+            // we explicity ignore touchpad pressure
+            WinitEvent::TouchpadPressure { .. } => None,
             unknown => {
                 tracing::warn!("unhandled window event: {:?}", unknown);
                 None

@@ -34,6 +34,9 @@ version = "0.0.1"
 rust-version = "1.90.0"
 edition = "2024"
 authors = ["hxyulin <hxyulin@proton.me>"]
+license = "MIT"
+publish = true
+repository = "https://github.com/hxyulin/astrelis"
 
 [workspace.dependencies]
 astrelis = { path = "crates/astrelis", version = "0.0.1" }
@@ -52,6 +55,28 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 puffin = "0.19.1"
+puffin_http = "0.16"
 bytemuck = "1.23.1"
 glam = { version = "0.30.9", features = ["mint"] }
 mint = "0.5.9"
+
+# External dependencies
+cosmic-text = "0.12"
+taffy = { version = "0.5", features = ["flexbox", "grid"] }
+indexmap = "2.0"
+pollster = "0.4.0"
+wgpu = { version = "=27.0.1", features = ["wgsl"] }
+winit = { version = "0.30.12", features = ["rwh_05"] }
+sys-locale = "0.3"
+egui = "0.33"
+egui-wgpu = "0.33"
+
+# Optimized collections
+ahash = "0.8"
+static_assertions = "1.1"
+
+# Bitflags
+bitflags = "2.4"
+
+# Benchmarking
+criterion = { version = "0.5", features = ["html_reports"] }

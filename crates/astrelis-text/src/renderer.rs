@@ -1,10 +1,11 @@
-use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+use astrelis_core::alloc::HashMap;
+use astrelis_core::math::Vec2;
+use astrelis_core::profiling::profile_function;
 use cosmic_text::{Buffer, CacheKey, Color as CosmicColor, Metrics, Shaping, SwashCache};
-use glam::Vec2;
 
-use astrelis_render::{GraphicsContext, Renderer, wgpu};
+use astrelis_render::{GraphicsContext, Renderer, Viewport, wgpu};
 
 use crate::{
     font::FontSystem,
@@ -27,10 +28,10 @@ impl TextBuffer {
         }
     }
 
-    fn set_text(&mut self, font_system: &mut cosmic_text::FontSystem, text: &Text) {
+    fn set_text(&mut self, font_system: &mut cosmic_text::FontSystem, text: &Text, scale: f32) {
         let metrics = Metrics::new(
-            text.get_font_size(),
-            text.get_font_size() * text.get_line_height(),
+            text.get_font_size() * scale,
+            text.get_font_size() * scale * text.get_line_height(),
         );
         self.buffer.set_metrics(font_system, metrics);
 
@@ -44,7 +45,7 @@ impl TextBuffer {
 
         // Set buffer size for wrapping
         self.buffer
-            .set_size(font_system, text.get_max_width(), text.get_max_height());
+            .set_size(font_system, text.get_max_width().map(|w| w * scale), text.get_max_height().map(|h| h * scale));
 
         // Set wrapping mode
         self.buffer
@@ -60,6 +61,7 @@ impl TextBuffer {
     }
 
     fn layout(&mut self, font_system: &mut cosmic_text::FontSystem) {
+        profile_function!();
         if self.needs_layout {
             self.buffer.shape_until_scroll(font_system, false);
             self.needs_layout = false;
@@ -90,11 +92,11 @@ struct TextVertex {
 
 /// Glyph atlas entry with UV coordinates.
 #[derive(Debug, Clone)]
-struct AtlasEntry {
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
+pub struct AtlasEntry {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
 }
 
 impl AtlasEntry {
@@ -105,6 +107,19 @@ impl AtlasEntry {
         let v1 = (self.y + self.height) as f32 / atlas_size as f32;
         (u0, v0, u1, v1)
     }
+}
+
+/// Glyph placement information for correct positioning.
+#[derive(Debug, Clone, Copy)]
+pub struct GlyphPlacement {
+    /// Left bearing offset (horizontal offset from origin)
+    pub left: f32,
+    /// Top bearing offset (vertical offset from baseline)
+    pub top: f32,
+    /// Glyph width in pixels
+    pub width: f32,
+    /// Glyph height in pixels
+    pub height: f32,
 }
 
 /// Simple row-based atlas packer.
@@ -156,6 +171,7 @@ impl AtlasPacker {
 /// Font renderer for rendering text with WGPU.
 pub struct FontRenderer {
     renderer: Renderer,
+    viewport: Viewport,
     font_system: Arc<RwLock<cosmic_text::FontSystem>>,
     swash_cache: Arc<RwLock<SwashCache>>,
 
@@ -181,6 +197,19 @@ pub struct FontRenderer {
 }
 
 impl FontRenderer {
+    /// Measure text dimensions without rendering.
+    pub fn measure_text(&self, text: &Text) -> (f32, f32) {
+        profile_function!();
+        let scale = self.viewport.scale_factor as f32;
+        let mut font_system = self.font_system.write().unwrap();
+        let mut buffer = TextBuffer::new(&mut font_system);
+        // we increase the text size in order to make it sharper on high-DPI displays
+        buffer.set_text(&mut font_system, text, scale);
+        buffer.layout(&mut font_system);
+        let (width, height) = buffer.bounds();
+        (width / scale, height / scale)
+    }
+
     /// Create a new font renderer.
     pub fn new(context: &'static GraphicsContext, font_system: FontSystem) -> Self {
         Self::new_with_atlas_size(context, font_system, 2048)
@@ -329,6 +358,7 @@ impl FontRenderer {
         });
 
         Self {
+            viewport: Viewport::default(),
             renderer,
             font_system: font_system.inner(),
             swash_cache,
@@ -419,17 +449,38 @@ impl FontRenderer {
         self.atlas_dirty = false;
     }
 
+    pub fn set_viewport(&mut self, viewport: Viewport) {
+        if viewport.scale_factor != self.viewport.scale_factor {
+            tracing::trace!(
+                "FontRenderer scale factor changed: {} -> {}",
+                self.viewport.scale_factor,
+                viewport.scale_factor
+            );
+            // Clear atlas and repack on scale factor change
+            self.atlas_entries.clear();
+            self.atlas_packer = AtlasPacker::new(self.atlas_size);
+            self.atlas_dirty = true;
+        }
+        self.viewport = viewport;
+    }
+
     /// Prepare text for rendering. Returns a TextBuffer handle.
+    ///
+    /// This buffer can be cached and reused for rendering the same text multiple times,
+    /// but must be revalidated if the text content, style, or scale factor changes.
     pub fn prepare(&mut self, text: &Text) -> TextBuffer {
+        profile_function!();
         let mut font_system = self.font_system.write().unwrap();
         let mut buffer = TextBuffer::new(&mut font_system);
-        buffer.set_text(&mut font_system, text);
-        buffer.layout(&mut font_system);
+        buffer.set_text(&mut font_system, text, self.viewport.scale_factor as f32);
         buffer
     }
 
     /// Draw text at a position.
     pub fn draw_text(&mut self, buffer: &mut TextBuffer, position: Vec2) {
+        profile_function!();
+
+        let scale = self.viewport.scale_factor as f32;
         let mut font_system = self.font_system.write().unwrap();
         buffer.layout(&mut font_system);
         drop(font_system);
@@ -457,6 +508,11 @@ impl FontRenderer {
                     let w = image.placement.width as f32;
                     let h = image.placement.height as f32;
 
+                    let x = x / scale;
+                    let y = y / scale;
+                    let w = w / scale;
+                    let h = h / scale;
+
                     drop(font_system);
                     drop(swash_cache);
 
@@ -469,6 +525,10 @@ impl FontRenderer {
                         color.b() as f32 / 255.0,
                         color.a() as f32 / 255.0,
                     ];
+
+                    // TODO: Do we want to do pixel snapping here?
+                    let x = (x * scale).round() / scale;
+                    let y = (y * scale).round() / scale;
 
                     // Create quad
                     let idx = self.vertices.len() as u16;
@@ -503,7 +563,14 @@ impl FontRenderer {
     }
 
     /// Render all queued text to the given render pass.
-    pub fn render(&mut self, render_pass: &mut wgpu::RenderPass, viewport_size: Vec2) {
+    pub fn render(&mut self, render_pass: &mut wgpu::RenderPass) {
+        profile_function!();
+
+        debug_assert!(
+            self.viewport.is_valid(),
+            "Viewport size must be set before rendering text."
+        );
+
         if self.vertices.is_empty() {
             return;
         }
@@ -521,7 +588,11 @@ impl FontRenderer {
             .create_index_buffer(Some("Text Index Buffer"), &self.indices);
 
         // Create projection uniform
-        let projection = orthographic_projection(viewport_size.x, viewport_size.y);
+        let size = self.viewport.to_logical();
+        let projection = orthographic_projection(
+            size.width,
+            size.height,
+        );
         let uniform_buffer = self
             .renderer
             .create_uniform_buffer(Some("Text Projection"), &projection);
@@ -552,6 +623,104 @@ impl FontRenderer {
     /// Get the font system.
     pub fn font_system(&self) -> Arc<RwLock<cosmic_text::FontSystem>> {
         self.font_system.clone()
+    }
+
+    /// Get the atlas size in pixels.
+    pub fn atlas_size(&self) -> u32 {
+        self.atlas_size
+    }
+
+    /// Ensure a glyph is in the atlas using a cache key.
+    ///
+    /// This is a public wrapper around the internal ensure_glyph method
+    /// for use by the retained rendering system.
+    pub fn ensure_glyph_in_atlas(&mut self, cache_key: CacheKey) -> Option<&AtlasEntry> {
+        self.ensure_glyph(cache_key)
+    }
+
+    /// Get glyph placement information (left/top offsets, width, height).
+    ///
+    /// Returns the placement metrics needed to correctly position a glyph on screen.
+    /// This includes the bearing offsets that position the glyph relative to its baseline.
+    pub fn get_glyph_placement(&mut self, cache_key: CacheKey) -> Option<GlyphPlacement> {
+        let mut font_system = self.font_system.write().unwrap();
+        let mut swash_cache = self.swash_cache.write().unwrap();
+
+        let image = swash_cache
+            .get_image(&mut font_system, cache_key)
+            .as_ref()?;
+
+        let scale = self.viewport.scale_factor as f32;
+
+        Some(GlyphPlacement {
+            left: image.placement.left as f32 / scale,
+            top: image.placement.top as f32 / scale,
+            width: image.placement.width as f32 / scale,
+            height: image.placement.height as f32 / scale,
+        })
+    }
+
+    /// Ensure a glyph is in the atlas and get its placement info.
+    ///
+    /// This is a combined operation to avoid multiple mutable borrows.
+    /// Returns both the atlas entry and glyph placement information.
+    pub fn ensure_glyph_with_placement(
+        &mut self,
+        cache_key: CacheKey,
+    ) -> Option<(AtlasEntry, GlyphPlacement)> {
+        // First ensure the glyph is in the atlas
+        let atlas_entry = self.ensure_glyph(cache_key)?.clone();
+
+        // Then get the placement info
+        let mut font_system = self.font_system.write().unwrap();
+        let mut swash_cache = self.swash_cache.write().unwrap();
+
+        let image = swash_cache
+            .get_image(&mut font_system, cache_key)
+            .as_ref()?;
+
+        let scale = self.viewport.scale_factor as f32;
+
+        let placement = GlyphPlacement {
+            left: image.placement.left as f32 / scale,
+            top: image.placement.top as f32 / scale,
+            width: image.placement.width as f32 / scale,
+            height: image.placement.height as f32 / scale,
+        };
+
+        Some((atlas_entry, placement))
+    }
+
+    /// Get swash cache for external glyph operations.
+    pub fn swash_cache(&self) -> Arc<RwLock<cosmic_text::SwashCache>> {
+        self.swash_cache.clone()
+    }
+
+    /// Get the atlas texture view for binding.
+    pub fn atlas_texture_view(&self) -> &wgpu::TextureView {
+        &self.atlas_view
+    }
+
+    /// Get the atlas sampler for binding.
+    pub fn atlas_sampler(&self) -> &wgpu::Sampler {
+        &self.sampler
+    }
+
+    /// Upload atlas data to GPU if dirty (public wrapper).
+    pub fn upload_atlas_if_dirty(&mut self) {
+        profile_function!();
+
+        self.upload_atlas();
+    }
+
+    /// Check if the atlas has pending changes.
+    pub fn is_atlas_dirty(&self) -> bool {
+        self.atlas_dirty
+    }
+
+    /// Get an atlas entry by cache key (if it exists).
+    pub fn get_atlas_entry(&self, cache_key: CacheKey) -> Option<&AtlasEntry> {
+        self.atlas_entries.get(&cache_key)
     }
 }
 

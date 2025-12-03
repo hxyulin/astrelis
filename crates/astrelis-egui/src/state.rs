@@ -1,3 +1,4 @@
+use astrelis_core::profiling::profile_function;
 use astrelis_render::RenderableWindow;
 use astrelis_winit::event::{ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta};
 
@@ -81,6 +82,7 @@ impl State {
     }
 
     pub fn on_event(&mut self, window: &RenderableWindow, event: &Event) -> EventResponse {
+        profile_function!();
         match event {
             Event::ScaleFactorChanged(scale_factor) => {
                 let native_pixels_per_point = *scale_factor as f32;
@@ -199,7 +201,7 @@ impl State {
     fn on_cursor_moved(
         &mut self,
         window: &RenderableWindow,
-        pos_in_pixels: astrelis_winit::event::PhysicalPosition<f64>,
+        pos_in_pixels: astrelis_core::geometry::Pos<f64>,
     ) {
         let pixels_per_point = pixels_per_point(&self.context, window);
 

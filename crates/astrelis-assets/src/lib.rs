@@ -1,14 +1,13 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+use std::any::{Any, TypeId};
+
+use astrelis_core::alloc::{HashMap, sparse_set::IndexSlot};
+
+pub struct Handle<T: Any> {
+    slot: IndexSlot,
+    _marker: std::marker::PhantomData<T>,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+pub struct AssetManager {
+    /// Maps TypeId to a Boxed Any containing a SparseSet of assets of that type
+    assets: HashMap<TypeId, Box<dyn Any>>,
 }

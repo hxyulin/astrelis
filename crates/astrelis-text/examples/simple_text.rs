@@ -1,4 +1,5 @@
 use astrelis_core::logging;
+use astrelis_core::math::Vec2;
 use astrelis_render::{
     Color, GraphicsContext, RenderPassBuilder, RenderableWindow, WindowContextDescriptor, wgpu,
 };
@@ -9,7 +10,6 @@ use astrelis_winit::{
     event::EventBatch,
     window::{PhysicalSize, WindowBackend, WindowDescriptor},
 };
-use glam::Vec2;
 
 struct SimpleTextApp {
     context: &'static GraphicsContext,
@@ -45,7 +45,8 @@ fn main() {
 
         // Initialize font system with system fonts
         let font_system = FontSystem::with_system_fonts();
-        let font_renderer = FontRenderer::new(graphics_ctx, font_system);
+        let mut font_renderer = FontRenderer::new(graphics_ctx, font_system);
+        font_renderer.set_viewport(window.viewport());
 
         tracing::info!("Simple text example initialized");
 
@@ -72,6 +73,7 @@ impl App for SimpleTextApp {
         events.dispatch(|event| {
             if let astrelis_winit::event::Event::WindowResized(size) = event {
                 self.window.resized(*size);
+                self.font_renderer.set_viewport(self.window.viewport());
                 astrelis_winit::event::HandleStatus::consumed()
             } else {
                 astrelis_winit::event::HandleStatus::ignored()
@@ -79,14 +81,14 @@ impl App for SimpleTextApp {
         });
 
         // Create some simple text
-        let hello = Text::new("Hello, World!").size(32.0).color(Color::WHITE);
+        let hello = Text::new("Hello, World!").size(24.0).color(Color::WHITE);
 
         let subtitle = Text::new("This is simple text rendering with Astrelis")
-            .size(18.0)
+            .size(16.0)
             .color(Color::from_rgb_u8(150, 200, 255));
 
         let info = Text::new("Press Ctrl+C to exit")
-            .size(14.0)
+            .size(12.0)
             .color(Color::from_rgb_u8(150, 150, 150));
 
         // Prepare text buffers
@@ -94,7 +96,7 @@ impl App for SimpleTextApp {
         let mut subtitle_buffer = self.font_renderer.prepare(&subtitle);
         let mut info_buffer = self.font_renderer.prepare(&info);
 
-        // Draw text at different positions
+        // Draw text at different position
         self.font_renderer
             .draw_text(&mut hello_buffer, Vec2::new(50.0, 100.0));
         self.font_renderer
@@ -120,11 +122,7 @@ impl App for SimpleTextApp {
                 .build(&mut frame);
 
             // Render all text
-            let size = self.window.window().window.inner_size();
-            self.font_renderer.render(
-                render_pass.descriptor(),
-                Vec2::new(size.width as f32, size.height as f32),
-            );
+            self.font_renderer.render(render_pass.descriptor());
         }
 
         frame.finish();

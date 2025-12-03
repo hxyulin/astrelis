@@ -1,8 +1,6 @@
-use astrelis_core::profiling::profile_function;
+use astrelis_core::{geometry::{Size}, profiling::profile_function};
 use astrelis_winit::{
-    WindowId,
-    event::PhysicalSize,
-    window::{Window, WindowBackend},
+    WindowId, event::PhysicalSize, window::{Window, WindowBackend}
 };
 
 use crate::{
@@ -10,7 +8,45 @@ use crate::{
     frame::{FrameContext, FrameStats, Surface},
 };
 
+/// Viewport definition for rendering.
+#[derive(Debug, Clone, Copy)]
+pub struct Viewport {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub scale_factor: f64,
+}
+
+impl Default for Viewport {
+    fn default() -> Self {
+        Self {
+            x: 0.0,
+            y: 0.0,
+            width: 800.0,
+            height: 600.0,
+            // it needs to be 1.0 to avoid division by zero and other issues
+            scale_factor: 1.0,
+        }
+    }
+}
+
+impl Viewport {
+    pub fn is_valid(&self) -> bool {
+        self.width > 0.0 && self.height > 0.0 && self.scale_factor > 0.0
+    }
+
+    /// Get the size in logical pixels.
+    pub fn to_logical(&self) -> Size<f32> {
+        Size {
+            width: self.width as f32 / self.scale_factor as f32,
+            height: self.height as f32 / self.scale_factor as f32,
+        }
+    }
+}
+
 /// Descriptor for configuring a window's rendering context.
+#[derive(Default)]
 pub struct WindowContextDescriptor {
     /// The surface texture format. If None, uses the default format for the surface.
     pub format: Option<wgpu::TextureFormat>,
@@ -18,16 +54,6 @@ pub struct WindowContextDescriptor {
     pub present_mode: Option<wgpu::PresentMode>,
     /// Alpha mode for the surface.
     pub alpha_mode: Option<wgpu::CompositeAlphaMode>,
-}
-
-impl Default for WindowContextDescriptor {
-    fn default() -> Self {
-        Self {
-            format: None,
-            present_mode: None,
-            alpha_mode: None,
-        }
-    }
 }
 
 pub struct PendingReconfigure {
@@ -55,7 +81,13 @@ impl WindowContext {
         context: &'static GraphicsContext,
         descriptor: WindowContextDescriptor,
     ) -> Self {
-        let PhysicalSize { width, height } = window.window.inner_size();
+        let scale_factor = window.window.scale_factor();
+        let Size { width, height } = window.size();
+        let (width, height) = (
+            (width as f64 * scale_factor) as u32,
+            (height as f64 * scale_factor) as u32,
+        );
+
         let surface = context
             .instance
             .create_surface(window.window.clone())
@@ -87,8 +119,12 @@ impl WindowContext {
     }
 
     /// Handle window resize event
-    pub fn resized(&mut self, new_size: PhysicalSize<u32>) {
-        self.reconfigure.resize = Some(new_size);
+    pub fn resized(&mut self, new_size: Size<u32>) {
+        let scale_factor = self.window.window.scale_factor();
+        self.reconfigure.resize = Some(PhysicalSize {
+            width: (new_size.width as f64 * scale_factor) as u32,
+            height: (new_size.height as f64 * scale_factor) as u32,
+        });
     }
 
     pub fn window(&self) -> &Window {
@@ -105,6 +141,24 @@ impl WindowContext {
 
     pub fn surface_config(&self) -> &wgpu::SurfaceConfiguration {
         &self.config
+    }
+
+    /// Get the size of the window.
+    pub fn size(&self) -> Size<u32> {
+        self.window.size()
+    }
+
+    pub fn size_f32(&self) -> Size<f32> {
+        let size = self.size();
+        Size {
+            width: size.width as f32,
+            height: size.height as f32,
+        }
+    }
+
+    /// Get the inner size of the window.
+    pub fn inner_size(&self) -> PhysicalSize<u32> {
+        self.window.inner_size()
     }
 
     /// Reconfigure the surface with a new configuration.
@@ -192,8 +246,30 @@ impl RenderableWindow {
     }
 
     /// Handle window resize event
-    pub fn resized(&mut self, new_size: PhysicalSize<u32>) {
+    pub fn resized(&mut self, new_size: Size<u32>) {
         self.context.resized(new_size);
+    }
+
+    /// Get the inner size of the window.
+    pub fn inner_size(&self) -> PhysicalSize<u32> {
+        self.context.inner_size()
+    }
+
+    pub fn scale_factor(&self) -> f64 {
+        self.window.window.scale_factor()
+    }
+
+    pub fn viewport(&self) -> Viewport {
+        let PhysicalSize { width, height } = self.inner_size();
+        let scale_factor = self.scale_factor();
+
+        Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: width as f32,
+            height: height as f32,
+            scale_factor,
+        }
     }
 }
 

@@ -1,4 +1,5 @@
 use astrelis_core::logging;
+use astrelis_core::math::Vec2;
 use astrelis_render::{
     Color, GraphicsContext, RenderPassBuilder, RenderableWindow, WindowContextDescriptor, wgpu,
 };
@@ -9,7 +10,6 @@ use astrelis_winit::{
     event::EventBatch,
     window::{PhysicalSize, WindowBackend, WindowDescriptor},
 };
-use glam::Vec2;
 
 struct TextDemo {
     context: &'static GraphicsContext,
@@ -78,14 +78,17 @@ impl App for TextDemo {
             }
         });
 
+        // set the viewport
+        self.font_renderer.set_viewport(self.window.viewport());
+
         // Prepare text examples
         let title = Text::new("Astrelis Text Rendering")
-            .size(48.0)
+            .size(24.0)
             .color(Color::WHITE)
             .weight(FontWeight::Bold);
 
         let subtitle = Text::new("Powered by cosmic-text")
-            .size(24.0)
+            .size(18.0)
             .color(Color::from_rgb_u8(150, 150, 255))
             .align(TextAlign::Left);
 
@@ -93,18 +96,18 @@ impl App for TextDemo {
             "This is a demonstration of text rendering with various styles and properties. \
              The text system supports different sizes, colors, weights, and alignments.",
         )
-        .size(16.0)
+        .size(12.0)
         .color(Color::from_rgb_u8(200, 200, 200))
-        .max_width(700.0)
+        .max_width(self.window.size_f32().width - 50.0)
         .line_height(1.5);
 
         let bold_text = Text::new("Bold text example")
-            .size(20.0)
+            .size(14.0)
             .color(Color::YELLOW)
             .bold();
 
         let italic_text = Text::new("Italic text example")
-            .size(20.0)
+            .size(14.0)
             .color(Color::CYAN)
             .italic();
 
@@ -118,7 +121,7 @@ impl App for TextDemo {
         ];
 
         let monospace_text = Text::new("Monospace font: fn main() { println!(\"Hello\"); }")
-            .size(14.0)
+            .size(18.0)
             .color(Color::from_rgb_u8(100, 255, 100))
             .font("monospace");
 
@@ -133,7 +136,7 @@ impl App for TextDemo {
         let mut color_buffers: Vec<_> = colored_samples
             .iter()
             .map(|(text, color)| {
-                let t = Text::new(*text).size(18.0).color(*color);
+                let t = Text::new(*text).size(12.0).color(*color);
                 self.font_renderer.prepare(&t)
             })
             .collect();
@@ -150,7 +153,7 @@ impl App for TextDemo {
 
         self.font_renderer
             .draw_text(&mut body_buffer, Vec2::new(50.0, y));
-        y += 80.0;
+        y += 120.0;
 
         self.font_renderer
             .draw_text(&mut bold_buffer, Vec2::new(50.0, y));
@@ -185,12 +188,7 @@ impl App for TextDemo {
                 )
                 .build(&mut frame);
 
-            // Render text
-            let size = self.window.window().window.inner_size();
-            self.font_renderer.render(
-                render_pass.descriptor(),
-                Vec2::new(size.width as f32, size.height as f32),
-            );
+            self.font_renderer.render(render_pass.descriptor());
         }
 
         frame.finish();

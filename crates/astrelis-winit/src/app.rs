@@ -8,13 +8,29 @@ use crate::{
     window::{Window, WindowDescriptor},
 };
 
-pub struct AppCtx<'event_loop> {
-    event_loop: &'event_loop ActiveEventLoop,
+struct WindowResources {
+    events: EventQueue,
+    scale_factor: f64,
+}
+
+pub struct AppCtx<'a> {
+    event_loop: &'a ActiveEventLoop,
+    windows: &'a mut HashMap<WindowId, WindowResources>,
 }
 
 impl AppCtx<'_> {
     pub fn create_window(&mut self, descriptor: WindowDescriptor) -> Result<Window, OsError> {
-        Window::new(self.event_loop, descriptor)
+        let window = Window::new(self.event_loop, descriptor)?;
+
+        self.windows.insert(
+            window.id(),
+            WindowResources {
+                events: EventQueue::new(),
+                scale_factor: window.scale_factor(),
+            },
+        );
+
+        Ok(window)
     }
 
     pub fn exit(&self) {
@@ -36,37 +52,9 @@ pub type AppFactory = fn(ctx: &mut AppCtx) -> Box<dyn App>;
 
 struct AppProxy {
     factory: AppFactory,
-    events: HashMap<WindowId, EventQueue>,
     app: Option<Box<dyn App>>,
     update_called_this_frame: bool,
-}
-
-impl AppProxy {
-    fn render(&mut self, ctx: &mut AppCtx, window_id: WindowId) {
-        let app = self.app.as_mut().unwrap();
-
-        // Call update() once per frame on first redraw
-        if !self.update_called_this_frame {
-            app.update(ctx);
-            self.update_called_this_frame = true;
-        }
-
-        // Call render() for this window with its events
-        let event_queue = self.events.entry(window_id).or_insert_with(EventQueue::new);
-        let mut events = event_queue.drain();
-
-        app.render(ctx, window_id, &mut events);
-
-        // Default event handling
-        events.dispatch(|event| match event {
-            Event::CloseRequested => {
-                tracing::info!("Close requested for window {:?}", window_id);
-                ctx.event_loop.exit();
-                HandleStatus::consumed()
-            }
-            _ => HandleStatus::ignored(),
-        });
-    }
+    windows: HashMap<WindowId, WindowResources>,
 }
 
 impl winit::application::ApplicationHandler for AppProxy {
@@ -74,6 +62,7 @@ impl winit::application::ApplicationHandler for AppProxy {
         if self.app.is_none() {
             let mut ctx = AppCtx {
                 event_loop: _event_loop,
+                windows: &mut self.windows,
             };
             self.app = Some((self.factory)(&mut ctx));
         }
@@ -97,24 +86,48 @@ impl winit::application::ApplicationHandler for AppProxy {
             None => return,
         };
 
-        let mut ctx = AppCtx { event_loop };
+        let mut ctx = AppCtx {
+            event_loop,
+            windows: &mut self.windows,
+        };
 
         match event {
             WindowEvent::RedrawRequested => {
-                self.render(&mut ctx, window_id);
+                let app = self.app.as_mut().unwrap();
+
+                // Call update() once per frame on first redraw
+                if !self.update_called_this_frame {
+                    app.update(&mut ctx);
+                    self.update_called_this_frame = true;
+                }
+
+                // Call render() for this window with its events
+                let window = ctx.windows.get_mut(&window_id).unwrap();
+                let mut events = window.events.drain();
+
+                app.render(&mut ctx, window_id, &mut events);
+
+                // Default event handling
+                events.dispatch(|event| match event {
+                    Event::CloseRequested => {
+                        tracing::info!("Close requested for window {:?}", window_id);
+                        ctx.event_loop.exit();
+                        HandleStatus::consumed()
+                    }
+                    _ => HandleStatus::ignored(),
+                });
             }
             event => {
-                let event_copy = event.clone();
-                let astrelis_event = match Event::from_winit(event) {
+                let window = self.windows.get_mut(&window_id).unwrap();
+                if let WindowEvent::ScaleFactorChanged { scale_factor, .. } = event {
+                    window.scale_factor = scale_factor;
+                }
+                let astrelis_event = match Event::from_winit(event, window.scale_factor) {
                     Some(event) => event,
-                    None => {
-                        tracing::trace!("Ignoring unsupported window event: {:?}", event_copy);
-                        return;
-                    }
+                    None => return,
                 };
 
-                let event_queue = self.events.entry(window_id).or_insert_with(EventQueue::new);
-                event_queue.push(astrelis_event);
+                window.events.push(astrelis_event);
             }
         }
     }
@@ -127,9 +140,9 @@ pub fn run_app(factory: AppFactory) {
     event_loop.set_control_flow(ControlFlow::Wait);
     let mut app_proxy = AppProxy {
         factory,
-        events: HashMap::new(),
         app: None,
         update_called_this_frame: false,
+        windows: HashMap::new(),
     };
     event_loop
         .run_app(&mut app_proxy)

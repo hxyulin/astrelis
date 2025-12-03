@@ -10,7 +10,7 @@
 //! ```rust,no_run
 //! use astrelis_text::{FontSystem, FontRenderer, Text, Color};
 //! use astrelis_render::GraphicsContext;
-//! use glam::Vec2;
+//! use astrelis_core::math::Vec2;
 //!
 //! let context = GraphicsContext::new_sync();
 //! let font_system = FontSystem::with_system_fonts();
@@ -50,15 +50,26 @@
 
 pub mod font;
 pub mod renderer;
+pub mod shaping;
 pub mod text;
+pub mod cache;
+pub mod pipeline;
 
 // Re-export main types
 pub use font::{FontAttributes, FontDatabase, FontStretch, FontStyle, FontSystem, FontWeight};
-pub use renderer::{FontRenderer, TextBuffer};
+pub use renderer::{AtlasEntry, FontRenderer, GlyphPlacement, TextBuffer};
+pub use shaping::{
+    ShapedGlyph, ShapedTextResult, extract_glyphs_from_buffer, measure_text_fast, shape_text,
+};
 pub use text::{Text, TextAlign, TextWrap};
+pub use cache::{ShapeKey, ShapedTextData, TextShapeCache};
+pub use pipeline::{RequestId, ShapedTextResult as PipelineShapedTextResult, TextPipeline, TextShapeRequest, TextShaper, SyncTextShaper};
+
+// Re-export cosmic-text types needed for retained rendering
+pub use cosmic_text::CacheKey;
 
 // Re-export Color from astrelis-render
 pub use astrelis_render::Color;
 
-// Re-export glam for Vec2
-pub use glam;
+// Re-export math types from astrelis-core
+pub use astrelis_core::math::Vec2;

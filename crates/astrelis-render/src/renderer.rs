@@ -47,7 +47,7 @@ impl Renderer {
     ) -> wgpu::Buffer {
         let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
             label,
-            size: (data.len() * std::mem::size_of::<T>()) as u64,
+            size: std::mem::size_of_val(data) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -67,7 +67,7 @@ impl Renderer {
     ) -> wgpu::Buffer {
         let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
             label,
-            size: (data.len() * std::mem::size_of::<T>()) as u64,
+            size: std::mem::size_of_val(data) as u64,
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });

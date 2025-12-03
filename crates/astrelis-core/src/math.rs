@@ -32,8 +32,4 @@ pub mod packed {
 }
 
 pub use fast::*;
-pub use packed::{
-    Vec2 as PackedVec2,
-    Vec3 as PackedVec3,
-    Vec4 as PackedVec4,
-};
+pub use packed::{Vec2 as PackedVec2, Vec3 as PackedVec3, Vec4 as PackedVec4};
