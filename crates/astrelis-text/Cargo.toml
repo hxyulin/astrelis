@@ -6,3 +6,20 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+astrelis-render = { path = "../astrelis-render" }
+
+# Text rendering
+cosmic-text = "0.12"
+
+# Math
+glam = "0.29"
+
+# Utilities
+bytemuck = { version = "1.14", features = ["derive"] }
+tracing = "0.1"
+sys-locale = "0.3"
+
+[dev-dependencies]
+astrelis-core = { path = "../astrelis-core" }
+astrelis-winit = { path = "../astrelis-winit" }
+pollster = "0.3"

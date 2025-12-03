@@ -13,14 +13,16 @@ use astrelis_render::{
     GraphicsContext, RenderPassBuilder, RenderableWindow, WindowContextDescriptor,
 };
 use astrelis_winit::{
+    WindowId,
     app::run_app,
     event::PhysicalSize,
     window::{WindowBackend, WindowDescriptor},
 };
+use std::collections::HashMap;
 
 struct App {
     context: &'static GraphicsContext,
-    windows: Vec<(RenderableWindow, wgpu::Color)>,
+    windows: HashMap<WindowId, (RenderableWindow, wgpu::Color)>,
 }
 
 fn main() {
@@ -29,7 +31,7 @@ fn main() {
     run_app(|ctx| {
         let graphics_ctx = GraphicsContext::new_sync();
 
-        let mut windows = Vec::new();
+        let mut windows = HashMap::new();
 
         // Create 3 windows with different colors
         let colors = [
@@ -67,10 +69,12 @@ fn main() {
                 graphics_ctx,
                 WindowContextDescriptor {
                     format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+                    ..Default::default()
                 },
             );
 
-            windows.push((renderable_window, *color));
+            let window_id = renderable_window.id();
+            windows.insert(window_id, (renderable_window, *color));
         }
 
         Box::new(App {
@@ -81,29 +85,49 @@ fn main() {
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(
+    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx) {
+        // Global logic - called once per frame
+        // (none needed for this example)
+    }
+
+    fn render(
         &mut self,
         _ctx: &mut astrelis_winit::app::AppCtx,
-        _events: &mut astrelis_winit::event::EventBatch,
+        window_id: WindowId,
+        events: &mut astrelis_winit::event::EventBatch,
     ) {
-        for (window, color) in &mut self.windows {
-            let mut frame = window.begin_drawing();
+        // Get the window and color for this specific window
+        let Some((window, color)) = self.windows.get_mut(&window_id) else {
+            return;
+        };
 
-            {
-                let _render_pass = RenderPassBuilder::new()
-                    .label("Multi-Window Render Pass")
-                    .color_attachment(
-                        None,
-                        None,
-                        wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(*color),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    )
-                    .build(&mut frame);
+        // Handle window-specific resize events
+        events.dispatch(|event| {
+            if let astrelis_winit::event::Event::WindowResized(size) = event {
+                window.resized(*size);
+                astrelis_winit::event::HandleStatus::consumed()
+            } else {
+                astrelis_winit::event::HandleStatus::ignored()
             }
+        });
 
-            frame.finish();
+        // Render this specific window
+        let mut frame = window.begin_drawing();
+
+        {
+            let _render_pass = RenderPassBuilder::new()
+                .label("Multi-Window Render Pass")
+                .color_attachment(
+                    None,
+                    None,
+                    wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(*color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                )
+                .build(&mut frame);
         }
+
+        frame.finish();
     }
 }

@@ -1,0 +1,132 @@
+use astrelis_core::logging;
+use astrelis_render::{
+    Color, GraphicsContext, RenderPassBuilder, RenderableWindow, WindowContextDescriptor, wgpu,
+};
+use astrelis_text::{FontRenderer, FontSystem, Text};
+use astrelis_winit::{
+    WindowId,
+    app::{App, AppCtx, run_app},
+    event::EventBatch,
+    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+};
+use glam::Vec2;
+
+struct SimpleTextApp {
+    context: &'static GraphicsContext,
+    window: RenderableWindow,
+    window_id: WindowId,
+    font_renderer: FontRenderer,
+}
+
+fn main() {
+    logging::init();
+
+    run_app(|ctx| {
+        let graphics_ctx = GraphicsContext::new_sync();
+
+        let window = ctx
+            .create_window(WindowDescriptor {
+                title: "Simple Text Drawing".to_string(),
+                size: Some(PhysicalSize::new(800.0, 600.0)),
+                ..Default::default()
+            })
+            .expect("Failed to create window");
+
+        let window = RenderableWindow::new_with_descriptor(
+            window,
+            graphics_ctx,
+            WindowContextDescriptor {
+                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+                ..Default::default()
+            },
+        );
+
+        let window_id = window.id();
+
+        // Initialize font system with system fonts
+        let font_system = FontSystem::with_system_fonts();
+        let font_renderer = FontRenderer::new(graphics_ctx, font_system);
+
+        tracing::info!("Simple text example initialized");
+
+        Box::new(SimpleTextApp {
+            context: graphics_ctx,
+            window,
+            window_id,
+            font_renderer,
+        })
+    });
+}
+
+impl App for SimpleTextApp {
+    fn update(&mut self, _ctx: &mut AppCtx) {
+        // No global logic needed for this example
+    }
+
+    fn render(&mut self, _ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
+        if window_id != self.window_id {
+            return;
+        }
+
+        // Handle window resize events
+        events.dispatch(|event| {
+            if let astrelis_winit::event::Event::WindowResized(size) = event {
+                self.window.resized(*size);
+                astrelis_winit::event::HandleStatus::consumed()
+            } else {
+                astrelis_winit::event::HandleStatus::ignored()
+            }
+        });
+
+        // Create some simple text
+        let hello = Text::new("Hello, World!").size(32.0).color(Color::WHITE);
+
+        let subtitle = Text::new("This is simple text rendering with Astrelis")
+            .size(18.0)
+            .color(Color::from_rgb_u8(150, 200, 255));
+
+        let info = Text::new("Press Ctrl+C to exit")
+            .size(14.0)
+            .color(Color::from_rgb_u8(150, 150, 150));
+
+        // Prepare text buffers
+        let mut hello_buffer = self.font_renderer.prepare(&hello);
+        let mut subtitle_buffer = self.font_renderer.prepare(&subtitle);
+        let mut info_buffer = self.font_renderer.prepare(&info);
+
+        // Draw text at different positions
+        self.font_renderer
+            .draw_text(&mut hello_buffer, Vec2::new(50.0, 100.0));
+        self.font_renderer
+            .draw_text(&mut subtitle_buffer, Vec2::new(50.0, 150.0));
+        self.font_renderer
+            .draw_text(&mut info_buffer, Vec2::new(50.0, 500.0));
+
+        // Begin frame and render
+        let mut frame = self.window.begin_drawing();
+
+        {
+            // Clear screen with dark background
+            let mut render_pass = RenderPassBuilder::new()
+                .label("Clear Pass")
+                .color_attachment(
+                    None,
+                    None,
+                    wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(Color::from_rgb_u8(25, 25, 35).to_wgpu()),
+                        store: wgpu::StoreOp::Store,
+                    },
+                )
+                .build(&mut frame);
+
+            // Render all text
+            let size = self.window.window().window.inner_size();
+            self.font_renderer.render(
+                render_pass.descriptor(),
+                Vec2::new(size.width as f32, size.height as f32),
+            );
+        }
+
+        frame.finish();
+    }
+}

@@ -6,3 +6,20 @@ edition.workspace = true
 authors.workspace = true
 
 [dependencies]
+astrelis-core.workspace = true
+astrelis-render.workspace = true
+astrelis-winit.workspace = true
+
+egui = "0.33"
+egui-wgpu = "0.33"
+wgpu = "=27.0.1"
+tracing.workspace = true
+bytemuck = "1.14"
+
+[[example]]
+name = "egui_app"
+path = "examples/egui_app.rs"
+
+[[example]]
+name = "textured_quad"
+path = "examples/textured_quad.rs"

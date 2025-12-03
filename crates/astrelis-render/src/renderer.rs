@@ -1,0 +1,402 @@
+use crate::context::GraphicsContext;
+
+/// Low-level extensible renderer that simplifies WGPU resource management.
+///
+/// This provides a foundation for higher-level renderers like TextRenderer, SceneRenderer, etc.
+/// It manages common rendering state and provides utilities for resource creation.
+pub struct Renderer {
+    context: &'static GraphicsContext,
+}
+
+impl Renderer {
+    /// Create a new renderer with the given graphics context.
+    pub fn new(context: &'static GraphicsContext) -> Self {
+        Self { context }
+    }
+
+    /// Get the graphics context.
+    pub fn context(&self) -> &'static GraphicsContext {
+        self.context
+    }
+
+    /// Get the device.
+    pub fn device(&self) -> &wgpu::Device {
+        &self.context.device
+    }
+
+    /// Get the queue.
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.context.queue
+    }
+
+    /// Create a shader module from WGSL source.
+    pub fn create_shader(&self, label: Option<&str>, source: &str) -> wgpu::ShaderModule {
+        self.context
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label,
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            })
+    }
+
+    /// Create a vertex buffer with data.
+    pub fn create_vertex_buffer<T: bytemuck::Pod>(
+        &self,
+        label: Option<&str>,
+        data: &[T],
+    ) -> wgpu::Buffer {
+        let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: (data.len() * std::mem::size_of::<T>()) as u64,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        self.context
+            .queue
+            .write_buffer(&buffer, 0, bytemuck::cast_slice(data));
+
+        buffer
+    }
+
+    /// Create an index buffer with data.
+    pub fn create_index_buffer<T: bytemuck::Pod>(
+        &self,
+        label: Option<&str>,
+        data: &[T],
+    ) -> wgpu::Buffer {
+        let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: (data.len() * std::mem::size_of::<T>()) as u64,
+            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        self.context
+            .queue
+            .write_buffer(&buffer, 0, bytemuck::cast_slice(data));
+
+        buffer
+    }
+
+    /// Create a uniform buffer with data.
+    pub fn create_uniform_buffer<T: bytemuck::Pod>(
+        &self,
+        label: Option<&str>,
+        data: &T,
+    ) -> wgpu::Buffer {
+        let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: std::mem::size_of::<T>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        self.context.queue.write_buffer(
+            &buffer,
+            0,
+            bytemuck::cast_slice(std::slice::from_ref(data)),
+        );
+
+        buffer
+    }
+
+    /// Update a uniform buffer with new data.
+    pub fn update_uniform_buffer<T: bytemuck::Pod>(&self, buffer: &wgpu::Buffer, data: &T) {
+        self.context.queue.write_buffer(
+            buffer,
+            0,
+            bytemuck::cast_slice(std::slice::from_ref(data)),
+        );
+    }
+
+    /// Create a texture with descriptor.
+    pub fn create_texture(&self, descriptor: &wgpu::TextureDescriptor) -> wgpu::Texture {
+        self.context.device.create_texture(descriptor)
+    }
+
+    /// Create a 2D texture with data.
+    pub fn create_texture_2d(
+        &self,
+        label: Option<&str>,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        usage: wgpu::TextureUsages,
+        data: &[u8],
+    ) -> wgpu::Texture {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        };
+
+        let texture = self
+            .context
+            .device
+            .create_texture(&wgpu::TextureDescriptor {
+                label,
+                size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: usage | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+
+        let bytes_per_pixel = format.block_copy_size(None).unwrap();
+
+        self.context.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * bytes_per_pixel),
+                rows_per_image: Some(height),
+            },
+            size,
+        );
+
+        texture
+    }
+
+    /// Create a sampler with descriptor.
+    pub fn create_sampler(&self, descriptor: &wgpu::SamplerDescriptor) -> wgpu::Sampler {
+        self.context.device.create_sampler(descriptor)
+    }
+
+    /// Create a simple linear sampler.
+    pub fn create_linear_sampler(&self, label: Option<&str>) -> wgpu::Sampler {
+        self.context
+            .device
+            .create_sampler(&wgpu::SamplerDescriptor {
+                label,
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            })
+    }
+
+    /// Create a simple nearest sampler.
+    pub fn create_nearest_sampler(&self, label: Option<&str>) -> wgpu::Sampler {
+        self.context
+            .device
+            .create_sampler(&wgpu::SamplerDescriptor {
+                label,
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            })
+    }
+
+    /// Create a bind group layout.
+    pub fn create_bind_group_layout(
+        &self,
+        label: Option<&str>,
+        entries: &[wgpu::BindGroupLayoutEntry],
+    ) -> wgpu::BindGroupLayout {
+        self.context
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label, entries })
+    }
+
+    /// Create a bind group.
+    pub fn create_bind_group(
+        &self,
+        label: Option<&str>,
+        layout: &wgpu::BindGroupLayout,
+        entries: &[wgpu::BindGroupEntry],
+    ) -> wgpu::BindGroup {
+        self.context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label,
+                layout,
+                entries,
+            })
+    }
+
+    /// Create a pipeline layout.
+    pub fn create_pipeline_layout(
+        &self,
+        label: Option<&str>,
+        bind_group_layouts: &[&wgpu::BindGroupLayout],
+        push_constant_ranges: &[wgpu::PushConstantRange],
+    ) -> wgpu::PipelineLayout {
+        self.context
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label,
+                bind_group_layouts,
+                push_constant_ranges,
+            })
+    }
+
+    /// Create a render pipeline.
+    pub fn create_render_pipeline(
+        &self,
+        descriptor: &wgpu::RenderPipelineDescriptor,
+    ) -> wgpu::RenderPipeline {
+        self.context.device.create_render_pipeline(descriptor)
+    }
+
+    /// Create a compute pipeline.
+    pub fn create_compute_pipeline(
+        &self,
+        descriptor: &wgpu::ComputePipelineDescriptor,
+    ) -> wgpu::ComputePipeline {
+        self.context.device.create_compute_pipeline(descriptor)
+    }
+
+    /// Create a command encoder.
+    pub fn create_command_encoder(&self, label: Option<&str>) -> wgpu::CommandEncoder {
+        self.context
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label })
+    }
+
+    /// Submit command buffers to the queue.
+    pub fn submit<I>(&self, command_buffers: I)
+    where
+        I: IntoIterator<Item = wgpu::CommandBuffer>,
+    {
+        self.context.queue.submit(command_buffers);
+    }
+}
+
+/// Builder for creating a render pipeline with common defaults.
+pub struct RenderPipelineBuilder<'a> {
+    renderer: &'a Renderer,
+    label: Option<&'a str>,
+    shader: Option<&'a wgpu::ShaderModule>,
+    vertex_entry: &'a str,
+    fragment_entry: &'a str,
+    layout: Option<&'a wgpu::PipelineLayout>,
+    vertex_buffers: Vec<wgpu::VertexBufferLayout<'a>>,
+    color_targets: Vec<Option<wgpu::ColorTargetState>>,
+    primitive: wgpu::PrimitiveState,
+    depth_stencil: Option<wgpu::DepthStencilState>,
+    multisample: wgpu::MultisampleState,
+}
+
+impl<'a> RenderPipelineBuilder<'a> {
+    pub fn new(renderer: &'a Renderer) -> Self {
+        Self {
+            renderer,
+            label: None,
+            shader: None,
+            vertex_entry: "vs_main",
+            fragment_entry: "fs_main",
+            layout: None,
+            vertex_buffers: Vec::new(),
+            color_targets: Vec::new(),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+        }
+    }
+
+    pub fn label(mut self, label: &'a str) -> Self {
+        self.label = Some(label);
+        self
+    }
+
+    pub fn shader(mut self, shader: &'a wgpu::ShaderModule) -> Self {
+        self.shader = Some(shader);
+        self
+    }
+
+    pub fn vertex_entry(mut self, entry: &'a str) -> Self {
+        self.vertex_entry = entry;
+        self
+    }
+
+    pub fn fragment_entry(mut self, entry: &'a str) -> Self {
+        self.fragment_entry = entry;
+        self
+    }
+
+    pub fn layout(mut self, layout: &'a wgpu::PipelineLayout) -> Self {
+        self.layout = Some(layout);
+        self
+    }
+
+    pub fn vertex_buffer(mut self, layout: wgpu::VertexBufferLayout<'a>) -> Self {
+        self.vertex_buffers.push(layout);
+        self
+    }
+
+    pub fn color_target(mut self, target: wgpu::ColorTargetState) -> Self {
+        self.color_targets.push(Some(target));
+        self
+    }
+
+    pub fn primitive(mut self, primitive: wgpu::PrimitiveState) -> Self {
+        self.primitive = primitive;
+        self
+    }
+
+    pub fn depth_stencil(mut self, depth_stencil: wgpu::DepthStencilState) -> Self {
+        self.depth_stencil = Some(depth_stencil);
+        self
+    }
+
+    pub fn multisample(mut self, multisample: wgpu::MultisampleState) -> Self {
+        self.multisample = multisample;
+        self
+    }
+
+    pub fn build(self) -> wgpu::RenderPipeline {
+        let shader = self.shader.expect("Shader module is required");
+        let layout = self.layout.expect("Pipeline layout is required");
+
+        self.renderer
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: self.label,
+                layout: Some(layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some(self.vertex_entry),
+                    buffers: &self.vertex_buffers,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some(self.fragment_entry),
+                    targets: &self.color_targets,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: self.primitive,
+                depth_stencil: self.depth_stencil,
+                multisample: self.multisample,
+                multiview: None,
+                cache: None,
+            })
+    }
+}

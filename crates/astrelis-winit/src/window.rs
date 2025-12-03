@@ -1,9 +1,9 @@
 use std::{any::Any, sync::Arc};
 
+pub use winit::dpi::PhysicalSize;
 pub use winit::window::Fullscreen;
-use winit::{
-    dpi::PhysicalSize, error::OsError, event_loop::ActiveEventLoop, window::WindowAttributes,
-};
+pub use winit::window::Window as WinitWindow;
+use winit::{error::OsError, event_loop::ActiveEventLoop, window::WindowAttributes};
 
 pub struct WindowDescriptor {
     pub title: String,
@@ -30,6 +30,10 @@ pub struct Window {
 }
 
 impl Window {
+    pub fn id(&self) -> winit::window::WindowId {
+        self.window.id()
+    }
+
     pub(crate) fn new(
         event_loop: &ActiveEventLoop,
         descriptor: WindowDescriptor,
@@ -46,9 +50,7 @@ impl Window {
 
         let window = Arc::new(event_loop.create_window(attributes)?);
 
-        Ok(Window {
-            window,
-        })
+        Ok(Window { window })
     }
 }
 
