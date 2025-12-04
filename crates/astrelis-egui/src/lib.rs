@@ -87,7 +87,7 @@ impl Egui {
         let config = window.context().surface_config();
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [config.width, config.height],
-            pixels_per_point: window.window().window.scale_factor() as f32,
+            pixels_per_point: full_output.pixels_per_point,
         };
 
         self.renderer

@@ -201,13 +201,20 @@ impl State {
     fn on_cursor_moved(
         &mut self,
         window: &RenderableWindow,
-        pos_in_pixels: astrelis_core::geometry::Pos<f64>,
+        pos_in_logical: astrelis_core::geometry::Pos<f64>,
     ) {
+        // Input is in logical pixels, convert to physical pixels first
+        let scale_factor = window.window().window.scale_factor() as f32;
+        let pos_in_physical = egui::pos2(
+            pos_in_logical.x as f32 * scale_factor,
+            pos_in_logical.y as f32 * scale_factor,
+        );
+        
+        // Then convert physical pixels to egui points
         let pixels_per_point = pixels_per_point(&self.context, window);
-
         let pos_in_points = egui::pos2(
-            pos_in_pixels.x as f32 / pixels_per_point,
-            pos_in_pixels.y as f32 / pixels_per_point,
+            pos_in_physical.x / pixels_per_point,
+            pos_in_physical.y / pixels_per_point,
         );
         self.pointer_pos_in_points = Some(pos_in_points);
 
