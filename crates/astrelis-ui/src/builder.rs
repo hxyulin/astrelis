@@ -3,7 +3,10 @@
 use crate::style::Style;
 use crate::tree::{NodeId, UiTree};
 use crate::widget_id::{WidgetId, WidgetIdRegistry};
-use crate::widgets::{Button, Column, Container, Row, Text, TextInput, Tooltip, Widget};
+use crate::widgets::{
+    Button, Column, Container, Image, ImageFit, ImageTexture, ImageUV, Row, Text, TextInput,
+    Tooltip, Widget,
+};
 
 /// Builder for constructing UI trees declaratively.
 pub struct UiBuilder<'a> {
@@ -84,6 +87,24 @@ impl<'a> UiBuilder<'a> {
         TooltipBuilder {
             builder: self,
             tooltip: Tooltip::new(text),
+        }
+    }
+
+    /// Create an image widget with a texture.
+    pub fn image(&mut self, texture: ImageTexture) -> ImageBuilder<'_, 'a> {
+        ImageBuilder {
+            builder: self,
+            image: Image::new().texture(texture),
+            widget_id: None,
+        }
+    }
+
+    /// Create an image widget without a texture (can be set later).
+    pub fn image_placeholder(&mut self) -> ImageBuilder<'_, 'a> {
+        ImageBuilder {
+            builder: self,
+            image: Image::new(),
+            widget_id: None,
         }
     }
 
@@ -832,6 +853,107 @@ impl<'b, 'a> TooltipBuilder<'b, 'a> {
 
     pub fn margin(mut self, margin: f32) -> Self {
         self.tooltip.style = self.tooltip.style.margin(margin);
+        self
+    }
+}
+
+/// Builder for image widgets.
+pub struct ImageBuilder<'b, 'a> {
+    builder: &'b mut UiBuilder<'a>,
+    image: Image,
+    widget_id: Option<WidgetId>,
+}
+
+impl<'b, 'a> ImageBuilder<'b, 'a> {
+    /// Set widget ID for later reference.
+    pub fn id(mut self, id: WidgetId) -> Self {
+        self.widget_id = Some(id);
+        self
+    }
+
+    /// Set UV coordinates (for sprites/atlases).
+    pub fn uv(mut self, uv: ImageUV) -> Self {
+        self.image = self.image.uv(uv);
+        self
+    }
+
+    /// Set tint color (multiplied with texture).
+    pub fn tint(mut self, color: astrelis_render::Color) -> Self {
+        self.image = self.image.tint(color);
+        self
+    }
+
+    /// Set how the image fits within its bounds.
+    pub fn fit(mut self, fit: ImageFit) -> Self {
+        self.image = self.image.fit(fit);
+        self
+    }
+
+    /// Set the natural size of the image (for sizing calculations).
+    pub fn natural_size(mut self, width: f32, height: f32) -> Self {
+        self.image = self.image.natural_size(width, height);
+        self
+    }
+
+    /// Set border radius for rounded corners.
+    pub fn border_radius(mut self, radius: f32) -> Self {
+        self.image = self.image.border_radius(radius);
+        self
+    }
+
+    /// Build the image widget and add it to the tree.
+    pub fn build(self) -> NodeId {
+        let node_id = self.builder.add_widget(Box::new(self.image));
+        if let Some(widget_id) = self.widget_id {
+            self.builder.widget_registry.register(widget_id, node_id);
+        }
+        self.builder.set_root(node_id);
+        node_id
+    }
+
+    // WidgetBuilder methods inlined
+    pub fn style(mut self, style: Style) -> Self {
+        self.image.style = style;
+        self
+    }
+
+    pub fn width(mut self, width: f32) -> Self {
+        self.image.style = self.image.style.width(width);
+        self
+    }
+
+    pub fn height(mut self, height: f32) -> Self {
+        self.image.style = self.image.style.height(height);
+        self
+    }
+
+    pub fn padding(mut self, padding: f32) -> Self {
+        self.image.style = self.image.style.padding(padding);
+        self
+    }
+
+    pub fn margin(mut self, margin: f32) -> Self {
+        self.image.style = self.image.style.margin(margin);
+        self
+    }
+
+    pub fn min_width(mut self, width: f32) -> Self {
+        self.image.style = self.image.style.min_width(width);
+        self
+    }
+
+    pub fn min_height(mut self, height: f32) -> Self {
+        self.image.style = self.image.style.min_height(height);
+        self
+    }
+
+    pub fn max_width(mut self, width: f32) -> Self {
+        self.image.style = self.image.style.max_width(width);
+        self
+    }
+
+    pub fn max_height(mut self, height: f32) -> Self {
+        self.image.style = self.image.style.max_height(height);
         self
     }
 }

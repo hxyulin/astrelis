@@ -61,19 +61,20 @@ pub use auto_dirty::{NumericValue, TextValue, Value};
 pub use debug::DebugOverlay;
 pub use dirty::DirtyFlags;
 pub use dirty_ranges::DirtyRanges;
-pub use draw_list::{DrawCommand, DrawList, QuadCommand, TextCommand};
+pub use draw_list::{DrawCommand, DrawList, ImageCommand, QuadCommand, TextCommand};
 pub use glyph_atlas::{
     GlyphBatch, atlas_entry_uv_coords, create_glyph_batches, glyph_to_instance, glyphs_to_instances,
 };
-pub use gpu_types::{QuadInstance, QuadVertex, TextInstance};
+pub use gpu_types::{ImageInstance, QuadInstance, QuadVertex, TextInstance};
 pub use instance_buffer::InstanceBuffer;
 pub use length::{Length, LengthAuto, LengthPercentage, auto, length, percent};
 pub use metrics::UiMetrics;
 pub use astrelis_text::{TextPipeline, TextShapeRequest, TextShaper, SyncTextShaper};
 pub use widget_id::{WidgetId, WidgetIdRegistry};
+pub use widgets::{Image, ImageFit, ImageTexture, ImageUV};
 
 // Re-export main types
-pub use builder::{UiBuilder, WidgetBuilder};
+pub use builder::{ImageBuilder, UiBuilder, WidgetBuilder};
 pub use event::{UiEvent, UiEventSystem};
 pub use layout::LayoutCache;
 pub use renderer::UiRenderer;

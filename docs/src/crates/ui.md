@@ -8,8 +8,9 @@ The `astrelis-ui` crate implements a retained-mode UI system with flexbox/grid l
 - **Layout**: Full Flexbox and Grid support using Taffy.
 - **Rendering**: Batched, instanced rendering for high performance.
 - **Incremental Updates**: Dirty tracking to minimize layout and rendering work.
-- **Widgets**: Built-in widgets like Container, Text, Button, TextInput.
+- **Widgets**: Built-in widgets like Container, Text, Button, TextInput, Image.
 - **Styling**: CSS-like styling properties.
+- **Images**: GPU-accelerated image rendering with fit modes and tinting.
 
 ## Usage
 
@@ -42,6 +43,7 @@ Contains built-in widget implementations:
 - `Text`: Text display.
 - `Button`: Interactive button.
 - `TextInput`: Editable text field.
+- `Image`: GPU texture display with fit modes (Cover, Contain, Fill, None).
 
 ### `builder`
 

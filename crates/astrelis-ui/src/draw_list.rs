@@ -5,6 +5,7 @@
 //! It tracks which nodes contribute which draw commands for efficient updates.
 
 use crate::dirty_ranges::DirtyRanges;
+use crate::widgets::{ImageTexture, ImageUV};
 use astrelis_text::PipelineShapedTextResult as ShapedTextResult;
 use crate::tree::NodeId;
 use astrelis_core::alloc::HashMap;
@@ -20,6 +21,8 @@ pub enum DrawCommand {
     Quad(QuadCommand),
     /// Draw shaped text
     Text(TextCommand),
+    /// Draw a textured image
+    Image(ImageCommand),
 }
 
 impl DrawCommand {
@@ -28,6 +31,7 @@ impl DrawCommand {
         match self {
             DrawCommand::Quad(q) => q.node_id,
             DrawCommand::Text(t) => t.node_id,
+            DrawCommand::Image(i) => i.node_id,
         }
     }
 }
@@ -38,6 +42,7 @@ impl DrawCommand {
         match self {
             DrawCommand::Quad(q) => q.z_index,
             DrawCommand::Text(t) => t.z_index,
+            DrawCommand::Image(i) => i.z_index,
         }
     }
 
@@ -46,6 +51,7 @@ impl DrawCommand {
         match self {
             DrawCommand::Quad(q) => q.color.a >= 1.0,
             DrawCommand::Text(t) => t.color.a >= 1.0,
+            DrawCommand::Image(i) => i.tint.a >= 1.0,
         }
     }
 
@@ -54,6 +60,7 @@ impl DrawCommand {
         match self {
             DrawCommand::Quad(q) => q.node_id = node_id,
             DrawCommand::Text(t) => t.node_id = node_id,
+            DrawCommand::Image(i) => i.node_id = node_id,
         }
     }
 }
@@ -164,6 +171,78 @@ impl TextCommand {
     }
 }
 
+/// Command to draw an image (textured quad).
+#[derive(Clone)]
+pub struct ImageCommand {
+    /// Node that owns this command
+    pub node_id: NodeId,
+    /// Position in screen space
+    pub position: Vec2,
+    /// Size of the image
+    pub size: Vec2,
+    /// The texture to draw
+    pub texture: ImageTexture,
+    /// UV coordinates for sprite regions
+    pub uv: ImageUV,
+    /// Tint color (multiplied with texture)
+    pub tint: Color,
+    /// Border radius for rounded corners
+    pub border_radius: f32,
+    /// Z-index for depth sorting
+    pub z_index: u16,
+}
+
+impl std::fmt::Debug for ImageCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageCommand")
+            .field("node_id", &self.node_id)
+            .field("position", &self.position)
+            .field("size", &self.size)
+            .field("uv", &self.uv)
+            .field("tint", &self.tint)
+            .field("border_radius", &self.border_radius)
+            .field("z_index", &self.z_index)
+            .finish()
+    }
+}
+
+impl ImageCommand {
+    /// Create a new image command.
+    pub fn new(
+        position: Vec2,
+        size: Vec2,
+        texture: ImageTexture,
+        uv: ImageUV,
+        tint: Color,
+        border_radius: f32,
+        z_index: u16,
+    ) -> Self {
+        Self {
+            node_id: NodeId(0), // Will be set by DrawList
+            position,
+            size,
+            texture,
+            uv,
+            tint,
+            border_radius,
+            z_index,
+        }
+    }
+
+    /// Create a simple image command with default UV (full texture).
+    pub fn simple(position: Vec2, size: Vec2, texture: ImageTexture, z_index: u16) -> Self {
+        Self::new(
+            position,
+            size,
+            texture,
+            ImageUV::default(),
+            Color::WHITE,
+            0.0,
+            z_index,
+        )
+    }
+}
+
 /// Retained draw list for efficient UI rendering.
 ///
 /// Maintains a list of draw commands and tracks which nodes contribute
@@ -263,6 +342,7 @@ impl DrawList {
                     match cmd {
                         DrawCommand::Quad(q) => q.color = color,
                         DrawCommand::Text(t) => t.color = color,
+                        DrawCommand::Image(i) => i.tint = color,
                     }
                     self.dirty_ranges.mark_dirty(idx, idx + 1);
                 }
@@ -392,6 +472,7 @@ impl DrawList {
     pub fn stats(&self) -> DrawListStats {
         let mut num_quads = 0;
         let mut num_text = 0;
+        let mut num_images = 0;
         let mut num_opaque = 0;
         let mut num_transparent = 0;
 
@@ -399,6 +480,7 @@ impl DrawList {
             match cmd {
                 DrawCommand::Quad(_) => num_quads += 1,
                 DrawCommand::Text(_) => num_text += 1,
+                DrawCommand::Image(_) => num_images += 1,
             }
             if cmd.is_opaque() {
                 num_opaque += 1;
@@ -411,6 +493,7 @@ impl DrawList {
             total_commands: self.commands.len(),
             num_quads,
             num_text,
+            num_images,
             num_opaque,
             num_transparent,
             num_nodes: self.node_to_commands.len(),
@@ -462,6 +545,7 @@ pub struct DrawListStats {
     pub total_commands: usize,
     pub num_quads: usize,
     pub num_text: usize,
+    pub num_images: usize,
     pub num_opaque: usize,
     pub num_transparent: usize,
     pub num_nodes: usize,

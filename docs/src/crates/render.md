@@ -8,6 +8,8 @@ The `astrelis-render` crate provides a modular, low-level rendering framework bu
 - **WindowContext**: Manages window surface and swapchain.
 - **Renderer**: Extensible trait and base implementation for resource management.
 - **Frame**: RAII-based frame lifecycle management.
+- **BlitRenderer**: CPU-to-GPU texture blitting for dynamic image updates.
+- **SpriteSheet**: Sprite sheet management with animation support.
 - **WGPU**: Re-exports `wgpu` types for convenience.
 
 ## Usage
@@ -47,3 +49,17 @@ let buffer = renderer.create_vertex_buffer(Some("Vertices"), &vertices);
 ### `color`
 
 - `Color`: RGBA color struct with conversion to/from WGPU types and hex strings.
+
+### `blit`
+
+- `BlitRenderer`: Renders CPU-side image buffers to GPU textures. Useful for:
+  - Procedural texture generation
+  - Video frame display
+  - Dynamic image manipulation
+  - Software rendering to texture
+
+### `sprite`
+
+- `SpriteSheet`: Manages sprite sheets with named sprites and UV coordinates.
+- `SpriteAnimation`: Handles frame-based sprite animations with timing control.
+- `AnimationState`: Tracks playback state (playing, paused, stopped).

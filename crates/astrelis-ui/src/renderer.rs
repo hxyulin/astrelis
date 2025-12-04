@@ -2,10 +2,11 @@
 
 use crate::draw_list::{DrawCommand, DrawList};
 use crate::glyph_atlas::glyphs_to_instances;
-use crate::gpu_types::{QuadInstance, QuadVertex, TextInstance};
+use crate::gpu_types::{ImageInstance, QuadInstance, QuadVertex, TextInstance};
 use crate::instance_buffer::InstanceBuffer;
 use crate::tree::{NodeId, UiTree};
-use crate::widgets::{Button, Container, Text};
+use crate::widgets::{Button, Container, Image, ImageTexture, Text};
+use astrelis_core::alloc::HashMap;
 use astrelis_core::math::Vec2;
 use astrelis_core::profiling::{profile_function, profile_scope};
 use astrelis_render::wgpu::util::DeviceExt;
@@ -27,13 +28,28 @@ struct ImmediateModeQuadVertex {
     border_thickness: f32,
 }
 
+/// Batched image rendering data for a specific texture.
+#[allow(dead_code)]
+struct ImageBatch {
+    /// The texture being rendered (kept for potential future use/debugging)
+    texture: ImageTexture,
+    /// Bind group for this texture
+    bind_group: wgpu::BindGroup,
+    /// Start index in the global instance buffer
+    start_index: u32,
+    /// Number of instances
+    count: u32,
+}
+
 /// UI renderer for rendering all widgets.
 pub struct UiRenderer {
     renderer: Renderer,
     font_renderer: FontRenderer,
+    context: &'static GraphicsContext,
 
     quad_instanced_pipeline: wgpu::RenderPipeline,
     text_instanced_pipeline: wgpu::RenderPipeline,
+    image_instanced_pipeline: wgpu::RenderPipeline,
 
     unit_quad_vbo: wgpu::Buffer,
 
@@ -41,11 +57,21 @@ pub struct UiRenderer {
     projection_buffer: wgpu::Buffer,
     text_atlas_bind_group: wgpu::BindGroup,
     text_projection_bind_group: wgpu::BindGroup,
+    
+    /// Bind group layout for image textures (reused for each texture)
+    image_texture_bind_group_layout: wgpu::BindGroupLayout,
+    /// Sampler for image textures
+    image_sampler: wgpu::Sampler,
+    /// Cache of bind groups for image textures (keyed by Arc pointer address)
+    image_bind_group_cache: HashMap<usize, wgpu::BindGroup>,
 
     text_pipeline: TextPipeline,
     draw_list: DrawList,
     quad_instances: InstanceBuffer<QuadInstance>,
     text_instances: InstanceBuffer<TextInstance>,
+    image_instances: InstanceBuffer<ImageInstance>,
+    /// Current frame's image batches (grouped by texture)
+    image_batches: Vec<ImageBatch>,
     scale_factor: f64,
 }
 
@@ -76,6 +102,10 @@ impl UiRenderer {
         let text_instanced_shader = renderer.create_shader(
             Some("Text Instanced Shader"),
             include_str!("../shaders/text_instanced.wgsl"),
+        );
+        let image_instanced_shader = renderer.create_shader(
+            Some("Image Instanced Shader"),
+            include_str!("../shaders/image_instanced.wgsl"),
         );
 
         // 3. Create projection uniform buffer
@@ -179,6 +209,43 @@ impl UiRenderer {
             }],
         );
 
+        // Image texture bind group layout (group 0 for image shader)
+        let image_texture_bind_group_layout = renderer.create_bind_group_layout(
+            Some("Image Texture Bind Group Layout"),
+            &[
+                // Image texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                // Image sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        );
+
+        // Create image sampler (linear filtering for smooth scaling)
+        let image_sampler = context.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Image Sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+
         // 6. Create instanced pipelines
         let quad_instanced_layout = renderer.create_pipeline_layout(
             Some("Quad Instanced Pipeline Layout"),
@@ -273,31 +340,94 @@ impl UiRenderer {
                 cache: None,
             });
 
+        // Image instanced pipeline
+        let image_instanced_layout = renderer.create_pipeline_layout(
+            Some("Image Instanced Pipeline Layout"),
+            &[
+                &image_texture_bind_group_layout,
+                &text_projection_bind_group_layout, // Reuse projection layout
+            ],
+            &[],
+        );
+
+        let image_instanced_pipeline =
+            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Image Instanced Pipeline"),
+                layout: Some(&image_instanced_layout),
+                vertex: wgpu::VertexState {
+                    module: &image_instanced_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[QuadVertex::vertex_layout(), ImageInstance::vertex_layout()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &image_instanced_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+
         // 7. Initialize retained components
         let text_pipeline = TextPipeline::new();
         let draw_list = DrawList::new();
         let quad_instances = InstanceBuffer::new(&context.device, Some("Quad Instances"), 1024);
         let text_instances = InstanceBuffer::new(&context.device, Some("Text Instances"), 4096);
+        let image_instances = InstanceBuffer::new(&context.device, Some("Image Instances"), 256);
 
         Self {
             renderer,
             font_renderer,
+            context,
             quad_instanced_pipeline,
             text_instanced_pipeline,
+            image_instanced_pipeline,
             unit_quad_vbo,
             projection_bind_group,
             projection_buffer,
             text_atlas_bind_group,
             text_projection_bind_group,
+            image_texture_bind_group_layout,
+            image_sampler,
+            image_bind_group_cache: HashMap::new(),
             text_pipeline,
             draw_list,
             quad_instances,
             text_instances,
+            image_instances,
+            image_batches: Vec::new(),
             scale_factor: 1.0,
         }
     }
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
+        // Clear caches if scale factor changed
+        // (shaped text positions and glyph cache keys are scale-dependent)
+        if (self.scale_factor - viewport.scale_factor).abs() > f64::EPSILON {
+            self.text_pipeline.clear_cache();
+            self.draw_list.clear(); // Force re-render of all nodes
+        }
         self.scale_factor = viewport.scale_factor;
         self.font_renderer.set_viewport(viewport);
     }
@@ -571,6 +701,19 @@ impl UiRenderer {
                     1,
                 )));
             }
+        } else if let Some(image) = widget.as_any().downcast_ref::<Image>() {
+            // Image widget - render textured quad
+            if let Some(texture) = &image.texture {
+                commands.push(DrawCommand::Image(crate::draw_list::ImageCommand::new(
+                    Vec2::new(abs_x, abs_y),
+                    Vec2::new(layout.width, layout.height),
+                    texture.clone(),
+                    image.uv,
+                    image.tint,
+                    image.border_radius,
+                    0,
+                )));
+            }
         }
 
         // Update commands for this node in the draw list
@@ -583,6 +726,10 @@ impl UiRenderer {
 
         let mut quad_instances = Vec::new();
         let mut text_instances = Vec::new();
+        
+        // Group image instances by texture
+        // Key: Arc pointer address, Value: (texture, instances)
+        let mut image_groups: HashMap<usize, (ImageTexture, Vec<ImageInstance>)> = HashMap::new();
 
         for cmd in self.draw_list.commands() {
             match cmd {
@@ -605,13 +752,82 @@ impl UiRenderer {
                     );
                     text_instances.extend(instances);
                 }
+                DrawCommand::Image(i) => {
+                    // Use Arc pointer address as key for grouping
+                    let texture_key = std::sync::Arc::as_ptr(&i.texture) as usize;
+                    
+                    let instance = ImageInstance {
+                        position: [i.position.x, i.position.y],
+                        size: [i.size.x, i.size.y],
+                        uv_min: [i.uv.u_min, i.uv.v_min],
+                        uv_max: [i.uv.u_max, i.uv.v_max],
+                        tint: [i.tint.r, i.tint.g, i.tint.b, i.tint.a],
+                        border_radius: i.border_radius,
+                        texture_index: 0, // Not used for now
+                        _padding: [0.0; 2],
+                    };
+                    
+                    image_groups
+                        .entry(texture_key)
+                        .or_insert_with(|| (i.texture.clone(), Vec::new()))
+                        .1
+                        .push(instance);
+                }
             }
+        }
+
+        // Build image batches with bind groups
+        self.image_batches.clear();
+        let mut all_image_instances = Vec::new();
+        
+        for (texture_key, (texture, instances)) in image_groups {
+            let start_index = all_image_instances.len() as u32;
+            let count = instances.len() as u32;
+            
+            // Get or create bind group for this texture
+            let bind_group = self.get_or_create_image_bind_group(texture_key, &texture);
+            
+            self.image_batches.push(ImageBatch {
+                texture,
+                bind_group,
+                start_index,
+                count,
+            });
+            
+            all_image_instances.extend(instances);
         }
 
         self.quad_instances
             .set_instances(&self.renderer.device(), quad_instances);
         self.text_instances
             .set_instances(&self.renderer.device(), text_instances);
+        self.image_instances
+            .set_instances(&self.renderer.device(), all_image_instances);
+    }
+    
+    /// Get or create a bind group for an image texture.
+    fn get_or_create_image_bind_group(&mut self, texture_key: usize, texture: &ImageTexture) -> wgpu::BindGroup {
+        if let Some(bind_group) = self.image_bind_group_cache.get(&texture_key) {
+            return bind_group.clone();
+        }
+        
+        let bind_group = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Image Texture Bind Group"),
+            layout: &self.image_texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(texture),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.image_sampler),
+                },
+            ],
+        });
+        
+        self.image_bind_group_cache.insert(texture_key, bind_group.clone());
+        bind_group
     }
 
     /// Upload dirty instance ranges to GPU.
@@ -620,6 +836,7 @@ impl UiRenderer {
 
         self.quad_instances.upload_dirty(self.renderer.queue());
         self.text_instances.upload_dirty(self.renderer.queue());
+        self.image_instances.upload_dirty(self.renderer.queue());
 
         self.font_renderer.upload_atlas_if_dirty();
     }
@@ -662,6 +879,19 @@ impl UiRenderer {
             render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
             render_pass.set_vertex_buffer(1, self.text_instances.buffer().slice(..));
             render_pass.draw(0..6, 0..self.text_instances.len() as u32);
+        }
+        
+        // Render images (batched by texture)
+        if !self.image_batches.is_empty() {
+            render_pass.set_pipeline(&self.image_instanced_pipeline);
+            render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]); // Reuse projection
+            render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
+            render_pass.set_vertex_buffer(1, self.image_instances.buffer().slice(..));
+            
+            for batch in &self.image_batches {
+                render_pass.set_bind_group(0, &batch.bind_group, &[]);
+                render_pass.draw(0..6, batch.start_index..(batch.start_index + batch.count));
+            }
         }
     }
 

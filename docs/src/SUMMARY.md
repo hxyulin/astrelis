@@ -19,6 +19,7 @@
 - [astrelis-ui](./crates/ui.md)
 - [astrelis-text](./crates/text.md)
 - [astrelis-winit](./crates/winit.md)
+- [astrelis-input](./crates/input.md)
 - [astrelis-ecs](./crates/ecs.md)
 - [astrelis-assets](./crates/assets.md)
 - [astrelis-audio](./crates/audio.md)

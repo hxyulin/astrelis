@@ -63,9 +63,11 @@ fn main() {
         );
 
         let window_id = renderable_window.id();
+        let viewport = renderable_window.viewport();
         windows.insert(window_id, renderable_window);
 
         let mut ui = UiSystem::new(graphics_ctx);
+        ui.set_viewport(viewport);
         
         // Build the complex UI
         build_complex_ui(&mut ui);

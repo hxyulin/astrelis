@@ -8,6 +8,7 @@ use astrelis_render::Color;
 use astrelis_text::{FontRenderer, FontWeight, Text as TextStyle, TextAlign};
 use std::any::Any;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// Base trait for all UI widgets.
 pub trait Widget: Any {
@@ -48,6 +49,227 @@ pub trait Widget: Any {
 impl Clone for Box<dyn Widget> {
     fn clone(&self) -> Self {
         self.clone_box()
+    }
+}
+
+/// Handle to a texture for use in Image widgets.
+///
+/// This is an Arc-wrapped texture view that can be shared across widgets.
+pub type ImageTexture = Arc<astrelis_render::wgpu::TextureView>;
+
+/// UV coordinates for sprite/image regions.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ImageUV {
+    pub u_min: f32,
+    pub v_min: f32,
+    pub u_max: f32,
+    pub v_max: f32,
+}
+
+impl Default for ImageUV {
+    fn default() -> Self {
+        Self {
+            u_min: 0.0,
+            v_min: 0.0,
+            u_max: 1.0,
+            v_max: 1.0,
+        }
+    }
+}
+
+impl ImageUV {
+    /// Create UV coordinates for a full texture.
+    pub fn full() -> Self {
+        Self::default()
+    }
+
+    /// Create UV coordinates from sprite sheet coordinates.
+    pub fn from_sprite(
+        sprite_x: u32,
+        sprite_y: u32,
+        sprite_width: u32,
+        sprite_height: u32,
+        texture_width: u32,
+        texture_height: u32,
+    ) -> Self {
+        Self {
+            u_min: sprite_x as f32 / texture_width as f32,
+            v_min: sprite_y as f32 / texture_height as f32,
+            u_max: (sprite_x + sprite_width) as f32 / texture_width as f32,
+            v_max: (sprite_y + sprite_height) as f32 / texture_height as f32,
+        }
+    }
+
+    /// Create UV coordinates from normalized values.
+    pub fn new(u_min: f32, v_min: f32, u_max: f32, v_max: f32) -> Self {
+        Self { u_min, v_min, u_max, v_max }
+    }
+
+    /// Flip horizontally.
+    pub fn flip_h(self) -> Self {
+        Self {
+            u_min: self.u_max,
+            u_max: self.u_min,
+            ..self
+        }
+    }
+
+    /// Flip vertically.
+    pub fn flip_v(self) -> Self {
+        Self {
+            v_min: self.v_max,
+            v_max: self.v_min,
+            ..self
+        }
+    }
+}
+
+/// Image fit mode - how to fit the image within the widget bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ImageFit {
+    /// Fill the entire bounds, may distort the image.
+    Fill,
+    /// Scale to fit within bounds, preserving aspect ratio (letterbox).
+    #[default]
+    Contain,
+    /// Scale to cover bounds, preserving aspect ratio (may crop).
+    Cover,
+    /// Don't scale the image, render at native size.
+    None,
+}
+
+/// Image widget - displays a texture or sprite.
+#[derive(Clone)]
+pub struct Image {
+    /// The texture to display
+    pub texture: Option<ImageTexture>,
+    /// UV coordinates (for sprites)
+    pub uv: ImageUV,
+    /// Tint color (multiplied with texture)
+    pub tint: Color,
+    /// How to fit the image within bounds
+    pub fit: ImageFit,
+    /// Natural width of the image (for sizing)
+    pub natural_width: f32,
+    /// Natural height of the image (for sizing)
+    pub natural_height: f32,
+    /// Border radius for rounded corners
+    pub border_radius: f32,
+    /// Style
+    pub style: Style,
+}
+
+impl Image {
+    /// Create a new image widget.
+    pub fn new() -> Self {
+        Self {
+            texture: None,
+            uv: ImageUV::default(),
+            tint: Color::WHITE,
+            fit: ImageFit::default(),
+            natural_width: 0.0,
+            natural_height: 0.0,
+            border_radius: 0.0,
+            style: Style::new(),
+        }
+    }
+
+    /// Create an image widget with a texture.
+    pub fn with_texture(texture: ImageTexture, width: f32, height: f32) -> Self {
+        Self {
+            texture: Some(texture),
+            uv: ImageUV::default(),
+            tint: Color::WHITE,
+            fit: ImageFit::default(),
+            natural_width: width,
+            natural_height: height,
+            border_radius: 0.0,
+            style: Style::new().width(width).height(height),
+        }
+    }
+
+    /// Set the texture.
+    pub fn texture(mut self, texture: ImageTexture) -> Self {
+        self.texture = Some(texture);
+        self
+    }
+
+    /// Set UV coordinates (for sprites).
+    pub fn uv(mut self, uv: ImageUV) -> Self {
+        self.uv = uv;
+        self
+    }
+
+    /// Set the tint color.
+    pub fn tint(mut self, color: Color) -> Self {
+        self.tint = color;
+        self
+    }
+
+    /// Set the image fit mode.
+    pub fn fit(mut self, fit: ImageFit) -> Self {
+        self.fit = fit;
+        self
+    }
+
+    /// Set the natural size (for sizing calculations).
+    pub fn natural_size(mut self, width: f32, height: f32) -> Self {
+        self.natural_width = width;
+        self.natural_height = height;
+        self
+    }
+
+    /// Set border radius for rounded corners.
+    pub fn border_radius(mut self, radius: f32) -> Self {
+        self.border_radius = radius;
+        self
+    }
+
+    /// Update the texture at runtime.
+    pub fn set_texture(&mut self, texture: ImageTexture) {
+        self.texture = Some(texture);
+    }
+
+    /// Update UV coordinates at runtime.
+    pub fn set_uv(&mut self, uv: ImageUV) {
+        self.uv = uv;
+    }
+
+    /// Update tint color at runtime.
+    pub fn set_tint(&mut self, color: Color) {
+        self.tint = color;
+    }
+}
+
+impl Default for Image {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Widget for Image {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn style(&self) -> &Style {
+        &self.style
+    }
+
+    fn style_mut(&mut self) -> &mut Style {
+        &mut self.style
+    }
+
+    fn measure(&self, _available_space: Vec2, _font_renderer: Option<&FontRenderer>) -> Vec2 {
+        Vec2::new(self.natural_width, self.natural_height)
+    }
+
+    fn clone_box(&self) -> Box<dyn Widget> {
+        Box::new(self.clone())
     }
 }
 

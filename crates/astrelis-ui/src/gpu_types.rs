@@ -194,6 +194,151 @@ impl TextInstance {
     }
 }
 
+/// Instance data for image rendering.
+///
+/// Each instance represents one image quad to be drawn from a texture.
+/// Supports UV coordinates for sprite sheets and tinting.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub struct ImageInstance {
+    /// Position in screen space (top-left corner)
+    pub position: [f32; 2],
+    /// Size of the image quad in screen space
+    pub size: [f32; 2],
+    /// UV coordinates (top-left)
+    pub uv_min: [f32; 2],
+    /// UV coordinates (bottom-right)
+    pub uv_max: [f32; 2],
+    /// Tint color (RGBA) - multiplied with texture color
+    pub tint: [f32; 4],
+    /// Border radius for rounded corners (0 = sharp corners)
+    pub border_radius: f32,
+    /// Texture index (for texture arrays, 0 for single texture)
+    pub texture_index: u32,
+    /// Padding to align to 16-byte boundary
+    pub _padding: [f32; 2],
+}
+
+impl ImageInstance {
+    /// Create a new image instance covering the full texture.
+    pub fn new(position: Vec2, size: Vec2) -> Self {
+        Self {
+            position: position.into(),
+            size: size.into(),
+            uv_min: [0.0, 0.0],
+            uv_max: [1.0, 1.0],
+            tint: [1.0, 1.0, 1.0, 1.0],
+            border_radius: 0.0,
+            texture_index: 0,
+            _padding: [0.0; 2],
+        }
+    }
+
+    /// Create an image instance with specific UV coordinates (for sprites).
+    pub fn with_uv(
+        position: Vec2,
+        size: Vec2,
+        uv_min: [f32; 2],
+        uv_max: [f32; 2],
+    ) -> Self {
+        Self {
+            position: position.into(),
+            size: size.into(),
+            uv_min,
+            uv_max,
+            tint: [1.0, 1.0, 1.0, 1.0],
+            border_radius: 0.0,
+            texture_index: 0,
+            _padding: [0.0; 2],
+        }
+    }
+
+    /// Create an image instance with a tint color.
+    pub fn with_tint(position: Vec2, size: Vec2, tint: Color) -> Self {
+        Self {
+            position: position.into(),
+            size: size.into(),
+            uv_min: [0.0, 0.0],
+            uv_max: [1.0, 1.0],
+            tint: tint.into(),
+            border_radius: 0.0,
+            texture_index: 0,
+            _padding: [0.0; 2],
+        }
+    }
+
+    /// Set the tint color.
+    pub fn tint(mut self, color: Color) -> Self {
+        self.tint = color.into();
+        self
+    }
+
+    /// Set the border radius for rounded corners.
+    pub fn border_radius(mut self, radius: f32) -> Self {
+        self.border_radius = radius;
+        self
+    }
+
+    /// Set the texture index (for texture arrays).
+    pub fn texture_index(mut self, index: u32) -> Self {
+        self.texture_index = index;
+        self
+    }
+
+    /// Get the WGPU vertex buffer layout for image instances.
+    pub fn vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+        use wgpu::*;
+        VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as u64,
+            step_mode: VertexStepMode::Instance,
+            attributes: &[
+                // position
+                VertexAttribute {
+                    offset: 0,
+                    shader_location: 2,
+                    format: VertexFormat::Float32x2,
+                },
+                // size
+                VertexAttribute {
+                    offset: 8,
+                    shader_location: 3,
+                    format: VertexFormat::Float32x2,
+                },
+                // uv_min
+                VertexAttribute {
+                    offset: 16,
+                    shader_location: 4,
+                    format: VertexFormat::Float32x2,
+                },
+                // uv_max
+                VertexAttribute {
+                    offset: 24,
+                    shader_location: 5,
+                    format: VertexFormat::Float32x2,
+                },
+                // tint
+                VertexAttribute {
+                    offset: 32,
+                    shader_location: 6,
+                    format: VertexFormat::Float32x4,
+                },
+                // border_radius
+                VertexAttribute {
+                    offset: 48,
+                    shader_location: 7,
+                    format: VertexFormat::Float32,
+                },
+                // texture_index
+                VertexAttribute {
+                    offset: 52,
+                    shader_location: 8,
+                    format: VertexFormat::Uint32,
+                },
+            ],
+        }
+    }
+}
+
 /// Vertex data for a unit quad (0,0 to 1,1).
 ///
 /// Used as the base geometry for all quad instances.
