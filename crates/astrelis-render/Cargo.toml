@@ -15,3 +15,4 @@ astrelis-winit.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 bytemuck.workspace = true
+bitflags.workspace = true

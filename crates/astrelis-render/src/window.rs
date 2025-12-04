@@ -1,6 +1,8 @@
-use astrelis_core::{geometry::{Size}, profiling::profile_function};
+use astrelis_core::{geometry::Size, profiling::profile_function};
 use astrelis_winit::{
-    WindowId, event::PhysicalSize, window::{Window, WindowBackend}
+    WindowId,
+    event::PhysicalSize,
+    window::{Window, WindowBackend},
 };
 
 use crate::{
@@ -206,6 +208,7 @@ impl WindowBackend for WindowContext {
             context: self.context,
             stats: FrameStats::new(),
             window: self.window.window.clone(),
+            surface_format: self.config.format,
         }
     }
 }

@@ -10,3 +10,14 @@ repository.workspace = true
 
 [dependencies]
 astrelis-core.workspace = true
+futures-lite = "2.3"
+
+[dev-dependencies]
+tempfile = "3.14"
+serde_json = "1.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Window", "Request", "RequestInit", "Response"] }
+js-sys = "0.3"

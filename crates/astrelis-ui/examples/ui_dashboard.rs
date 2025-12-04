@@ -10,7 +10,10 @@
 
 use astrelis_core::logging;
 use astrelis_core::profiling::{init_profiling, ProfilingBackend, new_frame};
-use astrelis_render::{GraphicsContext, RenderPassBuilder, RenderableWindow, WindowContextDescriptor, wgpu};
+use astrelis_render::{
+    GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow, WindowContextDescriptor,
+    wgpu,
+};
 use astrelis_ui::{
     Color, FlexDirection, FlexWrap, JustifyContent, UiSystem, WidgetId, AlignItems,
 };
@@ -213,14 +216,8 @@ impl astrelis_winit::app::App for App {
         {
             let mut render_pass = RenderPassBuilder::new()
                 .label("UI Render Pass")
-                .color_attachment(
-                    None,
-                    None,
-                    wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                )
+                .target(RenderTarget::Surface)
+                .clear_color(wgpu::Color::BLACK)
                 .build(&mut frame);
 
             self.ui.render(render_pass.descriptor());

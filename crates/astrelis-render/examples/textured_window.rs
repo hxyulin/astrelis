@@ -1,6 +1,6 @@
 use astrelis_core::logging;
 use astrelis_render::{
-    GraphicsContext, RenderPassBuilder, RenderableWindow, WindowContextDescriptor,
+    GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow, WindowContextDescriptor,
 };
 use astrelis_winit::{
     WindowId,
@@ -9,7 +9,6 @@ use astrelis_winit::{
 };
 
 struct App {
-    context: &'static GraphicsContext,
     window: RenderableWindow,
     window_id: WindowId,
     pipeline: wgpu::RenderPipeline,
@@ -225,7 +224,6 @@ fn main() {
         let window_id = window.id();
 
         Box::new(App {
-            context: graphics_ctx,
             window,
             window_id,
             pipeline,
@@ -262,22 +260,17 @@ impl astrelis_winit::app::App for App {
 
         let mut frame = self.window.begin_drawing();
 
+        // Using new simplified RenderPassBuilder API with RenderTarget
         {
             let mut render_pass = RenderPassBuilder::new()
                 .label("Render Pass")
-                .color_attachment(
-                    None,
-                    None,
-                    wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                )
+                .target(RenderTarget::Surface)
+                .clear_color(wgpu::Color {
+                    r: 0.1,
+                    g: 0.2,
+                    b: 0.3,
+                    a: 1.0,
+                })
                 .build(&mut frame);
 
             let pass = render_pass.descriptor();

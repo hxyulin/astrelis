@@ -1,6 +1,7 @@
 use astrelis_core::logging;
 use astrelis_render::{
-    GraphicsContext, RenderPassBuilder, RenderableWindow, Renderer, WindowContextDescriptor, wgpu,
+    BlendMode, Framebuffer, GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow,
+    Renderer, WindowContextDescriptor, wgpu,
 };
 use astrelis_winit::{
     WindowId,
@@ -17,6 +18,10 @@ struct RendererApp {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     vertex_buffer: wgpu::Buffer,
+    // Offscreen framebuffer for demonstrating framebuffer rendering
+    offscreen_fb: Framebuffer,
+    blit_pipeline: wgpu::RenderPipeline,
+    blit_bind_group: wgpu::BindGroup,
     time: f32,
 }
 
@@ -107,7 +112,7 @@ fn main() {
             &[],
         );
 
-        // Create pipeline using Renderer API
+        // Create pipeline using Renderer API with BlendMode
         let pipeline = renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&pipeline_layout),
@@ -124,11 +129,10 @@ fn main() {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                // Use BlendMode for transparent rendering
+                targets: &[Some(
+                    BlendMode::Alpha.to_color_target_state(wgpu::TextureFormat::Rgba8UnormSrgb),
+                )],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
@@ -163,6 +167,87 @@ fn main() {
         // Create vertex buffer using Renderer helper
         let vertex_buffer = renderer.create_vertex_buffer(Some("Vertex Buffer"), vertices);
 
+        // Create offscreen framebuffer using the new Framebuffer abstraction
+        let offscreen_fb = Framebuffer::builder(400, 300)
+            .format(wgpu::TextureFormat::Rgba8UnormSrgb)
+            .label("Offscreen FB")
+            .build(graphics_ctx);
+
+        // Create blit shader and pipeline for rendering framebuffer to surface
+        let blit_shader = renderer.create_shader(Some("Blit Shader"), BLIT_SHADER_SOURCE);
+
+        let blit_bind_group_layout = renderer.create_bind_group_layout(
+            Some("Blit Bind Group Layout"),
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        );
+
+        let blit_bind_group = renderer.create_bind_group(
+            Some("Blit Bind Group"),
+            &blit_bind_group_layout,
+            &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(offscreen_fb.color_view()),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        );
+
+        let blit_pipeline_layout = renderer.create_pipeline_layout(
+            Some("Blit Pipeline Layout"),
+            &[&blit_bind_group_layout],
+            &[],
+        );
+
+        let blit_pipeline = renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Blit Pipeline"),
+            layout: Some(&blit_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &blit_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &blit_shader,
+                entry_point: Some("fs_main"),
+                // Use PremultipliedAlpha for framebuffer blitting
+                targets: &[Some(
+                    BlendMode::PremultipliedAlpha
+                        .to_color_target_state(wgpu::TextureFormat::Bgra8UnormSrgb),
+                )],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            cache: None,
+        });
+
         tracing::info!("Renderer initialized successfully");
         tracing::info!("Device: {:?}", renderer.context().info());
 
@@ -174,6 +259,9 @@ fn main() {
             pipeline,
             bind_group,
             vertex_buffer,
+            offscreen_fb,
+            blit_pipeline,
+            blit_bind_group,
             time: 0.0,
         })
     });
@@ -202,22 +290,17 @@ impl App for RendererApp {
 
         let mut frame = self.window.begin_drawing();
 
+        // Pass 1: Render to offscreen framebuffer using new simplified API
         {
             let mut render_pass = RenderPassBuilder::new()
-                .label("Render Pass")
-                .color_attachment(
-                    None,
-                    None,
-                    wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                )
+                .label("Offscreen Pass")
+                .target(RenderTarget::Framebuffer(&self.offscreen_fb))
+                .clear_color(wgpu::Color {
+                    r: 0.2,
+                    g: 0.1,
+                    b: 0.3,
+                    a: 1.0,
+                })
                 .build(&mut frame);
 
             let pass = render_pass.descriptor();
@@ -225,6 +308,26 @@ impl App for RendererApp {
             pass.set_bind_group(0, &self.bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             pass.draw(0..6, 0..1);
+        }
+
+        // Pass 2: Blit framebuffer to surface using new simplified API
+        {
+            let mut render_pass = RenderPassBuilder::new()
+                .label("Surface Pass")
+                .target(RenderTarget::Surface)
+                .clear_color(wgpu::Color {
+                    r: 0.1,
+                    g: 0.2,
+                    b: 0.3,
+                    a: 1.0,
+                })
+                .build(&mut frame);
+
+            let pass = render_pass.descriptor();
+            pass.set_pipeline(&self.blit_pipeline);
+            pass.set_bind_group(0, &self.blit_bind_group, &[]);
+            // Draw fullscreen triangle
+            pass.draw(0..3, 0..1);
         }
 
         frame.finish();
@@ -272,5 +375,42 @@ var s_diffuse: sampler;
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     return textureSample(t_diffuse, s_diffuse, in.tex_coords);
+}
+"#;
+
+const BLIT_SHADER_SOURCE: &str = r#"
+struct VertexOutput {
+    @builtin(position) clip_position: vec4<f32>,
+    @location(0) tex_coords: vec2<f32>,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+    // Fullscreen triangle
+    var positions = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0)
+    );
+    var tex_coords = array<vec2<f32>, 3>(
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(2.0, 1.0),
+        vec2<f32>(0.0, -1.0)
+    );
+
+    var out: VertexOutput;
+    out.clip_position = vec4<f32>(positions[vertex_index], 0.0, 1.0);
+    out.tex_coords = tex_coords[vertex_index];
+    return out;
+}
+
+@group(0) @binding(0)
+var t_source: texture_2d<f32>;
+@group(0) @binding(1)
+var s_source: sampler;
+
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSample(t_source, s_source, in.tex_coords);
 }
 "#;

@@ -1,9 +1,13 @@
+use crate::features::GpuFeatures;
+
 /// A globally shared graphics context.
 pub struct GraphicsContext {
     pub instance: wgpu::Instance,
     pub adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    /// The GPU features that were enabled on this context.
+    enabled_features: GpuFeatures,
 }
 
 impl GraphicsContext {
@@ -22,6 +26,10 @@ impl GraphicsContext {
     }
 
     /// Creates a new graphics context with custom descriptor.
+    ///
+    /// # Panics
+    ///
+    /// Panics if any required features are not supported by the adapter.
     pub async fn new_with_descriptor(descriptor: GraphicsContextDescriptor) -> &'static Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: descriptor.backends,
@@ -37,9 +45,40 @@ impl GraphicsContext {
             .await
             .expect("Failed to find a suitable GPU adapter");
 
+        // Check required features
+        let required_result = descriptor.required_gpu_features.check_support(&adapter);
+        if let Some(missing) = required_result.missing() {
+            panic!(
+                "Required GPU features are not supported by the adapter: {:?}\n\
+                 Adapter: {:?}\n\
+                 Supported features: {:?}",
+                missing,
+                adapter.get_info().name,
+                GpuFeatures::from_wgpu(adapter.features())
+            );
+        }
+
+        // Determine which requested features are available
+        let available_requested = descriptor.requested_gpu_features
+            & GpuFeatures::from_wgpu(adapter.features());
+
+        // Log which requested features were not available
+        let unavailable_requested =
+            descriptor.requested_gpu_features - available_requested;
+        if !unavailable_requested.is_empty() {
+            tracing::warn!(
+                "Some requested GPU features are not available: {:?}",
+                unavailable_requested
+            );
+        }
+
+        // Combine all features to enable
+        let enabled_features = descriptor.required_gpu_features | available_requested;
+        let wgpu_features = enabled_features.to_wgpu() | descriptor.additional_wgpu_features;
+
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
-                required_features: descriptor.features,
+                required_features: wgpu_features,
                 required_limits: descriptor.limits.clone(),
                 label: descriptor.label,
                 ..Default::default()
@@ -47,11 +86,17 @@ impl GraphicsContext {
             .await
             .expect("Failed to create device");
 
+        tracing::info!(
+            "Created graphics context with features: {:?}",
+            enabled_features
+        );
+
         Box::leak(Box::new(Self {
             instance,
             adapter,
             device,
             queue,
+            enabled_features,
         }))
     }
 
@@ -65,9 +110,38 @@ impl GraphicsContext {
         self.device.limits()
     }
 
-    /// Get device features
-    pub fn features(&self) -> wgpu::Features {
+    /// Get raw wgpu device features
+    pub fn wgpu_features(&self) -> wgpu::Features {
         self.device.features()
+    }
+
+    /// Get the enabled GPU features (high-level wrapper).
+    pub fn gpu_features(&self) -> GpuFeatures {
+        self.enabled_features
+    }
+
+    /// Check if a specific GPU feature is enabled.
+    pub fn has_feature(&self, feature: GpuFeatures) -> bool {
+        self.enabled_features.contains(feature)
+    }
+
+    /// Check if all specified GPU features are enabled.
+    pub fn has_all_features(&self, features: GpuFeatures) -> bool {
+        self.enabled_features.contains(features)
+    }
+
+    /// Assert that a feature is available, panicking with a clear message if not.
+    ///
+    /// Use this before operations that require specific features.
+    pub fn require_feature(&self, feature: GpuFeatures) {
+        if !self.has_feature(feature) {
+            panic!(
+                "GPU feature {:?} is required but not enabled.\n\
+                 Enabled features: {:?}\n\
+                 To use this feature, add it to `required_gpu_features` in GraphicsContextDescriptor.",
+                feature, self.enabled_features
+            );
+        }
     }
 }
 
@@ -79,8 +153,16 @@ pub struct GraphicsContextDescriptor {
     pub power_preference: wgpu::PowerPreference,
     /// Whether to force fallback adapter
     pub force_fallback_adapter: bool,
-    /// Required device features
-    pub features: wgpu::Features,
+    /// Required GPU features (panics if not available).
+    ///
+    /// Use this for features that your application cannot function without.
+    pub required_gpu_features: GpuFeatures,
+    /// Requested GPU features (best-effort, logs warning if unavailable).
+    ///
+    /// Use this for features that would be nice to have but are not essential.
+    pub requested_gpu_features: GpuFeatures,
+    /// Additional raw wgpu features to enable (for features not covered by GpuFeatures).
+    pub additional_wgpu_features: wgpu::Features,
     /// Required device limits
     pub limits: wgpu::Limits,
     /// Optional label for debugging
@@ -93,9 +175,72 @@ impl Default for GraphicsContextDescriptor {
             backends: wgpu::Backends::all(),
             power_preference: wgpu::PowerPreference::HighPerformance,
             force_fallback_adapter: false,
-            features: wgpu::Features::empty(),
+            required_gpu_features: GpuFeatures::empty(),
+            requested_gpu_features: GpuFeatures::empty(),
+            additional_wgpu_features: wgpu::Features::empty(),
             limits: wgpu::Limits::default(),
             label: None,
         }
+    }
+}
+
+impl GraphicsContextDescriptor {
+    /// Create a new descriptor with default settings.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set required GPU features (panics if not available).
+    pub fn require_features(mut self, features: GpuFeatures) -> Self {
+        self.required_gpu_features = features;
+        self
+    }
+
+    /// Set requested GPU features (best-effort, warns if unavailable).
+    pub fn request_features(mut self, features: GpuFeatures) -> Self {
+        self.requested_gpu_features = features;
+        self
+    }
+
+    /// Add additional required features.
+    pub fn with_required_features(mut self, features: GpuFeatures) -> Self {
+        self.required_gpu_features |= features;
+        self
+    }
+
+    /// Add additional requested features.
+    pub fn with_requested_features(mut self, features: GpuFeatures) -> Self {
+        self.requested_gpu_features |= features;
+        self
+    }
+
+    /// Set additional raw wgpu features (for features not covered by GpuFeatures).
+    pub fn with_wgpu_features(mut self, features: wgpu::Features) -> Self {
+        self.additional_wgpu_features = features;
+        self
+    }
+
+    /// Set the power preference.
+    pub fn power_preference(mut self, preference: wgpu::PowerPreference) -> Self {
+        self.power_preference = preference;
+        self
+    }
+
+    /// Set the backends to use.
+    pub fn backends(mut self, backends: wgpu::Backends) -> Self {
+        self.backends = backends;
+        self
+    }
+
+    /// Set the device limits.
+    pub fn limits(mut self, limits: wgpu::Limits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    /// Set the debug label.
+    pub fn label(mut self, label: &'static str) -> Self {
+        self.label = Some(label);
+        self
     }
 }

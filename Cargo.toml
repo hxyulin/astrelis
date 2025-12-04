@@ -44,6 +44,7 @@ astrelis-assets = { path = "crates/astrelis-assets", version = "0.0.1" }
 astrelis-audio = { path = "crates/astrelis-audio", version = "0.0.1" }
 astrelis-core = { path = "crates/astrelis-core", version = "0.0.1" }
 astrelis-ecs = { path = "crates/astrelis-ecs", version = "0.0.1" }
+astrelis-egui = { path = "crates/astrelis-egui", version = "0.0.1" }
 astrelis-input = { path = "crates/astrelis-input", version = "0.0.1" }
 astrelis-render = { path = "crates/astrelis-render", version = "0.0.1" }
 astrelis-scene = { path = "crates/astrelis-scene", version = "0.0.1" }
@@ -77,6 +78,9 @@ static_assertions = "1.1"
 
 # Bitflags
 bitflags = "2.4"
+
+# Testing
+tempfile = "3.10"
 
 # Benchmarking
 criterion = { version = "0.5", features = ["html_reports"] }

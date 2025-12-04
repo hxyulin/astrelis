@@ -8,4 +8,34 @@ license.workspace = true
 publish.workspace = true
 repository.workspace = true
 
+[features]
+default = ["winit", "assets", "render", "text", "input"]
+winit = ["dep:astrelis-winit"]
+assets = ["dep:astrelis-assets"]
+render = ["dep:astrelis-render"]
+text = ["dep:astrelis-text", "assets"]
+input = ["dep:astrelis-input"]
+ui = ["dep:astrelis-ui"]
+egui = ["dep:astrelis-egui"]
+audio = ["dep:astrelis-audio"]
+
 [dependencies]
+# Core (always included)
+astrelis-core.workspace = true
+
+# Optional sub-crates
+astrelis-winit = { workspace = true, optional = true }
+astrelis-assets = { workspace = true, optional = true }
+astrelis-render = { workspace = true, optional = true }
+astrelis-text = { workspace = true, optional = true }
+astrelis-input = { workspace = true, optional = true }
+astrelis-ui = { workspace = true, optional = true }
+astrelis-egui = { workspace = true, optional = true }
+astrelis-audio = { workspace = true, optional = true }
+
+# Utilities
+tracing.workspace = true
+ahash.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

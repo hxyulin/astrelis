@@ -11,7 +11,8 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderPassBuilder, RenderableWindow, WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow,
+    WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::UiSystem;
 use astrelis_winit::{
@@ -289,14 +290,8 @@ impl App for CounterApp {
         {
             let mut render_pass = RenderPassBuilder::new()
                 .label("UI Render Pass")
-                .color_attachment(
-                    None,
-                    None,
-                    wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(Color::from_rgb_u8(20, 20, 30).to_wgpu()),
-                        store: wgpu::StoreOp::Store,
-                    },
-                )
+                .target(RenderTarget::Surface)
+                .clear_color(Color::from_rgb_u8(20, 20, 30))
                 .build(&mut frame);
 
             // Render UI

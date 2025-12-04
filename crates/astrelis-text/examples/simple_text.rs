@@ -1,7 +1,8 @@
 use astrelis_core::logging;
 use astrelis_core::math::Vec2;
 use astrelis_render::{
-    Color, GraphicsContext, RenderPassBuilder, RenderableWindow, WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow,
+    WindowContextDescriptor, wgpu,
 };
 use astrelis_text::{FontRenderer, FontSystem, Text};
 use astrelis_winit::{
@@ -111,14 +112,8 @@ impl App for SimpleTextApp {
             // Clear screen with dark background
             let mut render_pass = RenderPassBuilder::new()
                 .label("Clear Pass")
-                .color_attachment(
-                    None,
-                    None,
-                    wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(Color::from_rgb_u8(25, 25, 35).to_wgpu()),
-                        store: wgpu::StoreOp::Store,
-                    },
-                )
+                .target(RenderTarget::Surface)
+                .clear_color(Color::from_rgb_u8(25, 25, 35))
                 .build(&mut frame);
 
             // Render all text

@@ -10,7 +10,7 @@
 
 use astrelis_core::logging;
 use astrelis_render::{
-    GraphicsContext, RenderPassBuilder, RenderableWindow, WindowContextDescriptor,
+    GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow, WindowContextDescriptor,
 };
 use astrelis_winit::{
     WindowId,
@@ -117,14 +117,8 @@ impl astrelis_winit::app::App for App {
         {
             let _render_pass = RenderPassBuilder::new()
                 .label("Multi-Window Render Pass")
-                .color_attachment(
-                    None,
-                    None,
-                    wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(*color),
-                        store: wgpu::StoreOp::Store,
-                    },
-                )
+                .target(RenderTarget::Surface)
+                .clear_color(*color)
                 .build(&mut frame);
         }
 

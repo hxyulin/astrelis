@@ -38,6 +38,7 @@
 //! - **Builder Pattern**: Fluent API for text configuration
 //! - **GPU Accelerated**: WGPU-based rendering with texture atlas
 //! - **Text Layout**: Multi-line text with automatic wrapping
+//! - **Asset Integration**: Load fonts through the asset system (with `asset` feature)
 //!
 //! ## Examples
 //!
@@ -48,22 +49,32 @@
 //! cargo run --package astrelis-text --example text_demo
 //! ```
 
+pub mod cache;
 pub mod font;
+pub mod pipeline;
 pub mod renderer;
 pub mod shaping;
 pub mod text;
-pub mod cache;
-pub mod pipeline;
+
+#[cfg(feature = "asset")]
+pub mod asset;
 
 // Re-export main types
+pub use cache::{ShapeKey, ShapedTextData, TextShapeCache};
 pub use font::{FontAttributes, FontDatabase, FontStretch, FontStyle, FontSystem, FontWeight};
+pub use pipeline::{
+    RequestId, ShapedTextResult as PipelineShapedTextResult, SyncTextShaper, TextPipeline,
+    TextShapeRequest, TextShaper,
+};
 pub use renderer::{AtlasEntry, FontRenderer, GlyphPlacement, TextBuffer};
 pub use shaping::{
-    ShapedGlyph, ShapedTextResult, extract_glyphs_from_buffer, measure_text_fast, shape_text,
+    extract_glyphs_from_buffer, measure_text_fast, shape_text, ShapedGlyph, ShapedTextResult,
 };
 pub use text::{Text, TextAlign, TextWrap};
-pub use cache::{ShapeKey, ShapedTextData, TextShapeCache};
-pub use pipeline::{RequestId, ShapedTextResult as PipelineShapedTextResult, TextPipeline, TextShapeRequest, TextShaper, SyncTextShaper};
+
+// Re-export asset types when feature is enabled
+#[cfg(feature = "asset")]
+pub use asset::{FontAsset, FontFormat, FontLoader};
 
 // Re-export cosmic-text types needed for retained rendering
 pub use cosmic_text::CacheKey;

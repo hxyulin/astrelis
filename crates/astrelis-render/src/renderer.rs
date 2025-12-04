@@ -110,6 +110,90 @@ impl Renderer {
         );
     }
 
+    /// Create an empty storage buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `label` - Optional debug label
+    /// * `size` - Size in bytes
+    /// * `read_only` - If true, creates a read-only storage buffer (STORAGE),
+    ///                 otherwise creates a read-write storage buffer (STORAGE | COPY_DST)
+    pub fn create_storage_buffer(
+        &self,
+        label: Option<&str>,
+        size: u64,
+        read_only: bool,
+    ) -> wgpu::Buffer {
+        let usage = if read_only {
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST
+        } else {
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC
+        };
+
+        self.context.device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size,
+            usage,
+            mapped_at_creation: false,
+        })
+    }
+
+    /// Create a storage buffer initialized with data.
+    ///
+    /// # Arguments
+    ///
+    /// * `label` - Optional debug label
+    /// * `data` - Initial data to write to the buffer
+    /// * `read_only` - If true, creates a read-only storage buffer,
+    ///                 otherwise creates a read-write storage buffer
+    pub fn create_storage_buffer_init<T: bytemuck::Pod>(
+        &self,
+        label: Option<&str>,
+        data: &[T],
+        read_only: bool,
+    ) -> wgpu::Buffer {
+        let usage = if read_only {
+            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST
+        } else {
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC
+        };
+
+        let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: std::mem::size_of_val(data) as u64,
+            usage,
+            mapped_at_creation: false,
+        });
+
+        self.context
+            .queue
+            .write_buffer(&buffer, 0, bytemuck::cast_slice(data));
+
+        buffer
+    }
+
+    /// Update a storage buffer with new data at the specified offset.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer` - The buffer to update
+    /// * `offset` - Byte offset into the buffer
+    /// * `data` - Data to write
+    pub fn update_storage_buffer<T: bytemuck::Pod>(
+        &self,
+        buffer: &wgpu::Buffer,
+        offset: u64,
+        data: &[T],
+    ) {
+        self.context
+            .queue
+            .write_buffer(buffer, offset, bytemuck::cast_slice(data));
+    }
+
     /// Create a texture with descriptor.
     pub fn create_texture(&self, descriptor: &wgpu::TextureDescriptor) -> wgpu::Texture {
         self.context.device.create_texture(descriptor)
@@ -396,6 +480,85 @@ impl<'a> RenderPipelineBuilder<'a> {
                 depth_stencil: self.depth_stencil,
                 multisample: self.multisample,
                 multiview: None,
+                cache: None,
+            })
+    }
+}
+
+/// Builder for creating a compute pipeline with common defaults.
+///
+/// # Example
+///
+/// ```ignore
+/// let pipeline = ComputePipelineBuilder::new(&renderer)
+///     .label("My Compute Pipeline")
+///     .shader(&shader)
+///     .entry("main")
+///     .layout(&layout)
+///     .build();
+/// ```
+pub struct ComputePipelineBuilder<'a> {
+    renderer: &'a Renderer,
+    label: Option<&'a str>,
+    shader: Option<&'a wgpu::ShaderModule>,
+    entry: &'a str,
+    layout: Option<&'a wgpu::PipelineLayout>,
+}
+
+impl<'a> ComputePipelineBuilder<'a> {
+    /// Create a new compute pipeline builder.
+    pub fn new(renderer: &'a Renderer) -> Self {
+        Self {
+            renderer,
+            label: None,
+            shader: None,
+            entry: "main",
+            layout: None,
+        }
+    }
+
+    /// Set a debug label for the pipeline.
+    pub fn label(mut self, label: &'a str) -> Self {
+        self.label = Some(label);
+        self
+    }
+
+    /// Set the shader module.
+    pub fn shader(mut self, shader: &'a wgpu::ShaderModule) -> Self {
+        self.shader = Some(shader);
+        self
+    }
+
+    /// Set the entry point function name.
+    ///
+    /// Defaults to "main".
+    pub fn entry(mut self, entry: &'a str) -> Self {
+        self.entry = entry;
+        self
+    }
+
+    /// Set the pipeline layout.
+    pub fn layout(mut self, layout: &'a wgpu::PipelineLayout) -> Self {
+        self.layout = Some(layout);
+        self
+    }
+
+    /// Build the compute pipeline.
+    ///
+    /// # Panics
+    ///
+    /// Panics if shader or layout is not set.
+    pub fn build(self) -> wgpu::ComputePipeline {
+        let shader = self.shader.expect("Shader module is required");
+        let layout = self.layout.expect("Pipeline layout is required");
+
+        self.renderer
+            .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: self.label,
+                layout: Some(layout),
+                module: shader,
+                entry_point: Some(self.entry),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
                 cache: None,
             })
     }
