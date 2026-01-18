@@ -3,7 +3,7 @@ use cosmic_text::Color as CosmicColor;
 use crate::font::{FontAttributes, FontStretch, FontStyle, FontWeight};
 use astrelis_render::Color;
 
-/// Text alignment.
+/// Text alignment (horizontal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextAlign {
     Left,
@@ -20,6 +20,27 @@ impl TextAlign {
             TextAlign::Right => cosmic_text::Align::Right,
             TextAlign::Justified => cosmic_text::Align::Justified,
         }
+    }
+}
+
+/// Vertical alignment for text within a container.
+///
+/// Controls how text is positioned vertically within its allocated space.
+/// Position coordinates always represent the top-left corner of the text's bounding box,
+/// and vertical alignment adjusts the text within that space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VerticalAlign {
+    /// Align text to the top of the container (default).
+    Top,
+    /// Center text vertically within the container.
+    Center,
+    /// Align text to the bottom of the container.
+    Bottom,
+}
+
+impl Default for VerticalAlign {
+    fn default() -> Self {
+        VerticalAlign::Top
     }
 }
 
@@ -51,7 +72,27 @@ pub(crate) fn color_to_cosmic(color: Color) -> CosmicColor {
     )
 }
 
+/// Font metrics for text layout and positioning.
+///
+/// These metrics describe the vertical characteristics of a font at a given size,
+/// useful for precise text layout and baseline alignment.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextMetrics {
+    /// The ascent: distance from baseline to the top of the tallest glyph.
+    pub ascent: f32,
+    /// The descent: distance from baseline to the bottom of the lowest glyph (positive value).
+    pub descent: f32,
+    /// The line height: total vertical space for a line of text.
+    pub line_height: f32,
+    /// The baseline offset from the top of the bounding box.
+    /// This is typically equal to ascent for top-left positioned text.
+    pub baseline_offset: f32,
+}
+
 /// Text builder for creating styled text.
+///
+/// Text positioning uses a top-left coordinate system where (0, 0) is the top-left corner
+/// and Y increases downward, consistent with UI layout systems like CSS and Flutter.
 pub struct Text {
     content: String,
     font_size: f32,
@@ -59,6 +100,7 @@ pub struct Text {
     font_attrs: FontAttributes,
     color: Color,
     align: TextAlign,
+    vertical_align: VerticalAlign,
     wrap: TextWrap,
     max_width: Option<f32>,
     max_height: Option<f32>,
@@ -76,6 +118,7 @@ impl Text {
             font_attrs: FontAttributes::default(),
             color: Color::WHITE,
             align: TextAlign::Left,
+            vertical_align: VerticalAlign::Top,
             wrap: TextWrap::Word,
             max_width: None,
             max_height: None,
@@ -132,9 +175,15 @@ impl Text {
         self
     }
 
-    /// Set the text alignment.
+    /// Set the text alignment (horizontal).
     pub fn align(mut self, align: TextAlign) -> Self {
         self.align = align;
+        self
+    }
+
+    /// Set the vertical alignment.
+    pub fn vertical_align(mut self, vertical_align: VerticalAlign) -> Self {
+        self.vertical_align = vertical_align;
         self
     }
 
@@ -202,6 +251,10 @@ impl Text {
 
     pub fn get_align(&self) -> TextAlign {
         self.align
+    }
+
+    pub fn get_vertical_align(&self) -> VerticalAlign {
+        self.vertical_align
     }
 
     pub fn get_wrap(&self) -> TextWrap {

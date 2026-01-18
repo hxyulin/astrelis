@@ -3,6 +3,22 @@
 //! This module bridges the gap between cosmic-text's shaped glyph data and
 //! our GPU TextInstance format. It manages the conversion from abstract glyph
 //! IDs to concrete atlas UV coordinates for rendering.
+//!
+//! ## Coordinate System
+//!
+//! The text rendering system uses a **top-left origin coordinate system**:
+//! - Origin (0, 0) is at the top-left corner
+//! - X increases rightward
+//! - Y increases downward
+//!
+//! This is consistent with UI layout systems (CSS, Flutter) and Taffy's layout model.
+//!
+//! ## Baseline to Top-Left Conversion
+//!
+//! Internally, glyphs are positioned relative to a baseline (typography standard).
+//! This module performs the critical conversion from baseline-relative positioning
+//! to top-left positioning via the `-placement.top` operation. See the positioning
+//! comments in [`glyphs_to_instances`] for details.
 
 use crate::gpu_types::TextInstance;
 use astrelis_core::math::Vec2;
@@ -27,8 +43,18 @@ pub fn glyphs_to_instances(
         if let Some((atlas_entry, placement)) =
             font_renderer.ensure_glyph_with_placement(glyph.cache_key)
         {
-            // Calculate screen position with placement offsets
-            // left offset moves glyph horizontally, top offset moves vertically from baseline
+            // Calculate screen position with placement offsets.
+            //
+            // POSITIONING EXPLANATION:
+            // - base_position: Top-left corner of the text bounding box (from layout)
+            // - glyph.position: Contains (horizontal_advance, baseline_y) from shaping
+            // - placement.left: Horizontal bearing (distance from cursor to left edge of glyph)
+            // - placement.top: Distance from baseline DOWN to top of glyph (positive downward)
+            //
+            // The key transformation is `-placement.top`:
+            // Since placement.top is the distance FROM baseline TO top (positive = down),
+            // we negate it to move FROM baseline UP to the top edge of the glyph.
+            // This converts baseline-relative positioning to top-left positioning.
             let screen_pos = base_position
                 + glyph.position
                 + Vec2::new(placement.left, -placement.top);
@@ -72,7 +98,8 @@ pub fn glyph_to_instance(
     let atlas_size = font_renderer.atlas_size() as f32;
     let (atlas_entry, placement) = font_renderer.ensure_glyph_with_placement(glyph.cache_key)?;
 
-    // Calculate screen position with placement offsets for correct baseline alignment
+    // Calculate screen position with placement offsets for correct baseline alignment.
+    // The -placement.top converts from baseline-relative to top-left positioning.
     let screen_pos =
         base_position + glyph.position + Vec2::new(placement.left, -placement.top);
 

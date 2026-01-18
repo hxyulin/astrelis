@@ -9,7 +9,7 @@ use astrelis_render::{GraphicsContext, Renderer, Viewport, wgpu};
 
 use crate::{
     font::FontSystem,
-    text::{Text, color_to_cosmic},
+    text::{Text, TextMetrics, color_to_cosmic},
 };
 
 /// A cached text buffer with layout information.
@@ -208,6 +208,48 @@ impl FontRenderer {
         buffer.layout(&mut font_system);
         let (width, height) = buffer.bounds();
         (width / scale, height / scale)
+    }
+
+    /// Get font metrics for the given text style.
+    ///
+    /// Returns metrics including ascent, descent, line height, and baseline offset
+    /// which are useful for precise text positioning and baseline alignment.
+    pub fn get_text_metrics(&self, text: &Text) -> TextMetrics {
+        profile_function!();
+        let scale = self.viewport.scale_factor as f32;
+        let font_size = text.get_font_size();
+        let line_height_multiplier = text.get_line_height();
+
+        // Create metrics for the given font size and line height
+        let metrics = Metrics::new(
+            font_size * scale,
+            font_size * scale * line_height_multiplier,
+        );
+
+        // The line_height from cosmic_text includes both ascent and descent
+        let line_height = metrics.line_height / scale;
+
+        // For cosmic-text, the ascent is typically about 80% of font size
+        // and descent is about 20% of font size (these are approximations)
+        // We can get better metrics by actually querying the font
+        let ascent = font_size * 0.8;  // Approximate ascent
+        let descent = font_size * 0.2; // Approximate descent
+
+        TextMetrics {
+            ascent,
+            descent,
+            line_height,
+            baseline_offset: ascent, // Baseline is at ascent distance from top
+        }
+    }
+
+    /// Get the baseline offset from the top of the text bounding box.
+    ///
+    /// This is the distance from the top of the text's bounding box to the baseline
+    /// of the first line of text. Useful for aligning text by baseline.
+    pub fn get_baseline_offset(&self, text: &Text) -> f32 {
+        let metrics = self.get_text_metrics(text);
+        metrics.baseline_offset
     }
 
     /// Create a new font renderer.
@@ -477,6 +519,10 @@ impl FontRenderer {
     }
 
     /// Draw text at a position.
+    ///
+    /// The position represents the **top-left corner** of the text's bounding box.
+    /// This is consistent with UI layout conventions (CSS, Flutter) where elements
+    /// are positioned by their top-left corner.
     pub fn draw_text(&mut self, buffer: &mut TextBuffer, position: Vec2) {
         profile_function!();
 
@@ -724,6 +770,15 @@ impl FontRenderer {
     }
 }
 
+/// Create an orthographic projection matrix for screen-space rendering.
+///
+/// This matrix transforms from screen coordinates (top-left origin, Y down)
+/// to normalized device coordinates (NDC) where:
+/// - X ranges from -1 (left) to +1 (right)
+/// - Y ranges from -1 (bottom) to +1 (top)
+///
+/// The negative Y scale factor (-2.0 / height) flips the Y axis to convert
+/// from top-left origin (UI convention) to bottom-left origin (OpenGL/NDC convention).
 fn orthographic_projection(width: f32, height: f32) -> [[f32; 4]; 4] {
     [
         [2.0 / width, 0.0, 0.0, 0.0],

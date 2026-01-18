@@ -119,10 +119,15 @@ impl QuadInstance {
 ///
 /// Each instance represents one glyph to be drawn from the font atlas.
 /// Text is rendered as individual glyph instances for maximum flexibility.
+///
+/// ## Coordinate System
+///
+/// Positions use a top-left origin coordinate system where (0, 0) is the top-left
+/// corner and Y increases downward, consistent with UI layout conventions.
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct TextInstance {
-    /// Position in screen space (top-left of glyph)
+    /// Position in screen space (top-left corner of glyph bounding box)
     pub position: [f32; 2],
     /// Size of the glyph quad in screen space
     pub size: [f32; 2],

@@ -66,11 +66,12 @@ cosmic-text = "0.12"
 taffy = { version = "0.5", features = ["flexbox", "grid"] }
 indexmap = "2.0"
 pollster = "0.4.0"
+# wgpu version must match egui-wgpu's requirement (see https://github.com/emilk/egui/blob/master/Cargo.toml)
 wgpu = { version = "=27.0.1", features = ["wgsl"] }
 winit = { version = "0.30.12", features = ["rwh_05"] }
 sys-locale = "0.3"
-egui = "0.33"
-egui-wgpu = "0.33"
+egui = "0.33.3"
+egui-wgpu = "0.33.3"
 
 # Optimized collections
 ahash = "0.8"

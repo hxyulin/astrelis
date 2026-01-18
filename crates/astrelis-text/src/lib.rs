@@ -70,7 +70,7 @@ pub use renderer::{AtlasEntry, FontRenderer, GlyphPlacement, TextBuffer};
 pub use shaping::{
     extract_glyphs_from_buffer, measure_text_fast, shape_text, ShapedGlyph, ShapedTextResult,
 };
-pub use text::{Text, TextAlign, TextWrap};
+pub use text::{Text, TextAlign, TextMetrics, TextWrap, VerticalAlign};
 
 // Re-export asset types when feature is enabled
 #[cfg(feature = "asset")]

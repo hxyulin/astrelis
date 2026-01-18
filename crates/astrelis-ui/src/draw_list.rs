@@ -705,10 +705,7 @@ mod tests {
 
         let shaped = Arc::new(ShapedTextResult::new(
             1,
-            BaseShapedTextResult {
-                bounds: (100.0, 20.0),
-                glyphs: vec![],
-            },
+            BaseShapedTextResult::new((100.0, 20.0), vec![]),
         ));
         draw_list.update_node(
             NodeId(2),

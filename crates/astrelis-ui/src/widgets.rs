@@ -5,7 +5,7 @@ use crate::style::Style;
 use crate::tree::NodeId;
 use astrelis_core::math::Vec2;
 use astrelis_render::Color;
-use astrelis_text::{FontRenderer, FontWeight, Text as TextStyle, TextAlign};
+use astrelis_text::{FontRenderer, FontWeight, Text as TextStyle, TextAlign, VerticalAlign};
 use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -340,6 +340,7 @@ pub struct Text {
     pub color: Color,
     pub weight: FontWeight,
     pub align: TextAlign,
+    pub vertical_align: VerticalAlign,
     pub style: Style,
 }
 
@@ -351,6 +352,7 @@ impl Text {
             color: Color::WHITE,
             weight: FontWeight::Normal,
             align: TextAlign::Left,
+            vertical_align: VerticalAlign::Top,
             style: Style::new(),
         }
     }
@@ -380,13 +382,19 @@ impl Text {
         self
     }
 
+    pub fn vertical_align(mut self, vertical_align: VerticalAlign) -> Self {
+        self.vertical_align = vertical_align;
+        self
+    }
+
     /// Build a TextStyle for rendering.
     pub fn build_text_style(&self) -> TextStyle {
         let mut text = TextStyle::new(self.content.get())
             .size(self.font_size)
             .color(self.color)
             .weight(self.weight)
-            .align(self.align);
+            .align(self.align)
+            .vertical_align(self.vertical_align);
 
         // Apply max width from style if set
         if let taffy::Dimension::Length(width) = self.style.layout.size.width {

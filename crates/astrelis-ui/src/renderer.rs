@@ -661,8 +661,17 @@ impl UiRenderer {
 
             // If shaping is complete, add text command
             if let Some(shaped) = self.text_pipeline.get_completed(request_id) {
+                // Apply vertical alignment
+                use astrelis_text::VerticalAlign;
+                let text_height = shaped.bounds().1;
+                let text_y = match text.vertical_align {
+                    VerticalAlign::Top => abs_y,
+                    VerticalAlign::Center => abs_y + (layout.height - text_height) * 0.5,
+                    VerticalAlign::Bottom => abs_y + (layout.height - text_height),
+                };
+
                 commands.push(DrawCommand::Text(crate::draw_list::TextCommand::new(
-                    Vec2::new(abs_x, abs_y),
+                    Vec2::new(abs_x, text_y),
                     shaped,
                     text.color,
                     0,
@@ -692,7 +701,25 @@ impl UiRenderer {
 
             if let Some(shaped) = self.text_pipeline.get_completed(request_id) {
                 let text_x = abs_x + (layout.width - shaped.bounds().0) * 0.5;
-                let text_y = abs_y + (layout.height - shaped.bounds().1) * 0.5;
+
+                // Visual centering: For text like "+", "-", "Reset" without descenders,
+                // we want the visual center (roughly cap height) at the container center.
+                // baseline_offset is the Y position of the baseline from the text top.
+                // To center visually: place the text so the baseline is slightly below center.
+                let text_height = shaped.bounds().1;
+                let baseline_offset = shaped.inner.baseline_offset;
+
+                // DEBUG: Log values for first button
+                tracing::trace!(
+                    "Button text - height: {}, baseline_offset: {}, layout.height: {}",
+                    text_height,
+                    baseline_offset,
+                    layout.height
+                );
+
+                // Simple centering: center the text box, then offset slightly down
+                // to account for visual weight being above center
+                let text_y = abs_y + (layout.height - text_height) * 0.5;
 
                 commands.push(DrawCommand::Text(crate::draw_list::TextCommand::new(
                     Vec2::new(text_x, text_y),

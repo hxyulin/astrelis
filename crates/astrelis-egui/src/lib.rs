@@ -11,8 +11,8 @@ use state::State;
 
 // Re-export egui types
 pub use egui::{
-    self, Align, Align2, Color32, Context as EguiContext, FontFamily, FontId, Frame, Id, Key,
-    Label, Layout, Margin, Modifiers, Pos2, Rect, Response, RichText, Rounding, Sense, Slider,
+    self, Align, Align2, Color32, Context as EguiContext, CornerRadius, FontFamily, FontId, Frame,
+    Id, Key, Label, Layout, Margin, Modifiers, Pos2, Rect, Response, RichText, Sense, Slider,
     Stroke, Style, TextEdit, TextStyle, Ui, Vec2, Visuals, Widget,
 };
 pub use state::EventResponse;

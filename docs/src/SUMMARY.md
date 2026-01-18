@@ -11,6 +11,9 @@
 - [Text Rendering](./architecture/text.md)
 - [Windowing & Events](./architecture/windowing.md)
 - [Performance](./architecture/performance.md)
+- [Redesign Roadmap](./architecture/roadmap.md)
+- [Implementation Plan](./architecture/implementation-plan.md)
+- [Borrow Checking Guide](./architecture/borrow-checking-guide.md)
 
 # Crate Reference
 

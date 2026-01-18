@@ -8,11 +8,18 @@ use astrelis_core::{math::Vec2, profiling::profile_function};
 use cosmic_text::{Attrs, Buffer, CacheKey, FontSystem, Metrics, Shaping};
 
 /// A positioned glyph after text shaping.
+///
+/// Glyphs are positioned in a coordinate system where:
+/// - X is the horizontal advance from the text origin
+/// - Y is the baseline Y position for the line containing this glyph
+///
+/// Note: This uses baseline-relative positioning internally. The conversion to
+/// top-left positioning happens in the glyph_atlas module via `-placement.top`.
 #[derive(Debug, Clone, Copy)]
 pub struct ShapedGlyph {
     /// Complete cache key for glyph rasterization
     pub cache_key: CacheKey,
-    /// Position relative to text origin
+    /// Position relative to text origin (horizontal_advance, baseline_y)
     pub position: Vec2,
     /// Horizontal advance for this glyph
     pub advance: f32,
@@ -25,12 +32,34 @@ pub struct ShapedTextResult {
     pub bounds: (f32, f32),
     /// Positioned glyphs ready for rendering
     pub glyphs: Vec<ShapedGlyph>,
+    /// Distance from top of bounding box to the first baseline
+    /// This is useful for vertical alignment - approximately 80% of line height for most fonts
+    pub baseline_offset: f32,
 }
 
 impl ShapedTextResult {
     /// Create a new shaped text result.
     pub fn new(bounds: (f32, f32), glyphs: Vec<ShapedGlyph>) -> Self {
-        Self { bounds, glyphs }
+        // Approximate baseline as 80% of height (typical ascent ratio)
+        let baseline_offset = bounds.1 * 0.8;
+        Self {
+            bounds,
+            glyphs,
+            baseline_offset,
+        }
+    }
+
+    /// Create with explicit baseline offset.
+    pub fn with_baseline(
+        bounds: (f32, f32),
+        glyphs: Vec<ShapedGlyph>,
+        baseline_offset: f32,
+    ) -> Self {
+        Self {
+            bounds,
+            glyphs,
+            baseline_offset,
+        }
     }
 }
 
@@ -70,31 +99,56 @@ pub fn shape_text(
 ///
 /// This is useful when you already have a shaped buffer and want to convert
 /// it to our retained rendering format.
-pub fn extract_glyphs_from_buffer(buffer: &Buffer, font_size: f32, scale: f32) -> ShapedTextResult {
-    let mut glyphs = Vec::new();
+pub fn extract_glyphs_from_buffer(buffer: &Buffer, _font_size: f32, scale: f32) -> ShapedTextResult {
     let mut max_x = 0.0_f32;
-    let mut max_y = 0.0_f32;
+    let mut min_y = f32::MAX;
+    let mut max_y = f32::MIN;
+    let mut first_line_y = None;
 
+    // First pass: determine the bounds
+    for run in buffer.layout_runs() {
+        if first_line_y.is_none() {
+            first_line_y = Some(run.line_y);
+        }
+
+        for glyph in run.glyphs.iter() {
+            let physical = glyph.physical((0., 0.), 1.0);
+            let glyph_right = physical.x as f32 + glyph.w;
+
+            // For cosmic-text, line_y is the baseline position
+            // The top of the line is approximately at line_y - (line_height * 0.8) (ascent)
+            // The bottom is at line_y + (line_height * 0.2) (descent)
+            let line_top = run.line_y - (run.line_height * 0.8);
+            let line_bottom = run.line_y + (run.line_height * 0.2);
+
+            max_x = max_x.max(glyph_right);
+            min_y = min_y.min(line_top);
+            max_y = max_y.max(line_bottom);
+        }
+    }
+
+    // Second pass: create glyphs with positions relative to min_y
+    let mut glyphs = Vec::new();
     for run in buffer.layout_runs() {
         for glyph in run.glyphs.iter() {
             let physical = glyph.physical((0., 0.), 1.0);
 
             glyphs.push(ShapedGlyph {
                 cache_key: physical.cache_key,
-                position: Vec2::new(physical.x as f32 / scale, run.line_y / scale),
+                // Position relative to the top of the text bounds
+                position: Vec2::new(physical.x as f32 / scale, (run.line_y - min_y) / scale),
                 advance: glyph.w / scale,
             });
-
-            let glyph_right = physical.x as f32 + glyph.w;
-            let glyph_bottom = run.line_y + run.line_height;
-            max_x = max_x.max(glyph_right);
-            max_y = max_y.max(glyph_bottom);
         }
     }
 
-    let bounds = (max_x / scale, max_y / scale);
+    // Bounds should be relative to the top of the first line
+    let bounds = (max_x / scale, (max_y - min_y) / scale);
 
-    ShapedTextResult::new(bounds, glyphs)
+    // The first line's baseline Y position relative to the top
+    let baseline_offset = first_line_y.map(|y| (y - min_y) / scale).unwrap_or(0.0);
+
+    ShapedTextResult::with_baseline(bounds, glyphs, baseline_offset)
 }
 
 /// Measure text without extracting glyph data (faster for layout-only).
