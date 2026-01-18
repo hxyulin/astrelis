@@ -11,7 +11,7 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow,
+    Color, GraphicsContext, RenderTarget, RenderableWindow,
     WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::UiSystem;
@@ -71,7 +71,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -83,7 +83,7 @@ fn main() {
 
         let window = RenderableWindow::new_with_descriptor(
             window,
-            graphics_ctx,
+            graphics_ctx.clone(),
             WindowContextDescriptor {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
@@ -98,7 +98,7 @@ fn main() {
         let viewport_height = size.height as f32;
 
         // Create UI system
-        let mut ui = UiSystem::new(graphics_ctx);
+        let mut ui = UiSystem::new(graphics_ctx.clone());
         ui.set_viewport(window.viewport());
 
         // Create shared state
@@ -287,16 +287,14 @@ impl App for CounterApp {
         // Begin frame and render
         let mut frame = self.window.begin_drawing();
 
-        {
-            let mut render_pass = RenderPassBuilder::new()
-                .label("UI Render Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(Color::from_rgb_u8(20, 20, 30))
-                .build(&mut frame);
-
-            // Render UI
-            self.ui.render(render_pass.descriptor());
-        }
+        // Render UI with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::from_rgb_u8(20, 20, 30),
+            |pass| {
+                self.ui.render(pass.descriptor());
+            },
+        );
 
         frame.finish();
     }

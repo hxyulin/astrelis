@@ -7,10 +7,12 @@ use crate::framebuffer::Framebuffer;
 /// This enum simplifies render pass setup by providing a unified interface
 /// for different rendering destinations.
 #[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub enum RenderTarget<'a> {
     /// Render to the window surface.
     ///
     /// The surface view is obtained from the FrameContext during render pass creation.
+    #[default]
     Surface,
 
     /// Render to an offscreen framebuffer.
@@ -82,11 +84,6 @@ impl<'a> RenderTarget<'a> {
     }
 }
 
-impl Default for RenderTarget<'_> {
-    fn default() -> Self {
-        RenderTarget::Surface
-    }
-}
 
 impl<'a> From<&'a Framebuffer> for RenderTarget<'a> {
     fn from(fb: &'a Framebuffer) -> Self {

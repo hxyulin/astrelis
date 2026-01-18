@@ -1,22 +1,23 @@
 use crate::context::GraphicsContext;
+use std::sync::Arc;
 
 /// Low-level extensible renderer that simplifies WGPU resource management.
 ///
 /// This provides a foundation for higher-level renderers like TextRenderer, SceneRenderer, etc.
 /// It manages common rendering state and provides utilities for resource creation.
 pub struct Renderer {
-    context: &'static GraphicsContext,
+    context: Arc<GraphicsContext>,
 }
 
 impl Renderer {
     /// Create a new renderer with the given graphics context.
-    pub fn new(context: &'static GraphicsContext) -> Self {
+    pub fn new(context: Arc<GraphicsContext>) -> Self {
         Self { context }
     }
 
     /// Get the graphics context.
-    pub fn context(&self) -> &'static GraphicsContext {
-        self.context
+    pub fn context(&self) -> &GraphicsContext {
+        &self.context
     }
 
     /// Get the device.
@@ -117,7 +118,7 @@ impl Renderer {
     /// * `label` - Optional debug label
     /// * `size` - Size in bytes
     /// * `read_only` - If true, creates a read-only storage buffer (STORAGE),
-    ///                 otherwise creates a read-write storage buffer (STORAGE | COPY_DST)
+    ///   otherwise creates a read-write storage buffer (STORAGE | COPY_DST)
     pub fn create_storage_buffer(
         &self,
         label: Option<&str>,
@@ -147,7 +148,7 @@ impl Renderer {
     /// * `label` - Optional debug label
     /// * `data` - Initial data to write to the buffer
     /// * `read_only` - If true, creates a read-only storage buffer,
-    ///                 otherwise creates a read-write storage buffer
+    ///   otherwise creates a read-write storage buffer
     pub fn create_storage_buffer_init<T: bytemuck::Pod>(
         &self,
         label: Option<&str>,

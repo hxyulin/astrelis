@@ -42,7 +42,7 @@ pub struct FrameContext {
     pub(crate) stats: FrameStats,
     pub(crate) surface: Option<Surface>,
     pub(crate) encoder: Option<wgpu::CommandEncoder>,
-    pub(crate) context: &'static GraphicsContext,
+    pub context: Arc<GraphicsContext>,
     pub(crate) window: Arc<WinitWindow>,
     pub(crate) surface_format: wgpu::TextureFormat,
 }
@@ -68,8 +68,8 @@ impl FrameContext {
         &self.stats
     }
 
-    pub fn graphics_context(&self) -> &'static GraphicsContext {
-        self.context
+    pub fn graphics_context(&self) -> &GraphicsContext {
+        &self.context
     }
 
     pub fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
@@ -85,6 +85,69 @@ impl FrameContext {
 
     pub fn finish(self) {
         drop(self);
+    }
+
+    /// Execute a closure with a render pass, automatically handling scoping.
+    ///
+    /// This is the ergonomic RAII pattern that eliminates the need for manual `{ }` blocks.
+    /// The render pass is automatically dropped after the closure completes.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use astrelis_render::*;
+    /// # let mut frame: FrameContext = todo!();
+    /// frame.with_pass(
+    ///     RenderPassBuilder::new()
+    ///         .target(RenderTarget::Surface)
+    ///         .clear_color(Color::BLACK),
+    ///     |pass| {
+    ///         // Render commands here
+    ///         // pass automatically drops when closure ends
+    ///     }
+    /// );
+    /// frame.finish();
+    /// ```
+    pub fn with_pass<'a, F>(&'a mut self, builder: RenderPassBuilder<'a>, f: F)
+    where
+        F: FnOnce(&mut RenderPass<'a>),
+    {
+        let mut pass = builder.build(self);
+        f(&mut pass);
+        // pass drops here automatically
+    }
+
+    /// Convenience method to clear to a color and execute rendering commands.
+    ///
+    /// This is the most common pattern - clear the surface and render.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// # use astrelis_render::*;
+    /// # let mut frame: FrameContext = todo!();
+    /// frame.clear_and_render(
+    ///     RenderTarget::Surface,
+    ///     Color::BLACK,
+    ///     |pass| {
+    ///         // Render your content here
+    ///         // Example: ui.render(pass.descriptor());
+    ///     }
+    /// );
+    /// frame.finish();
+    /// ```
+    pub fn clear_and_render<'a, F>(
+        &'a mut self,
+        target: RenderTarget<'a>,
+        clear_color: impl Into<crate::Color>,
+        f: F,
+    ) where
+        F: FnOnce(&mut RenderPass<'a>),
+    {
+        self.with_pass(
+            RenderPassBuilder::new()
+                .target(target)
+                .clear_color(clear_color.into()),
+            f,
+        );
     }
 }
 
@@ -114,18 +177,15 @@ impl Drop for FrameContext {
 
 /// Clear operation for a render pass.
 #[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub enum ClearOp {
     /// Load existing contents (no clear).
+    #[default]
     Load,
     /// Clear to the specified color.
     Clear(wgpu::Color),
 }
 
-impl Default for ClearOp {
-    fn default() -> Self {
-        ClearOp::Load
-    }
-}
 
 impl From<wgpu::Color> for ClearOp {
     fn from(color: wgpu::Color) -> Self {

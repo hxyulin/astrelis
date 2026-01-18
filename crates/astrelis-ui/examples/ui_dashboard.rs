@@ -11,7 +11,7 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{init_profiling, ProfilingBackend, new_frame};
 use astrelis_render::{
-    GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow, WindowContextDescriptor,
+    GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
     wgpu,
 };
 use astrelis_ui::{
@@ -25,9 +25,10 @@ use astrelis_winit::{
 };
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+use std::sync::Arc;
 
 struct App {
-    context: &'static GraphicsContext,
+    context: Arc<GraphicsContext>,
     windows: HashMap<WindowId, RenderableWindow>,
     ui: UiSystem,
     last_update: Instant,
@@ -40,7 +41,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
         let mut windows = HashMap::new();
 
         let scale = Window::platform_dpi() as f32;
@@ -54,7 +55,7 @@ fn main() {
 
         let renderable_window = RenderableWindow::new_with_descriptor(
             window,
-            graphics_ctx,
+            graphics_ctx.clone(),
             WindowContextDescriptor {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
@@ -65,7 +66,7 @@ fn main() {
         let viewport = renderable_window.viewport();
         windows.insert(window_id, renderable_window);
 
-        let mut ui = UiSystem::new(graphics_ctx);
+        let mut ui = UiSystem::new(graphics_ctx.clone());
         ui.set_viewport(viewport);
         
         // Build the initial UI
@@ -215,15 +216,14 @@ impl astrelis_winit::app::App for App {
 
         let mut frame = window.begin_drawing();
 
-        {
-            let mut render_pass = RenderPassBuilder::new()
-                .label("UI Render Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(wgpu::Color::BLACK)
-                .build(&mut frame);
-
-            self.ui.render(render_pass.descriptor());
-        }
+        // Render UI with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::BLACK,
+            |pass| {
+                self.ui.render(pass.descriptor());
+            },
+        );
 
         frame.finish();
     }

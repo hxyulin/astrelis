@@ -9,7 +9,7 @@
 
 use astrelis_core::logging;
 use astrelis_render::{
-    GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow, WindowContextDescriptor,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
     SpriteSheet, SpriteSheetDescriptor, SpriteAnimation,
 };
 use astrelis_winit::{
@@ -21,6 +21,7 @@ use astrelis_winit::{
 use std::collections::HashMap;
 use std::time::Instant;
 use wgpu::util::DeviceExt;
+use std::sync::Arc;
 
 /// WGSL shader for rendering sprites
 const SHADER: &str = r#"
@@ -134,7 +135,7 @@ fn generate_sprite_sheet_data() -> (Vec<u8>, u32, u32) {
 }
 
 struct App {
-    _context: &'static GraphicsContext,
+    _context: Arc<GraphicsContext>,
     windows: HashMap<WindowId, RenderableWindow>,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
@@ -149,7 +150,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
         let mut windows = HashMap::new();
 
         let scale = Window::platform_dpi() as f32;
@@ -163,7 +164,7 @@ fn main() {
 
         let renderable_window = RenderableWindow::new_with_descriptor(
             window,
-            graphics_ctx,
+            graphics_ctx.clone(),
             WindowContextDescriptor {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
@@ -176,7 +177,7 @@ fn main() {
         // Generate sprite sheet
         let (sprite_data, tex_width, tex_height) = generate_sprite_sheet_data();
         let sprite_sheet = SpriteSheet::from_data(
-            graphics_ctx,
+            &graphics_ctx,
             &sprite_data,
             tex_width,
             tex_height,
@@ -405,24 +406,18 @@ impl astrelis_winit::app::App for App {
 
         let mut frame = window.begin_drawing();
 
-        {
-            let mut render_pass = RenderPassBuilder::new()
-                .label("Sprite Render Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(wgpu::Color {
-                    r: 0.1,
-                    g: 0.1,
-                    b: 0.15,
-                    a: 1.0,
-                })
-                .build(&mut frame);
-
-            let pass = render_pass.descriptor();
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.draw(0..6, 0..1);
-        }
+        // Render with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::rgb(0.1, 0.1, 0.15),
+            |pass| {
+                let pass = pass.descriptor();
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.draw(0..6, 0..1);
+            },
+        );
 
         frame.finish();
     }

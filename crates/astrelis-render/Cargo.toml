@@ -9,9 +9,14 @@ publish.workspace = true
 repository.workspace = true
 description = "Astrelis Core Rendering Module"
 
+[features]
+# Enable mock GPU types for testing
+mock = ["astrelis-test-utils/mock"]
+
 [dependencies]
 tracing.workspace = true
 astrelis-core.workspace = true
+astrelis-test-utils.workspace = true
 astrelis-winit.workspace = true
 wgpu.workspace = true
 pollster.workspace = true

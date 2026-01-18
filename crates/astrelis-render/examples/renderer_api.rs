@@ -1,6 +1,7 @@
+use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_render::{
-    BlendMode, Framebuffer, GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow,
+    BlendMode, Color, Framebuffer, GraphicsContext, RenderTarget, RenderableWindow,
     Renderer, WindowContextDescriptor, wgpu,
 };
 use astrelis_winit::{
@@ -11,7 +12,7 @@ use astrelis_winit::{
 };
 
 struct RendererApp {
-    context: &'static GraphicsContext,
+    context: Arc<GraphicsContext>,
     renderer: Renderer,
     window: RenderableWindow,
     window_id: WindowId,
@@ -29,8 +30,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
-        let renderer = Renderer::new(graphics_ctx);
+        let graphics_ctx = GraphicsContext::new_owned_sync();
+        let renderer = Renderer::new(graphics_ctx.clone());
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -42,7 +43,7 @@ fn main() {
 
         let window = RenderableWindow::new_with_descriptor(
             window,
-            graphics_ctx,
+            graphics_ctx.clone(),
             WindowContextDescriptor {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
@@ -171,7 +172,7 @@ fn main() {
         let offscreen_fb = Framebuffer::builder(400, 300)
             .format(wgpu::TextureFormat::Rgba8UnormSrgb)
             .label("Offscreen FB")
-            .build(graphics_ctx);
+            .build(&graphics_ctx);
 
         // Create blit shader and pipeline for rendering framebuffer to surface
         let blit_shader = renderer.create_shader(Some("Blit Shader"), BLIT_SHADER_SOURCE);
@@ -290,45 +291,31 @@ impl App for RendererApp {
 
         let mut frame = self.window.begin_drawing();
 
-        // Pass 1: Render to offscreen framebuffer using new simplified API
-        {
-            let mut render_pass = RenderPassBuilder::new()
-                .label("Offscreen Pass")
-                .target(RenderTarget::Framebuffer(&self.offscreen_fb))
-                .clear_color(wgpu::Color {
-                    r: 0.2,
-                    g: 0.1,
-                    b: 0.3,
-                    a: 1.0,
-                })
-                .build(&mut frame);
+        // Pass 1: Render to offscreen framebuffer with automatic scoping
+        frame.clear_and_render(
+            RenderTarget::Framebuffer(&self.offscreen_fb),
+            Color::rgb(0.2, 0.1, 0.3),
+            |pass| {
+                let pass = pass.descriptor();
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.draw(0..6, 0..1);
+            },
+        );
 
-            let pass = render_pass.descriptor();
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.draw(0..6, 0..1);
-        }
-
-        // Pass 2: Blit framebuffer to surface using new simplified API
-        {
-            let mut render_pass = RenderPassBuilder::new()
-                .label("Surface Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(wgpu::Color {
-                    r: 0.1,
-                    g: 0.2,
-                    b: 0.3,
-                    a: 1.0,
-                })
-                .build(&mut frame);
-
-            let pass = render_pass.descriptor();
-            pass.set_pipeline(&self.blit_pipeline);
-            pass.set_bind_group(0, &self.blit_bind_group, &[]);
-            // Draw fullscreen triangle
-            pass.draw(0..3, 0..1);
-        }
+        // Pass 2: Blit framebuffer to surface with automatic scoping
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::rgb(0.1, 0.2, 0.3),
+            |pass| {
+                let pass = pass.descriptor();
+                pass.set_pipeline(&self.blit_pipeline);
+                pass.set_bind_group(0, &self.blit_bind_group, &[]);
+                // Draw fullscreen triangle
+                pass.draw(0..3, 0..1);
+            },
+        );
 
         frame.finish();
     }

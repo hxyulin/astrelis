@@ -5,6 +5,7 @@
 
 use crate::context::GraphicsContext;
 use crate::Renderer;
+use std::sync::Arc;
 
 /// A renderer for blitting textures to the screen.
 ///
@@ -24,7 +25,7 @@ pub struct BlitRenderer {
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     vertex_buffer: wgpu::Buffer,
-    context: &'static GraphicsContext,
+    context: Arc<GraphicsContext>,
 }
 
 impl BlitRenderer {
@@ -34,17 +35,17 @@ impl BlitRenderer {
     ///
     /// * `context` - The graphics context
     /// * `target_format` - The format of the render target (typically the surface format)
-    pub fn new(context: &'static GraphicsContext, target_format: wgpu::TextureFormat) -> Self {
+    pub fn new(context: Arc<GraphicsContext>, target_format: wgpu::TextureFormat) -> Self {
         Self::new_with_options(context, target_format, BlitOptions::default())
     }
 
     /// Create a new blit renderer with custom options.
     pub fn new_with_options(
-        context: &'static GraphicsContext,
+        context: Arc<GraphicsContext>,
         target_format: wgpu::TextureFormat,
         options: BlitOptions,
     ) -> Self {
-        let renderer = Renderer::new(context);
+        let renderer = Renderer::new(context.clone());
 
         // Create shader
         let shader = renderer.create_shader(

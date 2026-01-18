@@ -259,12 +259,11 @@ impl UiTree {
                 while let Some(parent_id) = current_parent {
                     if !self.dirty_nodes.insert(parent_id) {
                         // Already marked, check if we need to add more flags
-                        if let Some(parent_node) = self.nodes.get(&parent_id) {
-                            if parent_node.dirty_flags.contains(propagation_flags) {
+                        if let Some(parent_node) = self.nodes.get(&parent_id)
+                            && parent_node.dirty_flags.contains(propagation_flags) {
                                 // Already has these flags, stop propagation
                                 break;
                             }
-                        }
                     }
 
                     if let Some(parent_node) = self.nodes.get_mut(&parent_id) {
@@ -285,11 +284,10 @@ impl UiTree {
                 }
                 
                 // If we reached here, we hit the top without a boundary.
-                if let Some(root) = self.root {
-                    if self.dirty_nodes.contains(&root) {
+                if let Some(root) = self.root
+                    && self.dirty_nodes.contains(&root) {
                         self.dirty_roots.insert(root);
                     }
-                }
             }
         }
     }
@@ -500,11 +498,10 @@ impl UiTree {
         font_renderer: Option<&FontRenderer>,
     ) {
         // If no dirty roots but dirty nodes exist, default to root
-        if self.dirty_roots.is_empty() && !self.dirty_nodes.is_empty() {
-             if let Some(root) = self.root {
+        if self.dirty_roots.is_empty() && !self.dirty_nodes.is_empty()
+             && let Some(root) = self.root {
                  self.dirty_roots.insert(root);
              }
-        }
 
         // Filter redundant roots (keep only top-most)
         let mut roots_to_process: Vec<NodeId> = Vec::new();
@@ -535,11 +532,10 @@ impl UiTree {
         // when Taffy computes layout relative to the subtree root.
         let mut restored_positions: Vec<(NodeId, f32, f32)> = Vec::new();
         for &root_id in &roots_to_process {
-             if Some(root_id) != self.root {
-                 if let Some(node) = self.nodes.get(&root_id) {
+             if Some(root_id) != self.root
+                 && let Some(node) = self.nodes.get(&root_id) {
                      restored_positions.push((root_id, node.layout.x, node.layout.y));
                  }
-             }
         }
 
         let nodes_ptr = &mut self.nodes as *mut IndexMap<NodeId, UiNode>;
@@ -646,12 +642,13 @@ impl UiTree {
     }
 
     /// Cache layout results from Taffy into our nodes.
+    #[allow(dead_code)]
     fn cache_layouts(&mut self) {
         let node_ids: Vec<NodeId> = self.nodes.keys().copied().collect();
 
         for node_id in node_ids {
-            if let Some(node) = self.nodes.get(&node_id) {
-                if let Ok(layout) = self.taffy.layout(node.taffy_node) {
+            if let Some(node) = self.nodes.get(&node_id)
+                && let Ok(layout) = self.taffy.layout(node.taffy_node) {
                     let layout_rect = LayoutRect {
                         x: layout.location.x,
                         y: layout.location.y,
@@ -663,7 +660,6 @@ impl UiTree {
                         node.layout = layout_rect;
                     }
                 }
-            }
         }
     }
 
@@ -679,8 +675,8 @@ impl UiTree {
             };
             
             // Update this node
-            if let Some(node) = self.nodes.get_mut(&node_id) {
-                 if let Ok(layout) = self.taffy.layout(node.taffy_node) {
+            if let Some(node) = self.nodes.get_mut(&node_id)
+                 && let Ok(layout) = self.taffy.layout(node.taffy_node) {
                     node.layout = LayoutRect {
                         x: layout.location.x,
                         y: layout.location.y,
@@ -688,7 +684,6 @@ impl UiTree {
                         height: layout.size.height,
                     };
                 }
-            }
 
             stack.extend(children);
         }

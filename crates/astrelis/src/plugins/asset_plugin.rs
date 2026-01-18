@@ -36,16 +36,12 @@ use astrelis_text::FontLoader;
 /// let server = engine.get::<AssetServer>().unwrap();
 /// let text: Handle<String> = server.load_sync("hello.txt").unwrap();
 /// ```
+#[derive(Default)]
 pub struct AssetPlugin {
     /// Base path for loading assets from disk.
     pub base_path: Option<String>,
 }
 
-impl Default for AssetPlugin {
-    fn default() -> Self {
-        Self { base_path: None }
-    }
-}
 
 impl AssetPlugin {
     /// Create a new asset plugin.
@@ -87,6 +83,7 @@ impl Plugin for AssetPlugin {
 }
 
 /// Extension trait for easily registering loaders with the engine.
+#[allow(dead_code)]
 pub trait AssetServerExt {
     /// Register an asset loader with the asset server.
     fn register_loader<L: AssetLoader>(&mut self, loader: L)

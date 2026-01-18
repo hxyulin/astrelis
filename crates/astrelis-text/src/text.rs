@@ -29,8 +29,10 @@ impl TextAlign {
 /// Position coordinates always represent the top-left corner of the text's bounding box,
 /// and vertical alignment adjusts the text within that space.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum VerticalAlign {
     /// Align text to the top of the container (default).
+    #[default]
     Top,
     /// Center text vertically within the container.
     Center,
@@ -38,11 +40,6 @@ pub enum VerticalAlign {
     Bottom,
 }
 
-impl Default for VerticalAlign {
-    fn default() -> Self {
-        VerticalAlign::Top
-    }
-}
 
 /// Text wrapping mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

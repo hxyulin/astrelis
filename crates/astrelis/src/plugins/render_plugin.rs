@@ -1,6 +1,7 @@
 //! Render plugin for graphics context management.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use astrelis_core::geometry::Size;
 use astrelis_render::{GraphicsContext, WindowContext, WindowContextDescriptor};
@@ -12,7 +13,7 @@ use crate::resource::Resources;
 
 /// Manages render contexts for multiple windows.
 pub struct RenderContexts {
-    graphics: Option<&'static GraphicsContext>,
+    graphics: Option<Arc<GraphicsContext>>,
     contexts: HashMap<WindowId, WindowContext>,
 }
 
@@ -32,7 +33,7 @@ impl RenderContexts {
     }
 
     /// Create a new render context manager with a graphics context.
-    pub fn with_graphics(graphics: &'static GraphicsContext) -> Self {
+    pub fn with_graphics(graphics: Arc<GraphicsContext>) -> Self {
         Self {
             graphics: Some(graphics),
             contexts: HashMap::new(),
@@ -45,7 +46,9 @@ impl RenderContexts {
     pub fn create_for_window(&mut self, window: Window) -> &mut WindowContext {
         let graphics = self
             .graphics
-            .expect("RenderContexts must be initialized with a GraphicsContext");
+            .as_ref()
+            .expect("RenderContexts must be initialized with a GraphicsContext")
+            .clone();
         self.create_for_window_with(window, graphics, WindowContextDescriptor::default())
     }
 
@@ -53,15 +56,15 @@ impl RenderContexts {
     pub fn create_for_window_with(
         &mut self,
         window: Window,
-        graphics: &'static GraphicsContext,
+        graphics: Arc<GraphicsContext>,
         descriptor: WindowContextDescriptor,
     ) -> &mut WindowContext {
         let window_id = window.id();
 
-        if !self.contexts.contains_key(&window_id) {
-            let context = WindowContext::new(window, graphics, descriptor);
-            self.contexts.insert(window_id, context);
-        }
+        self.contexts.entry(window_id).or_insert_with(|| {
+            
+            WindowContext::new(window, graphics, descriptor)
+        });
 
         self.contexts.get_mut(&window_id).unwrap()
     }
@@ -94,8 +97,8 @@ impl RenderContexts {
     }
 
     /// Get the graphics context.
-    pub fn graphics(&self) -> Option<&'static GraphicsContext> {
-        self.graphics
+    pub fn graphics(&self) -> Option<&GraphicsContext> {
+        self.graphics.as_deref()
     }
 }
 
@@ -106,7 +109,7 @@ impl RenderContexts {
 ///
 /// # Resources Provided
 ///
-/// - `&'static GraphicsContext` - The main GPU context (static lifetime)
+/// - `Arc<GraphicsContext>` - The main GPU context (shared ownership)
 /// - `RenderContexts` - Manager for window render contexts
 ///
 /// # Example
@@ -117,7 +120,7 @@ impl RenderContexts {
 /// // In your App::render():
 /// fn render(&mut self, ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
 ///     let render_contexts = self.engine.get_mut::<RenderContexts>().unwrap();
-///     
+///
 ///     if let Some(render_ctx) = render_contexts.get_mut(window_id) {
 ///         let mut frame = render_ctx.begin_drawing();
 ///         // Render...
@@ -132,15 +135,15 @@ impl Plugin for RenderPlugin {
     }
 
     fn build(&self, resources: &mut Resources) {
-        // Create graphics context (returns 'static lifetime)
-        let graphics: &'static GraphicsContext = GraphicsContext::new_sync();
+        // Create graphics context with Arc (no memory leak)
+        let graphics = GraphicsContext::new_owned_sync();
 
         tracing::info!(
             "RenderPlugin: GraphicsContext created (backend: {:?})",
             graphics.info().backend
         );
 
-        resources.insert(graphics);
+        resources.insert(graphics.clone());
         resources.insert(RenderContexts::with_graphics(graphics));
     }
 }

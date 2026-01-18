@@ -12,6 +12,7 @@ use astrelis_core::profiling::{profile_function, profile_scope};
 use astrelis_render::wgpu::util::DeviceExt;
 use astrelis_render::{Color, GraphicsContext, Renderer, Viewport, wgpu};
 use astrelis_text::{FontRenderer, FontSystem, TextPipeline};
+use std::sync::Arc;
 
 /// Vertex data for immediate mode quad rendering (legacy).
 #[repr(C)]
@@ -45,7 +46,7 @@ struct ImageBatch {
 pub struct UiRenderer {
     renderer: Renderer,
     font_renderer: FontRenderer,
-    context: &'static GraphicsContext,
+    context: Arc<GraphicsContext>,
 
     quad_instanced_pipeline: wgpu::RenderPipeline,
     text_instanced_pipeline: wgpu::RenderPipeline,
@@ -77,12 +78,12 @@ pub struct UiRenderer {
 
 impl UiRenderer {
     /// Create a new UI renderer.
-    pub fn new(context: &'static GraphicsContext) -> Self {
-        let renderer = Renderer::new(context);
+    pub fn new(context: Arc<GraphicsContext>) -> Self {
+        let renderer = Renderer::new(context.clone());
 
         // Create font renderer for text
         let font_system = FontSystem::with_system_fonts();
-        let font_renderer = FontRenderer::new(context, font_system);
+        let font_renderer = FontRenderer::new(context.clone(), font_system);
 
         // 1. Create unit quad VBO for instanced rendering
         let unit_quad_vertices = QuadVertex::unit_quad();
@@ -544,7 +545,7 @@ impl UiRenderer {
         if let Some(text) = widget.as_any().downcast_ref::<Text>() {
             let font_id = 0;
             self.text_pipeline.request_shape(
-                text.content.get().to_string(),
+                text.content.clone(),
                 font_id,
                 text.font_size,
                 None,
@@ -552,7 +553,7 @@ impl UiRenderer {
         } else if let Some(button) = widget.as_any().downcast_ref::<Button>() {
             let font_id = 0;
             self.text_pipeline.request_shape(
-                button.label.get().to_string(),
+                button.label.clone(),
                 font_id,
                 button.font_size,
                 None,
@@ -637,8 +638,8 @@ impl UiRenderer {
             }
 
             // Border quad
-            if container.style.border_width > 0.0 {
-                if let Some(border_color) = container.style.border_color {
+            if container.style.border_width > 0.0
+                && let Some(border_color) = container.style.border_color {
                     commands.push(DrawCommand::Quad(crate::draw_list::QuadCommand::bordered(
                         Vec2::new(abs_x, abs_y),
                         Vec2::new(layout.width, layout.height),
@@ -648,12 +649,11 @@ impl UiRenderer {
                         0,
                     )));
                 }
-            }
         } else if let Some(text) = widget.as_any().downcast_ref::<Text>() {
             // Request text shaping
             let font_id = 0; // TODO: Get actual font ID
             let request_id = self.text_pipeline.request_shape(
-                text.content.get().to_string(),
+                text.content.clone(),
                 font_id,
                 text.font_size,
                 None,
@@ -693,7 +693,7 @@ impl UiRenderer {
             // Text label
             let font_id = 0;
             let request_id = self.text_pipeline.request_shape(
-                button.label.get().to_string(),
+                button.label.clone(),
                 font_id,
                 16.0,
                 None,
@@ -707,15 +707,6 @@ impl UiRenderer {
                 // baseline_offset is the Y position of the baseline from the text top.
                 // To center visually: place the text so the baseline is slightly below center.
                 let text_height = shaped.bounds().1;
-                let baseline_offset = shaped.inner.baseline_offset;
-
-                // DEBUG: Log values for first button
-                tracing::trace!(
-                    "Button text - height: {}, baseline_offset: {}, layout.height: {}",
-                    text_height,
-                    baseline_offset,
-                    layout.height
-                );
 
                 // Simple centering: center the text box, then offset slightly down
                 // to account for visual weight being above center
@@ -825,11 +816,11 @@ impl UiRenderer {
         }
 
         self.quad_instances
-            .set_instances(&self.renderer.device(), quad_instances);
+            .set_instances(self.renderer.device(), quad_instances);
         self.text_instances
-            .set_instances(&self.renderer.device(), text_instances);
+            .set_instances(self.renderer.device(), text_instances);
         self.image_instances
-            .set_instances(&self.renderer.device(), all_image_instances);
+            .set_instances(self.renderer.device(), all_image_instances);
     }
     
     /// Get or create a bind group for an image texture.
@@ -890,7 +881,7 @@ impl UiRenderer {
         );
 
         // Render quads
-        if self.quad_instances.len() > 0 {
+        if !self.quad_instances.is_empty() {
             render_pass.set_pipeline(&self.quad_instanced_pipeline);
             render_pass.set_bind_group(0, &self.projection_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
@@ -899,7 +890,7 @@ impl UiRenderer {
         }
 
         // Render text
-        if self.text_instances.len() > 0 {
+        if !self.text_instances.is_empty() {
             render_pass.set_pipeline(&self.text_instanced_pipeline);
             render_pass.set_bind_group(0, &self.text_atlas_bind_group, &[]);
             render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]);

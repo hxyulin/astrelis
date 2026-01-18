@@ -12,7 +12,7 @@
 //! use astrelis_render::GraphicsContext;
 //! use astrelis_core::math::Vec2;
 //!
-//! let context = GraphicsContext::new_sync();
+//! let context = GraphicsContext::new_owned_sync();
 //! let font_system = FontSystem::with_system_fonts();
 //! let mut renderer = FontRenderer::new(context, font_system);
 //!

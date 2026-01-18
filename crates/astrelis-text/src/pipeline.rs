@@ -111,6 +111,12 @@ pub trait TextShaper: Send + Sync {
 /// Since FontRenderer isn't Send+Sync, we don't implement TextShaper trait here.
 pub struct SyncTextShaper;
 
+impl Default for SyncTextShaper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SyncTextShaper {
     /// Create a new synchronous text shaper.
     pub fn new() -> Self {

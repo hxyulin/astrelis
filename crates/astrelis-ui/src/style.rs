@@ -247,11 +247,13 @@ impl Style {
 }
 
 /// Helper to create a length dimension.
+#[allow(dead_code)]
 fn length(value: f32) -> Dimension {
     Dimension::Length(value)
 }
 
 /// Helper to create a rect with same length on all sides (for padding).
+#[allow(dead_code)]
 fn length_rect(value: f32) -> Rect<TaffyLengthPercentage> {
     Rect {
         left: TaffyLengthPercentage::Length(value),
@@ -262,6 +264,7 @@ fn length_rect(value: f32) -> Rect<TaffyLengthPercentage> {
 }
 
 /// Helper to create a rect with same length on all sides (for margin).
+#[allow(dead_code)]
 fn margin_rect(value: f32) -> Rect<TaffyLengthPercentageAuto> {
     Rect {
         left: TaffyLengthPercentageAuto::Length(value),
@@ -272,6 +275,7 @@ fn margin_rect(value: f32) -> Rect<TaffyLengthPercentageAuto> {
 }
 
 /// Helper to create an auto dimension.
+#[allow(dead_code)]
 fn auto() -> TaffyLengthPercentageAuto {
     TaffyLengthPercentageAuto::Auto
 }

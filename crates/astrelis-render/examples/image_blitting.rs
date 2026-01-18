@@ -14,7 +14,7 @@
 
 use astrelis_core::logging;
 use astrelis_render::{
-    GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow, WindowContextDescriptor,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
 };
 use astrelis_winit::{
     WindowId,
@@ -25,6 +25,7 @@ use astrelis_winit::{
 use std::collections::HashMap;
 use std::time::Instant;
 use wgpu::util::DeviceExt;
+use std::sync::Arc;
 
 /// WGSL shader for rendering textured quads
 const SHADER: &str = r#"
@@ -152,7 +153,7 @@ impl ImageBuffer {
 }
 
 struct App {
-    context: &'static GraphicsContext,
+    context: Arc<GraphicsContext>,
     windows: HashMap<WindowId, RenderableWindow>,
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -168,7 +169,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
         let mut windows = HashMap::new();
 
         let scale = Window::platform_dpi() as f32;
@@ -182,7 +183,7 @@ fn main() {
 
         let renderable_window = RenderableWindow::new_with_descriptor(
             window,
-            graphics_ctx,
+            graphics_ctx.clone(),
             WindowContextDescriptor {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
@@ -463,24 +464,18 @@ impl astrelis_winit::app::App for App {
 
         let mut frame = window.begin_drawing();
 
-        {
-            let mut render_pass = RenderPassBuilder::new()
-                .label("Blit Render Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(wgpu::Color {
-                    r: 0.05,
-                    g: 0.05,
-                    b: 0.08,
-                    a: 1.0,
-                })
-                .build(&mut frame);
-
-            let pass = render_pass.descriptor();
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.draw(0..6, 0..1);
-        }
+        // Render with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::rgb(0.05, 0.05, 0.08),
+            |pass| {
+                let pass = pass.descriptor();
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.draw(0..6, 0..1);
+            },
+        );
 
         frame.finish();
     }

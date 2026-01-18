@@ -5,6 +5,7 @@
 /// Use these to configure how source and destination colors are combined
 /// during rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Default)]
 pub enum BlendMode {
     /// No blending - source completely replaces destination.
     Replace,
@@ -14,6 +15,7 @@ pub enum BlendMode {
     /// Formula: `src.rgb * src.a + dst.rgb * (1 - src.a)`
     ///
     /// Use for: Transparent UI over game content, sprites with transparency.
+    #[default]
     Alpha,
 
     /// Premultiplied alpha blending.
@@ -86,11 +88,6 @@ impl BlendMode {
     }
 }
 
-impl Default for BlendMode {
-    fn default() -> Self {
-        BlendMode::Alpha
-    }
-}
 
 impl From<BlendMode> for Option<wgpu::BlendState> {
     fn from(mode: BlendMode) -> Self {

@@ -1,6 +1,5 @@
 //! Widget system for UI components.
 
-use crate::auto_dirty::TextValue;
 use crate::style::Style;
 use crate::tree::NodeId;
 use astrelis_core::math::Vec2;
@@ -335,7 +334,7 @@ impl Widget for Container {
 /// Text widget - displays text.
 #[derive(Clone)]
 pub struct Text {
-    pub content: TextValue,
+    pub content: String,
     pub font_size: f32,
     pub color: Color,
     pub weight: FontWeight,
@@ -347,7 +346,7 @@ pub struct Text {
 impl Text {
     pub fn new(content: impl Into<String>) -> Self {
         Self {
-            content: TextValue::new(content.into()),
+            content: content.into(),
             font_size: 16.0,
             color: Color::WHITE,
             weight: FontWeight::Normal,
@@ -389,7 +388,7 @@ impl Text {
 
     /// Build a TextStyle for rendering.
     pub fn build_text_style(&self) -> TextStyle {
-        let mut text = TextStyle::new(self.content.get())
+        let mut text = TextStyle::new(&self.content)
             .size(self.font_size)
             .color(self.color)
             .weight(self.weight)
@@ -407,17 +406,18 @@ impl Text {
     /// Set the text content (for incremental updates).
     /// Returns true if the content changed.
     pub fn set_content(&mut self, content: impl Into<String>) -> bool {
-        self.content.set(content)
+        let new_content = content.into();
+        if self.content != new_content {
+            self.content = new_content;
+            true
+        } else {
+            false
+        }
     }
 
     /// Get the current text content.
     pub fn get_content(&self) -> &str {
-        self.content.get()
-    }
-
-    /// Get the text version for cache invalidation.
-    pub fn text_version(&self) -> u32 {
-        self.content.version()
+        &self.content
     }
 
     /// Set the font size (for incremental updates).
@@ -457,7 +457,7 @@ impl Widget for Text {
         }
 
         // Fallback: rough estimate based on font size
-        let char_count = self.content.get().chars().count() as f32;
+        let char_count = self.content.chars().count() as f32;
         let estimated_width = char_count * self.font_size * 0.6;
         let estimated_height = self.font_size * 1.2;
         Vec2::new(estimated_width, estimated_height)
@@ -474,7 +474,7 @@ pub type ButtonCallback = Rc<dyn Fn()>;
 /// Button widget - clickable with label.
 #[derive(Clone)]
 pub struct Button {
-    pub label: TextValue,
+    pub label: String,
     pub style: Style,
     pub hover_color: Color,
     pub active_color: Color,
@@ -488,7 +488,7 @@ pub struct Button {
 impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         Self {
-            label: TextValue::new(label.into()),
+            label: label.into(),
             style: Style::new()
                 .display(taffy::Display::Flex)
                 .padding(10.0)
@@ -548,17 +548,18 @@ impl Button {
     /// Set the button label (for incremental updates).
     /// Returns true if the label changed.
     pub fn set_label(&mut self, label: impl Into<String>) -> bool {
-        self.label.set(label)
+        let new_label = label.into();
+        if self.label != new_label {
+            self.label = new_label;
+            true
+        } else {
+            false
+        }
     }
 
     /// Get the current label.
     pub fn get_label(&self) -> &str {
-        self.label.get()
-    }
-
-    /// Get the label version for cache invalidation.
-    pub fn label_version(&self) -> u32 {
-        self.label.version()
+        &self.label
     }
 
     /// Set the button hover color (for incremental updates).
@@ -592,7 +593,7 @@ impl Widget for Button {
     fn measure(&self, _available_space: Vec2, font_renderer: Option<&FontRenderer>) -> Vec2 {
         // Measure button label text
         if let Some(renderer) = font_renderer {
-            let text_style = TextStyle::new(self.label.get())
+            let text_style = TextStyle::new(&self.label)
                 .size(self.font_size)
                 .color(self.text_color);
             let (text_width, text_height) = renderer.measure_text(&text_style);
@@ -617,7 +618,7 @@ impl Widget for Button {
         }
 
         // Fallback: estimate
-        let char_count = self.label.get().chars().count() as f32;
+        let char_count = self.label.chars().count() as f32;
         let estimated_width = char_count * self.font_size * 0.6 + 20.0;
         let estimated_height = self.font_size * 1.2 + 20.0;
         Vec2::new(estimated_width, estimated_height)
@@ -690,7 +691,7 @@ impl Widget for Row {
 /// Text input widget - editable text field.
 #[derive(Clone)]
 pub struct TextInput {
-    pub content: TextValue,
+    pub content: String,
     pub placeholder: String,
     pub font_size: f32,
     pub text_color: Color,
@@ -705,7 +706,7 @@ pub struct TextInput {
 impl TextInput {
     pub fn new(placeholder: impl Into<String>) -> Self {
         Self {
-            content: TextValue::new(""),
+            content: String::new(),
             placeholder: placeholder.into(),
             font_size: 16.0,
             text_color: Color::WHITE,
@@ -727,7 +728,7 @@ impl TextInput {
     pub fn content(mut self, content: impl Into<String>) -> Self {
         let content_str = content.into();
         self.cursor_position = content_str.len();
-        self.content = TextValue::new(content_str);
+        self.content = content_str;
         self
     }
 
@@ -736,17 +737,17 @@ impl TextInput {
     pub fn set_value(&mut self, value: impl Into<String>) -> bool {
         let value_str = value.into();
         self.cursor_position = value_str.len();
-        self.content.set(value_str)
+        if self.content != value_str {
+            self.content = value_str;
+            true
+        } else {
+            false
+        }
     }
 
     /// Get the current value.
     pub fn get_value(&self) -> &str {
-        self.content.get()
-    }
-
-    /// Get the content version for cache invalidation.
-    pub fn content_version(&self) -> u32 {
-        self.content.version()
+        &self.content
     }
 
     /// Set the placeholder text (for incremental updates).
@@ -783,42 +784,37 @@ impl TextInput {
     }
 
     pub fn insert_char(&mut self, c: char) {
-        if let Some(max) = self.max_length {
-            if self.content.get().len() >= max {
+        if let Some(max) = self.max_length
+            && self.content.len() >= max {
                 return;
             }
-        }
-        let mut new_content = self.content.get().to_string();
-        new_content.insert(self.cursor_position, c);
+        self.content.insert(self.cursor_position, c);
         self.cursor_position += 1;
-        self.content.set(new_content.clone());
         if let Some(ref callback) = self.on_change {
-            callback(new_content);
+            callback(self.content.clone());
         }
     }
 
     pub fn delete_char(&mut self) {
         if self.cursor_position > 0 {
             self.cursor_position -= 1;
-            let mut new_content = self.content.get().to_string();
-            new_content.remove(self.cursor_position);
-            self.content.set(new_content.clone());
+            self.content.remove(self.cursor_position);
             if let Some(ref callback) = self.on_change {
-                callback(new_content);
+                callback(self.content.clone());
             }
         }
     }
 
     pub fn display_text(&self) -> &str {
-        if self.content.get().is_empty() {
+        if self.content.is_empty() {
             &self.placeholder
         } else {
-            self.content.get()
+            &self.content
         }
     }
 
     pub fn display_color(&self) -> Color {
-        if self.content.get().is_empty() {
+        if self.content.is_empty() {
             self.placeholder_color
         } else {
             self.text_color
@@ -845,10 +841,10 @@ impl Widget for TextInput {
 
     fn measure(&self, _available_space: Vec2, font_renderer: Option<&FontRenderer>) -> Vec2 {
         if let Some(renderer) = font_renderer {
-            let text = if self.content.get().is_empty() {
+            let text = if self.content.is_empty() {
                 &self.placeholder
             } else {
-                self.content.get()
+                &self.content
             };
             let text_style = TextStyle::new(text)
                 .size(self.font_size)

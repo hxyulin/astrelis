@@ -105,10 +105,7 @@ impl<T: Asset> Handle<T> {
 
 impl<T: Asset> Clone for Handle<T> {
     fn clone(&self) -> Self {
-        Self {
-            id: self.id,
-            _marker: PhantomData,
-        }
+        *self
     }
 }
 
@@ -365,5 +362,89 @@ impl<T: Asset> Clone for TrackedHandle<T> {
             handle: self.handle,
             seen_version: self.seen_version,
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use astrelis_core::alloc::sparse_set::IndexSlot;
+    use std::sync::atomic::AtomicU32;
+
+    // Define a test asset type
+    #[derive(Debug, Clone)]
+    struct TestAsset;
+
+    impl Asset for TestAsset {
+        fn type_name() -> &'static str {
+            "TestAsset"
+        }
+    }
+
+    fn make_test_handle() -> Handle<TestAsset> {
+        let slot = IndexSlot::new(1, 42); // generation, index
+        let type_id = TypeId::of::<TestAsset>();
+        let handle_id = HandleId::new(slot, type_id);
+        Handle::new(handle_id)
+    }
+
+    #[test]
+    fn test_strong_handle_new_and_refcount() {
+        // Create a handle and refcount
+        let handle = make_test_handle();
+        let refcount = Arc::new(AtomicU32::new(0));
+
+        // Create a strong handle using the new() method
+        let strong = StrongHandle::new(handle, Arc::clone(&refcount));
+
+        // Verify refcount was incremented
+        assert_eq!(strong.ref_count(), 1);
+        assert_eq!(refcount.load(Ordering::Relaxed), 1);
+
+        // Clone the strong handle
+        let strong2 = strong.clone();
+        assert_eq!(strong2.ref_count(), 2);
+        assert_eq!(refcount.load(Ordering::Relaxed), 2);
+
+        // Drop one handle
+        drop(strong);
+        assert_eq!(strong2.ref_count(), 1);
+        assert_eq!(refcount.load(Ordering::Relaxed), 1);
+
+        // Drop the last handle
+        drop(strong2);
+        assert_eq!(refcount.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_strong_handle_downgrade() {
+        let handle = make_test_handle();
+        let refcount = Arc::new(AtomicU32::new(0));
+        let strong = StrongHandle::new(handle, Arc::clone(&refcount));
+
+        // Downgrade to weak
+        let weak = strong.downgrade();
+        assert_eq!(weak.handle(), handle);
+
+        // Strong still keeps refcount
+        assert_eq!(strong.ref_count(), 1);
+
+        // Weak can upgrade while strong exists
+        let upgraded = weak.upgrade();
+        assert!(upgraded.is_some());
+        if let Some(upgraded_strong) = upgraded {
+            assert_eq!(upgraded_strong.ref_count(), 2); // original + upgraded
+            drop(upgraded_strong);
+        }
+
+        // After dropping the original strong handle, refcount goes to 0
+        drop(strong);
+        assert_eq!(refcount.load(Ordering::Relaxed), 0);
+
+        // Weak can still create a handle, but it represents a dead reference
+        // (The refcount is managed separately from Arc lifecycle)
+        let second_upgrade = weak.upgrade();
+        assert!(second_upgrade.is_some()); // Weak can still upgrade since Arc<AtomicU32> exists
     }
 }

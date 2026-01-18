@@ -7,6 +7,7 @@
 //!
 //! Run with: cargo run -p astrelis --example window_app
 
+use std::sync::Arc;
 use astrelis::prelude::*;
 use astrelis::render::{RenderTarget, RenderableWindow, WindowContextDescriptor};
 use astrelis::winit::window::WindowBackend;
@@ -42,16 +43,14 @@ impl App for WindowApp {
         // Begin drawing
         let mut frame = renderable.begin_drawing();
 
-        // Create a simple clear pass with a dark color
-        {
-            let _pass = RenderPassBuilder::new()
-                .label("Clear Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(Color::rgb(0.1, 0.1, 0.15)) // Dark blue-gray
-                .build(&mut frame);
-
-            // In a real app, you would draw here
-        }
+        // Clear with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::rgb(0.1, 0.1, 0.15), // Dark blue-gray
+            |_pass| {
+                // In a real app, you would draw here
+            },
+        );
 
         // Frame is automatically submitted when dropped
     }
@@ -84,11 +83,11 @@ fn main() {
         let engine = Engine::builder().add_plugin(RenderPlugin).build();
 
         // Get the graphics context from the engine
-        let graphics = engine.get::<&'static GraphicsContext>().unwrap();
+        let graphics = engine.get::<Arc<GraphicsContext>>().unwrap();
 
         // Create a renderable window
         let renderable =
-            RenderableWindow::new_with_descriptor(window, graphics, WindowContextDescriptor::default());
+            RenderableWindow::new_with_descriptor(window, graphics.clone(), WindowContextDescriptor::default());
 
         Box::new(WindowApp {
             engine,

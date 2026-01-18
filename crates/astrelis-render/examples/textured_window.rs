@@ -1,6 +1,6 @@
 use astrelis_core::logging;
 use astrelis_render::{
-    GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow, WindowContextDescriptor,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
 };
 use astrelis_winit::{
     WindowId,
@@ -20,7 +20,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -31,7 +31,7 @@ fn main() {
 
         let window = RenderableWindow::new_with_descriptor(
             window,
-            graphics_ctx,
+            graphics_ctx.clone(),
             WindowContextDescriptor {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
@@ -260,25 +260,18 @@ impl astrelis_winit::app::App for App {
 
         let mut frame = self.window.begin_drawing();
 
-        // Using new simplified RenderPassBuilder API with RenderTarget
-        {
-            let mut render_pass = RenderPassBuilder::new()
-                .label("Render Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(wgpu::Color {
-                    r: 0.1,
-                    g: 0.2,
-                    b: 0.3,
-                    a: 1.0,
-                })
-                .build(&mut frame);
-
-            let pass = render_pass.descriptor();
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.draw(0..6, 0..1);
-        }
+        // Render with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::rgb(0.1, 0.2, 0.3),
+            |pass| {
+                let pass = pass.descriptor();
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[]);
+                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+                pass.draw(0..6, 0..1);
+            },
+        );
 
         frame.finish();
     }

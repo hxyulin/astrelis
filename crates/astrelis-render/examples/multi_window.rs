@@ -10,7 +10,7 @@
 
 use astrelis_core::logging;
 use astrelis_render::{
-    GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow, WindowContextDescriptor,
+    GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
 };
 use astrelis_winit::{
     WindowId,
@@ -19,9 +19,10 @@ use astrelis_winit::{
     window::{WindowBackend, WindowDescriptor},
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 
 struct App {
-    context: &'static GraphicsContext,
+    context: Arc<GraphicsContext>,
     windows: HashMap<WindowId, (RenderableWindow, wgpu::Color)>,
 }
 
@@ -29,7 +30,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
 
         let mut windows = HashMap::new();
 
@@ -66,7 +67,7 @@ fn main() {
 
             let renderable_window = RenderableWindow::new_with_descriptor(
                 window,
-                graphics_ctx,
+                graphics_ctx.clone(),
                 WindowContextDescriptor {
                     format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                     ..Default::default()
@@ -114,13 +115,14 @@ impl astrelis_winit::app::App for App {
         // Render this specific window
         let mut frame = window.begin_drawing();
 
-        {
-            let _render_pass = RenderPassBuilder::new()
-                .label("Multi-Window Render Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(*color)
-                .build(&mut frame);
-        }
+        // Render with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            astrelis_render::Color::rgba(color.r as f32, color.g as f32, color.b as f32, color.a as f32),
+            |_pass| {
+                // Just clearing - no rendering commands needed
+            },
+        );
 
         frame.finish();
     }

@@ -181,11 +181,10 @@ impl AssetServer {
         let storage = self.storages.get_or_create::<T>();
 
         // Check if already loaded (use canonical key for dedup)
-        if let Some(existing) = storage.find_by_source(&source) {
-            if storage.is_ready(&existing) {
+        if let Some(existing) = storage.find_by_source(&source)
+            && storage.is_ready(&existing) {
                 return Ok(existing);
             }
-        }
 
         // Reserve a handle
         let handle = storage.reserve(source.clone());
@@ -267,14 +266,13 @@ impl AssetServer {
 
     /// Remove an asset by handle.
     pub fn remove<T: Asset>(&mut self, handle: &Handle<T>) {
-        if let Some(storage) = self.storages.get_mut::<T>() {
-            if storage.remove(handle).is_some() {
+        if let Some(storage) = self.storages.get_mut::<T>()
+            && storage.remove(handle).is_some() {
                 self.events.push(AssetEvent::Removed {
                     handle_id: handle.id(),
                     type_id: TypeId::of::<T>(),
                 });
             }
-        }
     }
 
     /// Drain all events from this frame.

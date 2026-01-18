@@ -63,7 +63,7 @@ Astrelis is a modular 2D/3D Rust game engine with a layered architecture:
 
 **Rendering Layer:**
 - `astrelis-render`: WGPU-based GPU rendering
-  - `GraphicsContext`: Static lifetime GPU context (device, queue, adapter) - created once via `Box::leak`
+  - `GraphicsContext`: GPU context (device, queue, adapter) with Arc-based shared ownership
   - `WindowContext`: Per-window surface management
   - `FrameContext`: Per-frame rendering state (RAII - Drop submits commands and presents)
   - `Renderer`: Low-level utility for shader/buffer/bind group creation
@@ -91,8 +91,8 @@ Astrelis is a modular 2D/3D Rust game engine with a layered architecture:
 
 ### Key Architectural Patterns
 
-**Static Lifetime Pattern:**
-`GraphicsContext` uses `Box::leak` to achieve `'static` lifetime, simplifying API by eliminating lifetime parameters. It's created once at startup and lives for the program lifetime.
+**Arc-Based Shared Ownership:**
+`GraphicsContext` uses `Arc<GraphicsContext>` for shared ownership, enabling proper resource cleanup while maintaining cheap cloning. Use `GraphicsContext::new_owned_sync()` to create an owned context. The Arc pattern eliminates memory leaks while keeping the API ergonomic.
 
 **RAII Resource Management:**
 `FrameContext::Drop` automatically submits commands and presents the surface. Always ensure frame contexts go out of scope properly.
@@ -147,41 +147,65 @@ ui.update_color("greeting", Color::RED);
 
 ## Rendering Pipeline Flow
 
-**Typical frame:**
+**Typical frame (recommended pattern):**
 ```rust
 // 1. Begin frame (acquires surface texture, creates encoder)
 let mut frame = renderable_window.begin_drawing();
 
-// 2. Create render pass
+// 2. Clear and render with automatic pass scoping
+frame.clear_and_render(
+    RenderTarget::Surface,
+    Color::BLACK,
+    |pass| {
+        ui.render(pass.descriptor());
+    },
+);
+
+// 3. Finish frame (Drop impl submits and presents)
+frame.finish();
+```
+
+**Alternative (manual pass management):**
+```rust
+let mut frame = renderable_window.begin_drawing();
+
 {
     let mut pass = RenderPassBuilder::new()
         .target(RenderTarget::Surface)
         .clear_color(Color::BLACK)
         .build(&mut frame);
 
-    // 3. Render (UI, sprites, etc.)
     ui.render(pass.descriptor());
-}
+} // pass drops here automatically
 
-// 4. Finish frame (Drop impl submits and presents)
 frame.finish();
 ```
 
-**IMPORTANT:** Render passes must be dropped before `frame.finish()`. Use block scoping `{ }` to ensure pass drops first.
+**IMPORTANT:** Render passes must be dropped before `frame.finish()`. The `clear_and_render` method handles this automatically via closure scoping.
 
 ## Application Entry Points
 
 **Low-level approach (using `App` trait):**
 ```rust
+use std::sync::Arc;
 use astrelis_winit::{run_app, App, AppCtx};
+use astrelis_render::GraphicsContext;
 
 fn main() {
     run_app(|ctx| {
-        let graphics = GraphicsContext::new_sync();
+        let graphics = GraphicsContext::new_owned_sync();
         let window = ctx.create_window(descriptor).unwrap();
-        let renderable = RenderableWindow::new(window, graphics);
-        Box::new(MyApp { renderable })
+        let renderable = RenderableWindow::new(window, graphics.clone());
+        Box::new(MyApp {
+            graphics,
+            renderable
+        })
     });
+}
+
+struct MyApp {
+    graphics: Arc<GraphicsContext>,
+    renderable: RenderableWindow,
 }
 
 impl App for MyApp {
@@ -221,9 +245,9 @@ let assets = engine.get::<AssetServer>().unwrap();
 - Asset handle lookups (SparseSet in `crates/astrelis-assets`)
 
 **Common pitfalls:**
-- Forgetting to drop render pass before `frame.finish()`
+- Forgetting to drop render pass before `frame.finish()` (use `clear_and_render` for automatic scoping)
 - Not marking UI nodes dirty after state changes
-- Creating GraphicsContext multiple times (should be singleton)
+- Forgetting to `.clone()` Arc<GraphicsContext> when passing to multiple owners
 - Mixing up generational handle generations (always use AssetServer API)
 
 ## File Locations for Common Tasks

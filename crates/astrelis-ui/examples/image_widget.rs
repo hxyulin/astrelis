@@ -5,7 +5,7 @@
 
 use astrelis_core::logging;
 use astrelis_render::{
-    GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow, WindowContextDescriptor,
+    GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
     wgpu,
 };
 use astrelis_ui::{
@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 struct App {
-    context: &'static GraphicsContext,
+    context: Arc<GraphicsContext>,
     windows: HashMap<WindowId, RenderableWindow>,
     ui: UiSystem,
     texture: ImageTexture,
@@ -31,7 +31,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
         let mut windows = HashMap::new();
 
         let scale = Window::platform_dpi() as f32;
@@ -45,7 +45,7 @@ fn main() {
 
         let renderable_window = RenderableWindow::new_with_descriptor(
             window,
-            graphics_ctx,
+            graphics_ctx.clone(),
             WindowContextDescriptor {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
@@ -56,9 +56,9 @@ fn main() {
         windows.insert(window_id, renderable_window);
 
         // Create a procedural checkerboard texture
-        let texture = create_checkerboard_texture(graphics_ctx, 256, 256, 32);
+        let texture = create_checkerboard_texture(&graphics_ctx, 256, 256, 32);
 
-        let mut ui = UiSystem::new(graphics_ctx);
+        let mut ui = UiSystem::new(graphics_ctx.clone());
 
         // Build the UI with multiple image widgets showing different features
         build_image_demo(&mut ui, texture.clone());
@@ -410,20 +410,14 @@ impl astrelis_winit::app::App for App {
 
         let mut frame = window.begin_drawing();
 
-        {
-            let mut render_pass = RenderPassBuilder::new()
-                .label("UI Render Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(wgpu::Color {
-                    r: 0.1,
-                    g: 0.1,
-                    b: 0.15,
-                    a: 1.0,
-                })
-                .build(&mut frame);
-
-            self.ui.render(render_pass.descriptor());
-        }
+        // Render UI with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::rgb(0.1, 0.1, 0.15),
+            |pass| {
+                self.ui.render(pass.descriptor());
+            },
+        );
 
         frame.finish();
     }

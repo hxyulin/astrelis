@@ -10,6 +10,7 @@ members = [
   "crates/astrelis-input",
   "crates/astrelis-render",
   "crates/astrelis-scene",
+  "crates/astrelis-test-utils",
   "crates/astrelis-text",
   "crates/astrelis-ui",
   "crates/astrelis-winit",
@@ -24,6 +25,7 @@ default-members = [
   "crates/astrelis-input",
   "crates/astrelis-render",
   "crates/astrelis-scene",
+  "crates/astrelis-test-utils",
   "crates/astrelis-text",
   "crates/astrelis-ui",
   "crates/astrelis-winit",
@@ -48,6 +50,7 @@ astrelis-egui = { path = "crates/astrelis-egui", version = "0.0.1" }
 astrelis-input = { path = "crates/astrelis-input", version = "0.0.1" }
 astrelis-render = { path = "crates/astrelis-render", version = "0.0.1" }
 astrelis-scene = { path = "crates/astrelis-scene", version = "0.0.1" }
+astrelis-test-utils = { path = "crates/astrelis-test-utils", version = "0.0.1" }
 astrelis-text = { path = "crates/astrelis-text", version = "0.0.1" }
 astrelis-ui = { path = "crates/astrelis-ui", version = "0.0.1" }
 astrelis-winit = { path = "crates/astrelis-winit", version = "0.0.1" }

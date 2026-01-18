@@ -177,6 +177,8 @@ pub struct FontRenderer {
 
     // GPU resources
     pipeline: wgpu::RenderPipeline,
+    /// Kept alive for pipeline - must not be dropped while pipeline exists
+    #[allow(dead_code)]
     bind_group_layout: wgpu::BindGroupLayout,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
     atlas_texture: wgpu::Texture,
@@ -253,17 +255,17 @@ impl FontRenderer {
     }
 
     /// Create a new font renderer.
-    pub fn new(context: &'static GraphicsContext, font_system: FontSystem) -> Self {
+    pub fn new(context: Arc<GraphicsContext>, font_system: FontSystem) -> Self {
         Self::new_with_atlas_size(context, font_system, 2048)
     }
 
     /// Create a new font renderer with a custom atlas size.
     pub fn new_with_atlas_size(
-        context: &'static GraphicsContext,
+        context: Arc<GraphicsContext>,
         font_system: FontSystem,
         atlas_size: u32,
     ) -> Self {
-        let renderer = Renderer::new(context);
+        let renderer = Renderer::new(context.clone());
         let swash_cache = Arc::new(RwLock::new(SwashCache::new()));
 
         // Create shader

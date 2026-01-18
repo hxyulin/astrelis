@@ -1,7 +1,8 @@
+use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_core::math::Vec2;
 use astrelis_render::{
-    Color, GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow,
+    Color, GraphicsContext, RenderTarget, RenderableWindow,
     WindowContextDescriptor, wgpu,
 };
 use astrelis_text::{FontRenderer, FontSystem, Text};
@@ -13,7 +14,7 @@ use astrelis_winit::{
 };
 
 struct SimpleTextApp {
-    context: &'static GraphicsContext,
+    context: Arc<GraphicsContext>,
     window: RenderableWindow,
     window_id: WindowId,
     font_renderer: FontRenderer,
@@ -23,7 +24,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -35,7 +36,7 @@ fn main() {
 
         let window = RenderableWindow::new_with_descriptor(
             window,
-            graphics_ctx,
+            graphics_ctx.clone(),
             WindowContextDescriptor {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
@@ -46,7 +47,7 @@ fn main() {
 
         // Initialize font system with system fonts
         let font_system = FontSystem::with_system_fonts();
-        let mut font_renderer = FontRenderer::new(graphics_ctx, font_system);
+        let mut font_renderer = FontRenderer::new(graphics_ctx.clone(), font_system);
         font_renderer.set_viewport(window.viewport());
 
         tracing::info!("Simple text example initialized");
@@ -108,17 +109,15 @@ impl App for SimpleTextApp {
         // Begin frame and render
         let mut frame = self.window.begin_drawing();
 
-        {
-            // Clear screen with dark background
-            let mut render_pass = RenderPassBuilder::new()
-                .label("Clear Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(Color::from_rgb_u8(25, 25, 35))
-                .build(&mut frame);
-
-            // Render all text
-            self.font_renderer.render(render_pass.descriptor());
-        }
+        // Render with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::from_rgb_u8(25, 25, 35),
+            |pass| {
+                // Render all text
+                self.font_renderer.render(pass.descriptor());
+            },
+        );
 
         frame.finish();
     }

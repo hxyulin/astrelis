@@ -112,6 +112,8 @@ pub trait PluginGroup {
 
 /// Wrapper to make a PluginGroup usable as a single Plugin.
 pub(crate) struct PluginGroupAdapter {
+    /// Plugin group name for debugging
+    #[allow(dead_code)]
     name: &'static str,
     plugins: Vec<Box<dyn Plugin>>,
 }

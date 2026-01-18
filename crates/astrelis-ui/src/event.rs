@@ -40,7 +40,8 @@ pub struct UiEventSystem {
     hovered: Option<NodeId>,
     /// Currently focused node.
     focused: Option<NodeId>,
-    /// Node with active tooltip.
+    /// Node with active tooltip (planned feature).
+    #[allow(dead_code)]
     tooltip_node: Option<NodeId>,
     /// Current mouse position.
     mouse_pos: Vec2,
@@ -146,30 +147,28 @@ impl UiEventSystem {
                 self.pressed_nodes.insert(hovered_id);
 
                 // Update button state
-                if let Some(widget) = tree.get_widget_mut(hovered_id) {
-                    if let Some(button) = widget.as_any_mut().downcast_mut::<Button>() {
+                if let Some(widget) = tree.get_widget_mut(hovered_id)
+                    && let Some(button) = widget.as_any_mut().downcast_mut::<Button>() {
                         button.is_pressed = true;
                         // Mark dirty for retained renderer
                         tree.mark_dirty_flags(hovered_id, crate::dirty::DirtyFlags::COLOR_ONLY);
                     }
-                }
             }
         } else {
             self.mouse_buttons.remove(&mouse_button);
 
             // Handle release - check if it's a click
-            if let Some(hovered_id) = self.hovered {
-                if self.pressed_nodes.contains(&hovered_id) {
+            if let Some(hovered_id) = self.hovered
+                && self.pressed_nodes.contains(&hovered_id) {
                     // This is a click!
                     self.dispatch_click(hovered_id, tree);
                 }
-            }
 
             // Clear pressed state on ALL previously pressed nodes
             // (handles release outside button, drag-away scenarios)
             for &pressed_node_id in &self.pressed_nodes {
-                if let Some(widget) = tree.get_widget_mut(pressed_node_id) {
-                    if let Some(button) = widget.as_any_mut().downcast_mut::<Button>() {
+                if let Some(widget) = tree.get_widget_mut(pressed_node_id)
+                    && let Some(button) = widget.as_any_mut().downcast_mut::<Button>() {
                         button.is_pressed = false;
                         // Mark dirty for retained renderer
                         tree.mark_dirty_flags(
@@ -177,7 +176,6 @@ impl UiEventSystem {
                             crate::dirty::DirtyFlags::COLOR_ONLY,
                         );
                     }
-                }
             }
 
             self.pressed_nodes.clear();
@@ -190,26 +188,22 @@ impl UiEventSystem {
 
         if new_hovered != self.hovered {
             // Clear old hover state
-            if let Some(old_id) = self.hovered {
-                if let Some(widget) = tree.get_widget_mut(old_id) {
-                    if let Some(button) = widget.as_any_mut().downcast_mut::<Button>() {
+            if let Some(old_id) = self.hovered
+                && let Some(widget) = tree.get_widget_mut(old_id)
+                    && let Some(button) = widget.as_any_mut().downcast_mut::<Button>() {
                         button.is_hovered = false;
                         // Mark dirty for retained renderer
                         tree.mark_dirty_flags(old_id, crate::dirty::DirtyFlags::COLOR_ONLY);
                     }
-                }
-            }
 
             // Set new hover state
-            if let Some(new_id) = new_hovered {
-                if let Some(widget) = tree.get_widget_mut(new_id) {
-                    if let Some(button) = widget.as_any_mut().downcast_mut::<Button>() {
+            if let Some(new_id) = new_hovered
+                && let Some(widget) = tree.get_widget_mut(new_id)
+                    && let Some(button) = widget.as_any_mut().downcast_mut::<Button>() {
                         button.is_hovered = true;
                         // Mark dirty for retained renderer
                         tree.mark_dirty_flags(new_id, crate::dirty::DirtyFlags::COLOR_ONLY);
                     }
-                }
-            }
 
             self.hovered = new_hovered;
         }
@@ -288,10 +282,10 @@ impl UiEventSystem {
 
     /// Handle keyboard input for focused widgets.
     fn handle_key_input(&mut self, key: &PhysicalKey, tree: &mut UiTree) {
-        if let Some(focused_id) = self.focused {
-            if let Some(widget) = tree.get_widget_mut(focused_id) {
-                if let Some(text_input) = widget.as_any_mut().downcast_mut::<TextInput>() {
-                    if let PhysicalKey::Code(code) = key {
+        if let Some(focused_id) = self.focused
+            && let Some(widget) = tree.get_widget_mut(focused_id)
+                && let Some(text_input) = widget.as_any_mut().downcast_mut::<TextInput>()
+                    && let PhysicalKey::Code(code) = key {
                         use astrelis_winit::event::KeyCode;
                         match code {
                             KeyCode::Backspace => {
@@ -304,22 +298,16 @@ impl UiEventSystem {
                             _ => {}
                         }
                     }
-                }
-            }
-        }
     }
 
     /// Handle character input for focused widgets.
     fn handle_char_input(&mut self, c: char, tree: &mut UiTree) {
-        if let Some(focused_id) = self.focused {
-            if let Some(widget) = tree.get_widget_mut(focused_id) {
-                if let Some(text_input) = widget.as_any_mut().downcast_mut::<TextInput>() {
-                    if !c.is_control() {
+        if let Some(focused_id) = self.focused
+            && let Some(widget) = tree.get_widget_mut(focused_id)
+                && let Some(text_input) = widget.as_any_mut().downcast_mut::<TextInput>()
+                    && !c.is_control() {
                         text_input.insert_char(c);
                     }
-                }
-            }
-        }
     }
 }
 

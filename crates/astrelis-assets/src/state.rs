@@ -8,8 +8,10 @@ use crate::source::AssetSource;
 
 /// The current state of an asset in the loading pipeline.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub enum AssetState<T> {
     /// The asset has not been loaded yet.
+    #[default]
     Unloaded,
 
     /// The asset is currently being loaded.
@@ -68,11 +70,6 @@ impl<T> AssetState<T> {
     }
 }
 
-impl<T> Default for AssetState<T> {
-    fn default() -> Self {
-        AssetState::Unloaded
-    }
-}
 
 /// Load state for tracking async loading progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

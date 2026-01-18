@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_egui::{Color32, Egui, RichText, Slider};
 use astrelis_render::{GraphicsContext, RenderableWindow};
@@ -9,7 +10,7 @@ use astrelis_winit::{
 };
 
 struct DemoApp {
-    _context: &'static GraphicsContext,
+    _context: Arc<GraphicsContext>,
     window: RenderableWindow,
     window_id: WindowId,
     egui: Egui,
@@ -26,7 +27,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -36,9 +37,9 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new(window, graphics_ctx);
+        let window = RenderableWindow::new(window, graphics_ctx.clone());
         let window_id = window.id();
-        let egui = Egui::new(&window, graphics_ctx);
+        let egui = Egui::new(&window, &graphics_ctx);
 
         Box::new(DemoApp {
             _context: graphics_ctx,
@@ -251,25 +252,15 @@ impl App for DemoApp {
 
         let mut frame = self.window.begin_drawing();
 
-        // Clear to dark background
+        // Clear to dark background with automatic scoping
         {
-            use astrelis_render::RenderPassBuilder;
-            let _render_pass = RenderPassBuilder::new()
+            use astrelis_render::{RenderPassBuilder, RenderTarget};
+            let render_pass = RenderPassBuilder::new()
                 .label("Clear Pass")
-                .color_attachment(
-                    None,
-                    None,
-                    wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.1,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                )
+                .target(RenderTarget::Surface)
+                .clear_color(astrelis_render::Color::rgb(0.1, 0.1, 0.1))
                 .build(&mut frame);
+            drop(render_pass);
         }
 
         self.egui.render(&self.window, &mut frame);

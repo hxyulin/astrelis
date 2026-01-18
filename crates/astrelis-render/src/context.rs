@@ -1,6 +1,31 @@
 use crate::features::GpuFeatures;
+use std::sync::Arc;
 
 /// A globally shared graphics context.
+///
+/// # Ownership Pattern
+///
+/// This type uses Arc for shared ownership:
+///
+/// ```rust,no_run
+/// use astrelis_render::GraphicsContext;
+/// use std::sync::Arc;
+///
+/// // Synchronous creation (blocks on async internally)
+/// let ctx = GraphicsContext::new_owned_sync(); // Returns Arc<Self>
+/// let ctx2 = ctx.clone(); // Cheap clone (Arc)
+///
+/// // Asynchronous creation (for async contexts)
+/// # async fn example() {
+/// let ctx = GraphicsContext::new_owned().await; // Returns Arc<Self>
+/// # }
+/// ```
+///
+/// Benefits of the Arc pattern:
+/// - No memory leak
+/// - Proper cleanup on drop
+/// - Better for testing (can create/destroy contexts)
+/// - Arc internally makes cloning cheap
 pub struct GraphicsContext {
     pub instance: wgpu::Instance,
     pub adapter: wgpu::Adapter,
@@ -11,26 +36,39 @@ pub struct GraphicsContext {
 }
 
 impl GraphicsContext {
-    /// Creates a new graphics context synchronously.
+    /// Creates a new graphics context with owned ownership (recommended).
     ///
-    /// See [`GraphicsContext::new`] for the asynchronous version.
-    pub fn new_sync() -> &'static Self {
-        pollster::block_on(Self::new())
+    /// Returns `Arc<Self>` which can be cheaply cloned and shared.
+    /// This is the preferred method for new code as it doesn't leak memory.
+    ///
+    /// # Example
+    /// ```rust,no_run
+    /// use astrelis_render::GraphicsContext;
+    ///
+    /// # async fn example() {
+    /// let ctx = GraphicsContext::new_owned().await;
+    /// let ctx2 = ctx.clone(); // Cheap clone
+    /// # }
+    /// ```
+    pub async fn new_owned() -> Arc<Self> {
+        Self::new_owned_with_descriptor(GraphicsContextDescriptor::default()).await
     }
 
-    /// Creates a new graphics context asynchronously.
+    /// Creates a new graphics context synchronously with owned ownership (recommended).
     ///
-    /// This returns a static reference to simplify the public API and lifecycle
-    pub async fn new() -> &'static Self {
-        Self::new_with_descriptor(GraphicsContextDescriptor::default()).await
+    /// This blocks the current thread until the context is created.
+    pub fn new_owned_sync() -> Arc<Self> {
+        pollster::block_on(Self::new_owned())
     }
 
-    /// Creates a new graphics context with custom descriptor.
-    ///
-    /// # Panics
-    ///
-    /// Panics if any required features are not supported by the adapter.
-    pub async fn new_with_descriptor(descriptor: GraphicsContextDescriptor) -> &'static Self {
+    /// Creates a new graphics context with custom descriptor (owned).
+    pub async fn new_owned_with_descriptor(descriptor: GraphicsContextDescriptor) -> Arc<Self> {
+        let context = Self::create_context_internal(descriptor).await;
+        Arc::new(context)
+    }
+
+    /// Internal method to create context without deciding on ownership pattern.
+    async fn create_context_internal(descriptor: GraphicsContextDescriptor) -> Self {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: descriptor.backends,
             ..Default::default()
@@ -91,13 +129,13 @@ impl GraphicsContext {
             enabled_features
         );
 
-        Box::leak(Box::new(Self {
+        Self {
             instance,
             adapter,
             device,
             queue,
             enabled_features,
-        }))
+        }
     }
 
     /// Get device info

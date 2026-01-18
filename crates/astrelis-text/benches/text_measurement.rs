@@ -1,13 +1,14 @@
 //! Benchmarks for text measurement operations
 
+use std::sync::Arc;
 use astrelis_render::GraphicsContext;
 use astrelis_text::{FontRenderer, FontSystem, Text};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
-fn setup() -> (&'static GraphicsContext, FontRenderer) {
-    let context = GraphicsContext::new_sync();
+fn setup() -> (Arc<GraphicsContext>, FontRenderer) {
+    let context = GraphicsContext::new_owned_sync();
     let font_system = FontSystem::with_system_fonts();
-    let renderer = FontRenderer::new(context, font_system);
+    let renderer = FontRenderer::new(context.clone(), font_system);
     (context, renderer)
 }
 

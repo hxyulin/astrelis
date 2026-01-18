@@ -12,7 +12,7 @@
 //! ```rust,no_run
 //! # use astrelis_ui::UiSystem;
 //! # use astrelis_render::{Color, GraphicsContext};
-//! # let graphics_context = GraphicsContext::new_sync();
+//! # let graphics_context = GraphicsContext::new_owned_sync();
 //! let mut ui = UiSystem::new(graphics_context);
 //!
 //! ui.build(|root| {
@@ -53,10 +53,12 @@ pub mod metrics;
 pub mod renderer;
 pub mod style;
 pub mod tree;
+pub mod widget;
 pub mod widget_id;
 pub mod widgets;
 
 use astrelis_core::geometry::Size;
+use std::sync::Arc;
 pub use auto_dirty::{NumericValue, TextValue, Value};
 pub use debug::DebugOverlay;
 pub use dirty::DirtyFlags;
@@ -72,6 +74,13 @@ pub use metrics::UiMetrics;
 pub use astrelis_text::{TextPipeline, TextShapeRequest, TextShaper, SyncTextShaper};
 pub use widget_id::{WidgetId, WidgetIdRegistry};
 pub use widgets::{Image, ImageFit, ImageTexture, ImageUV};
+
+// Re-export new widget system types
+pub use widget::{
+    ClickableWidget, ColorWidget, ParentWidget, SizedWidget, TextWidget,
+    WidgetHandle, WidgetStorage, AnyWidgetHandle, TextWidgetHandle,
+    ParentWidgetHandle, ColorWidgetHandle,
+};
 
 // Re-export main types
 pub use builder::{ImageBuilder, UiBuilder, WidgetBuilder};
@@ -178,9 +187,9 @@ impl UiCore {
         widget_id: WidgetId,
         new_label: impl Into<String>,
     ) -> bool {
-        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
-            if let Some(node) = self.tree.get_node_mut(node_id) {
-                if let Some(button) = node.widget.as_any_mut().downcast_mut::<widgets::Button>() {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id)
+            && let Some(node) = self.tree.get_node_mut(node_id)
+                && let Some(button) = node.widget.as_any_mut().downcast_mut::<widgets::Button>() {
                     let changed = button.set_label(new_label);
                     if changed {
                         self.tree
@@ -188,8 +197,6 @@ impl UiCore {
                     }
                     return changed;
                 }
-            }
-        }
         false
     }
 
@@ -197,9 +204,9 @@ impl UiCore {
     ///
     /// Returns true if the value changed.
     pub fn update_text_input(&mut self, widget_id: WidgetId, new_value: impl Into<String>) -> bool {
-        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
-            if let Some(node) = self.tree.get_node_mut(node_id) {
-                if let Some(input) = node
+        if let Some(node_id) = self.widget_registry.get_node(widget_id)
+            && let Some(node) = self.tree.get_node_mut(node_id)
+                && let Some(input) = node
                     .widget
                     .as_any_mut()
                     .downcast_mut::<widgets::TextInput>()
@@ -211,8 +218,6 @@ impl UiCore {
                     }
                     return changed;
                 }
-            }
-        }
         false
     }
 
@@ -269,7 +274,7 @@ pub struct UiSystem {
 
 impl UiSystem {
     /// Create a new UI system with rendering support.
-    pub fn new(context: &'static GraphicsContext) -> Self {
+    pub fn new(context: Arc<GraphicsContext>) -> Self {
         Self {
             core: UiCore::new(),
             renderer: UiRenderer::new(context),
@@ -332,7 +337,7 @@ impl UiSystem {
     /// ```no_run
     /// # use astrelis_ui::{UiSystem, WidgetId};
     /// # use astrelis_render::GraphicsContext;
-    /// # let context = GraphicsContext::new_sync();
+    /// # let context = GraphicsContext::new_owned_sync();
     /// # let mut ui = UiSystem::new(context);
     /// let counter_id = WidgetId::new("counter");
     /// ui.update_text(counter_id, "Count: 42");

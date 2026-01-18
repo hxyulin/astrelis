@@ -205,6 +205,7 @@ name = "astrelis-render"
 version = "0.0.1"
 dependencies = [
  "astrelis-core",
+ "astrelis-test-utils",
  "astrelis-winit",
  "bitflags 2.10.0",
  "bytemuck",
@@ -216,6 +217,14 @@ dependencies = [
 [[package]]
 name = "astrelis-scene"
 version = "0.0.1"
+
+[[package]]
+name = "astrelis-test-utils"
+version = "0.0.1"
+dependencies = [
+ "parking_lot",
+ "wgpu",
+]
 
 [[package]]
 name = "astrelis-text"
@@ -239,6 +248,7 @@ dependencies = [
 name = "astrelis-ui"
 version = "0.0.1"
 dependencies = [
+ "ahash",
  "astrelis-core",
  "astrelis-render",
  "astrelis-text",

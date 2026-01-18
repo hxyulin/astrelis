@@ -164,11 +164,10 @@ impl InputState {
                     }
 
                     // Collect text input
-                    if key_event.state == ElementState::Pressed {
-                        if let Some(ref text) = key_event.text {
+                    if key_event.state == ElementState::Pressed
+                        && let Some(ref text) = key_event.text {
                             self.text_input.push_str(text);
                         }
-                    }
 
                     HandleStatus::handled()
                 }

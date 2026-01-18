@@ -260,9 +260,7 @@ impl AssetStorages {
     pub fn get_or_create<T: Asset>(&mut self) -> &mut Assets<T> {
         let type_id = TypeId::of::<T>();
 
-        if !self.storages.contains_key(&type_id) {
-            self.storages.insert(type_id, Box::new(Assets::<T>::new()));
-        }
+        self.storages.entry(type_id).or_insert_with(|| Box::new(Assets::<T>::new()));
 
         self.storages
             .get_mut(&type_id)

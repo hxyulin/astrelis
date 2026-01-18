@@ -1,7 +1,8 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
+use std::sync::Arc;
 use astrelis_render::{
-    Color, GraphicsContext, RenderPassBuilder, RenderTarget, RenderableWindow,
+    Color, GraphicsContext, RenderTarget, RenderableWindow,
     WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::{UiSystem, widgets::*};
@@ -13,7 +14,7 @@ use astrelis_winit::{
 };
 
 struct SimpleUiApp {
-    graphics_ctx: &'static GraphicsContext,
+    graphics_ctx: Arc<GraphicsContext>,
     window: RenderableWindow,
     window_id: WindowId,
     ui: UiSystem,
@@ -26,7 +27,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync();
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -38,7 +39,7 @@ fn main() {
 
         let window = RenderableWindow::new_with_descriptor(
             window,
-            graphics_ctx,
+            graphics_ctx.clone(),
             WindowContextDescriptor {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
@@ -46,7 +47,7 @@ fn main() {
         );
 
         let window_id = window.id();
-        let ui = UiSystem::new(graphics_ctx);
+        let ui = UiSystem::new(graphics_ctx.clone());
 
         Box::new(SimpleUiApp {
             graphics_ctx,
@@ -203,16 +204,14 @@ impl App for SimpleUiApp {
         // Begin frame and render
         let mut frame = self.window.begin_drawing();
 
-        {
-            let mut render_pass = RenderPassBuilder::new()
-                .label("UI Render Pass")
-                .target(RenderTarget::Surface)
-                .clear_color(Color::from_rgb_u8(20, 20, 30))
-                .build(&mut frame);
-
-            // Render UI
-            self.ui.render(render_pass.descriptor());
-        }
+        // Render UI with automatic scoping (no manual {} block needed)
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            Color::from_rgb_u8(20, 20, 30),
+            |pass| {
+                self.ui.render(pass.descriptor());
+            },
+        );
 
         frame.finish();
     }

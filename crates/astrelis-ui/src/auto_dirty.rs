@@ -92,20 +92,16 @@ impl LayoutHash {
         std::mem::discriminant(&style.flex_direction).hash(&mut hasher);
         std::mem::discriminant(&style.flex_wrap).hash(&mut hasher);
         style
-            .align_items
-            .and_then(|v| Some(std::mem::discriminant(&v)))
+            .align_items.map(|v| std::mem::discriminant(&v))
             .hash(&mut hasher);
         style
-            .align_content
-            .and_then(|v| Some(std::mem::discriminant(&v)))
+            .align_content.map(|v| std::mem::discriminant(&v))
             .hash(&mut hasher);
         style
-            .align_self
-            .and_then(|v| Some(std::mem::discriminant(&v)))
+            .align_self.map(|v| std::mem::discriminant(&v))
             .hash(&mut hasher);
         style
-            .justify_content
-            .and_then(|v| Some(std::mem::discriminant(&v)))
+            .justify_content.map(|v| std::mem::discriminant(&v))
             .hash(&mut hasher);
         Self::hash_length_percentage(&mut hasher, &style.gap.width);
         Self::hash_length_percentage(&mut hasher, &style.gap.height);
@@ -167,8 +163,7 @@ impl<'a> StyleGuard<'a> {
     /// Get mutable reference to the Taffy layout style.
     pub fn layout_mut(&mut self) -> Option<&mut taffy::Style> {
         self.tree
-            .get_node_mut(self.node_id)
-            .and_then(|node| Some(&mut node.widget.style_mut().layout))
+            .get_node_mut(self.node_id).map(|node| &mut node.widget.style_mut().layout)
     }
 }
 

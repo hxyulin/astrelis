@@ -125,7 +125,7 @@ impl BytesReader for MemoryReader {
             .files
             .get(&key)
             .cloned()
-            .ok_or_else(|| AssetError::NotFound { path: key });
+            .ok_or(AssetError::NotFound { path: key });
 
         Box::pin(async move { result })
     }

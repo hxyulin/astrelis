@@ -18,6 +18,8 @@ pub struct State {
     viewport_id: egui::ViewportId,
     pointer_pos_in_points: Option<egui::Pos2>,
     any_pointer_button_down: bool,
+    /// Cursor icon state (planned for future cursor handling)
+    #[allow(dead_code)]
     current_cursor_icon: Option<egui::CursorIcon>,
 }
 
@@ -178,8 +180,8 @@ impl State {
     }
 
     fn on_mouse_button_input(&mut self, state: ElementState, button: MouseButton) {
-        if let Some(pos) = self.pointer_pos_in_points {
-            if let Some(button) = translate_mouse_button(button) {
+        if let Some(pos) = self.pointer_pos_in_points
+            && let Some(button) = translate_mouse_button(button) {
                 let pressed = state == ElementState::Pressed;
 
                 self.input.events.push(egui::Event::PointerButton {
@@ -189,13 +191,8 @@ impl State {
                     modifiers: self.input.modifiers,
                 });
 
-                if pressed {
-                    self.any_pointer_button_down = true;
-                } else {
-                    self.any_pointer_button_down = false;
-                }
+                self.any_pointer_button_down = pressed;
             }
-        }
     }
 
     fn on_cursor_moved(
@@ -286,8 +283,8 @@ impl State {
             });
         }
 
-        if let Some(text) = &text {
-            if !text.is_empty() && text.chars().all(is_printable_char) {
+        if let Some(text) = &text
+            && !text.is_empty() && text.chars().all(is_printable_char) {
                 let is_cmd = self.input.modifiers.ctrl
                     || self.input.modifiers.command
                     || self.input.modifiers.mac_cmd;
@@ -295,7 +292,6 @@ impl State {
                     self.input.events.push(egui::Event::Text(text.to_string()));
                 }
             }
-        }
     }
 }
 
@@ -311,9 +307,9 @@ pub fn pixels_per_point(context: &egui::Context, window: &RenderableWindow) -> f
 }
 
 fn is_printable_char(chr: char) -> bool {
-    let is_in_private_use_area = '\u{e000}' <= chr && chr <= '\u{f8ff}'
-        || '\u{f0000}' <= chr && chr <= '\u{ffffd}'
-        || '\u{100000}' <= chr && chr <= '\u{10fffd}';
+    let is_in_private_use_area = ('\u{e000}'..='\u{f8ff}').contains(&chr)
+        || ('\u{f0000}'..='\u{ffffd}').contains(&chr)
+        || ('\u{100000}'..='\u{10fffd}').contains(&chr);
 
     !is_in_private_use_area && !chr.is_ascii_control()
 }

@@ -4,6 +4,7 @@ use astrelis_winit::{
     event::PhysicalSize,
     window::{Window, WindowBackend},
 };
+use std::sync::Arc;
 
 use crate::{
     context::GraphicsContext,
@@ -41,8 +42,8 @@ impl Viewport {
     /// Get the size in logical pixels.
     pub fn to_logical(&self) -> Size<f32> {
         Size {
-            width: self.width as f32 / self.scale_factor as f32,
-            height: self.height as f32 / self.scale_factor as f32,
+            width: self.width / self.scale_factor as f32,
+            height: self.height / self.scale_factor as f32,
         }
     }
 }
@@ -71,7 +72,7 @@ impl PendingReconfigure {
 /// Window rendering context that manages a surface and its configuration.
 pub struct WindowContext {
     pub(crate) window: Window,
-    pub(crate) context: &'static GraphicsContext,
+    pub(crate) context: Arc<GraphicsContext>,
     pub(crate) surface: wgpu::Surface<'static>,
     pub(crate) config: wgpu::SurfaceConfiguration,
     pub(crate) reconfigure: PendingReconfigure,
@@ -80,7 +81,7 @@ pub struct WindowContext {
 impl WindowContext {
     pub fn new(
         window: Window,
-        context: &'static GraphicsContext,
+        context: Arc<GraphicsContext>,
         descriptor: WindowContextDescriptor,
     ) -> Self {
         let scale_factor = window.window.scale_factor();
@@ -134,7 +135,7 @@ impl WindowContext {
     }
 
     pub fn graphics_context(&self) -> &GraphicsContext {
-        self.context
+        &self.context
     }
 
     pub fn surface(&self) -> &wgpu::Surface<'static> {
@@ -205,7 +206,7 @@ impl WindowBackend for WindowContext {
                 view,
             }),
             encoder: Some(encoder),
-            context: self.context,
+            context: self.context.clone(),
             stats: FrameStats::new(),
             window: self.window.window.clone(),
             surface_format: self.config.format,
@@ -219,13 +220,13 @@ pub struct RenderableWindow {
 }
 
 impl RenderableWindow {
-    pub fn new(window: Window, context: &'static GraphicsContext) -> Self {
+    pub fn new(window: Window, context: Arc<GraphicsContext>) -> Self {
         Self::new_with_descriptor(window, context, WindowContextDescriptor::default())
     }
 
     pub fn new_with_descriptor(
         window: Window,
-        context: &'static GraphicsContext,
+        context: Arc<GraphicsContext>,
         descriptor: WindowContextDescriptor,
     ) -> Self {
         let context = WindowContext::new(window, context, descriptor);

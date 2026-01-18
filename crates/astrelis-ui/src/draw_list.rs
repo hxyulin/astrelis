@@ -430,7 +430,7 @@ impl DrawList {
         for (idx, cmd) in self.commands.iter().enumerate() {
             self.node_to_commands
                 .entry(cmd.node_id())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(idx);
         }
     }

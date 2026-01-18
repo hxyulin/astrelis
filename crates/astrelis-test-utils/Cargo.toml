@@ -1,0 +1,14 @@
+[package]
+name = "astrelis-test-utils"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# Enable mock GPU types for testing without a real GPU
+mock = []
+
+[dependencies]
+wgpu.workspace = true
+parking_lot = "0.12"

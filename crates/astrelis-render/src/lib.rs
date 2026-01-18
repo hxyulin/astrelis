@@ -20,6 +20,7 @@ mod blit;
 mod color;
 mod compute;
 mod context;
+mod context_impl;
 mod features;
 mod frame;
 mod framebuffer;

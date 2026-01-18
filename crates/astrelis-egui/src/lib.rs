@@ -71,7 +71,8 @@ impl Egui {
         self.state
             .handle_platform_output(window, full_output.platform_output);
 
-        let graphics_ctx = frame.graphics_context();
+        // Clone the Arc to avoid borrowing issues
+        let graphics_ctx = frame.context.clone();
         let device = &graphics_ctx.device;
         let queue = &graphics_ctx.queue;
 
@@ -81,7 +82,7 @@ impl Egui {
 
         for (id, image_delta) in &full_output.textures_delta.set {
             self.renderer
-                .update_texture(device, queue, *id, &image_delta);
+                .update_texture(device, queue, *id, image_delta);
         }
 
         let config = window.context().surface_config();
