@@ -8,7 +8,9 @@ use cosmic_text::{Buffer, CacheKey, Color as CosmicColor, Metrics, Shaping, Swas
 use astrelis_render::{GraphicsContext, Renderer, Viewport, wgpu};
 
 use crate::{
+    effects::TextEffects,
     font::FontSystem,
+    sdf::{SdfConfig, TextRenderMode, generate_sdf},
     text::{Text, TextMetrics, color_to_cosmic},
 };
 
@@ -122,6 +124,237 @@ pub struct GlyphPlacement {
     pub height: f32,
 }
 
+/// SDF glyph cache key - size-independent for scale-free rendering.
+///
+/// Unlike bitmap glyphs which need different cache entries per font size,
+/// SDF glyphs are rendered at a fixed base size (48px) and scaled via shader,
+/// so we only need `glyph_id` and `font_id` as cache keys.
+///
+/// # Why Size-Independent?
+///
+/// Traditional bitmap rendering requires a separate cached glyph for each font size
+/// (e.g., 12px, 16px, 24px would need 3 atlas entries). SDF rendering stores distance
+/// information that can be sampled at any scale, so a single cached glyph works for
+/// all sizes.
+///
+/// # Example
+///
+/// ```ignore
+/// use cosmic_text::CacheKey;
+/// use astrelis_text::SdfCacheKey;
+///
+/// let bitmap_key = CacheKey { glyph_id: 42, font_id: ..., font_size_bits: 16.0.to_bits(), ... };
+/// let sdf_key = SdfCacheKey::from_cache_key(bitmap_key);
+/// // sdf_key ignores font_size_bits - same key for all sizes
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SdfCacheKey {
+    /// The glyph ID within the font
+    pub glyph_id: u16,
+    /// The font ID (for supporting multiple fonts)
+    pub font_id: u32,
+}
+
+impl SdfCacheKey {
+    /// Create a new SDF cache key from a cosmic-text CacheKey.
+    ///
+    /// Extracts `glyph_id` and `font_id`, ignoring size-related fields
+    /// (`font_size_bits`, `x_bin`, `y_bin`) since SDF glyphs are resolution-independent.
+    ///
+    /// We use a hash of the `font_id` since cosmic_text's ID type is opaque.
+    ///
+    /// # Arguments
+    ///
+    /// * `cache_key` - A cosmic-text CacheKey containing glyph and font information
+    ///
+    /// # Returns
+    ///
+    /// A size-independent cache key suitable for SDF atlas lookups
+    pub fn from_cache_key(cache_key: CacheKey) -> Self {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        cache_key.font_id.hash(&mut hasher);
+        Self {
+            glyph_id: cache_key.glyph_id,
+            font_id: hasher.finish() as u32,
+        }
+    }
+}
+
+/// SDF atlas entry with additional metadata for SDF rendering.
+///
+/// Contains the information needed to render an SDF glyph at any size.
+/// The glyph is rasterized once at a fixed base size (48px), and the placement
+/// information is used to scale it correctly at render time.
+///
+/// # Fields
+///
+/// - `entry`: Position and size in the atlas texture
+/// - `spread`: Distance field spread in pixels (typically 4.0)
+/// - `base_size`: The size at which the glyph was rasterized (48px)
+/// - `base_placement`: Bearing offsets and dimensions at base size
+///
+/// # Rendering
+///
+/// At render time, the shader samples the SDF texture and the placement is
+/// scaled by `target_size / base_size` to achieve the correct appearance at
+/// any font size.
+///
+/// # Example
+///
+/// ```ignore
+/// // Glyph rasterized at 48px base size with 4px spread
+/// let sdf_entry = SdfAtlasEntry {
+///     entry: atlas_entry,
+///     spread: 4.0,
+///     base_size: 48.0,
+///     base_placement: GlyphPlacement { left: 2.0, top: 40.0, width: 28.0, height: 35.0 },
+/// };
+///
+/// // Render at 24px: scale factor = 24.0 / 48.0 = 0.5
+/// let render_width = sdf_entry.base_placement.width * 0.5;  // 14px
+/// ```
+#[derive(Debug, Clone)]
+pub struct SdfAtlasEntry {
+    /// Base atlas entry (position and size in atlas)
+    pub entry: AtlasEntry,
+    /// The SDF spread used when generating this glyph (distance field radius in pixels)
+    pub spread: f32,
+    /// Base font size at which the glyph was rasterized (typically 48px)
+    pub base_size: f32,
+    /// Original glyph metrics at base size (for scaling during rendering)
+    pub base_placement: GlyphPlacement,
+}
+
+/// SDF rendering parameters passed to shaders for text effects.
+///
+/// This structure is uploaded to the GPU as a uniform buffer and controls
+/// how the SDF shader renders effects like shadows, outlines, and glows.
+///
+/// # GPU Layout
+///
+/// The structure is `#[repr(C)]` and `bytemuck::Pod` for safe GPU upload.
+/// Padding fields ensure proper alignment for GPU uniform buffers.
+///
+/// # Usage
+///
+/// ```ignore
+/// use astrelis_text::{SdfParams, TextEffects, SdfConfig};
+///
+/// let effects = TextEffectsBuilder::new()
+///     .shadow(Vec2::new(2.0, 2.0), Color::BLACK)
+///     .outline(1.5, Color::WHITE)
+///     .build();
+///
+/// let config = SdfConfig::default();
+/// let params = SdfParams::from_effects(&effects, &config);
+/// // Upload params to GPU uniform buffer
+/// ```
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SdfParams {
+    /// Edge softness for anti-aliasing (0.0 to 1.0)
+    /// Lower values = sharper edges, higher values = softer edges
+    pub edge_softness: f32,
+    /// Outline width in SDF space (0.0 = no outline)
+    pub outline_width: f32,
+    /// Outline color (RGBA)
+    pub outline_color: [f32; 4],
+    /// Shadow offset in pixels (x, y)
+    pub shadow_offset: [f32; 2],
+    /// Shadow blur radius (0.0 = hard shadow)
+    pub shadow_blur: f32,
+    /// Shadow color (RGBA, typically with alpha < 1.0)
+    pub shadow_color: [f32; 4],
+    /// Glow radius in pixels (0.0 = no glow)
+    pub glow_radius: f32,
+    /// Glow color (RGBA)
+    pub glow_color: [f32; 4],
+    /// Padding for GPU alignment (unused)
+    pub _padding: [f32; 2],
+}
+
+impl Default for SdfParams {
+    fn default() -> Self {
+        Self {
+            edge_softness: 0.05,
+            outline_width: 0.0,
+            outline_color: [0.0, 0.0, 0.0, 1.0],
+            shadow_offset: [0.0, 0.0],
+            shadow_blur: 0.0,
+            shadow_color: [0.0, 0.0, 0.0, 0.5],
+            glow_radius: 0.0,
+            glow_color: [1.0, 1.0, 1.0, 0.5],
+            _padding: [0.0, 0.0],
+        }
+    }
+}
+
+impl SdfParams {
+    /// Create SDF parameters from a collection of text effects.
+    ///
+    /// Extracts effect parameters (shadow offset, outline width, etc.) from the
+    /// `TextEffects` collection and combines them with the SDF configuration to
+    /// produce shader-ready parameters.
+    ///
+    /// # Arguments
+    ///
+    /// * `effects` - Collection of text effects to convert
+    /// * `config` - SDF configuration for edge softness and other global settings
+    ///
+    /// # Returns
+    ///
+    /// GPU-ready SDF parameters that can be uploaded to a uniform buffer
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let effects = TextEffectsBuilder::new()
+    ///     .shadow(Vec2::new(2.0, 2.0), Color::rgba(0.0, 0.0, 0.0, 0.5))
+    ///     .outline(1.5, Color::WHITE)
+    ///     .build();
+    ///
+    /// let params = SdfParams::from_effects(&effects, &config);
+    /// queue.write_buffer(&uniform_buffer, 0, bytemuck::cast_slice(&[params]));
+    /// ```
+    pub fn from_effects(effects: &TextEffects, config: &SdfConfig) -> Self {
+        let mut params = Self {
+            edge_softness: config.edge_softness,
+            ..Default::default()
+        };
+
+        for effect in effects.sorted_by_priority() {
+            match &effect.effect_type {
+                crate::effects::TextEffectType::Shadow { offset, blur_radius, color } => {
+                    params.shadow_offset = [offset.x, offset.y];
+                    params.shadow_blur = *blur_radius;
+                    params.shadow_color = [color.r, color.g, color.b, color.a];
+                }
+                crate::effects::TextEffectType::Outline { width, color } => {
+                    params.outline_width = *width;
+                    params.outline_color = [color.r, color.g, color.b, color.a];
+                }
+                crate::effects::TextEffectType::Glow { radius, color, intensity: _ } => {
+                    params.glow_radius = *radius;
+                    params.glow_color = [color.r, color.g, color.b, color.a];
+                }
+                crate::effects::TextEffectType::InnerShadow { .. } => {
+                    // Inner shadow requires special handling in shader
+                }
+            }
+        }
+
+        params
+    }
+}
+
+/// Base size for SDF glyph rasterization.
+/// Glyphs are rasterized at this size, then scaled via shader.
+const SDF_BASE_SIZE: f32 = 48.0;
+
+/// Default SDF spread in pixels.
+const SDF_DEFAULT_SPREAD: f32 = 4.0;
+
 /// Simple row-based atlas packer.
 struct AtlasPacker {
     size: u32,
@@ -175,7 +408,7 @@ pub struct FontRenderer {
     font_system: Arc<RwLock<cosmic_text::FontSystem>>,
     swash_cache: Arc<RwLock<SwashCache>>,
 
-    // GPU resources
+    // GPU resources - Bitmap rendering
     pipeline: wgpu::RenderPipeline,
     /// Kept alive for pipeline - must not be dropped while pipeline exists
     #[allow(dead_code)]
@@ -186,12 +419,35 @@ pub struct FontRenderer {
     sampler: wgpu::Sampler,
     bind_group: wgpu::BindGroup,
 
-    // Atlas management
+    // Bitmap atlas management
     atlas_size: u32,
     atlas_data: Vec<u8>,
     atlas_entries: HashMap<CacheKey, AtlasEntry>,
     atlas_packer: AtlasPacker,
     atlas_dirty: bool,
+
+    // GPU resources - SDF rendering
+    sdf_pipeline: wgpu::RenderPipeline,
+    #[allow(dead_code)]
+    sdf_bind_group_layout: wgpu::BindGroupLayout,
+    sdf_atlas_texture: wgpu::Texture,
+    #[allow(dead_code)]
+    sdf_atlas_view: wgpu::TextureView,
+    sdf_bind_group: wgpu::BindGroup,
+    sdf_params_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    sdf_params_bind_group_layout: wgpu::BindGroupLayout,
+    sdf_params_bind_group: wgpu::BindGroup,
+
+    // SDF atlas management
+    sdf_atlas_data: Vec<u8>,
+    sdf_atlas_entries: HashMap<SdfCacheKey, SdfAtlasEntry>,
+    sdf_atlas_packer: AtlasPacker,
+    sdf_atlas_dirty: bool,
+
+    // Render mode configuration
+    render_mode: TextRenderMode,
+    sdf_config: SdfConfig,
 
     // Staging data
     vertices: Vec<TextVertex>,
@@ -208,6 +464,16 @@ impl FontRenderer {
         // we increase the text size in order to make it sharper on high-DPI displays
         buffer.set_text(&mut font_system, text, scale);
         buffer.layout(&mut font_system);
+        let (width, height) = buffer.bounds();
+        (width / scale, height / scale)
+    }
+
+    /// Get the logical (unscaled) bounds of a prepared text buffer.
+    ///
+    /// Use this to get the dimensions for layout purposes after calling `prepare()`.
+    /// The returned dimensions are in logical coordinates (not scaled by DPI).
+    pub fn buffer_bounds(&self, buffer: &TextBuffer) -> (f32, f32) {
+        let scale = self.viewport.scale_factor as f32;
         let (width, height) = buffer.bounds();
         (width / scale, height / scale)
     }
@@ -401,11 +667,167 @@ impl FontRenderer {
             cache: None,
         });
 
+        // ========== SDF Rendering Setup ==========
+
+        // Create SDF shader
+        let sdf_shader = renderer.create_shader(
+            Some("Text SDF Shader"),
+            include_str!("../shaders/text_sdf.wgsl"),
+        );
+
+        // Create SDF atlas texture (same size as bitmap atlas)
+        let sdf_atlas_texture = renderer.create_texture(&wgpu::TextureDescriptor {
+            label: Some("SDF Text Atlas"),
+            size: wgpu::Extent3d {
+                width: atlas_size,
+                height: atlas_size,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        let sdf_atlas_view = sdf_atlas_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sdf_atlas_data = vec![0u8; (atlas_size * atlas_size) as usize];
+
+        // SDF bind group layout (texture + sampler, same structure as bitmap)
+        let sdf_bind_group_layout = renderer.create_bind_group_layout(
+            Some("SDF Text Bind Group Layout"),
+            &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        );
+
+        let sdf_bind_group = renderer.create_bind_group(
+            Some("SDF Text Bind Group"),
+            &sdf_bind_group_layout,
+            &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&sdf_atlas_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        );
+
+        // SDF params uniform buffer
+        let sdf_params_buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("SDF Params Buffer"),
+            size: std::mem::size_of::<SdfParams>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // SDF params bind group layout
+        let sdf_params_bind_group_layout = renderer.create_bind_group_layout(
+            Some("SDF Params Bind Group Layout"),
+            &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        );
+
+        let sdf_params_bind_group = renderer.create_bind_group(
+            Some("SDF Params Bind Group"),
+            &sdf_params_bind_group_layout,
+            &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: sdf_params_buffer.as_entire_binding(),
+            }],
+        );
+
+        // Create SDF pipeline layout (atlas + projection + sdf_params)
+        let sdf_pipeline_layout = renderer.create_pipeline_layout(
+            Some("SDF Text Pipeline Layout"),
+            &[
+                &sdf_bind_group_layout,
+                &uniform_bind_group_layout,
+                &sdf_params_bind_group_layout,
+            ],
+            &[],
+        );
+
+        // Create SDF pipeline
+        let sdf_pipeline = renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("SDF Text Pipeline"),
+            layout: Some(&sdf_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &sdf_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<TextVertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x2,
+                        1 => Float32x2,
+                        2 => Float32x4,
+                    ],
+                }],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &sdf_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
         Self {
             viewport: Viewport::default(),
             renderer,
             font_system: font_system.inner(),
             swash_cache,
+            // Bitmap rendering
             pipeline,
             bind_group_layout,
             uniform_bind_group_layout,
@@ -418,6 +840,23 @@ impl FontRenderer {
             atlas_entries: HashMap::new(),
             atlas_packer: AtlasPacker::new(atlas_size),
             atlas_dirty: false,
+            // SDF rendering
+            sdf_pipeline,
+            sdf_bind_group_layout,
+            sdf_atlas_texture,
+            sdf_atlas_view,
+            sdf_bind_group,
+            sdf_params_buffer,
+            sdf_params_bind_group_layout,
+            sdf_params_bind_group,
+            sdf_atlas_data,
+            sdf_atlas_entries: HashMap::new(),
+            sdf_atlas_packer: AtlasPacker::new(atlas_size),
+            sdf_atlas_dirty: false,
+            // Configuration
+            render_mode: TextRenderMode::default(),
+            sdf_config: SdfConfig::default(),
+            // Staging data
             vertices: Vec::new(),
             indices: Vec::new(),
         }
@@ -493,6 +932,372 @@ impl FontRenderer {
         self.atlas_dirty = false;
     }
 
+    /// Upload SDF atlas data to GPU if dirty.
+    fn upload_sdf_atlas(&mut self) {
+        if !self.sdf_atlas_dirty {
+            return;
+        }
+
+        self.renderer.queue().write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.sdf_atlas_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            &self.sdf_atlas_data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(self.atlas_size),
+                rows_per_image: Some(self.atlas_size),
+            },
+            wgpu::Extent3d {
+                width: self.atlas_size,
+                height: self.atlas_size,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        self.sdf_atlas_dirty = false;
+    }
+
+    /// Ensure a glyph is in the SDF atlas, rasterizing at base size and generating SDF if needed.
+    ///
+    /// SDF glyphs are size-independent: they're rasterized at a fixed base size (48px)
+    /// and scaled via shader. This allows a single cached glyph to work at any display size.
+    fn ensure_glyph_sdf(&mut self, cache_key: CacheKey) -> Option<&SdfAtlasEntry> {
+        let sdf_key = SdfCacheKey::from_cache_key(cache_key);
+
+        // Check if already in SDF atlas
+        if self.sdf_atlas_entries.contains_key(&sdf_key) {
+            return self.sdf_atlas_entries.get(&sdf_key);
+        }
+
+        // Create a cache key at base size for rasterization
+        // We need to create a new CacheKey with the base size for consistent SDF generation
+        // font_size_bits stores the f32 representation of font size as bits
+        let base_cache_key = CacheKey {
+            font_id: cache_key.font_id,
+            glyph_id: cache_key.glyph_id,
+            font_size_bits: SDF_BASE_SIZE.to_bits(),
+            x_bin: cache_key.x_bin,
+            y_bin: cache_key.y_bin,
+            flags: cache_key.flags,
+        };
+
+        // Rasterize the glyph at base size
+        let mut font_system = self.font_system.write().unwrap();
+        let mut swash_cache = self.swash_cache.write().unwrap();
+        let image = match swash_cache.get_image(&mut font_system, base_cache_key) {
+            Some(img) => img.clone(),
+            None => return None,
+        };
+
+        drop(font_system);
+        drop(swash_cache);
+
+        let width = image.placement.width;
+        let height = image.placement.height;
+
+        if width == 0 || height == 0 {
+            return None;
+        }
+
+        // Generate SDF from the rasterized bitmap
+        let spread = self.sdf_config.mode.spread().max(SDF_DEFAULT_SPREAD);
+        let sdf_data = generate_sdf(&image, spread);
+
+        if sdf_data.is_empty() {
+            return None;
+        }
+
+        // Add padding for effects (shadow, glow can extend beyond glyph bounds)
+        let padding = (spread.ceil() as u32) * 2;
+        let padded_width = width + padding * 2;
+        let padded_height = height + padding * 2;
+
+        // Try to pack into SDF atlas
+        let atlas_entry = self.sdf_atlas_packer.pack(padded_width, padded_height)?;
+
+        // Copy SDF data into atlas with padding
+        for y in 0..height {
+            for x in 0..width {
+                let src_idx = (y * width + x) as usize;
+                let dst_x = atlas_entry.x + padding + x;
+                let dst_y = atlas_entry.y + padding + y;
+                let dst_idx = (dst_y * self.atlas_size + dst_x) as usize;
+                if src_idx < sdf_data.len() && dst_idx < self.sdf_atlas_data.len() {
+                    self.sdf_atlas_data[dst_idx] = sdf_data[src_idx];
+                }
+            }
+        }
+
+        // Store the base placement info for proper scaling at render time
+        let base_placement = GlyphPlacement {
+            left: image.placement.left as f32,
+            top: image.placement.top as f32,
+            width: width as f32,
+            height: height as f32,
+        };
+
+        let sdf_entry = SdfAtlasEntry {
+            entry: AtlasEntry {
+                x: atlas_entry.x + padding,
+                y: atlas_entry.y + padding,
+                width,
+                height,
+            },
+            spread,
+            base_size: SDF_BASE_SIZE,
+            base_placement,
+        };
+
+        self.sdf_atlas_dirty = true;
+        self.sdf_atlas_entries.insert(sdf_key, sdf_entry);
+        self.sdf_atlas_entries.get(&sdf_key)
+    }
+
+    /// Set the text render mode (Bitmap or SDF).
+    ///
+    /// Controls which rendering pipeline is used for subsequent text rendering.
+    /// This affects all text drawn until the mode is changed again.
+    ///
+    /// # Arguments
+    ///
+    /// * `mode` - The render mode to use:
+    ///   - `TextRenderMode::Bitmap` - Traditional bitmap atlas (sharper at small sizes)
+    ///   - `TextRenderMode::SDF { spread }` - Signed distance field (scalable, supports effects)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{FontRenderer, TextRenderMode};
+    ///
+    /// let mut renderer = FontRenderer::new(context, font_system);
+    ///
+    /// // Use SDF for large, scalable text
+    /// renderer.set_render_mode(TextRenderMode::SDF { spread: 4.0 });
+    ///
+    /// // Switch back to bitmap for small UI text
+    /// renderer.set_render_mode(TextRenderMode::Bitmap);
+    /// ```
+    pub fn set_render_mode(&mut self, mode: TextRenderMode) {
+        self.render_mode = mode;
+    }
+
+    /// Get the current render mode.
+    pub fn render_mode(&self) -> TextRenderMode {
+        self.render_mode
+    }
+
+    /// Set SDF configuration.
+    pub fn set_sdf_config(&mut self, config: SdfConfig) {
+        // Update render mode if config specifies SDF
+        if config.mode.is_sdf() {
+            self.render_mode = config.mode;
+        }
+        self.sdf_config = config;
+    }
+
+    /// Get the current SDF configuration.
+    pub fn sdf_config(&self) -> &SdfConfig {
+        &self.sdf_config
+    }
+
+    /// Determine the appropriate render mode based on font size and effects.
+    ///
+    /// This is a helper function that implements the hybrid rendering strategy:
+    /// - Small text (< 24px) without effects: use Bitmap for sharpness
+    /// - Large text (>= 24px) or text with effects: use SDF for quality and effects
+    ///
+    /// # Arguments
+    ///
+    /// * `font_size` - Font size in pixels
+    /// * `has_effects` - Whether the text has effects (shadows, outlines, glows)
+    ///
+    /// # Returns
+    ///
+    /// The recommended `TextRenderMode` for optimal quality
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{FontRenderer, Text};
+    ///
+    /// let text = Text::new("Hello").size(32.0).with_shadow(...);
+    ///
+    /// let mode = FontRenderer::select_render_mode(
+    ///     text.get_font_size(),
+    ///     text.has_effects()
+    /// );
+    /// // Returns TextRenderMode::SDF { spread: 4.0 } because size >= 24px
+    /// ```
+    ///
+    /// # Hybrid Strategy
+    ///
+    /// The 24px threshold is chosen based on typical UI text sizes:
+    /// - UI labels, buttons, and body text are typically 12-18px (bitmap is sharper)
+    /// - Headings and display text are typically 24px+ (SDF scales better)
+    /// - Any text with effects automatically uses SDF regardless of size
+    pub fn select_render_mode(font_size: f32, has_effects: bool) -> TextRenderMode {
+        if has_effects {
+            return TextRenderMode::SDF { spread: SDF_DEFAULT_SPREAD };
+        }
+        if font_size >= 24.0 {
+            return TextRenderMode::SDF { spread: SDF_DEFAULT_SPREAD };
+        }
+        TextRenderMode::Bitmap
+    }
+
+    /// Draw text with effects at a position using SDF rendering.
+    ///
+    /// This method automatically switches to SDF mode when effects are present and
+    /// configures the shader parameters from the provided effects collection.
+    ///
+    /// Effects include shadows, outlines, and glows. Multiple effects can be combined
+    /// and are rendered in a single draw call using the SDF shader.
+    ///
+    /// # Arguments
+    ///
+    /// * `buffer` - Prepared text buffer containing shaped glyphs
+    /// * `position` - Top-left position to draw the text
+    /// * `effects` - Collection of effects to apply (shadows, outlines, glows)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{FontRenderer, Text, TextEffectsBuilder, Color};
+    /// use astrelis_core::math::Vec2;
+    ///
+    /// let mut renderer = FontRenderer::new(context, font_system);
+    ///
+    /// let text = Text::new("Glowing Text").size(48.0);
+    /// let mut buffer = renderer.prepare(&text);
+    ///
+    /// let effects = TextEffectsBuilder::new()
+    ///     .shadow(Vec2::new(2.0, 2.0), Color::rgba(0.0, 0.0, 0.0, 0.5))
+    ///     .outline(2.0, Color::WHITE)
+    ///     .glow(5.0, Color::CYAN, 0.8)
+    ///     .build();
+    ///
+    /// renderer.draw_text_with_effects(&mut buffer, Vec2::new(100.0, 100.0), &effects);
+    /// ```
+    ///
+    /// # Performance
+    ///
+    /// All effects are rendered in a single pass using the SDF shader. The shader
+    /// samples the distance field and applies effects based on the uploaded uniform
+    /// parameters.
+    pub fn draw_text_with_effects(
+        &mut self,
+        buffer: &mut TextBuffer,
+        position: Vec2,
+        effects: &TextEffects,
+    ) {
+        profile_function!();
+
+        // Always use SDF mode when effects are present
+        if effects.has_enabled_effects() && !self.render_mode.is_sdf() {
+            self.render_mode = TextRenderMode::SDF { spread: SDF_DEFAULT_SPREAD };
+        }
+
+        // Update SDF params from effects
+        let sdf_params = SdfParams::from_effects(effects, &self.sdf_config);
+        self.renderer.queue().write_buffer(
+            &self.sdf_params_buffer,
+            0,
+            bytemuck::cast_slice(&[sdf_params]),
+        );
+
+        // Use SDF drawing path
+        self.draw_text_sdf_internal(buffer, position);
+    }
+
+    /// Internal SDF text drawing implementation.
+    fn draw_text_sdf_internal(&mut self, buffer: &mut TextBuffer, position: Vec2) {
+        profile_function!();
+
+        let scale = self.viewport.scale_factor as f32;
+        let mut font_system = self.font_system.write().unwrap();
+        buffer.layout(&mut font_system);
+        drop(font_system);
+
+        // Render glyphs using SDF atlas
+        for run in buffer.buffer.layout_runs() {
+            for glyph in run.glyphs.iter() {
+                let physical_glyph = glyph.physical((position.x, position.y + run.line_y), 1.0);
+                let cache_key = physical_glyph.cache_key;
+
+                // Ensure glyph is in SDF atlas
+                let sdf_entry = match self.ensure_glyph_sdf(cache_key) {
+                    Some(e) => e.clone(),
+                    None => continue,
+                };
+
+                // Calculate scale factor from base size to target size
+                let target_size = f32::from_bits(cache_key.font_size_bits as u32);
+                let size_scale = target_size / sdf_entry.base_size;
+
+                // Scale placement based on size ratio
+                let scaled_left = sdf_entry.base_placement.left * size_scale;
+                let scaled_top = sdf_entry.base_placement.top * size_scale;
+                let scaled_width = sdf_entry.base_placement.width * size_scale;
+                let scaled_height = sdf_entry.base_placement.height * size_scale;
+
+                let x = physical_glyph.x as f32 + scaled_left;
+                let y = physical_glyph.y as f32 - scaled_top;
+                let w = scaled_width;
+                let h = scaled_height;
+
+                let x = x / scale;
+                let y = y / scale;
+                let w = w / scale;
+                let h = h / scale;
+
+                let (u0, v0, u1, v1) = sdf_entry.entry.uv_coords(self.atlas_size);
+
+                let color = glyph.color_opt.unwrap_or(CosmicColor::rgb(255, 255, 255));
+                let color_f = [
+                    color.r() as f32 / 255.0,
+                    color.g() as f32 / 255.0,
+                    color.b() as f32 / 255.0,
+                    color.a() as f32 / 255.0,
+                ];
+
+                // Pixel snapping for crisp rendering
+                let x = (x * scale).round() / scale;
+                let y = (y * scale).round() / scale;
+
+                // Create quad
+                let idx = self.vertices.len() as u16;
+
+                self.vertices.push(TextVertex {
+                    position: [x, y],
+                    tex_coords: [u0, v0],
+                    color: color_f,
+                });
+                self.vertices.push(TextVertex {
+                    position: [x + w, y],
+                    tex_coords: [u1, v0],
+                    color: color_f,
+                });
+                self.vertices.push(TextVertex {
+                    position: [x + w, y + h],
+                    tex_coords: [u1, v1],
+                    color: color_f,
+                });
+                self.vertices.push(TextVertex {
+                    position: [x, y + h],
+                    tex_coords: [u0, v1],
+                    color: color_f,
+                });
+
+                self.indices
+                    .extend_from_slice(&[idx, idx + 1, idx + 2, idx, idx + 2, idx + 3]);
+            }
+        }
+    }
+
     pub fn set_viewport(&mut self, viewport: Viewport) {
         if viewport.scale_factor != self.viewport.scale_factor {
             tracing::trace!(
@@ -500,10 +1305,13 @@ impl FontRenderer {
                 self.viewport.scale_factor,
                 viewport.scale_factor
             );
-            // Clear atlas and repack on scale factor change
+            // Clear bitmap atlas and repack on scale factor change
             self.atlas_entries.clear();
             self.atlas_packer = AtlasPacker::new(self.atlas_size);
             self.atlas_dirty = true;
+
+            // Note: SDF atlas doesn't need to be cleared on scale factor change
+            // because SDF glyphs are resolution-independent (rendered at fixed base size)
         }
         self.viewport = viewport;
     }
@@ -517,6 +1325,7 @@ impl FontRenderer {
         let mut font_system = self.font_system.write().unwrap();
         let mut buffer = TextBuffer::new(&mut font_system);
         buffer.set_text(&mut font_system, text, self.viewport.scale_factor as f32);
+        buffer.layout(&mut font_system);
         buffer
     }
 
@@ -537,7 +1346,9 @@ impl FontRenderer {
         for run in buffer.buffer.layout_runs() {
             for glyph in run.glyphs.iter() {
                 // Use run.line_y for proper multi-line positioning
-                let physical_glyph = glyph.physical((position.x, position.y + run.line_y), 1.0);
+                // Position is in logical coordinates, but run.line_y is in scaled coordinates
+                // So we scale the position to physical space before combining
+                let physical_glyph = glyph.physical((position.x * scale, position.y * scale + run.line_y), 1.0);
                 let cache_key = physical_glyph.cache_key;
 
                 // Ensure glyph is in atlas
@@ -611,6 +1422,8 @@ impl FontRenderer {
     }
 
     /// Render all queued text to the given render pass.
+    ///
+    /// Automatically selects bitmap or SDF pipeline based on the current render mode.
     pub fn render(&mut self, render_pass: &mut wgpu::RenderPass) {
         profile_function!();
 
@@ -623,8 +1436,12 @@ impl FontRenderer {
             return;
         }
 
-        // Upload atlas if dirty
-        self.upload_atlas();
+        // Upload appropriate atlas based on render mode
+        if self.render_mode.is_sdf() {
+            self.upload_sdf_atlas();
+        } else {
+            self.upload_atlas();
+        }
 
         // Create buffers
         let vertex_buffer = self
@@ -637,10 +1454,7 @@ impl FontRenderer {
 
         // Create projection uniform
         let size = self.viewport.to_logical();
-        let projection = orthographic_projection(
-            size.width,
-            size.height,
-        );
+        let projection = orthographic_projection(size.width, size.height);
         let uniform_buffer = self
             .renderer
             .create_uniform_buffer(Some("Text Projection"), &projection);
@@ -655,10 +1469,20 @@ impl FontRenderer {
             }],
         );
 
-        // Render
-        render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &self.bind_group, &[]);
-        render_pass.set_bind_group(1, &uniform_bind_group, &[]);
+        // Render with appropriate pipeline
+        if self.render_mode.is_sdf() {
+            // SDF pipeline: atlas (group 0) + projection (group 1) + sdf_params (group 2)
+            render_pass.set_pipeline(&self.sdf_pipeline);
+            render_pass.set_bind_group(0, &self.sdf_bind_group, &[]);
+            render_pass.set_bind_group(1, &uniform_bind_group, &[]);
+            render_pass.set_bind_group(2, &self.sdf_params_bind_group, &[]);
+        } else {
+            // Bitmap pipeline: atlas (group 0) + projection (group 1)
+            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[]);
+            render_pass.set_bind_group(1, &uniform_bind_group, &[]);
+        }
+
         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
         render_pass.draw_indexed(0..self.indices.len() as u32, 0, 0..1);
@@ -788,4 +1612,201 @@ fn orthographic_projection(width: f32, height: f32) -> [[f32; 4]; 4] {
         [0.0, 0.0, 1.0, 0.0],
         [-1.0, 1.0, 0.0, 1.0],
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use astrelis_render::Color;
+
+    #[test]
+    fn test_sdf_cache_key_basic() {
+        // Test SdfCacheKey creation directly
+        let key1 = SdfCacheKey {
+            glyph_id: 100,
+            font_id: 12345,
+        };
+        let key2 = SdfCacheKey {
+            glyph_id: 100,
+            font_id: 12345,
+        };
+        // Same glyph_id and font_id should be equal
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_sdf_cache_key_different_glyphs() {
+        // Test that different glyph IDs produce different cache keys
+        let key1 = SdfCacheKey {
+            glyph_id: 100,
+            font_id: 12345,
+        };
+        let key2 = SdfCacheKey {
+            glyph_id: 200,
+            font_id: 12345,
+        };
+        // Different glyph IDs should produce different keys
+        assert_ne!(key1.glyph_id, key2.glyph_id);
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_sdf_cache_key_different_fonts() {
+        // Test that different font IDs produce different cache keys
+        let key1 = SdfCacheKey {
+            glyph_id: 100,
+            font_id: 12345,
+        };
+        let key2 = SdfCacheKey {
+            glyph_id: 100,
+            font_id: 67890,
+        };
+        // Different font IDs should produce different keys
+        assert_ne!(key1.font_id, key2.font_id);
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_sdf_cache_key_hash() {
+        // Test that SdfCacheKey can be used as a HashMap key
+        use std::collections::HashMap;
+
+        let mut map = HashMap::new();
+        let key = SdfCacheKey {
+            glyph_id: 65, // 'A'
+            font_id: 1,
+        };
+        map.insert(key, "test_value");
+
+        assert_eq!(map.get(&key), Some(&"test_value"));
+    }
+
+    #[test]
+    fn test_sdf_params_default() {
+        let params = SdfParams::default();
+
+        assert_eq!(params.edge_softness, 0.05);
+        assert_eq!(params.outline_width, 0.0);
+        assert_eq!(params.outline_color, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(params.shadow_offset, [0.0, 0.0]);
+        assert_eq!(params.shadow_blur, 0.0);
+        assert_eq!(params.shadow_color, [0.0, 0.0, 0.0, 0.5]);
+        assert_eq!(params.glow_radius, 0.0);
+        assert_eq!(params.glow_color, [1.0, 1.0, 1.0, 0.5]);
+    }
+
+    #[test]
+    fn test_sdf_params_from_effects_shadow() {
+        use crate::effects::{TextEffect, TextEffects};
+
+        let mut effects = TextEffects::new();
+        effects.add(TextEffect::shadow_blurred(
+            Vec2::new(2.0, 3.0),
+            1.5,
+            Color::rgba(0.1, 0.2, 0.3, 0.8),
+        ));
+
+        let config = SdfConfig::default();
+        let params = SdfParams::from_effects(&effects, &config);
+
+        assert_eq!(params.shadow_offset, [2.0, 3.0]);
+        assert_eq!(params.shadow_blur, 1.5);
+        assert_eq!(params.shadow_color[0], 0.1);
+        assert_eq!(params.shadow_color[1], 0.2);
+        assert_eq!(params.shadow_color[2], 0.3);
+        assert_eq!(params.shadow_color[3], 0.8);
+    }
+
+    #[test]
+    fn test_sdf_params_from_effects_outline() {
+        use crate::effects::{TextEffect, TextEffects};
+
+        let mut effects = TextEffects::new();
+        effects.add(TextEffect::outline(2.5, Color::rgba(1.0, 0.0, 0.0, 1.0)));
+
+        let config = SdfConfig::default();
+        let params = SdfParams::from_effects(&effects, &config);
+
+        assert_eq!(params.outline_width, 2.5);
+        assert_eq!(params.outline_color, [1.0, 0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn test_sdf_params_from_effects_glow() {
+        use crate::effects::{TextEffect, TextEffects};
+
+        let mut effects = TextEffects::new();
+        effects.add(TextEffect::glow(
+            5.0,
+            Color::rgba(0.0, 1.0, 0.0, 0.9),
+            0.7,
+        ));
+
+        let config = SdfConfig::default();
+        let params = SdfParams::from_effects(&effects, &config);
+
+        assert_eq!(params.glow_radius, 5.0);
+        assert_eq!(params.glow_color, [0.0, 1.0, 0.0, 0.9]);
+    }
+
+    #[test]
+    fn test_sdf_params_from_effects_multiple() {
+        use crate::effects::{TextEffect, TextEffects};
+
+        let mut effects = TextEffects::new();
+        effects.add(TextEffect::shadow(Vec2::new(1.0, 1.0), Color::BLACK));
+        effects.add(TextEffect::outline(1.0, Color::WHITE));
+        effects.add(TextEffect::glow(3.0, Color::BLUE, 0.5));
+
+        let config = SdfConfig::default();
+        let params = SdfParams::from_effects(&effects, &config);
+
+        // All effects should be present
+        assert_eq!(params.shadow_offset, [1.0, 1.0]);
+        assert_eq!(params.outline_width, 1.0);
+        assert_eq!(params.glow_radius, 3.0);
+    }
+
+    #[test]
+    fn test_sdf_params_from_effects_custom_edge_softness() {
+        use crate::effects::TextEffects;
+
+        let effects = TextEffects::new();
+        let config = SdfConfig::default().edge_softness(0.15);
+        let params = SdfParams::from_effects(&effects, &config);
+
+        assert_eq!(params.edge_softness, 0.15);
+    }
+
+    #[test]
+    fn test_select_render_mode_small_text_no_effects() {
+        let mode = FontRenderer::select_render_mode(12.0, false);
+        assert!(!mode.is_sdf());
+        assert_eq!(mode, TextRenderMode::Bitmap);
+    }
+
+    #[test]
+    fn test_select_render_mode_large_text_no_effects() {
+        let mode = FontRenderer::select_render_mode(32.0, false);
+        assert!(mode.is_sdf());
+        assert_eq!(mode.spread(), SDF_DEFAULT_SPREAD);
+    }
+
+    #[test]
+    fn test_select_render_mode_small_text_with_effects() {
+        let mode = FontRenderer::select_render_mode(12.0, true);
+        assert!(mode.is_sdf());
+        assert_eq!(mode.spread(), SDF_DEFAULT_SPREAD);
+    }
+
+    #[test]
+    fn test_select_render_mode_boundary() {
+        // Exactly at 24px boundary
+        let mode = FontRenderer::select_render_mode(24.0, false);
+        assert!(mode.is_sdf());
+
+        // Just below boundary
+        let mode = FontRenderer::select_render_mode(23.9, false);
+        assert!(!mode.is_sdf());
+    }
 }
