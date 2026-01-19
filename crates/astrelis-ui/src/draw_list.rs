@@ -5,13 +5,14 @@
 //! It tracks which nodes contribute which draw commands for efficient updates.
 
 use crate::dirty_ranges::DirtyRanges;
-use crate::widgets::{ImageTexture, ImageUV};
-use astrelis_text::PipelineShapedTextResult as ShapedTextResult;
 use crate::tree::NodeId;
+use crate::widgets::{ImageTexture, ImageUV};
 use astrelis_core::alloc::HashMap;
 use astrelis_core::math::Vec2;
 use astrelis_core::profiling::profile_function;
 use astrelis_render::Color;
+use astrelis_text::PipelineShapedTextResult as ShapedTextResult;
+use astrelis_text::{TextEffects, TextRenderMode};
 use std::sync::Arc;
 
 /// High-level draw command for a UI element.
@@ -151,6 +152,10 @@ pub struct TextCommand {
     pub color: Color,
     /// Z-index for depth sorting
     pub z_index: u16,
+    /// Optional text effects (shadows, outlines, glows)
+    pub effects: Option<TextEffects>,
+    /// Render mode (Bitmap or SDF) - auto-selected when effects are present
+    pub render_mode: TextRenderMode,
 }
 
 impl TextCommand {
@@ -167,7 +172,81 @@ impl TextCommand {
             shaped_text,
             color,
             z_index,
+            effects: None,
+            render_mode: TextRenderMode::Bitmap,
         }
+    }
+
+    /// Create a text command with effects (automatically uses SDF rendering).
+    ///
+    /// Effects require SDF (Signed Distance Field) rendering to work properly.
+    /// This constructor automatically sets the render mode to SDF.
+    ///
+    /// # Arguments
+    ///
+    /// * `position` - Top-left position to draw the text
+    /// * `shaped_text` - Pre-shaped text buffer with glyph layout
+    /// * `color` - Base text color
+    /// * `z_index` - Depth sorting order
+    /// * `effects` - Collection of text effects (shadows, outlines, glows)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_ui::{TextCommand, TextEffectsBuilder};
+    /// use astrelis_core::math::Vec2;
+    /// use astrelis_render::Color;
+    ///
+    /// let effects = TextEffectsBuilder::new()
+    ///     .shadow(Vec2::new(2.0, 2.0), Color::BLACK)
+    ///     .outline(1.5, Color::WHITE)
+    ///     .build();
+    ///
+    /// let cmd = TextCommand::with_effects(
+    ///     Vec2::new(100.0, 100.0),
+    ///     shaped_text,
+    ///     Color::WHITE,
+    ///     1,
+    ///     effects
+    /// );
+    /// ```
+    pub fn with_effects(
+        position: Vec2,
+        shaped_text: Arc<ShapedTextResult>,
+        color: Color,
+        z_index: u16,
+        effects: TextEffects,
+    ) -> Self {
+        Self {
+            node_id: NodeId(0),
+            position,
+            shaped_text,
+            color,
+            z_index,
+            effects: Some(effects),
+            render_mode: TextRenderMode::SDF { spread: 4.0 },
+        }
+    }
+
+    /// Check if this text command requires SDF rendering.
+    ///
+    /// Returns `true` if:
+    /// - The render mode is explicitly set to SDF, OR
+    /// - The text has effects (which require SDF)
+    ///
+    /// This is used by the renderer to select the appropriate rendering pipeline.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let cmd = TextCommand::new(...);
+    /// assert!(!cmd.requires_sdf());  // Bitmap by default
+    ///
+    /// let cmd = TextCommand::with_effects(..., effects);
+    /// assert!(cmd.requires_sdf());  // SDF required for effects
+    /// ```
+    pub fn requires_sdf(&self) -> bool {
+        self.render_mode.is_sdf() || self.effects.is_some()
     }
 }
 
@@ -752,5 +831,107 @@ mod tests {
         let (opaque, transparent) = draw_list.separate_by_opacity();
         assert_eq!(opaque.len(), 1);
         assert_eq!(transparent.len(), 1);
+    }
+
+    #[test]
+    fn test_text_command_new() {
+        let shaped = Arc::new(ShapedTextResult::new(
+            1,
+            BaseShapedTextResult::new((100.0, 20.0), vec![]),
+        ));
+        let cmd = TextCommand::new(Vec2::new(10.0, 20.0), shaped, Color::BLACK, 5);
+
+        assert_eq!(cmd.position, Vec2::new(10.0, 20.0));
+        assert_eq!(cmd.color, Color::BLACK);
+        assert_eq!(cmd.z_index, 5);
+        assert!(cmd.effects.is_none());
+        assert_eq!(cmd.render_mode, TextRenderMode::Bitmap);
+        assert!(!cmd.requires_sdf());
+    }
+
+    #[test]
+    fn test_text_command_with_effects() {
+        use astrelis_text::{TextEffect, TextEffects};
+
+        let mut effects = TextEffects::new();
+        effects.add(TextEffect::shadow(Vec2::new(2.0, 2.0), Color::BLACK));
+
+        let shaped = Arc::new(ShapedTextResult::new(
+            1,
+            BaseShapedTextResult::new((100.0, 20.0), vec![]),
+        ));
+        let cmd = TextCommand::with_effects(
+            Vec2::new(10.0, 20.0),
+            shaped,
+            Color::WHITE,
+            5,
+            effects,
+        );
+
+        assert!(cmd.effects.is_some());
+        assert_eq!(cmd.render_mode, TextRenderMode::SDF { spread: 4.0 });
+        assert!(cmd.requires_sdf());
+    }
+
+    #[test]
+    fn test_text_command_requires_sdf_with_effects() {
+        use astrelis_text::{TextEffect, TextEffects};
+
+        let mut effects = TextEffects::new();
+        effects.add(TextEffect::outline(1.0, Color::BLACK));
+
+        let shaped = Arc::new(ShapedTextResult::new(
+            1,
+            BaseShapedTextResult::new((100.0, 20.0), vec![]),
+        ));
+        let mut cmd = TextCommand::new(Vec2::ZERO, shaped, Color::WHITE, 0);
+        cmd.effects = Some(effects);
+
+        // Has effects, should require SDF
+        assert!(cmd.requires_sdf());
+    }
+
+    #[test]
+    fn test_text_command_requires_sdf_with_sdf_mode() {
+        let shaped = Arc::new(ShapedTextResult::new(
+            1,
+            BaseShapedTextResult::new((100.0, 20.0), vec![]),
+        ));
+        let mut cmd = TextCommand::new(Vec2::ZERO, shaped, Color::WHITE, 0);
+        cmd.render_mode = TextRenderMode::SDF { spread: 6.0 };
+
+        // SDF mode set, should require SDF
+        assert!(cmd.requires_sdf());
+    }
+
+    #[test]
+    fn test_text_command_requires_sdf_bitmap_no_effects() {
+        let shaped = Arc::new(ShapedTextResult::new(
+            1,
+            BaseShapedTextResult::new((100.0, 20.0), vec![]),
+        ));
+        let cmd = TextCommand::new(Vec2::ZERO, shaped, Color::WHITE, 0);
+
+        // Bitmap mode, no effects, should not require SDF
+        assert!(!cmd.requires_sdf());
+    }
+
+    #[test]
+    fn test_text_command_multiple_effects() {
+        use astrelis_text::{TextEffect, TextEffects};
+
+        let mut effects = TextEffects::new();
+        effects.add(TextEffect::shadow(Vec2::new(1.0, 1.0), Color::BLACK));
+        effects.add(TextEffect::outline(1.0, Color::WHITE));
+        effects.add(TextEffect::glow(3.0, Color::BLUE, 0.5));
+
+        let shaped = Arc::new(ShapedTextResult::new(
+            1,
+            BaseShapedTextResult::new((100.0, 20.0), vec![]),
+        ));
+        let cmd = TextCommand::with_effects(Vec2::ZERO, shaped, Color::WHITE, 0, effects.clone());
+
+        assert!(cmd.requires_sdf());
+        assert_eq!(cmd.effects.as_ref().unwrap().effects().len(), 3);
     }
 }

@@ -1,3 +1,18 @@
+//! Text Rendering Demo - Basic Text Features
+//!
+//! Demonstrates the core text rendering capabilities:
+//! - Various font sizes and colors
+//! - Bold and italic styles
+//! - Text alignment
+//! - Line height control
+//! - Monospace fonts
+//!
+//! For more advanced features, see:
+//! - rich_text_demo.rs - Inline formatting with mixed styles
+//! - text_effects.rs - Shadows, outlines, glows
+//! - text_decoration.rs - Underlines, strikethrough, backgrounds
+//! - text_editor_demo.rs - Text editing with cursor and selection
+
 use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_core::math::Vec2;

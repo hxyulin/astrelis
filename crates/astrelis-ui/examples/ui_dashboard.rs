@@ -1,12 +1,23 @@
-//! Dashboard example simulating high-frequency text updates.
+//! Dashboard Performance Demo - Incremental Text Updates
 //!
-//! This example creates a dashboard with many "telemetry" cards that update
-//! their values every frame. This stresses the text pipeline and dirty tracking system.
+//! **Purpose**: Tests incremental text update performance using `.update_text()` API.
+//! This is different from ui_stress_test which tests full UI rebuild performance.
+//!
+//! This example simulates a telemetry dashboard with many values updating every frame.
+//! It uses the INCREMENTAL UPDATE API (update_text) to modify existing widgets without
+//! rebuilding the entire UI tree, demonstrating the dirty flag optimization system.
 //!
 //! Features:
-//! - Grid layout
-//! - High frequency text updates (simulating 60Hz telemetry)
-//! - Performance metrics display
+//! - 100 telemetry values updating 60 times per second
+//! - Uses .update_text() for incremental updates (TEXT_SHAPING dirty flag only)
+//! - Performance metrics: layout time, dirty node counts
+//! - F12 inspector toggle for debugging
+//!
+//! Compare with:
+//! - ui_stress_test.rs: Tests full UI rebuild performance
+//!
+//! Controls:
+//! - Press F12 to toggle UI inspector (shows widget bounds, dirty flags, layout tree)
 
 use astrelis_core::logging;
 use astrelis_core::profiling::{init_profiling, ProfilingBackend, new_frame};
@@ -20,7 +31,7 @@ use astrelis_ui::{
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    event::PhysicalSize,
+    event::{Event, HandleStatus, Key, NamedKey, PhysicalSize},
     window::{WindowDescriptor, WindowBackend, Window},
 };
 use std::collections::HashMap;
@@ -34,6 +45,7 @@ struct App {
     last_update: Instant,
     frame_count: u64,
     last_metrics_print: Instant,
+    inspector_enabled: bool,
 }
 
 fn main() {
@@ -72,6 +84,18 @@ fn main() {
         // Build the initial UI
         build_dashboard(&mut ui);
 
+        println!("\n═══════════════════════════════════════════════════════");
+        println!("  📊 UI DASHBOARD - Incremental Update Performance");
+        println!("═══════════════════════════════════════════════════════");
+        println!("  PURPOSE:");
+        println!("    Tests .update_text() API performance (dirty flags)");
+        println!("    100 values update 60x/sec WITHOUT rebuilding UI tree");
+        println!("\n  COMPARE WITH:");
+        println!("    ui_stress_test - Tests full UI rebuild performance");
+        println!("\n  CONTROLS:");
+        println!("    [F12]  Toggle UI Inspector");
+        println!("═══════════════════════════════════════════════════════\n");
+
         Box::new(App {
             context: graphics_ctx,
             windows,
@@ -79,6 +103,7 @@ fn main() {
             last_update: Instant::now(),
             frame_count: 0,
             last_metrics_print: Instant::now(),
+            inspector_enabled: false,
         })
     });
 }
@@ -199,7 +224,7 @@ impl astrelis_winit::app::App for App {
 
         // Handle resize
         events.dispatch(|event| {
-            if let astrelis_winit::event::Event::WindowResized(size) = event {
+            if let Event::WindowResized(size) = event {
                 window.resized(*size);
                 self.ui.set_viewport(astrelis_render::Viewport {
                     x: 0.0,
@@ -208,10 +233,27 @@ impl astrelis_winit::app::App for App {
                     height: size.height as f32,
                     scale_factor: window.scale_factor(),
                 });
-                astrelis_winit::event::HandleStatus::consumed()
+                HandleStatus::consumed()
             } else {
-                astrelis_winit::event::HandleStatus::ignored()
+                HandleStatus::ignored()
             }
+        });
+
+        // Handle F12 key for inspector toggle
+        events.dispatch(|event| {
+            if let Event::KeyInput(key) = event {
+                if key.state == astrelis_winit::event::ElementState::Pressed {
+                    match &key.logical_key {
+                        Key::Named(NamedKey::F12) => {
+                            self.inspector_enabled = !self.inspector_enabled;
+                            println!("Inspector: {}", if self.inspector_enabled { "ON" } else { "OFF" });
+                            return HandleStatus::consumed();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            HandleStatus::ignored()
         });
 
         let mut frame = window.begin_drawing();

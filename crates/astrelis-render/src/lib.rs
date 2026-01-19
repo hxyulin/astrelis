@@ -15,8 +15,11 @@
 //! - Low-level extensible Renderer for WGPU resource management
 //! - Building blocks for higher-level renderers (TextRenderer, SceneRenderer, etc.)
 
+mod atlas;
 mod blend;
 mod blit;
+mod buffer_pool;
+mod camera;
 mod color;
 mod compute;
 mod context;
@@ -25,14 +28,21 @@ mod features;
 mod frame;
 mod framebuffer;
 mod indirect;
+mod material;
+mod mesh;
+mod readback;
+mod render_graph;
 mod renderer;
 mod sprite;
 mod target;
 mod window;
 
 // Re-export all modules
+pub use atlas::*;
 pub use blend::*;
 pub use blit::*;
+pub use buffer_pool::*;
+pub use camera::*;
 pub use color::*;
 pub use compute::*;
 pub use context::*;
@@ -40,6 +50,10 @@ pub use features::*;
 pub use frame::*;
 pub use framebuffer::*;
 pub use indirect::*;
+pub use material::*;
+pub use mesh::*;
+pub use readback::*;
+pub use render_graph::*;
 pub use renderer::*;
 pub use sprite::*;
 pub use target::*;

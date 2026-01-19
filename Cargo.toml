@@ -61,7 +61,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 puffin = "0.19.1"
 puffin_http = "0.16"
 bytemuck = "1.23.1"
-glam = { version = "0.30.9", features = ["mint"] }
+glam = { version = "0.30.9", features = ["mint", "bytemuck"] }
 mint = "0.5.9"
 
 # External dependencies

@@ -62,3 +62,9 @@ pub use capability::*;
 pub use handle::*;
 pub use impls::*;
 pub use storage::*;
+
+// Re-export specific widget types for convenience
+pub use impls::{
+    Button, Checkbox, Container, Dropdown, Modal, ProgressBar, RadioButton, ScrollView,
+    ScrollbarVisibility, Slider, SliderOrientation, Tab, TabView, Text,
+};

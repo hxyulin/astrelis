@@ -4,6 +4,7 @@
 //! - Font management with system fonts and custom fonts
 //! - Text builder with styling (size, color, alignment, etc.)
 //! - GPU-accelerated text rendering with FontRenderer
+//! - Signed Distance Field (SDF) rendering for scalable text and effects
 //!
 //! ## Quick Start
 //!
@@ -39,20 +40,79 @@
 //! - **GPU Accelerated**: WGPU-based rendering with texture atlas
 //! - **Text Layout**: Multi-line text with automatic wrapping
 //! - **Asset Integration**: Load fonts through the asset system (with `asset` feature)
+//! - **SDF Rendering**: Resolution-independent text scaling and effects
+//! - **Text Effects**: Shadows, outlines, glows, and more
+//!
+//! ## SDF (Signed Distance Field) Rendering
+//!
+//! SDF rendering enables sharp text at any scale and high-quality effects. The renderer uses
+//! a hybrid approach for optimal quality:
+//!
+//! - **Bitmap atlas** for small text (< 24px) without effects - sharper at small sizes
+//! - **SDF atlas** for large text (>= 24px) or text with effects - scalable and smooth
+//!
+//! ### When to Use SDF
+//!
+//! SDF rendering is automatically enabled for:
+//! - Large text (24px and above)
+//! - Text with effects (shadows, outlines, glows)
+//! - Text that needs to scale dynamically
+//!
+//! ### Basic SDF Usage
+//!
+//! ```rust,no_run
+//! use astrelis_text::{Text, TextEffect, Color};
+//! use astrelis_core::math::Vec2;
+//!
+//! // Text with a drop shadow
+//! let text = Text::new("Hello")
+//!     .size(32.0)
+//!     .with_shadow(Vec2::new(2.0, 2.0), Color::rgba(0.0, 0.0, 0.0, 0.5));
+//!
+//! // Text with an outline
+//! let text = Text::new("Bold")
+//!     .size(48.0)
+//!     .with_outline(2.0, Color::BLACK);
+//!
+//! // Combine multiple effects
+//! let text = Text::new("Glowing")
+//!     .size(36.0)
+//!     .with_shadow(Vec2::new(1.0, 1.0), Color::BLACK)
+//!     .with_outline(1.5, Color::WHITE)
+//!     .with_glow(4.0, Color::BLUE, 0.8);
+//! ```
+//!
+//! ### Force SDF Mode
+//!
+//! You can force SDF rendering for better scalability:
+//!
+//! ```rust,no_run
+//! use astrelis_text::Text;
+//!
+//! let text = Text::new("Scalable")
+//!     .size(16.0)
+//!     .sdf();  // Force SDF even for small text
+//! ```
 //!
 //! ## Examples
 //!
 //! Run the examples to see text rendering in action:
 //!
 //! ```bash
-//! cargo run --package astrelis-text --example simple_text
 //! cargo run --package astrelis-text --example text_demo
+//! cargo run --package astrelis-text --example text_effects
+//! cargo run --package astrelis-text --example rich_text_demo
 //! ```
 
 pub mod cache;
+pub mod decoration;
+pub mod editor;
+pub mod effects;
 pub mod font;
 pub mod pipeline;
 pub mod renderer;
+pub mod rich_text;
+pub mod sdf;
 pub mod shaping;
 pub mod text;
 
@@ -61,12 +121,24 @@ pub mod asset;
 
 // Re-export main types
 pub use cache::{ShapeKey, ShapedTextData, TextShapeCache};
+pub use decoration::{
+    BackgroundGeometry, DecorationGeometry, LineStyle, StrikethroughStyle, TextDecoration,
+    UnderlineStyle, generate_decoration_geometry,
+};
+pub use editor::{TextCursor, TextEditor, TextSelection};
+pub use effects::{
+    EffectRenderConfig, TextEffect, TextEffectType, TextEffects, TextEffectsBuilder,
+};
 pub use font::{FontAttributes, FontDatabase, FontStretch, FontStyle, FontSystem, FontWeight};
 pub use pipeline::{
     RequestId, ShapedTextResult as PipelineShapedTextResult, SyncTextShaper, TextPipeline,
     TextShapeRequest, TextShaper,
 };
-pub use renderer::{AtlasEntry, FontRenderer, GlyphPlacement, TextBuffer};
+pub use renderer::{
+    AtlasEntry, FontRenderer, GlyphPlacement, SdfAtlasEntry, SdfCacheKey, SdfParams, TextBuffer,
+};
+pub use rich_text::{RichText, RichTextBuilder, TextSpan, TextSpanStyle};
+pub use sdf::{SdfConfig, TextRenderMode, generate_sdf, generate_sdf_smooth};
 pub use shaping::{
     extract_glyphs_from_buffer, measure_text_fast, shape_text, ShapedGlyph, ShapedTextResult,
 };

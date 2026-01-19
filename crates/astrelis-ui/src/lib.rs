@@ -37,6 +37,7 @@
 //! // ui.render(&mut render_pass, viewport_size);
 //! ```
 
+pub mod animation;
 pub mod auto_dirty;
 pub mod builder;
 pub mod debug;
@@ -44,14 +45,17 @@ pub mod dirty;
 pub mod dirty_ranges;
 pub mod draw_list;
 pub mod event;
+pub mod focus;
 pub mod glyph_atlas;
 pub mod gpu_types;
+pub mod inspector;
 pub mod instance_buffer;
 pub mod layout;
 pub mod length;
 pub mod metrics;
 pub mod renderer;
 pub mod style;
+pub mod theme;
 pub mod tree;
 pub mod widget;
 pub mod widget_id;
@@ -59,6 +63,10 @@ pub mod widgets;
 
 use astrelis_core::geometry::Size;
 use std::sync::Arc;
+pub use animation::{
+    AnimatableProperty, Animation, AnimationState, AnimationSystem, EasingFunction,
+    WidgetAnimations, bounce, fade_in, fade_out, scale, slide_in_left, slide_in_top,
+};
 pub use auto_dirty::{NumericValue, TextValue, Value};
 pub use debug::DebugOverlay;
 pub use dirty::DirtyFlags;
@@ -77,9 +85,10 @@ pub use widgets::{Image, ImageFit, ImageTexture, ImageUV};
 
 // Re-export new widget system types
 pub use widget::{
-    ClickableWidget, ColorWidget, ParentWidget, SizedWidget, TextWidget,
-    WidgetHandle, WidgetStorage, AnyWidgetHandle, TextWidgetHandle,
-    ParentWidgetHandle, ColorWidgetHandle,
+    Button as CapButton, Checkbox, ClickableWidget, ColorWidget, Container as CapContainer,
+    ParentWidget, ParentWidgetHandle, RadioButton, Slider, SliderOrientation, SizedWidget,
+    Text as CapText, TextWidget, TextWidgetHandle, WidgetHandle, WidgetStorage,
+    AnyWidgetHandle, ColorWidgetHandle,
 };
 
 // Re-export main types
@@ -88,8 +97,14 @@ pub use event::{UiEvent, UiEventSystem};
 pub use layout::LayoutCache;
 pub use renderer::UiRenderer;
 pub use style::Style;
+pub use theme::{ColorPalette, ColorRole, Shapes, Spacing, Theme, ThemeBuilder, Typography};
 pub use tree::{NodeId, UiTree};
 pub use widgets::Widget;
+pub use focus::{FocusDirection, FocusEvent, FocusManager, FocusPolicy, FocusScopeId};
+pub use inspector::{
+    InspectedWidget, InspectorMetrics, InspectorMode, UiInspector, WidgetType,
+    WidgetIdRegistryExt,
+};
 
 // Re-export common types from dependencies
 pub use astrelis_core::math::{Vec2, Vec4};
