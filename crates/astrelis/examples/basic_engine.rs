@@ -33,6 +33,8 @@ pub struct GameConfig {
 }
 
 impl Plugin for GameConfigPlugin {
+    type Dependencies = ();
+
     fn name(&self) -> &'static str {
         "GameConfigPlugin"
     }
@@ -52,12 +54,10 @@ impl Plugin for GameConfigPlugin {
 struct DebugPlugin;
 
 impl Plugin for DebugPlugin {
+    type Dependencies = GameConfigPlugin;
+
     fn name(&self) -> &'static str {
         "DebugPlugin"
-    }
-
-    fn dependencies(&self) -> &[&'static str] {
-        &["GameConfigPlugin"]
     }
 
     fn build(&self, resources: &mut Resources) {

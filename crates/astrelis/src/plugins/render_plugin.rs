@@ -160,6 +160,7 @@ impl RenderContexts {
 pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
+    type Dependencies = ();
     fn name(&self) -> &'static str {
         "RenderPlugin"
     }

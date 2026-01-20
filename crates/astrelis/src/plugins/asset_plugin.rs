@@ -57,6 +57,7 @@ impl AssetPlugin {
 }
 
 impl Plugin for AssetPlugin {
+    type Dependencies = ();
     fn name(&self) -> &'static str {
         "AssetPlugin"
     }

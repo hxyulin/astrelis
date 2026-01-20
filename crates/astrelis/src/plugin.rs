@@ -5,8 +5,119 @@
 //! into the engine lifecycle.
 
 use crate::resource::Resources;
+use std::any::type_name;
 
-/// Trait for engine plugins.
+/// Trait for compile-time type-safe plugin dependency specification.
+///
+/// This trait is implemented for plugin types and tuples of plugin types,
+/// allowing dependencies to be checked at compile time.
+///
+/// # Example
+///
+/// ```ignore
+/// impl Plugin for MyPlugin {
+///     type Dependencies = (RenderPlugin, AssetPlugin);
+///     // ...
+/// }
+/// ```
+pub trait PluginSet {
+    /// Returns the type names of all plugins in this set.
+    fn names() -> Vec<&'static str>;
+}
+
+/// Empty dependency set (no dependencies).
+impl PluginSet for () {
+    fn names() -> Vec<&'static str> {
+        vec![]
+    }
+}
+
+/// Single plugin dependency.
+impl<P: Plugin> PluginSet for P {
+    fn names() -> Vec<&'static str> {
+        vec![type_name::<P>()]
+    }
+}
+
+/// Two plugin dependencies.
+impl<P1: Plugin, P2: Plugin> PluginSet for (P1, P2) {
+    fn names() -> Vec<&'static str> {
+        vec![type_name::<P1>(), type_name::<P2>()]
+    }
+}
+
+/// Three plugin dependencies.
+impl<P1: Plugin, P2: Plugin, P3: Plugin> PluginSet for (P1, P2, P3) {
+    fn names() -> Vec<&'static str> {
+        vec![type_name::<P1>(), type_name::<P2>(), type_name::<P3>()]
+    }
+}
+
+/// Four plugin dependencies.
+impl<P1: Plugin, P2: Plugin, P3: Plugin, P4: Plugin> PluginSet for (P1, P2, P3, P4) {
+    fn names() -> Vec<&'static str> {
+        vec![
+            type_name::<P1>(),
+            type_name::<P2>(),
+            type_name::<P3>(),
+            type_name::<P4>(),
+        ]
+    }
+}
+
+/// Five plugin dependencies.
+impl<P1: Plugin, P2: Plugin, P3: Plugin, P4: Plugin, P5: Plugin> PluginSet
+    for (P1, P2, P3, P4, P5)
+{
+    fn names() -> Vec<&'static str> {
+        vec![
+            type_name::<P1>(),
+            type_name::<P2>(),
+            type_name::<P3>(),
+            type_name::<P4>(),
+            type_name::<P5>(),
+        ]
+    }
+}
+
+/// Six plugin dependencies.
+impl<P1: Plugin, P2: Plugin, P3: Plugin, P4: Plugin, P5: Plugin, P6: Plugin> PluginSet
+    for (P1, P2, P3, P4, P5, P6)
+{
+    fn names() -> Vec<&'static str> {
+        vec![
+            type_name::<P1>(),
+            type_name::<P2>(),
+            type_name::<P3>(),
+            type_name::<P4>(),
+            type_name::<P5>(),
+            type_name::<P6>(),
+        ]
+    }
+}
+
+/// Object-safe plugin trait for runtime plugin management.
+///
+/// This trait is automatically implemented for all types that implement `Plugin`.
+/// It allows plugins to be stored as trait objects (`Box<dyn PluginDyn>`).
+pub trait PluginDyn: Send + Sync {
+    /// Returns the unique name of this plugin.
+    fn name(&self) -> &'static str;
+
+    /// Returns the names of plugins this plugin depends on.
+    fn dependencies(&self) -> Vec<&'static str>;
+
+    /// Called when the plugin is added to the engine.
+    fn build(&self, resources: &mut Resources);
+
+    /// Called after all plugins have been built.
+    fn finish(&self, resources: &mut Resources);
+
+    /// Called when the plugin is removed from the engine.
+    fn cleanup(&self, resources: &mut Resources);
+}
+
+/// Trait for engine plugins with compile-time type-safe dependencies.
 ///
 /// Plugins are building blocks that add functionality to the engine.
 /// They can register resources, depend on other plugins, and hook
@@ -20,6 +131,8 @@ use crate::resource::Resources;
 /// struct MyPlugin;
 ///
 /// impl Plugin for MyPlugin {
+///     type Dependencies = ();
+///
 ///     fn name(&self) -> &'static str {
 ///         "MyPlugin"
 ///     }
@@ -43,20 +156,40 @@ use crate::resource::Resources;
 ///
 /// # Plugin Dependencies
 ///
-/// Plugins can declare dependencies on other plugins by returning
-/// their names from `dependencies()`. The engine will ensure that
-/// dependencies are built before dependent plugins.
-pub trait Plugin: Send + Sync {
+/// Plugins can declare dependencies using the `Dependencies` associated type:
+///
+/// ```ignore
+/// impl Plugin for MyPlugin {
+///     type Dependencies = (RenderPlugin, AssetPlugin);
+///     // ...
+/// }
+/// ```
+///
+/// This provides compile-time type checking of dependencies.
+pub trait Plugin: Send + Sync + 'static {
+    /// Type-safe plugin dependencies.
+    ///
+    /// Specify dependencies as a tuple of plugin types:
+    /// - `()` for no dependencies
+    /// - `P` for a single dependency
+    /// - `(P1, P2)` for two dependencies
+    /// - `(P1, P2, P3)` for three dependencies, etc.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// impl Plugin for MyPlugin {
+    ///     type Dependencies = (RenderPlugin, AssetPlugin);
+    ///     // ...
+    /// }
+    /// ```
+    type Dependencies: PluginSet;
+
     /// Returns the unique name of this plugin.
     ///
-    /// This is used for dependency resolution and debugging.
-    fn name(&self) -> &'static str;
-
-    /// Returns the names of plugins this plugin depends on.
-    ///
-    /// The engine will ensure these plugins are built before this one.
-    fn dependencies(&self) -> &[&'static str] {
-        &[]
+    /// By default, this uses the type name. Override if you need a custom name.
+    fn name(&self) -> &'static str {
+        type_name::<Self>()
     }
 
     /// Called when the plugin is added to the engine.
@@ -76,6 +209,29 @@ pub trait Plugin: Send + Sync {
     /// Use this for cleanup.
     #[allow(unused_variables)]
     fn cleanup(&self, resources: &mut Resources) {}
+}
+
+// Blanket implementation of PluginDyn for all Plugin types
+impl<P: Plugin> PluginDyn for P {
+    fn name(&self) -> &'static str {
+        <Self as Plugin>::name(self)
+    }
+
+    fn dependencies(&self) -> Vec<&'static str> {
+        P::Dependencies::names()
+    }
+
+    fn build(&self, resources: &mut Resources) {
+        <Self as Plugin>::build(self, resources)
+    }
+
+    fn finish(&self, resources: &mut Resources) {
+        <Self as Plugin>::finish(self, resources)
+    }
+
+    fn cleanup(&self, resources: &mut Resources) {
+        <Self as Plugin>::cleanup(self, resources)
+    }
 }
 
 /// A plugin group that bundles multiple plugins together.
@@ -102,7 +258,7 @@ pub trait Plugin: Send + Sync {
 /// ```
 pub trait PluginGroup {
     /// Returns the plugins in this group.
-    fn plugins(&self) -> Vec<Box<dyn Plugin>>;
+    fn plugins(&self) -> Vec<Box<dyn PluginDyn>>;
 
     /// Returns the name of this plugin group.
     fn name(&self) -> &'static str {
@@ -115,7 +271,7 @@ pub(crate) struct PluginGroupAdapter {
     /// Plugin group name for debugging
     #[allow(dead_code)]
     name: &'static str,
-    plugins: Vec<Box<dyn Plugin>>,
+    plugins: Vec<Box<dyn PluginDyn>>,
 }
 
 impl PluginGroupAdapter {
@@ -126,7 +282,7 @@ impl PluginGroupAdapter {
         }
     }
 
-    pub fn into_plugins(self) -> Vec<Box<dyn Plugin>> {
+    pub fn into_plugins(self) -> Vec<Box<dyn PluginDyn>> {
         self.plugins
     }
 }
@@ -166,6 +322,8 @@ impl<F> Plugin for FnPlugin<F>
 where
     F: Fn(&mut Resources) + Send + Sync + 'static,
 {
+    type Dependencies = ();
+
     fn name(&self) -> &'static str {
         self.name
     }
@@ -184,6 +342,8 @@ mod tests {
     }
 
     impl Plugin for TestPlugin {
+        type Dependencies = ();
+
         fn name(&self) -> &'static str {
             "TestPlugin"
         }
@@ -198,7 +358,7 @@ mod tests {
         let plugin = TestPlugin { value: 42 };
         let mut resources = Resources::new();
 
-        plugin.build(&mut resources);
+        PluginDyn::build(&plugin, &mut resources);
 
         assert_eq!(*resources.get::<i32>().unwrap(), 42);
     }
@@ -210,7 +370,7 @@ mod tests {
         });
 
         let mut resources = Resources::new();
-        plugin.build(&mut resources);
+        PluginDyn::build(&plugin, &mut resources);
 
         assert_eq!(resources.get::<String>().unwrap(), "hello");
     }
@@ -218,12 +378,10 @@ mod tests {
     struct DependentPlugin;
 
     impl Plugin for DependentPlugin {
+        type Dependencies = TestPlugin;
+
         fn name(&self) -> &'static str {
             "DependentPlugin"
-        }
-
-        fn dependencies(&self) -> &[&'static str] {
-            &["TestPlugin"]
         }
 
         fn build(&self, resources: &mut Resources) {
@@ -236,7 +394,8 @@ mod tests {
 
     #[test]
     fn test_plugin_dependencies() {
-        let deps = DependentPlugin.dependencies();
-        assert_eq!(deps, &["TestPlugin"]);
+        let plugin = DependentPlugin;
+        let deps = PluginDyn::dependencies(&plugin);
+        assert_eq!(deps, vec![type_name::<TestPlugin>()]);
     }
 }

@@ -32,7 +32,7 @@ pub use input_plugin::InputPlugin;
 #[cfg(feature = "text")]
 pub use text_plugin::TextPlugin;
 
-use crate::plugin::{Plugin, PluginGroup};
+use crate::plugin::{Plugin, PluginDyn, PluginGroup};
 
 /// Default plugins for a minimal game setup.
 ///
@@ -51,7 +51,7 @@ use crate::plugin::{Plugin, PluginGroup};
 pub struct MinimalPlugins;
 
 impl PluginGroup for MinimalPlugins {
-    fn plugins(&self) -> Vec<Box<dyn Plugin>> {
+    fn plugins(&self) -> Vec<Box<dyn PluginDyn>> {
         vec![Box::new(AssetPlugin::default())]
     }
 
@@ -78,8 +78,8 @@ impl PluginGroup for MinimalPlugins {
 pub struct DefaultPlugins;
 
 impl PluginGroup for DefaultPlugins {
-    fn plugins(&self) -> Vec<Box<dyn Plugin>> {
-        let mut plugins: Vec<Box<dyn Plugin>> = vec![
+    fn plugins(&self) -> Vec<Box<dyn PluginDyn>> {
+        let mut plugins: Vec<Box<dyn PluginDyn>> = vec![
             Box::new(AssetPlugin::default()),
             Box::new(TimePlugin),
         ];

@@ -31,6 +31,7 @@ use crate::time::Time;
 pub struct TimePlugin;
 
 impl Plugin for TimePlugin {
+    type Dependencies = ();
     fn name(&self) -> &'static str {
         "TimePlugin"
     }

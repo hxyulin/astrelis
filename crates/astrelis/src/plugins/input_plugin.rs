@@ -24,6 +24,7 @@ use crate::resource::Resources;
 pub struct InputPlugin;
 
 impl Plugin for InputPlugin {
+    type Dependencies = ();
     fn name(&self) -> &'static str {
         "InputPlugin"
     }

@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::plugin::{Plugin, PluginGroup, PluginGroupAdapter};
+use crate::plugin::{Plugin, PluginDyn, PluginGroup, PluginGroupAdapter};
 use crate::resource::Resources;
 
 /// The main engine struct that holds all resources and manages plugins.
@@ -26,7 +26,7 @@ use crate::resource::Resources;
 pub struct Engine {
     resources: Resources,
     plugin_names: HashSet<&'static str>,
-    plugins: Vec<Box<dyn Plugin>>,
+    plugins: Vec<Box<dyn PluginDyn>>,
 }
 
 impl Engine {
@@ -121,7 +121,7 @@ impl Default for Engine {
 ///     .build();
 /// ```
 pub struct EngineBuilder {
-    plugins: Vec<Box<dyn Plugin>>,
+    plugins: Vec<Box<dyn PluginDyn>>,
     resources: Resources,
 }
 
@@ -205,9 +205,9 @@ impl EngineBuilder {
     }
 
     /// Reorder plugins according to sorted indices
-    fn reorder_plugins(plugins: Vec<Box<dyn Plugin>>, sorted_indices: &[usize]) -> Vec<Box<dyn Plugin>> {
+    fn reorder_plugins(plugins: Vec<Box<dyn PluginDyn>>, sorted_indices: &[usize]) -> Vec<Box<dyn PluginDyn>> {
         // Wrap in Option to allow taking elements
-        let mut plugins_opt: Vec<Option<Box<dyn Plugin>>> =
+        let mut plugins_opt: Vec<Option<Box<dyn PluginDyn>>> =
             plugins.into_iter().map(|p| Some(p)).collect();
 
         // Extract in sorted order
@@ -234,7 +234,7 @@ impl EngineBuilder {
 
         fn visit(
             name: &'static str,
-            plugins: &[Box<dyn Plugin>],
+            plugins: &[Box<dyn PluginDyn>],
             plugin_map: &std::collections::HashMap<&'static str, usize>,
             visited: &mut HashSet<&'static str>,
             visiting: &mut HashSet<&'static str>,
@@ -314,9 +314,7 @@ mod tests {
     fn test_plugin_order() {
         struct FirstPlugin;
         impl Plugin for FirstPlugin {
-            fn name(&self) -> &'static str {
-                "FirstPlugin"
-            }
+            type Dependencies = ();
             fn build(&self, resources: &mut Resources) {
                 resources.insert(vec!["first"]);
             }
@@ -324,12 +322,8 @@ mod tests {
 
         struct SecondPlugin;
         impl Plugin for SecondPlugin {
-            fn name(&self) -> &'static str {
-                "SecondPlugin"
-            }
-            fn dependencies(&self) -> &[&'static str] {
-                &["FirstPlugin"]
-            }
+            type Dependencies = FirstPlugin;
+
             fn build(&self, resources: &mut Resources) {
                 if let Some(v) = resources.get_mut::<Vec<&'static str>>() {
                     v.push("second");
@@ -366,6 +360,7 @@ mod tests {
         }
 
         impl Plugin for TestPlugin {
+            type Dependencies = ();
             fn name(&self) -> &'static str {
                 self.name
             }
@@ -411,9 +406,7 @@ mod tests {
         }
 
         impl Plugin for BasePlugin {
-            fn name(&self) -> &'static str {
-                "BasePlugin"
-            }
+            type Dependencies = ();
 
             fn build(&self, resources: &mut Resources) {
                 resources.insert(vec!["base"]);
@@ -429,13 +422,7 @@ mod tests {
         }
 
         impl Plugin for DependentPlugin {
-            fn name(&self) -> &'static str {
-                "DependentPlugin"
-            }
-
-            fn dependencies(&self) -> &[&'static str] {
-                &["BasePlugin"]
-            }
+            type Dependencies = BasePlugin;
 
             fn build(&self, resources: &mut Resources) {
                 if let Some(v) = resources.get_mut::<Vec<&'static str>>() {

@@ -53,6 +53,7 @@ impl TextPlugin {
 }
 
 impl Plugin for TextPlugin {
+    type Dependencies = ();
     fn name(&self) -> &'static str {
         "TextPlugin"
     }

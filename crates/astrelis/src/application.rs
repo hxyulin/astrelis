@@ -4,7 +4,7 @@
 //! a clean, declarative API for common app setup patterns.
 
 use crate::{Engine, EngineBuilder};
-use crate::plugin::{Plugin, PluginGroup};
+use crate::plugin::{Plugin, PluginDyn, PluginGroup};
 
 #[cfg(all(feature = "render", feature = "winit"))]
 use astrelis_render::{WindowManager, WindowContextDescriptor};
@@ -17,7 +17,7 @@ use astrelis_winit::{
 
 /// Internal plugin group that wraps stored plugins
 struct StoredPlugins {
-    plugins: std::cell::RefCell<Vec<Box<dyn Plugin>>>,
+    plugins: std::cell::RefCell<Vec<Box<dyn PluginDyn>>>,
 }
 
 impl PluginGroup for StoredPlugins {
@@ -25,7 +25,7 @@ impl PluginGroup for StoredPlugins {
         "StoredPlugins"
     }
 
-    fn plugins(&self) -> Vec<Box<dyn Plugin>> {
+    fn plugins(&self) -> Vec<Box<dyn PluginDyn>> {
         self.plugins.borrow_mut().drain(..).collect()
     }
 }
@@ -69,7 +69,7 @@ impl PluginGroup for StoredPlugins {
 pub struct ApplicationBuilder {
     title: String,
     size: (u32, u32),
-    plugins: Vec<Box<dyn Plugin>>,
+    plugins: Vec<Box<dyn PluginDyn>>,
     #[cfg(all(feature = "render", feature = "winit"))]
     window_descriptor: Option<WindowContextDescriptor>,
     create_window: bool,
