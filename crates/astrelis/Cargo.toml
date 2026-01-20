@@ -38,5 +38,11 @@ astrelis-audio = { workspace = true, optional = true }
 tracing.workspace = true
 ahash.workspace = true
 
+# Async runtime
+async-executor.workspace = true
+futures-lite.workspace = true
+num_cpus.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true
+pollster.workspace = true

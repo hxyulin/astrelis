@@ -83,6 +83,11 @@ static_assertions = "1.1"
 # Bitflags
 bitflags = "2.4"
 
+# Async runtime
+async-executor = "1.13"
+futures-lite = "2.5"
+num_cpus = "1.16"
+
 # Testing
 tempfile = "3.10"
 

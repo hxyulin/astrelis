@@ -59,6 +59,7 @@ pub mod application;
 pub mod engine;
 pub mod plugin;
 pub mod resource;
+pub mod task_pool;
 pub mod time;
 
 #[cfg(feature = "assets")]
@@ -104,12 +105,16 @@ pub use astrelis_audio as audio;
 pub use engine::{Engine, EngineBuilder};
 pub use plugin::{Plugin, FnPlugin, PluginGroup};
 pub use resource::{Resource, Resources};
+pub use task_pool::TaskPool;
 pub use time::Time;
 pub use application::ApplicationBuilder;
 
 // Re-export plugin types when available
 #[cfg(feature = "assets")]
 pub use plugins::AssetPlugin;
+
+#[cfg(feature = "assets")]
+pub use plugins::AsyncRuntimePlugin;
 
 #[cfg(all(feature = "render", feature = "winit"))]
 pub use plugins::{RenderPlugin, RenderContexts};
@@ -131,6 +136,7 @@ pub mod prelude {
     pub use crate::engine::{Engine, EngineBuilder};
     pub use crate::plugin::{Plugin, FnPlugin};
     pub use crate::resource::{Resource, Resources};
+    pub use crate::task_pool::TaskPool;
     pub use crate::time::Time;
     pub use crate::application::ApplicationBuilder;
 
@@ -163,7 +169,7 @@ pub mod prelude {
 
     // Plugin types
     #[cfg(feature = "assets")]
-    pub use crate::plugins::{AssetPlugin, DefaultPlugins, MinimalPlugins};
+    pub use crate::plugins::{AssetPlugin, AsyncRuntimePlugin, DefaultPlugins, MinimalPlugins};
 
     #[cfg(all(feature = "render", feature = "winit"))]
     pub use crate::plugins::{RenderPlugin, RenderContexts};

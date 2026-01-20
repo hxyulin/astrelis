@@ -4,6 +4,7 @@
 //! game engine functionality.
 
 mod asset_plugin;
+mod async_runtime_plugin;
 
 #[cfg(all(feature = "render", feature = "winit"))]
 mod render_plugin;
@@ -17,6 +18,7 @@ mod text_plugin;
 mod time_plugin;
 
 pub use asset_plugin::AssetPlugin;
+pub use async_runtime_plugin::AsyncRuntimePlugin;
 
 pub use time_plugin::TimePlugin;
 
@@ -32,7 +34,7 @@ pub use input_plugin::InputPlugin;
 #[cfg(feature = "text")]
 pub use text_plugin::TextPlugin;
 
-use crate::plugin::{Plugin, PluginDyn, PluginGroup};
+use crate::plugin::{PluginDyn, PluginGroup};
 
 /// Default plugins for a minimal game setup.
 ///
