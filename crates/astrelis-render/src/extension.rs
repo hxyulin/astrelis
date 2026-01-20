@@ -9,7 +9,7 @@
 //! ```ignore
 //! use astrelis_render::{GraphicsContext, GraphicsContextExt, AsWgpu};
 //!
-//! let ctx = GraphicsContext::new_owned_sync();
+//! let ctx = GraphicsContext::new_owned_sync_or_panic();
 //!
 //! // Access raw wgpu device
 //! let device: &wgpu::Device = ctx.device();

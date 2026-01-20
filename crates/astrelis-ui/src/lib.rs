@@ -12,7 +12,7 @@
 //! ```rust,no_run
 //! # use astrelis_ui::UiSystem;
 //! # use astrelis_render::{Color, GraphicsContext};
-//! # let graphics_context = GraphicsContext::new_owned_sync();
+//! # let graphics_context = GraphicsContext::new_owned_sync_or_panic();
 //! let mut ui = UiSystem::new(graphics_context);
 //!
 //! ui.build(|root| {
@@ -386,7 +386,7 @@ impl UiSystem {
     /// ```no_run
     /// # use astrelis_ui::{UiSystem, WidgetId};
     /// # use astrelis_render::GraphicsContext;
-    /// # let context = GraphicsContext::new_owned_sync();
+    /// # let context = GraphicsContext::new_owned_sync_or_panic();
     /// # let mut ui = UiSystem::new(context);
     /// let counter_id = WidgetId::new("counter");
     /// ui.update_text(counter_id, "Count: 42");

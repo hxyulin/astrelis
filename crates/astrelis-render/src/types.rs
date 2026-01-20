@@ -14,7 +14,7 @@
 //! ```ignore
 //! use astrelis_render::{GraphicsContext, TypedBuffer, GraphicsContextExt};
 //!
-//! let ctx = GraphicsContext::new_owned_sync();
+//! let ctx = GraphicsContext::new_owned_sync_or_panic();
 //!
 //! // Create a typed buffer of f32 values
 //! let data = [1.0f32, 2.0, 3.0, 4.0];

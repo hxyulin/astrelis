@@ -29,7 +29,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
 
         let mut windows = HashMap::new();
 

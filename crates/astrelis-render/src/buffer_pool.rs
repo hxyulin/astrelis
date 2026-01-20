@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_ring_buffer_allocation() {
-        let ctx = GraphicsContext::new_owned_sync();
+        let ctx = GraphicsContext::new_owned_sync_or_panic();
         let mut ring = RingBuffer::new(ctx, 1024, wgpu::BufferUsages::UNIFORM);
 
         // Allocate some space
@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_ring_buffer_frame_advance() {
-        let ctx = GraphicsContext::new_owned_sync();
+        let ctx = GraphicsContext::new_owned_sync_or_panic();
         let mut ring = RingBuffer::new(ctx, 1024, wgpu::BufferUsages::UNIFORM);
 
         // Fill first frame
@@ -401,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_staging_pool() {
-        let ctx = GraphicsContext::new_owned_sync();
+        let ctx = GraphicsContext::new_owned_sync_or_panic();
         let mut pool = StagingBufferPool::new();
 
         // Allocate a buffer
@@ -423,7 +423,7 @@ mod tests {
 
     #[test]
     fn test_staging_pool_size_matching() {
-        let ctx = GraphicsContext::new_owned_sync();
+        let ctx = GraphicsContext::new_owned_sync_or_panic();
         let mut pool = StagingBufferPool::new();
 
         // Add buffers of different sizes

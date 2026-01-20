@@ -7,7 +7,7 @@
 //! ```ignore
 //! use astrelis_render::{TextureAtlas, GraphicsContext};
 //!
-//! let context = GraphicsContext::new_owned_sync();
+//! let context = GraphicsContext::new_owned_sync_or_panic();
 //! let mut atlas = TextureAtlas::new(context.clone(), 512, wgpu::TextureFormat::Rgba8UnormSrgb);
 //!
 //! // Insert images
@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_atlas_basic() {
-        let context = GraphicsContext::new_owned_sync();
+        let context = GraphicsContext::new_owned_sync_or_panic();
         let mut atlas = TextureAtlas::new(context, 256, wgpu::TextureFormat::Rgba8UnormSrgb);
 
         assert_eq!(atlas.size(), 256);
@@ -481,7 +481,7 @@ mod tests {
 
     #[test]
     fn test_atlas_multiple_inserts() {
-        let context = GraphicsContext::new_owned_sync();
+        let context = GraphicsContext::new_owned_sync_or_panic();
         let mut atlas = TextureAtlas::new(context, 256, wgpu::TextureFormat::Rgba8UnormSrgb);
 
         // Insert multiple images
@@ -498,7 +498,7 @@ mod tests {
 
     #[test]
     fn test_atlas_duplicate_key() {
-        let context = GraphicsContext::new_owned_sync();
+        let context = GraphicsContext::new_owned_sync_or_panic();
         let mut atlas = TextureAtlas::new(context, 256, wgpu::TextureFormat::Rgba8UnormSrgb);
 
         let image_data = vec![0u8; 32 * 32 * 4];
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn test_atlas_clear() {
-        let context = GraphicsContext::new_owned_sync();
+        let context = GraphicsContext::new_owned_sync_or_panic();
         let mut atlas = TextureAtlas::new(context, 256, wgpu::TextureFormat::Rgba8UnormSrgb);
 
         let image_data = vec![0u8; 32 * 32 * 4];

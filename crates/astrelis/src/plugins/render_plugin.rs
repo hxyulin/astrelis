@@ -166,7 +166,7 @@ impl Plugin for RenderPlugin {
 
     fn build(&self, resources: &mut Resources) {
         // Create graphics context with Arc (no memory leak)
-        let graphics = GraphicsContext::new_owned_sync();
+        let graphics = GraphicsContext::new_owned_sync_or_panic();
 
         tracing::info!(
             "RenderPlugin: GraphicsContext created (backend: {:?})",

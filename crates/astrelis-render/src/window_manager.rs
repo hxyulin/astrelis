@@ -63,7 +63,7 @@ impl WindowManager {
     /// use astrelis_render::{WindowManager, GraphicsContext};
     /// use std::sync::Arc;
     ///
-    /// let graphics = GraphicsContext::new_owned_sync();
+    /// let graphics = GraphicsContext::new_owned_sync_or_panic();
     /// let window_manager = WindowManager::new(graphics);
     /// ```
     pub fn new(graphics: Arc<GraphicsContext>) -> Self {
@@ -275,7 +275,7 @@ mod tests {
 
     #[test]
     fn test_window_manager_creation() {
-        let graphics = GraphicsContext::new_owned_sync();
+        let graphics = GraphicsContext::new_owned_sync_or_panic();
         let manager = WindowManager::new(graphics.clone());
 
         assert_eq!(manager.window_count(), 0);
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_window_manager_window_count() {
-        let graphics = GraphicsContext::new_owned_sync();
+        let graphics = GraphicsContext::new_owned_sync_or_panic();
         let manager = WindowManager::new(graphics);
 
         assert_eq!(manager.window_count(), 0);
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_window_manager_window_ids_empty() {
-        let graphics = GraphicsContext::new_owned_sync();
+        let graphics = GraphicsContext::new_owned_sync_or_panic();
         let manager = WindowManager::new(graphics);
 
         assert_eq!(manager.window_ids().count(), 0);

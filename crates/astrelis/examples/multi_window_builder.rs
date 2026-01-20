@@ -12,7 +12,7 @@
 ///!
 ///!     run_app(|ctx| {
 ///!         // 1. Manual GraphicsContext creation
-///!         let graphics = GraphicsContext::new_owned_sync();
+///!         let graphics = GraphicsContext::new_owned_sync_or_panic();
 ///!
 ///!         // 2. Manual WindowManager creation
 ///!         let mut window_manager = WindowManager::new(graphics);

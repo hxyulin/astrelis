@@ -34,7 +34,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync();
+        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
         let window = ctx.create_window(WindowDescriptor {
             title: "UI Stress Test - Performance Benchmark".to_string(),
             size: Some(WinitPhysicalSize::new(1400.0, 900.0)),

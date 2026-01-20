@@ -7,7 +7,7 @@ use astrelis_text::{FontRenderer, FontSystem, Text, TextAlign, TextWrap};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 fn setup() -> (Arc<GraphicsContext>, FontRenderer) {
-    let context = GraphicsContext::new_owned_sync();
+    let context = GraphicsContext::new_owned_sync_or_panic();
     let font_system = FontSystem::with_system_fonts();
     let renderer = FontRenderer::new(context.clone(), font_system);
     (context, renderer)

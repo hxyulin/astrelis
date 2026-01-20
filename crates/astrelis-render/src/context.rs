@@ -1,6 +1,45 @@
 use crate::features::GpuFeatures;
 use std::sync::Arc;
 
+/// Errors that can occur during graphics context creation.
+#[derive(Debug, Clone)]
+pub enum GraphicsError {
+    /// No suitable GPU adapter was found.
+    NoAdapter,
+
+    /// Failed to create a device.
+    DeviceCreationFailed(String),
+
+    /// Required GPU features are not supported by the adapter.
+    MissingRequiredFeatures {
+        missing: GpuFeatures,
+        adapter_name: String,
+        supported: GpuFeatures,
+    },
+}
+
+impl std::fmt::Display for GraphicsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GraphicsError::NoAdapter => {
+                write!(f, "Failed to find a suitable GPU adapter")
+            }
+            GraphicsError::DeviceCreationFailed(msg) => {
+                write!(f, "Failed to create device: {}", msg)
+            }
+            GraphicsError::MissingRequiredFeatures { missing, adapter_name, supported } => {
+                write!(
+                    f,
+                    "Required GPU features not supported by adapter '{}': {:?}\nSupported: {:?}",
+                    adapter_name, missing, supported
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for GraphicsError {}
+
 /// A globally shared graphics context.
 ///
 /// # Ownership Pattern
@@ -12,7 +51,7 @@ use std::sync::Arc;
 /// use std::sync::Arc;
 ///
 /// // Synchronous creation (blocks on async internally)
-/// let ctx = GraphicsContext::new_owned_sync(); // Returns Arc<Self>
+/// let ctx = GraphicsContext::new_owned_sync_or_panic(); // Returns Arc<Self>
 /// let ctx2 = ctx.clone(); // Cheap clone (Arc)
 ///
 /// // Asynchronous creation (for async contexts)
@@ -50,25 +89,45 @@ impl GraphicsContext {
     /// let ctx2 = ctx.clone(); // Cheap clone
     /// # }
     /// ```
-    pub async fn new_owned() -> Arc<Self> {
+    pub async fn new_owned() -> Result<Arc<Self>, GraphicsError> {
         Self::new_owned_with_descriptor(GraphicsContextDescriptor::default()).await
     }
 
     /// Creates a new graphics context synchronously with owned ownership (recommended).
     ///
     /// This blocks the current thread until the context is created.
-    pub fn new_owned_sync() -> Arc<Self> {
+    ///
+    /// # Errors
+    ///
+    /// Returns `GraphicsError` if:
+    /// - No suitable GPU adapter is found
+    /// - Required GPU features are not supported
+    /// - Device creation fails
+    pub fn new_owned_sync() -> Result<Arc<Self>, GraphicsError> {
         pollster::block_on(Self::new_owned())
     }
 
+    /// Creates a new graphics context synchronously, panicking on error.
+    ///
+    /// This is a convenience method for tests and examples where error handling
+    /// is not needed. For production code, prefer `new_owned_sync()` which returns
+    /// a `Result`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if graphics context creation fails.
+    pub fn new_owned_sync_or_panic() -> Arc<Self> {
+        Self::new_owned_sync().expect("Failed to create graphics context")
+    }
+
     /// Creates a new graphics context with custom descriptor (owned).
-    pub async fn new_owned_with_descriptor(descriptor: GraphicsContextDescriptor) -> Arc<Self> {
-        let context = Self::create_context_internal(descriptor).await;
-        Arc::new(context)
+    pub async fn new_owned_with_descriptor(descriptor: GraphicsContextDescriptor) -> Result<Arc<Self>, GraphicsError> {
+        let context = Self::create_context_internal(descriptor).await?;
+        Ok(Arc::new(context))
     }
 
     /// Internal method to create context without deciding on ownership pattern.
-    async fn create_context_internal(descriptor: GraphicsContextDescriptor) -> Self {
+    async fn create_context_internal(descriptor: GraphicsContextDescriptor) -> Result<Self, GraphicsError> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: descriptor.backends,
             ..Default::default()
@@ -81,19 +140,16 @@ impl GraphicsContext {
                 force_fallback_adapter: descriptor.force_fallback_adapter,
             })
             .await
-            .expect("Failed to find a suitable GPU adapter");
+            .map_err(|_| GraphicsError::NoAdapter)?;
 
         // Check required features
         let required_result = descriptor.required_gpu_features.check_support(&adapter);
         if let Some(missing) = required_result.missing() {
-            panic!(
-                "Required GPU features are not supported by the adapter: {:?}\n\
-                 Adapter: {:?}\n\
-                 Supported features: {:?}",
+            return Err(GraphicsError::MissingRequiredFeatures {
                 missing,
-                adapter.get_info().name,
-                GpuFeatures::from_wgpu(adapter.features())
-            );
+                adapter_name: adapter.get_info().name.clone(),
+                supported: GpuFeatures::from_wgpu(adapter.features()),
+            });
         }
 
         // Determine which requested features are available
@@ -122,20 +178,20 @@ impl GraphicsContext {
                 ..Default::default()
             })
             .await
-            .expect("Failed to create device");
+            .map_err(|e| GraphicsError::DeviceCreationFailed(e.to_string()))?;
 
         tracing::info!(
             "Created graphics context with features: {:?}",
             enabled_features
         );
 
-        Self {
+        Ok(Self {
             instance,
             adapter,
             device,
             queue,
             enabled_features,
-        }
+        })
     }
 
     /// Get device info
