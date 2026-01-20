@@ -382,7 +382,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx) {
+    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::app::FrameTime) {
         // No updates needed for this static demo
     }
 

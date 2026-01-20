@@ -76,7 +76,7 @@ fn main() {
 }
 
 impl App for TextDemo {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         // Global logic (none needed for this demo)
     }
 

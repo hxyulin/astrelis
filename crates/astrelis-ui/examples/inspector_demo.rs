@@ -400,7 +400,7 @@ fn build_demo_ui(
 }
 
 impl App for InspectorDemoApp {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         new_frame();
 
         // Calculate frame time

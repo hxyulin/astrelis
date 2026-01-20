@@ -314,7 +314,7 @@ fn build_focusable_button(
 }
 
 impl App for FocusNavigationApp {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         new_frame();
         self.ui.update(0.016);
     }

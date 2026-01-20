@@ -15,6 +15,7 @@ use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu};
 use astrelis_ui::UiSystem;
 use astrelis_winit::{WindowId, app::{App, AppCtx, run_app}, event::{EventBatch, Event, HandleStatus, Key, NamedKey}, window::{WinitPhysicalSize, WindowBackend, WindowDescriptor}};
+use astrelis_winit::time::FrameTime;
 use std::time::Instant;
 
 struct UiStressTest {
@@ -140,7 +141,7 @@ fn build_stress_ui(ui: &mut UiSystem, count: usize, frame: u64) {
 }
 
 impl App for UiStressTest {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         new_frame();
         self.ui.update(0.016);
         self.frame_count += 1;

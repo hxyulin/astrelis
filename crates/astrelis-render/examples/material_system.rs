@@ -100,7 +100,7 @@ fn main() {
 }
 
 impl App for MaterialSystemDemo {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         self.time += 0.016; // 60 FPS
     }
 

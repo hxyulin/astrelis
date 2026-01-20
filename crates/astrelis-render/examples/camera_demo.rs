@@ -85,7 +85,7 @@ fn main() {
 }
 
 impl App for CameraDemo {
-    fn update(&mut self, _ctx: &mut AppCtx) {}
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {}
 
     fn render(&mut self, _ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
         if window_id != self.window_id {

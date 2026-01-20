@@ -665,7 +665,7 @@ fn build_tooltip_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::Node
 }
 
 impl App for WidgetGalleryApp {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         new_frame();
         self.ui.update(0.016);
     }

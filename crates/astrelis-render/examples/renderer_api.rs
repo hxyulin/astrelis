@@ -269,7 +269,7 @@ fn main() {
 }
 
 impl App for RendererApp {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         // Global logic - update animation time
         self.time += 0.016;
     }

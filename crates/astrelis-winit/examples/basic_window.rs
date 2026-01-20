@@ -12,7 +12,7 @@ struct BasicApp {
 }
 
 impl App for BasicApp {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         // Global logic - called once per frame
         self.counter += 1;
         if self.counter % 1000 == 0 {

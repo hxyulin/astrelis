@@ -317,12 +317,12 @@ fn build_counter_ui_with_callbacks(
 }
 
 impl App for CounterApp {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, time: &FrameTime) {
         // Mark new profiling frame
         new_frame();
 
-        // Update UI animations
-        self.ui.update(0.016);
+        // Update UI animations with real delta time
+        self.ui.update(time.delta_seconds());
     }
 
     fn render(&mut self, _ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {

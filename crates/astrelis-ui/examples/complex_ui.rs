@@ -429,7 +429,7 @@ fn build_activity_item(root: &mut astrelis_ui::UiBuilder, title: &str, time: &st
 }
 
 impl App for ComplexUiApp {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         new_frame();
         self.ui.update(0.016);
     }

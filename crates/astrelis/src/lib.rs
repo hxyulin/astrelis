@@ -58,6 +58,7 @@
 pub mod engine;
 pub mod plugin;
 pub mod resource;
+pub mod time;
 
 #[cfg(feature = "assets")]
 pub mod plugins;
@@ -102,6 +103,7 @@ pub use astrelis_audio as audio;
 pub use engine::{Engine, EngineBuilder};
 pub use plugin::{Plugin, FnPlugin, PluginGroup};
 pub use resource::{Resource, Resources};
+pub use time::Time;
 
 // Re-export plugin types when available
 #[cfg(feature = "assets")]
@@ -117,6 +119,9 @@ pub use plugins::TextPlugin;
 pub use plugins::InputPlugin;
 
 #[cfg(feature = "assets")]
+pub use plugins::TimePlugin;
+
+#[cfg(feature = "assets")]
 pub use plugins::{DefaultPlugins, MinimalPlugins};
 
 /// Prelude module for convenient imports
@@ -124,6 +129,7 @@ pub mod prelude {
     pub use crate::engine::{Engine, EngineBuilder};
     pub use crate::plugin::{Plugin, FnPlugin};
     pub use crate::resource::{Resource, Resources};
+    pub use crate::time::Time;
 
     // Core math types
     pub use astrelis_core::math::{Mat4, Vec2, Vec3, Vec4};
@@ -163,4 +169,7 @@ pub mod prelude {
 
     #[cfg(feature = "text")]
     pub use crate::plugins::TextPlugin;
+
+    #[cfg(feature = "assets")]
+    pub use crate::plugins::TimePlugin;
 }

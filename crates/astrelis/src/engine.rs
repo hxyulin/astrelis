@@ -26,6 +26,7 @@ use crate::resource::Resources;
 pub struct Engine {
     resources: Resources,
     plugin_names: HashSet<&'static str>,
+    plugins: Vec<Box<dyn Plugin>>,
 }
 
 impl Engine {
@@ -62,6 +63,41 @@ impl Engine {
     /// Get the names of all registered plugins.
     pub fn plugin_names(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.plugin_names.iter().copied()
+    }
+
+    /// Shutdown the engine, calling cleanup() on all plugins in reverse order.
+    ///
+    /// This allows plugins to perform cleanup tasks such as:
+    /// - Flushing assets to disk
+    /// - Closing file handles
+    /// - Persisting state
+    /// - Releasing resources
+    ///
+    /// Plugins are cleaned up in reverse dependency order (opposite of build order).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use astrelis::prelude::*;
+    ///
+    /// let mut engine = Engine::builder()
+    ///     .add_plugins(DefaultPlugins)
+    ///     .build();
+    ///
+    /// // ... game runs ...
+    ///
+    /// engine.shutdown(); // Cleanup all plugins
+    /// ```
+    pub fn shutdown(&mut self) {
+        tracing::info!("Shutting down engine with {} plugins", self.plugins.len());
+
+        // Call cleanup() in reverse order (reverse of build order)
+        for plugin in self.plugins.iter().rev() {
+            tracing::debug!("Cleaning up plugin: {}", plugin.name());
+            plugin.cleanup(&mut self.resources);
+        }
+
+        tracing::info!("Engine shutdown complete");
     }
 }
 
@@ -157,10 +193,28 @@ impl EngineBuilder {
             plugin_names
         );
 
+        // Reorder plugins vec to match build order for proper cleanup
+        // We need plugins in dependency order so cleanup can reverse it
+        let sorted_plugins = Self::reorder_plugins(self.plugins, &sorted_indices);
+
         Engine {
             resources: self.resources,
             plugin_names,
+            plugins: sorted_plugins,
         }
+    }
+
+    /// Reorder plugins according to sorted indices
+    fn reorder_plugins(plugins: Vec<Box<dyn Plugin>>, sorted_indices: &[usize]) -> Vec<Box<dyn Plugin>> {
+        // Wrap in Option to allow taking elements
+        let mut plugins_opt: Vec<Option<Box<dyn Plugin>>> =
+            plugins.into_iter().map(|p| Some(p)).collect();
+
+        // Extract in sorted order
+        sorted_indices
+            .iter()
+            .map(|&idx| plugins_opt[idx].take().expect("Plugin already taken"))
+            .collect()
     }
 
     /// Sort plugins by dependencies using topological sort, returning indices.
@@ -297,5 +351,115 @@ mod tests {
     fn test_default_engine() {
         let engine = Engine::default();
         assert!(engine.resources().is_empty());
+    }
+
+    #[test]
+    fn test_engine_shutdown() {
+        use std::sync::{Arc, Mutex};
+
+        // Track cleanup calls
+        let cleanup_log = Arc::new(Mutex::new(Vec::new()));
+
+        struct TestPlugin {
+            name: &'static str,
+            log: Arc<Mutex<Vec<&'static str>>>,
+        }
+
+        impl Plugin for TestPlugin {
+            fn name(&self) -> &'static str {
+                self.name
+            }
+
+            fn build(&self, resources: &mut Resources) {
+                resources.insert(format!("{}_built", self.name));
+            }
+
+            fn cleanup(&self, _resources: &mut Resources) {
+                self.log.lock().unwrap().push(self.name);
+            }
+        }
+
+        let log1 = cleanup_log.clone();
+        let log2 = cleanup_log.clone();
+        let log3 = cleanup_log.clone();
+
+        let mut engine = EngineBuilder::new()
+            .add_plugin(TestPlugin { name: "First", log: log1 })
+            .add_plugin(TestPlugin { name: "Second", log: log2 })
+            .add_plugin(TestPlugin { name: "Third", log: log3 })
+            .build();
+
+        // Verify resources were created
+        assert!(engine.get::<String>().is_some());
+
+        // Call shutdown
+        engine.shutdown();
+
+        // Verify cleanup was called in reverse order
+        let log = cleanup_log.lock().unwrap();
+        assert_eq!(*log, vec!["Third", "Second", "First"]);
+    }
+
+    #[test]
+    fn test_shutdown_with_dependencies() {
+        use std::sync::{Arc, Mutex};
+
+        let cleanup_log = Arc::new(Mutex::new(Vec::new()));
+
+        struct BasePlugin {
+            log: Arc<Mutex<Vec<&'static str>>>,
+        }
+
+        impl Plugin for BasePlugin {
+            fn name(&self) -> &'static str {
+                "BasePlugin"
+            }
+
+            fn build(&self, resources: &mut Resources) {
+                resources.insert(vec!["base"]);
+            }
+
+            fn cleanup(&self, _resources: &mut Resources) {
+                self.log.lock().unwrap().push("BasePlugin");
+            }
+        }
+
+        struct DependentPlugin {
+            log: Arc<Mutex<Vec<&'static str>>>,
+        }
+
+        impl Plugin for DependentPlugin {
+            fn name(&self) -> &'static str {
+                "DependentPlugin"
+            }
+
+            fn dependencies(&self) -> &[&'static str] {
+                &["BasePlugin"]
+            }
+
+            fn build(&self, resources: &mut Resources) {
+                if let Some(v) = resources.get_mut::<Vec<&'static str>>() {
+                    v.push("dependent");
+                }
+            }
+
+            fn cleanup(&self, _resources: &mut Resources) {
+                self.log.lock().unwrap().push("DependentPlugin");
+            }
+        }
+
+        let log1 = cleanup_log.clone();
+        let log2 = cleanup_log.clone();
+
+        let mut engine = EngineBuilder::new()
+            .add_plugin(DependentPlugin { log: log2 })
+            .add_plugin(BasePlugin { log: log1 })
+            .build();
+
+        engine.shutdown();
+
+        // Cleanup should be in reverse order: DependentPlugin first, then BasePlugin
+        let log = cleanup_log.lock().unwrap();
+        assert_eq!(*log, vec!["DependentPlugin", "BasePlugin"]);
     }
 }

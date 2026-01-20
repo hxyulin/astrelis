@@ -280,7 +280,7 @@ fn main() {
 }
 
 impl App for TexturedQuadApp {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         // Global logic - called once per frame
         self.time += 0.016;
     }

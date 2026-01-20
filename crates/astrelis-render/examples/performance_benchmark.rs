@@ -82,7 +82,7 @@ fn main() {
 }
 
 impl App for PerformanceBenchmark {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         self.frame_count += 1;
 
         let now = Instant::now();

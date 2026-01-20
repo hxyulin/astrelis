@@ -14,7 +14,11 @@ mod input_plugin;
 #[cfg(feature = "text")]
 mod text_plugin;
 
+mod time_plugin;
+
 pub use asset_plugin::AssetPlugin;
+
+pub use time_plugin::TimePlugin;
 
 #[cfg(all(feature = "render", feature = "winit"))]
 pub use render_plugin::RenderPlugin;
@@ -75,7 +79,10 @@ pub struct DefaultPlugins;
 
 impl PluginGroup for DefaultPlugins {
     fn plugins(&self) -> Vec<Box<dyn Plugin>> {
-        let mut plugins: Vec<Box<dyn Plugin>> = vec![Box::new(AssetPlugin::default())];
+        let mut plugins: Vec<Box<dyn Plugin>> = vec![
+            Box::new(AssetPlugin::default()),
+            Box::new(TimePlugin),
+        ];
 
         #[cfg(feature = "input")]
         plugins.push(Box::new(InputPlugin));

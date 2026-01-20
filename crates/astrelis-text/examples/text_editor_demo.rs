@@ -99,7 +99,7 @@ fn main() {
 }
 
 impl App for TextEditorDemo {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         // No update logic needed
     }
 

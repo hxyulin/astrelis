@@ -325,7 +325,7 @@ fn elastic(t: f32) -> f32 {
 }
 
 impl App for AnimationShowcaseApp {
-    fn update(&mut self, _ctx: &mut AppCtx) {
+    fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         new_frame();
 
         // Update animation time if animating
