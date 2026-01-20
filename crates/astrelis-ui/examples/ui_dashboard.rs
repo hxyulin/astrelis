@@ -31,8 +31,8 @@ use astrelis_ui::{
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    event::{Event, HandleStatus, Key, NamedKey, PhysicalSize},
-    window::{WindowDescriptor, WindowBackend, Window},
+    event::{Event, HandleStatus, Key, NamedKey},
+    window::{WindowDescriptor, WindowBackend, Window, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -60,7 +60,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Astrelis UI - Dashboard Performance".to_string(),
-                size: Some(PhysicalSize::new(1280.0 * scale, 800.0 * scale)),
+                size: Some(WinitPhysicalSize::new(1280.0 * scale, 800.0 * scale)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -226,13 +226,7 @@ impl astrelis_winit::app::App for App {
         events.dispatch(|event| {
             if let Event::WindowResized(size) = event {
                 window.resized(*size);
-                self.ui.set_viewport(astrelis_render::Viewport {
-                    x: 0.0,
-                    y: 0.0,
-                    width: size.width as f32,
-                    height: size.height as f32,
-                    scale_factor: window.scale_factor(),
-                });
+                self.ui.set_viewport(window.viewport());
                 HandleStatus::consumed()
             } else {
                 HandleStatus::ignored()

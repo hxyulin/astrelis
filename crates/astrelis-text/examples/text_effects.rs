@@ -26,7 +26,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 struct TextEffectsDemo {
@@ -45,7 +45,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Text Effects Demo - Shadows, Outlines, Glows".to_string(),
-                size: Some(PhysicalSize::new(1100.0, 800.0)),
+                size: Some(WinitPhysicalSize::new(1100.0, 800.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -256,7 +256,7 @@ impl App for TextEffectsDemo {
         )
         .size(11.0)
         .color(Color::from_rgb_u8(150, 150, 100))
-        .max_width(self.window.size_f32().width - 100.0);
+        .max_width(self.window.logical_size_f32().width - 100.0);
 
         let mut note_buffer = self.font_renderer.prepare(&note);
         self.font_renderer.draw_text(&mut note_buffer, Vec2::new(50.0, y + 30.0));

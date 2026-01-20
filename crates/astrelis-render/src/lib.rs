@@ -24,22 +24,26 @@ mod color;
 mod compute;
 mod context;
 mod context_impl;
+mod extension;
 mod features;
 mod frame;
 mod framebuffer;
 mod indirect;
 mod material;
 mod mesh;
+mod query;
 mod readback;
 mod render_graph;
 mod renderer;
 mod sprite;
 mod target;
+mod types;
 mod window;
 
 // Re-export all modules
 pub use atlas::*;
 pub use blend::*;
+pub use extension::*;
 pub use blit::*;
 pub use buffer_pool::*;
 pub use camera::*;
@@ -52,11 +56,13 @@ pub use framebuffer::*;
 pub use indirect::*;
 pub use material::*;
 pub use mesh::*;
+pub use query::*;
 pub use readback::*;
 pub use render_graph::*;
 pub use renderer::*;
 pub use sprite::*;
 pub use target::*;
+pub use types::*;
 pub use window::*;
 
 // Re-export wgpu under 'wgpu' module

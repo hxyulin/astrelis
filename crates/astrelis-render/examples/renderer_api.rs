@@ -8,7 +8,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 struct RendererApp {
@@ -36,7 +36,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Renderer API Example".to_string(),
-                size: Some(PhysicalSize::new(800.0, 600.0)),
+                size: Some(WinitPhysicalSize::new(800.0, 600.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");

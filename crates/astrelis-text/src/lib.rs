@@ -3,8 +3,23 @@
 //! This crate provides modular text rendering capabilities:
 //! - Font management with system fonts and custom fonts
 //! - Text builder with styling (size, color, alignment, etc.)
-//! - GPU-accelerated text rendering with FontRenderer
+//! - GPU-accelerated text rendering with zero-cost backend selection
 //! - Signed Distance Field (SDF) rendering for scalable text and effects
+//!
+//! ## Zero-Cost Renderer Selection
+//!
+//! Choose the renderer that fits your memory budget:
+//!
+//! | Renderer | Memory | Use Case |
+//! |----------|--------|----------|
+//! | [`BitmapTextRenderer`] | ~8 MB | Small text, UI labels, no effects needed |
+//! | [`SdfTextRenderer`] | ~8 MB | Large text, titles, needs shadows/outlines/glows |
+//! | [`FontRenderer`] | ~16 MB | Mixed usage, backwards compatibility (default) |
+//!
+//! Memory can be further reduced with [`TextRendererConfig`]:
+//! - `small()`: 512x512 atlas (~1 MB per renderer)
+//! - `medium()`: 1024x1024 atlas (~4 MB per renderer)
+//! - `large()`: 2048x2048 atlas (~8 MB per renderer, default)
 //!
 //! ## Quick Start
 //!
@@ -122,8 +137,9 @@ pub mod asset;
 // Re-export main types
 pub use cache::{ShapeKey, ShapedTextData, TextShapeCache};
 pub use decoration::{
-    BackgroundGeometry, DecorationGeometry, LineStyle, StrikethroughStyle, TextDecoration,
-    UnderlineStyle, generate_decoration_geometry,
+    BackgroundGeometry, DecorationGeometry, DecorationQuad, DecorationQuadType, LineStyle,
+    StrikethroughStyle, TextBounds, TextDecoration, UnderlineStyle, generate_decoration_geometry,
+    generate_decoration_quads,
 };
 pub use editor::{TextCursor, TextEditor, TextSelection};
 pub use effects::{
@@ -135,14 +151,18 @@ pub use pipeline::{
     TextShapeRequest, TextShaper,
 };
 pub use renderer::{
-    AtlasEntry, FontRenderer, GlyphPlacement, SdfAtlasEntry, SdfCacheKey, SdfParams, TextBuffer,
+    // Renderers
+    BitmapTextRenderer, FontRenderer, SdfTextRenderer,
+    // Common types
+    AtlasEntry, DecorationRenderer, DecorationVertex, GlyphPlacement, SdfAtlasEntry, SdfCacheKey,
+    SdfParams, SharedContext, TextBuffer, TextRender, TextRendererConfig, TextVertex,
 };
 pub use rich_text::{RichText, RichTextBuilder, TextSpan, TextSpanStyle};
 pub use sdf::{SdfConfig, TextRenderMode, generate_sdf, generate_sdf_smooth};
 pub use shaping::{
     extract_glyphs_from_buffer, measure_text_fast, shape_text, ShapedGlyph, ShapedTextResult,
 };
-pub use text::{Text, TextAlign, TextMetrics, TextWrap, VerticalAlign};
+pub use text::{LineBreakConfig, Text, TextAlign, TextMetrics, TextWrap, VerticalAlign};
 
 // Re-export asset types when feature is enabled
 #[cfg(feature = "asset")]

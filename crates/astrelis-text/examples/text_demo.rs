@@ -25,7 +25,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 struct TextDemo {
@@ -44,7 +44,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Text Rendering Demo".to_string(),
-                size: Some(PhysicalSize::new(1024.0, 768.0)),
+                size: Some(WinitPhysicalSize::new(1024.0, 768.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -115,7 +115,7 @@ impl App for TextDemo {
         )
         .size(12.0)
         .color(Color::from_rgb_u8(200, 200, 200))
-        .max_width(self.window.size_f32().width - 50.0)
+        .max_width(self.window.logical_size_f32().width - 50.0)
         .line_height(1.5);
 
         let bold_text = Text::new("Bold text example")

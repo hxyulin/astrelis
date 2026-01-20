@@ -425,11 +425,11 @@ impl UiRenderer {
     pub fn set_viewport(&mut self, viewport: Viewport) {
         // Clear caches if scale factor changed
         // (shaped text positions and glyph cache keys are scale-dependent)
-        if (self.scale_factor - viewport.scale_factor).abs() > f64::EPSILON {
+        if (self.scale_factor - viewport.scale_factor.0).abs() > f64::EPSILON {
             self.text_pipeline.clear_cache();
             self.draw_list.clear(); // Force re-render of all nodes
         }
-        self.scale_factor = viewport.scale_factor;
+        self.scale_factor = viewport.scale_factor.0;
         self.font_renderer.set_viewport(viewport);
     }
 
@@ -872,8 +872,8 @@ impl UiRenderer {
         self.update(tree);
 
         // physical size -> logical size -> NDC
-        let projection = orthographic_projection(viewport.width / viewport.scale_factor as f32,
-                                                 viewport.height / viewport.scale_factor as f32);
+        let logical_size = viewport.to_logical();
+        let projection = orthographic_projection(logical_size.width, logical_size.height);
         self.renderer.queue().write_buffer(
             &self.projection_buffer,
             0,

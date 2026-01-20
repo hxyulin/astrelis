@@ -29,7 +29,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::{EventBatch, Event, HandleStatus, Key, NamedKey},
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 struct TextEditorDemo {
@@ -49,7 +49,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Text Editor Demo - Cursor & Selection".to_string(),
-                size: Some(PhysicalSize::new(1100.0, 700.0)),
+                size: Some(WinitPhysicalSize::new(1100.0, 700.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -182,7 +182,7 @@ impl App for TextEditorDemo {
         let editor_text = Text::new(self.editor.text())
             .size(20.0)
             .color(Color::WHITE)
-            .max_width(self.window.size_f32().width - 100.0);
+            .max_width(self.window.logical_size_f32().width - 100.0);
         let mut editor_buffer = self.font_renderer.prepare(&editor_text);
 
         // Cursor info
@@ -221,7 +221,7 @@ impl App for TextEditorDemo {
         )
         .size(13.0)
         .color(Color::from_rgb_u8(200, 200, 150))
-        .max_width(self.window.size_f32().width - 100.0)
+        .max_width(self.window.logical_size_f32().width - 100.0)
         .line_height(1.6);
         let mut api_buffer = self.font_renderer.prepare(&api_desc);
 
@@ -232,7 +232,7 @@ impl App for TextEditorDemo {
         )
         .size(11.0)
         .color(Color::from_rgb_u8(150, 150, 100))
-        .max_width(self.window.size_f32().width - 100.0)
+        .max_width(self.window.logical_size_f32().width - 100.0)
         .line_height(1.5);
         let mut note_buffer = self.font_renderer.prepare(&note);
 

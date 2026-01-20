@@ -40,6 +40,7 @@
 pub mod animation;
 pub mod auto_dirty;
 pub mod builder;
+pub mod culling;
 pub mod debug;
 pub mod dirty;
 pub mod dirty_ranges;
@@ -51,12 +52,19 @@ pub mod gpu_types;
 pub mod inspector;
 pub mod instance_buffer;
 pub mod layout;
+pub mod layout_engine;
 pub mod length;
+pub mod menu;
 pub mod metrics;
+pub mod metrics_collector;
+pub mod middleware;
+pub mod overlay;
 pub mod renderer;
 pub mod style;
 pub mod theme;
+pub mod tooltip;
 pub mod tree;
+pub mod virtual_scroll;
 pub mod widget;
 pub mod widget_id;
 pub mod widgets;
@@ -101,9 +109,30 @@ pub use theme::{ColorPalette, ColorRole, Shapes, Spacing, Theme, ThemeBuilder, T
 pub use tree::{NodeId, UiTree};
 pub use widgets::Widget;
 pub use focus::{FocusDirection, FocusEvent, FocusManager, FocusPolicy, FocusScopeId};
+
+// Re-export new architecture modules
+pub use culling::{CullingStats, CullingTree, AABB};
 pub use inspector::{
-    InspectedWidget, InspectorMetrics, InspectorMode, UiInspector, WidgetType,
-    WidgetIdRegistryExt,
+    EditableProperty, InspectorConfig, InspectorGraphs, PropertyEditor, SearchState,
+    TreeViewState, UiInspector, WidgetIdRegistryExt, WidgetKind,
+};
+pub use layout_engine::{LayoutEngine, LayoutMode, LayoutRequest};
+pub use menu::{ContextMenu, MenuBar, MenuItem, MenuStyle};
+pub use metrics_collector::{
+    FrameTimingMetrics, MemoryMetrics, MetricsCollector, MetricsConfig, PerformanceWarning,
+    WidgetMetrics,
+};
+pub use middleware::{
+    InspectorMiddleware, Keybind, KeybindRegistry, MiddlewareContext, MiddlewareManager, Modifiers,
+    OverlayContext, OverlayDrawList, OverlayRenderer, UiMiddleware,
+};
+pub use overlay::{
+    AnchorAlignment, Overlay, OverlayConfig, OverlayId, OverlayManager, OverlayPosition, ZLayer,
+};
+pub use tooltip::{TooltipConfig, TooltipContent, TooltipManager, TooltipPosition};
+pub use virtual_scroll::{
+    ItemHeight, MountedItem, VirtualScrollConfig, VirtualScrollState, VirtualScrollStats,
+    VirtualScrollUpdate, VirtualScrollView,
 };
 
 // Re-export common types from dependencies
@@ -153,7 +182,7 @@ impl UiCore {
 
     /// Set the viewport size for layout calculations.
     pub fn set_viewport(&mut self, viewport: Viewport) {
-        self.viewport_size = viewport.to_logical();
+        self.viewport_size = viewport.to_logical().into();
         self.viewport = viewport;
     }
 
@@ -255,6 +284,11 @@ impl UiCore {
     /// Get reference to the tree.
     pub fn tree(&self) -> &UiTree {
         &self.tree
+    }
+
+    /// Get reference to the event system.
+    pub fn events(&self) -> &UiEventSystem {
+        &self.event_system
     }
 
     /// Get mutable access to the event system.
@@ -405,6 +439,10 @@ impl UiSystem {
     ///
     /// This is the high-performance path that only updates dirty nodes
     /// and uses GPU instancing for efficient rendering.
+    ///
+    /// Note: This automatically computes layout. If you need to control
+    /// layout computation separately (e.g., for middleware freeze functionality),
+    /// use `compute_layout()` + `render_without_layout()` instead.
     pub fn render(
         &mut self,
         render_pass: &mut astrelis_render::wgpu::RenderPass,
@@ -423,6 +461,41 @@ impl UiSystem {
         // Clear all dirty flags after rendering
         // (layout computation no longer clears flags - renderer owns this)
         self.core.tree_mut().clear_dirty_flags();
+    }
+
+    /// Render the UI without computing layout.
+    ///
+    /// Use this when you want to manually control layout computation,
+    /// for example when implementing layout freeze functionality with middleware.
+    ///
+    /// # Parameters
+    /// - `render_pass`: The WGPU render pass to render into
+    /// - `clear_dirty_flags`: Whether to clear dirty flags after rendering.
+    ///   Set to `false` when layout is frozen to preserve dirty state for inspection.
+    ///
+    /// Typical usage:
+    /// ```ignore
+    /// // Check if middleware wants to freeze layout
+    /// let skip_layout = middlewares.pre_layout(&ctx);
+    /// if !skip_layout {
+    ///     ui.compute_layout();
+    /// }
+    /// // Don't clear flags when frozen so inspector can keep showing them
+    /// ui.render_without_layout(render_pass, !skip_layout);
+    /// ```
+    pub fn render_without_layout(
+        &mut self,
+        render_pass: &mut astrelis_render::wgpu::RenderPass,
+        clear_dirty_flags: bool,
+    ) {
+        // Render using retained mode (processes paint-only dirty flags)
+        self.renderer
+            .render_instanced(self.core.tree(), render_pass, self.core.viewport);
+
+        // Clear dirty flags unless we're in a frozen state
+        if clear_dirty_flags {
+            self.core.tree_mut().clear_dirty_flags();
+        }
     }
 
     /// Get mutable access to the core for advanced usage.

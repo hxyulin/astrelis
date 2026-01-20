@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use astrelis_core::geometry::Size;
-pub use winit::dpi::PhysicalSize;
+use astrelis_core::geometry::{LogicalSize, PhysicalSize, ScaleFactor};
+pub use winit::dpi::PhysicalSize as WinitPhysicalSize;
 pub use winit::window::Fullscreen;
 pub use winit::window::Window as WinitWindow;
 use winit::{error::OsError, event_loop::ActiveEventLoop};
@@ -9,7 +9,7 @@ use winit::{error::OsError, event_loop::ActiveEventLoop};
 pub struct WindowDescriptor {
     pub title: String,
     pub resizeable: bool,
-    pub size: Option<PhysicalSize<f32>>,
+    pub size: Option<winit::dpi::PhysicalSize<f32>>,
     pub visible: bool,
     pub fullscreen: Option<Fullscreen>,
 }
@@ -35,20 +35,28 @@ impl Window {
         self.window.id()
     }
 
-    pub fn size(&self) -> Size<u32> {
+    /// Get the logical size of the window (DPI-independent).
+    pub fn logical_size(&self) -> LogicalSize<u32> {
         let physical_size = self.window.inner_size();
         let scale_factor = self.window.scale_factor();
-        Size {
-            width: (physical_size.width as f64 / scale_factor) as u32,
-            height: (physical_size.height as f64 / scale_factor) as u32,
-        }
+        LogicalSize::new(
+            (physical_size.width as f64 / scale_factor) as u32,
+            (physical_size.height as f64 / scale_factor) as u32,
+        )
     }
 
-    pub fn inner_size(&self) -> PhysicalSize<u32> {
-        self.window.inner_size()
+    /// Get the physical size of the window in pixels.
+    pub fn physical_size(&self) -> PhysicalSize<u32> {
+        self.window.inner_size().into()
     }
 
-    pub fn scale_factor(&self) -> f64 {
+    /// Get the scale factor for this window.
+    pub fn scale_factor(&self) -> ScaleFactor {
+        ScaleFactor(self.window.scale_factor())
+    }
+
+    /// Get the raw scale factor as f64.
+    pub fn scale_factor_f64(&self) -> f64 {
         self.window.scale_factor()
     }
 

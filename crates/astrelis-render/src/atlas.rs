@@ -25,13 +25,34 @@
 //! }
 //! ```
 
+use crate::extension::AsWgpu;
+use crate::types::GpuTexture;
 use crate::GraphicsContext;
 use ahash::HashMap;
-use astrelis_core::geometry::Rect as GenericRect;
 use std::sync::Arc;
 
-/// Rectangle type for atlas packing.
-type Rect = GenericRect<f32>;
+/// Rectangle for atlas packing (not coordinate-space aware).
+///
+/// This is a simple rectangle type used internally for texture atlas packing.
+/// It does not distinguish between logical/physical coordinates since atlas
+/// operations work in texture-local pixel space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AtlasRect {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl AtlasRect {
+    /// Create a new atlas rectangle.
+    pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { x, y, width, height }
+    }
+}
+
+/// Rectangle type for atlas packing (internal alias).
+type Rect = AtlasRect;
 
 /// Unique key for an atlas entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -191,12 +212,10 @@ impl PackerNode {
 
 /// Texture atlas with dynamic rectangle packing.
 pub struct TextureAtlas {
-    texture: wgpu::Texture,
-    texture_view: wgpu::TextureView,
+    /// GPU texture with cached view and metadata.
+    texture: GpuTexture,
     entries: HashMap<AtlasKey, AtlasEntry>,
     packer: PackerNode,
-    format: wgpu::TextureFormat,
-    size: u32,
     context: Arc<GraphicsContext>,
     /// Pending uploads (key, data, rect)
     pending_uploads: Vec<(AtlasKey, Vec<u8>, Rect)>,
@@ -212,24 +231,16 @@ impl TextureAtlas {
     /// * `size` - Size of the atlas texture (must be power of 2)
     /// * `format` - Texture format
     pub fn new(context: Arc<GraphicsContext>, size: u32, format: wgpu::TextureFormat) -> Self {
-        let texture = context.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("TextureAtlas"),
-            size: wgpu::Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
+        let texture = GpuTexture::new_2d(
+            &context.device,
+            Some("TextureAtlas"),
+            size,
+            size,
             format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
+            wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
-
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        );
 
         let packer = PackerNode::new(Rect {
             x: 0.0,
@@ -240,11 +251,8 @@ impl TextureAtlas {
 
         Self {
             texture,
-            texture_view,
             entries: HashMap::default(),
             packer,
-            format,
-            size,
             context,
             pending_uploads: Vec::new(),
             dirty: false,
@@ -277,7 +285,7 @@ impl TextureAtlas {
         let rect = self.packer.insert(key, width as f32, height as f32)?;
 
         // Create entry
-        let entry = AtlasEntry::new(rect, self.size as f32);
+        let entry = AtlasEntry::new(rect, self.texture.width() as f32);
         self.entries.insert(key, entry);
 
         // Queue upload
@@ -304,8 +312,9 @@ impl TextureAtlas {
             return;
         }
 
+        let format = self.texture.format();
         for (_, data, rect) in &self.pending_uploads {
-            let bytes_per_pixel = match self.format {
+            let bytes_per_pixel = match format {
                 wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Rgba8Unorm => 4,
                 wgpu::TextureFormat::Bgra8UnormSrgb | wgpu::TextureFormat::Bgra8Unorm => 4,
                 wgpu::TextureFormat::R8Unorm => 1,
@@ -314,7 +323,7 @@ impl TextureAtlas {
 
             self.context.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &self.texture,
+                    texture: self.texture.as_wgpu(),
                     mip_level: 0,
                     origin: wgpu::Origin3d {
                         x: rect.x as u32,
@@ -343,22 +352,22 @@ impl TextureAtlas {
 
     /// Get the texture view for binding.
     pub fn texture_view(&self) -> &wgpu::TextureView {
-        &self.texture_view
+        self.texture.view()
     }
 
     /// Get the texture for advanced use cases.
     pub fn texture(&self) -> &wgpu::Texture {
-        &self.texture
+        self.texture.as_wgpu()
     }
 
     /// Get the size of the atlas.
     pub fn size(&self) -> u32 {
-        self.size
+        self.texture.width()
     }
 
     /// Get the texture format.
     pub fn format(&self) -> wgpu::TextureFormat {
-        self.format
+        self.texture.format()
     }
 
     /// Get the number of entries in the atlas.
@@ -375,11 +384,12 @@ impl TextureAtlas {
     pub fn clear(&mut self) {
         self.entries.clear();
         self.pending_uploads.clear();
+        let size = self.texture.width();
         self.packer = PackerNode::new(Rect {
             x: 0.0,
             y: 0.0,
-            width: self.size as f32,
-            height: self.size as f32,
+            width: size as f32,
+            height: size as f32,
         });
         self.dirty = false;
     }

@@ -6,7 +6,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 #[allow(dead_code)]
@@ -39,7 +39,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Textured Quad in EGUI".to_string(),
-                size: Some(PhysicalSize::new(1280.0, 720.0)),
+                size: Some(WinitPhysicalSize::new(1280.0, 720.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");

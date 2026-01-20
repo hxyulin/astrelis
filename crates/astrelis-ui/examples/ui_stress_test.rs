@@ -14,7 +14,7 @@ use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu};
 use astrelis_ui::UiSystem;
-use astrelis_winit::{WindowId, app::{App, AppCtx, run_app}, event::{EventBatch, Event, HandleStatus, Key, NamedKey}, window::{PhysicalSize, WindowBackend, WindowDescriptor}};
+use astrelis_winit::{WindowId, app::{App, AppCtx, run_app}, event::{EventBatch, Event, HandleStatus, Key, NamedKey}, window::{WinitPhysicalSize, WindowBackend, WindowDescriptor}};
 use std::time::Instant;
 
 struct UiStressTest {
@@ -36,7 +36,7 @@ fn main() {
         let graphics_ctx = GraphicsContext::new_owned_sync();
         let window = ctx.create_window(WindowDescriptor {
             title: "UI Stress Test - Performance Benchmark".to_string(),
-            size: Some(PhysicalSize::new(1400.0, 900.0)),
+            size: Some(WinitPhysicalSize::new(1400.0, 900.0)),
             ..Default::default()
         }).expect("Failed to create window");
 

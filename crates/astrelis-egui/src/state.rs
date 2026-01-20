@@ -198,7 +198,7 @@ impl State {
     fn on_cursor_moved(
         &mut self,
         window: &RenderableWindow,
-        pos_in_logical: astrelis_core::geometry::Pos<f64>,
+        pos_in_logical: astrelis_core::geometry::LogicalPosition<f64>,
     ) {
         // Input is in logical pixels, convert to physical pixels first
         let scale_factor = window.window().window.scale_factor() as f32;

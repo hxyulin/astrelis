@@ -1,5 +1,4 @@
-use astrelis_core::geometry::{Pos, Size};
-pub use winit::dpi::{PhysicalPosition, PhysicalSize};
+use astrelis_core::geometry::{LogicalPosition, LogicalSize, PhysicalPosition};
 pub use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent as WinitEvent};
 pub use winit::keyboard::*;
 
@@ -14,7 +13,7 @@ pub struct EventQueue {
     priority: VecDeque<Event>,
 
     /// Deduplicated events (only last value kept)
-    latest_mouse_pos: Option<Pos<f64>>,
+    latest_mouse_pos: Option<LogicalPosition<f64>>,
     latest_scale_factor: Option<f64>,
 
     /// Statistics
@@ -133,17 +132,29 @@ pub struct EventStats {
 
 #[derive(Debug, Clone)]
 pub enum Event {
+    /// Window moved to a new physical position.
     WindowMoved(PhysicalPosition<i32>),
-    WindowResized(Size<u32>),
+    /// Window resized to a new logical size.
+    WindowResized(LogicalSize<u32>),
+    /// Scale factor changed.
     ScaleFactorChanged(f64),
+    /// Window focus changed.
     Focused(bool),
+    /// Window close requested.
     CloseRequested,
+    /// Mouse button pressed.
     MouseButtonDown(MouseButton),
+    /// Mouse button released.
     MouseButtonUp(MouseButton),
+    /// Mouse wheel scrolled.
     MouseScrolled(MouseScrollDelta),
-    MouseMoved(Pos<f64>),
+    /// Mouse cursor moved (logical coordinates).
+    MouseMoved(LogicalPosition<f64>),
+    /// Mouse cursor entered the window.
     MouseEntered,
+    /// Mouse cursor left the window.
     MouseLeft,
+    /// Keyboard input event.
     KeyInput(KeyEvent),
 }
 
@@ -191,11 +202,11 @@ impl HandleStatus {
 impl Event {
     pub(crate) fn from_winit(event: winit::event::WindowEvent, scale_factor: f64) -> Option<Self> {
         match event {
-            WinitEvent::Moved(pos) => Some(Event::WindowMoved(pos)),
-            WinitEvent::Resized(size) => Some(Event::WindowResized(Size {
-                width: (size.width as f64 / scale_factor) as u32,
-                height: (size.height as f64 / scale_factor) as u32,
-            })),
+            WinitEvent::Moved(pos) => Some(Event::WindowMoved(pos.into())),
+            WinitEvent::Resized(size) => Some(Event::WindowResized(LogicalSize::new(
+                (size.width as f64 / scale_factor) as u32,
+                (size.height as f64 / scale_factor) as u32,
+            ))),
             WinitEvent::ScaleFactorChanged {
                 scale_factor,
                 inner_size_writer: _,
@@ -218,10 +229,10 @@ impl Event {
             WinitEvent::CursorMoved {
                 device_id: _,
                 position,
-            } => Some(Event::MouseMoved(Pos {
-                x: position.x / scale_factor,
-                y: position.y / scale_factor,
-            })),
+            } => Some(Event::MouseMoved(LogicalPosition::new(
+                position.x / scale_factor,
+                position.y / scale_factor,
+            ))),
             WinitEvent::CursorEntered { device_id: _ } => Some(Event::MouseEntered),
             WinitEvent::CursorLeft { device_id: _ } => Some(Event::MouseLeft),
             WinitEvent::KeyboardInput {

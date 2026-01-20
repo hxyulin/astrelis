@@ -24,7 +24,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::{EventBatch, Event, HandleStatus, Key, NamedKey},
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 struct FocusNavigationApp {
@@ -47,7 +47,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Focus Navigation - Keyboard Navigation Demo".to_string(),
-                size: Some(PhysicalSize::new(1000.0, 700.0)),
+                size: Some(WinitPhysicalSize::new(1000.0, 700.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -62,7 +62,7 @@ fn main() {
         );
 
         let window_id = window.id();
-        let size = window.inner_size();
+        let size = window.physical_size();
 
         let mut ui = UiSystem::new(graphics_ctx.clone());
         ui.set_viewport(window.viewport());
@@ -383,7 +383,7 @@ impl App for FocusNavigationApp {
 
         // Update UI if focus changed
         if focus_changed {
-            let size = self.window.inner_size();
+            let size = self.window.physical_size();
             build_focus_ui(
                 &mut self.ui,
                 size.width as f32,

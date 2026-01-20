@@ -15,8 +15,7 @@ use astrelis_render::{
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    event::PhysicalSize,
-    window::{WindowBackend, WindowDescriptor, Window},
+    window::{WindowBackend, WindowDescriptor, Window, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -157,7 +156,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Sprite Sheet Animation Example".to_string(),
-                size: Some(PhysicalSize::new(400.0 * scale, 400.0 * scale)),
+                size: Some(WinitPhysicalSize::new(400.0 * scale, 400.0 * scale)),
                 ..Default::default()
             })
             .expect("Failed to create window");

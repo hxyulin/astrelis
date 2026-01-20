@@ -23,7 +23,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 struct RichTextDemo {
@@ -42,7 +42,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Rich Text Demo - Inline Formatting".to_string(),
-                size: Some(PhysicalSize::new(1100.0, 800.0)),
+                size: Some(WinitPhysicalSize::new(1100.0, 800.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -110,7 +110,7 @@ impl App for RichTextDemo {
         // Set the viewport
         self.font_renderer.set_viewport(self.window.viewport());
 
-        let width = self.window.size_f32().width;
+        let width = self.window.logical_size_f32().width;
 
         // Example 1: Builder pattern with inline styles
         let mut intro = RichTextBuilder::new()

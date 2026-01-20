@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use astrelis_core::geometry::Size;
+use astrelis_core::geometry::LogicalSize;
 use astrelis_render::{GraphicsContext, WindowContext, WindowContextDescriptor};
 use astrelis_winit::window::Window;
 use astrelis_winit::WindowId;
@@ -90,7 +90,7 @@ impl RenderContexts {
     }
 
     /// Notify that a window has been resized.
-    pub fn resized(&mut self, window_id: WindowId, new_size: Size<u32>) {
+    pub fn resized(&mut self, window_id: WindowId, new_size: LogicalSize<u32>) {
         if let Some(context) = self.contexts.get_mut(&window_id) {
             context.resized(new_size);
         }

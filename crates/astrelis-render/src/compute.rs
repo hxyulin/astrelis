@@ -150,6 +150,46 @@ impl<'a> ComputePass<'a> {
         self.pass().pop_debug_group();
     }
 
+    /// Set push constants for the compute shader.
+    ///
+    /// Push constants are a fast way to pass small amounts of data to shaders
+    /// without using uniform buffers. They require the `PUSH_CONSTANTS` feature
+    /// to be enabled on the device.
+    ///
+    /// # Arguments
+    ///
+    /// * `offset` - Byte offset into the push constant range
+    /// * `data` - Data to set (must be `Pod` for safe byte casting)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// #[repr(C)]
+    /// #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+    /// struct ComputeConstants {
+    ///     workgroup_count: u32,
+    ///     time: f32,
+    /// }
+    ///
+    /// let constants = ComputeConstants {
+    ///     workgroup_count: 64,
+    ///     time: 1.5,
+    /// };
+    ///
+    /// pass.set_push_constants(0, &constants);
+    /// ```
+    pub fn set_push_constants<T: bytemuck::Pod>(&mut self, offset: u32, data: &T) {
+        self.pass()
+            .set_push_constants(offset, bytemuck::bytes_of(data));
+    }
+
+    /// Set push constants from raw bytes.
+    ///
+    /// Use this when you need more control over the data layout.
+    pub fn set_push_constants_raw(&mut self, offset: u32, data: &[u8]) {
+        self.pass().set_push_constants(offset, data);
+    }
+
     /// Finish the compute pass, returning the encoder to the frame context.
     pub fn finish(self) {
         drop(self);

@@ -14,8 +14,7 @@ use astrelis_ui::{
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    event::PhysicalSize,
-    window::{WindowBackend, WindowDescriptor, Window},
+    window::{WindowBackend, WindowDescriptor, Window, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -38,7 +37,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Astrelis UI - Image Widget Example".to_string(),
-                size: Some(PhysicalSize::new(900.0 * scale, 700.0 * scale)),
+                size: Some(WinitPhysicalSize::new(900.0 * scale, 700.0 * scale)),
                 ..Default::default()
             })
             .expect("Failed to create window");

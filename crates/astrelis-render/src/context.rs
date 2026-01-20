@@ -181,6 +181,265 @@ impl GraphicsContext {
             );
         }
     }
+
+    // =========================================================================
+    // Texture Format Support Queries
+    // =========================================================================
+
+    /// Check if a texture format is supported for the given usages.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let supported = ctx.supports_texture_format(
+    ///     wgpu::TextureFormat::Rgba8Unorm,
+    ///     wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+    /// );
+    /// ```
+    pub fn supports_texture_format(
+        &self,
+        format: wgpu::TextureFormat,
+        usages: wgpu::TextureUsages,
+    ) -> bool {
+        let capabilities = self.adapter.get_texture_format_features(format);
+
+        // Check if all requested usages are supported
+        if usages.contains(wgpu::TextureUsages::TEXTURE_BINDING)
+            && !capabilities
+                .allowed_usages
+                .contains(wgpu::TextureUsages::TEXTURE_BINDING)
+        {
+            return false;
+        }
+        if usages.contains(wgpu::TextureUsages::STORAGE_BINDING)
+            && !capabilities
+                .allowed_usages
+                .contains(wgpu::TextureUsages::STORAGE_BINDING)
+        {
+            return false;
+        }
+        if usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+            && !capabilities
+                .allowed_usages
+                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        {
+            return false;
+        }
+        if usages.contains(wgpu::TextureUsages::COPY_SRC)
+            && !capabilities
+                .allowed_usages
+                .contains(wgpu::TextureUsages::COPY_SRC)
+        {
+            return false;
+        }
+        if usages.contains(wgpu::TextureUsages::COPY_DST)
+            && !capabilities
+                .allowed_usages
+                .contains(wgpu::TextureUsages::COPY_DST)
+        {
+            return false;
+        }
+
+        true
+    }
+
+    /// Get texture format capabilities.
+    ///
+    /// Returns detailed information about what operations are supported
+    /// for a given texture format.
+    pub fn texture_format_capabilities(
+        &self,
+        format: wgpu::TextureFormat,
+    ) -> wgpu::TextureFormatFeatures {
+        self.adapter.get_texture_format_features(format)
+    }
+
+    // =========================================================================
+    // Limit Queries (Convenience Methods)
+    // =========================================================================
+
+    /// Get the maximum 2D texture dimension.
+    ///
+    /// This is the maximum width and height for 2D textures.
+    #[inline]
+    pub fn max_texture_dimension_2d(&self) -> u32 {
+        self.device.limits().max_texture_dimension_2d
+    }
+
+    /// Get the maximum buffer size in bytes.
+    ///
+    /// This is the maximum size for any buffer.
+    #[inline]
+    pub fn max_buffer_size(&self) -> u64 {
+        self.device.limits().max_buffer_size
+    }
+
+    /// Get the minimum uniform buffer offset alignment.
+    ///
+    /// When using dynamic uniform buffers, offsets must be aligned to this value.
+    #[inline]
+    pub fn min_uniform_buffer_offset_alignment(&self) -> u32 {
+        self.device.limits().min_uniform_buffer_offset_alignment
+    }
+
+    /// Get the minimum storage buffer offset alignment.
+    ///
+    /// When using dynamic storage buffers, offsets must be aligned to this value.
+    #[inline]
+    pub fn min_storage_buffer_offset_alignment(&self) -> u32 {
+        self.device.limits().min_storage_buffer_offset_alignment
+    }
+
+    /// Get the maximum push constant size in bytes.
+    ///
+    /// Push constants require the `PUSH_CONSTANTS` feature.
+    /// Returns 0 if push constants are not supported.
+    #[inline]
+    pub fn max_push_constant_size(&self) -> u32 {
+        self.device.limits().max_push_constant_size
+    }
+
+    /// Get the maximum 1D texture dimension.
+    #[inline]
+    pub fn max_texture_dimension_1d(&self) -> u32 {
+        self.device.limits().max_texture_dimension_1d
+    }
+
+    /// Get the maximum 3D texture dimension.
+    #[inline]
+    pub fn max_texture_dimension_3d(&self) -> u32 {
+        self.device.limits().max_texture_dimension_3d
+    }
+
+    /// Get the maximum texture array layers.
+    #[inline]
+    pub fn max_texture_array_layers(&self) -> u32 {
+        self.device.limits().max_texture_array_layers
+    }
+
+    /// Get the maximum bind groups.
+    #[inline]
+    pub fn max_bind_groups(&self) -> u32 {
+        self.device.limits().max_bind_groups
+    }
+
+    /// Get the maximum bindings per bind group.
+    #[inline]
+    pub fn max_bindings_per_bind_group(&self) -> u32 {
+        self.device.limits().max_bindings_per_bind_group
+    }
+
+    /// Get the maximum dynamic uniform buffers per pipeline layout.
+    #[inline]
+    pub fn max_dynamic_uniform_buffers_per_pipeline_layout(&self) -> u32 {
+        self.device
+            .limits()
+            .max_dynamic_uniform_buffers_per_pipeline_layout
+    }
+
+    /// Get the maximum dynamic storage buffers per pipeline layout.
+    #[inline]
+    pub fn max_dynamic_storage_buffers_per_pipeline_layout(&self) -> u32 {
+        self.device
+            .limits()
+            .max_dynamic_storage_buffers_per_pipeline_layout
+    }
+
+    /// Get the maximum sampled textures per shader stage.
+    #[inline]
+    pub fn max_sampled_textures_per_shader_stage(&self) -> u32 {
+        self.device.limits().max_sampled_textures_per_shader_stage
+    }
+
+    /// Get the maximum samplers per shader stage.
+    #[inline]
+    pub fn max_samplers_per_shader_stage(&self) -> u32 {
+        self.device.limits().max_samplers_per_shader_stage
+    }
+
+    /// Get the maximum storage buffers per shader stage.
+    #[inline]
+    pub fn max_storage_buffers_per_shader_stage(&self) -> u32 {
+        self.device.limits().max_storage_buffers_per_shader_stage
+    }
+
+    /// Get the maximum storage textures per shader stage.
+    #[inline]
+    pub fn max_storage_textures_per_shader_stage(&self) -> u32 {
+        self.device.limits().max_storage_textures_per_shader_stage
+    }
+
+    /// Get the maximum uniform buffers per shader stage.
+    #[inline]
+    pub fn max_uniform_buffers_per_shader_stage(&self) -> u32 {
+        self.device.limits().max_uniform_buffers_per_shader_stage
+    }
+
+    /// Get the maximum uniform buffer binding size.
+    #[inline]
+    pub fn max_uniform_buffer_binding_size(&self) -> u32 {
+        self.device.limits().max_uniform_buffer_binding_size
+    }
+
+    /// Get the maximum storage buffer binding size.
+    #[inline]
+    pub fn max_storage_buffer_binding_size(&self) -> u32 {
+        self.device.limits().max_storage_buffer_binding_size
+    }
+
+    /// Get the maximum vertex buffers.
+    #[inline]
+    pub fn max_vertex_buffers(&self) -> u32 {
+        self.device.limits().max_vertex_buffers
+    }
+
+    /// Get the maximum vertex attributes.
+    #[inline]
+    pub fn max_vertex_attributes(&self) -> u32 {
+        self.device.limits().max_vertex_attributes
+    }
+
+    /// Get the maximum vertex buffer array stride.
+    #[inline]
+    pub fn max_vertex_buffer_array_stride(&self) -> u32 {
+        self.device.limits().max_vertex_buffer_array_stride
+    }
+
+    /// Get the maximum compute workgroup storage size.
+    #[inline]
+    pub fn max_compute_workgroup_storage_size(&self) -> u32 {
+        self.device.limits().max_compute_workgroup_storage_size
+    }
+
+    /// Get the maximum compute invocations per workgroup.
+    #[inline]
+    pub fn max_compute_invocations_per_workgroup(&self) -> u32 {
+        self.device.limits().max_compute_invocations_per_workgroup
+    }
+
+    /// Get the maximum compute workgroup size X.
+    #[inline]
+    pub fn max_compute_workgroup_size_x(&self) -> u32 {
+        self.device.limits().max_compute_workgroup_size_x
+    }
+
+    /// Get the maximum compute workgroup size Y.
+    #[inline]
+    pub fn max_compute_workgroup_size_y(&self) -> u32 {
+        self.device.limits().max_compute_workgroup_size_y
+    }
+
+    /// Get the maximum compute workgroup size Z.
+    #[inline]
+    pub fn max_compute_workgroup_size_z(&self) -> u32 {
+        self.device.limits().max_compute_workgroup_size_z
+    }
+
+    /// Get the maximum compute workgroups per dimension.
+    #[inline]
+    pub fn max_compute_workgroups_per_dimension(&self) -> u32 {
+        self.device.limits().max_compute_workgroups_per_dimension
+    }
 }
 
 /// Descriptor for configuring graphics context creation.

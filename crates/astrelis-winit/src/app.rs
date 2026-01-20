@@ -26,7 +26,7 @@ impl AppCtx<'_> {
             window.id(),
             WindowResources {
                 events: EventQueue::new(),
-                scale_factor: window.scale_factor(),
+                scale_factor: window.scale_factor_f64(),
             },
         );
 

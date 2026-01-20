@@ -22,7 +22,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::{EventBatch, Event, HandleStatus, Key, NamedKey},
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 struct AnimationShowcaseApp {
@@ -43,7 +43,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Animation Showcase - Easing Functions".to_string(),
-                size: Some(PhysicalSize::new(1400.0, 800.0)),
+                size: Some(WinitPhysicalSize::new(1400.0, 800.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -58,7 +58,7 @@ fn main() {
         );
 
         let window_id = window.id();
-        let size = window.inner_size();
+        let size = window.physical_size();
 
         let mut ui = UiSystem::new(graphics_ctx.clone());
         ui.set_viewport(window.viewport());
@@ -390,7 +390,7 @@ impl App for AnimationShowcaseApp {
 
         // Rebuild UI if animation time changed
         if self.is_animating {
-            let size = self.window.inner_size();
+            let size = self.window.physical_size();
             build_animation_ui(&mut self.ui, size.width as f32, size.height as f32, self.animation_time);
         }
 

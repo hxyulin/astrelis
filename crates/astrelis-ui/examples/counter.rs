@@ -27,7 +27,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::{Event, EventBatch, HandleStatus, Key, NamedKey},
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 use std::sync::{Arc, RwLock};
 
@@ -143,7 +143,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Counter Example".to_string(),
-                size: Some(PhysicalSize::new(640.0, 480.0)),
+                size: Some(WinitPhysicalSize::new(640.0, 480.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -160,7 +160,7 @@ fn main() {
         let window_id = window.id();
 
         // Get actual window size
-        let size = window.inner_size();
+        let size = window.physical_size();
         let viewport_width = size.width as f32;
         let viewport_height = size.height as f32;
 
@@ -365,7 +365,7 @@ impl App for CounterApp {
                             tracing::info!("Theme toggled to: {:?}", self.theme);
 
                             // Rebuild UI with new theme
-                            let size = self.window.inner_size();
+                            let size = self.window.physical_size();
                             self.counter_text_id = build_counter_ui_with_callbacks(
                                 &mut self.ui,
                                 &self.state,

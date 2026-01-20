@@ -4,6 +4,7 @@
 //! useful for video backgrounds, post-processing, and image display.
 
 use crate::context::GraphicsContext;
+use crate::types::{GpuTexture, TypedBuffer};
 use crate::Renderer;
 use std::sync::Arc;
 
@@ -24,7 +25,7 @@ pub struct BlitRenderer {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    vertex_buffer: wgpu::Buffer,
+    vertex_buffer: TypedBuffer<f32>,
     context: Arc<GraphicsContext>,
 }
 
@@ -158,7 +159,7 @@ impl BlitRenderer {
             -1.0,  1.0,               0.0, 0.0,
         ];
 
-        let vertex_buffer = renderer.create_vertex_buffer(Some("Blit Vertex Buffer"), &vertices);
+        let vertex_buffer = renderer.create_typed_vertex_buffer(Some("Blit Vertex Buffer"), &vertices);
 
         Self {
             pipeline,
@@ -215,7 +216,7 @@ impl BlitRenderer {
     ) {
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, bind_group, &[]);
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice());
         render_pass.draw(0..6, 0..1);
     }
 
@@ -285,11 +286,8 @@ impl BlitOptions {
 ///
 /// Useful for video frame upload or dynamic texture updates.
 pub struct TextureUploader {
-    texture: wgpu::Texture,
-    view: wgpu::TextureView,
-    width: u32,
-    height: u32,
-    format: wgpu::TextureFormat,
+    /// GPU texture with cached view and metadata.
+    texture: GpuTexture,
 }
 
 impl TextureUploader {
@@ -307,30 +305,16 @@ impl TextureUploader {
         height: u32,
         format: wgpu::TextureFormat,
     ) -> Self {
-        let texture = context.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("Uploadable Texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        Self {
-            texture,
-            view,
+        let texture = GpuTexture::new_2d(
+            &context.device,
+            Some("Uploadable Texture"),
             width,
             height,
             format,
-        }
+            wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        );
+
+        Self { texture }
     }
 
     /// Upload pixel data to the texture.
@@ -340,12 +324,13 @@ impl TextureUploader {
     /// * `context` - The graphics context
     /// * `data` - Raw pixel data (must match texture format and dimensions)
     pub fn upload(&self, context: &GraphicsContext, data: &[u8]) {
-        let bytes_per_pixel = self.format.block_copy_size(None).unwrap_or(4);
-        let bytes_per_row = self.width * bytes_per_pixel;
+        use crate::extension::AsWgpu;
+        let bytes_per_pixel = self.texture.format().block_copy_size(None).unwrap_or(4);
+        let bytes_per_row = self.texture.width() * bytes_per_pixel;
 
         context.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
+                texture: self.texture.as_wgpu(),
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
@@ -354,11 +339,11 @@ impl TextureUploader {
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(bytes_per_row),
-                rows_per_image: Some(self.height),
+                rows_per_image: Some(self.texture.height()),
             },
             wgpu::Extent3d {
-                width: self.width,
-                height: self.height,
+                width: self.texture.width(),
+                height: self.texture.height(),
                 depth_or_array_layers: 1,
             },
         );
@@ -381,12 +366,13 @@ impl TextureUploader {
         width: u32,
         height: u32,
     ) {
-        let bytes_per_pixel = self.format.block_copy_size(None).unwrap_or(4);
+        use crate::extension::AsWgpu;
+        let bytes_per_pixel = self.texture.format().block_copy_size(None).unwrap_or(4);
         let bytes_per_row = width * bytes_per_pixel;
 
         context.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
-                texture: &self.texture,
+                texture: self.texture.as_wgpu(),
                 mip_level: 0,
                 origin: wgpu::Origin3d { x, y, z: 0 },
                 aspect: wgpu::TextureAspect::All,
@@ -407,30 +393,31 @@ impl TextureUploader {
 
     /// Resize the texture (creates a new texture internally).
     pub fn resize(&mut self, context: &GraphicsContext, width: u32, height: u32) {
-        if self.width == width && self.height == height {
+        if self.texture.width() == width && self.texture.height() == height {
             return;
         }
 
-        *self = Self::new(context, width, height, self.format);
+        *self = Self::new(context, width, height, self.texture.format());
     }
 
     /// Get the texture view for rendering.
     pub fn view(&self) -> &wgpu::TextureView {
-        &self.view
+        self.texture.view()
     }
 
     /// Get the underlying texture.
     pub fn texture(&self) -> &wgpu::Texture {
-        &self.texture
+        use crate::extension::AsWgpu;
+        self.texture.as_wgpu()
     }
 
     /// Get the texture dimensions.
     pub fn size(&self) -> (u32, u32) {
-        (self.width, self.height)
+        (self.texture.width(), self.texture.height())
     }
 
     /// Get the texture format.
     pub fn format(&self) -> wgpu::TextureFormat {
-        self.format
+        self.texture.format()
     }
 }

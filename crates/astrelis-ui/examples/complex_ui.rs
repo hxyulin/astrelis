@@ -21,7 +21,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::{EventBatch, Event, HandleStatus},
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 struct ComplexUiApp {
@@ -60,7 +60,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Complex UI Demo - Multi-Panel Showcase".to_string(),
-                size: Some(PhysicalSize::new(1600.0, 900.0)),
+                size: Some(WinitPhysicalSize::new(1600.0, 900.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -75,7 +75,7 @@ fn main() {
         );
 
         let window_id = window.id();
-        let size = window.inner_size();
+        let size = window.physical_size();
 
         let mut ui = UiSystem::new(graphics_ctx.clone());
         ui.set_viewport(window.viewport());

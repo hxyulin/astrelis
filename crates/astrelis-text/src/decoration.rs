@@ -364,6 +364,182 @@ pub fn generate_decoration_geometry(
     (background, underline, strikethrough)
 }
 
+/// Type of decoration quad for rendering.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DecorationQuadType {
+    /// Background highlight quad.
+    Background,
+    /// Underline quad.
+    Underline {
+        /// Line thickness in pixels.
+        thickness: f32,
+    },
+    /// Strikethrough quad.
+    Strikethrough {
+        /// Line thickness in pixels.
+        thickness: f32,
+    },
+}
+
+/// A quad for rendering text decorations.
+///
+/// This is the unified output format for all decoration types.
+/// The renderer generates these quads and submits them for rendering.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DecorationQuad {
+    /// Quad bounds (x, y, width, height) in logical pixels.
+    pub bounds: (f32, f32, f32, f32),
+    /// Quad color.
+    pub color: Color,
+    /// Type of decoration this quad represents.
+    pub quad_type: DecorationQuadType,
+}
+
+impl DecorationQuad {
+    /// Create a new decoration quad.
+    pub fn new(x: f32, y: f32, width: f32, height: f32, color: Color, quad_type: DecorationQuadType) -> Self {
+        Self {
+            bounds: (x, y, width, height),
+            color,
+            quad_type,
+        }
+    }
+
+    /// Create a background quad.
+    pub fn background(x: f32, y: f32, width: f32, height: f32, color: Color) -> Self {
+        Self::new(x, y, width, height, color, DecorationQuadType::Background)
+    }
+
+    /// Create an underline quad.
+    pub fn underline(x: f32, y: f32, width: f32, thickness: f32, color: Color) -> Self {
+        Self::new(x, y, width, thickness, color, DecorationQuadType::Underline { thickness })
+    }
+
+    /// Create a strikethrough quad.
+    pub fn strikethrough(x: f32, y: f32, width: f32, thickness: f32, color: Color) -> Self {
+        Self::new(x, y, width, thickness, color, DecorationQuadType::Strikethrough { thickness })
+    }
+
+    /// Get the bounds as (x, y, width, height).
+    pub fn as_rect(&self) -> (f32, f32, f32, f32) {
+        self.bounds
+    }
+
+    /// Check if this is a background quad.
+    pub fn is_background(&self) -> bool {
+        matches!(self.quad_type, DecorationQuadType::Background)
+    }
+
+    /// Check if this is an underline quad.
+    pub fn is_underline(&self) -> bool {
+        matches!(self.quad_type, DecorationQuadType::Underline { .. })
+    }
+
+    /// Check if this is a strikethrough quad.
+    pub fn is_strikethrough(&self) -> bool {
+        matches!(self.quad_type, DecorationQuadType::Strikethrough { .. })
+    }
+}
+
+/// Text bounds information needed for decoration geometry generation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TextBounds {
+    /// X position of text (left edge).
+    pub x: f32,
+    /// Y position of text (top edge).
+    pub y: f32,
+    /// Width of text.
+    pub width: f32,
+    /// Height of text (line height).
+    pub height: f32,
+    /// Baseline Y offset from top (ascent).
+    pub baseline_offset: f32,
+}
+
+impl TextBounds {
+    /// Create new text bounds.
+    pub fn new(x: f32, y: f32, width: f32, height: f32, baseline_offset: f32) -> Self {
+        Self { x, y, width, height, baseline_offset }
+    }
+}
+
+/// Generate decoration quads from text bounds and decoration configuration.
+///
+/// This function generates all the quads needed to render decorations for a piece of text.
+/// It returns a Vec of DecorationQuad that can be rendered using the decoration pipeline.
+///
+/// The order of quads in the returned Vec is:
+/// 1. Background quads (rendered first, behind text)
+/// 2. Underline quads (rendered after text)
+/// 3. Strikethrough quads (rendered after text)
+///
+/// # Arguments
+///
+/// * `bounds` - The text bounds (position, size, baseline)
+/// * `decoration` - The decoration configuration
+///
+/// # Returns
+///
+/// A Vec of DecorationQuad to render
+///
+/// # Example
+///
+/// ```ignore
+/// use astrelis_text::{TextDecoration, UnderlineStyle, TextBounds, generate_decoration_quads};
+///
+/// let bounds = TextBounds::new(10.0, 20.0, 100.0, 24.0, 18.0);
+/// let decoration = TextDecoration::new()
+///     .underline(UnderlineStyle::solid(Color::BLUE, 1.0));
+///
+/// let quads = generate_decoration_quads(&bounds, &decoration);
+/// // quads now contains one underline quad
+/// ```
+pub fn generate_decoration_quads(bounds: &TextBounds, decoration: &TextDecoration) -> Vec<DecorationQuad> {
+    let mut quads = Vec::new();
+
+    // Background (rendered first, behind text)
+    if let Some(bg_color) = decoration.background {
+        let padding = &decoration.background_padding;
+        let x = bounds.x - padding[0];
+        let y = bounds.y - padding[1];
+        let width = bounds.width + padding[0] + padding[2];
+        let height = bounds.height + padding[1] + padding[3];
+
+        quads.push(DecorationQuad::background(x, y, width, height, bg_color));
+    }
+
+    // Underline (rendered after text)
+    if let Some(ul_style) = decoration.underline {
+        // Only support solid lines for now (MVP)
+        if matches!(ul_style.style, LineStyle::Solid) {
+            let baseline_y = bounds.y + bounds.baseline_offset;
+            let y = baseline_y + ul_style.offset;
+            let x = bounds.x;
+            let width = bounds.width;
+            let thickness = ul_style.thickness;
+
+            quads.push(DecorationQuad::underline(x, y, width, thickness, ul_style.color));
+        }
+    }
+
+    // Strikethrough (rendered after text)
+    if let Some(st_style) = decoration.strikethrough {
+        // Only support solid lines for now (MVP)
+        if matches!(st_style.style, LineStyle::Solid) {
+            // Strikethrough at ~40% of line height from baseline (approximately middle of x-height)
+            let baseline_y = bounds.y + bounds.baseline_offset;
+            let y = baseline_y - (bounds.height * 0.35) + st_style.offset;
+            let x = bounds.x;
+            let width = bounds.width;
+            let thickness = st_style.thickness;
+
+            quads.push(DecorationQuad::strikethrough(x, y, width, thickness, st_style.color));
+        }
+    }
+
+    quads
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

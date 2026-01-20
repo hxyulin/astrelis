@@ -1,7 +1,9 @@
-use astrelis_core::{geometry::Size, profiling::profile_function};
+use astrelis_core::{
+    geometry::{LogicalSize, PhysicalPosition, PhysicalSize, ScaleFactor},
+    profiling::profile_function,
+};
 use astrelis_winit::{
     WindowId,
-    event::PhysicalSize,
     window::{Window, WindowBackend},
 };
 use std::sync::Arc;
@@ -12,39 +14,77 @@ use crate::{
 };
 
 /// Viewport definition for rendering.
+///
+/// A viewport represents the renderable area of a window in physical coordinates,
+/// along with the scale factor for coordinate conversions.
 #[derive(Debug, Clone, Copy)]
 pub struct Viewport {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-    pub scale_factor: f64,
+    /// Position in physical coordinates (pixels).
+    pub position: PhysicalPosition<f32>,
+    /// Size in physical coordinates (pixels).
+    pub size: PhysicalSize<f32>,
+    /// Scale factor for logical/physical conversion.
+    pub scale_factor: ScaleFactor,
 }
 
 impl Default for Viewport {
     fn default() -> Self {
         Self {
-            x: 0.0,
-            y: 0.0,
-            width: 800.0,
-            height: 600.0,
+            position: PhysicalPosition::new(0.0, 0.0),
+            size: PhysicalSize::new(800.0, 600.0),
             // it needs to be 1.0 to avoid division by zero and other issues
-            scale_factor: 1.0,
+            scale_factor: ScaleFactor(1.0),
         }
     }
 }
 
 impl Viewport {
+    /// Create a new viewport with the given physical size and scale factor.
+    pub fn new(width: f32, height: f32, scale_factor: ScaleFactor) -> Self {
+        Self {
+            position: PhysicalPosition::new(0.0, 0.0),
+            size: PhysicalSize::new(width, height),
+            scale_factor,
+        }
+    }
+
+    /// Create a viewport from physical size.
+    pub fn from_physical_size(size: PhysicalSize<u32>, scale_factor: ScaleFactor) -> Self {
+        Self {
+            position: PhysicalPosition::new(0.0, 0.0),
+            size: PhysicalSize::new(size.width as f32, size.height as f32),
+            scale_factor,
+        }
+    }
+
+    /// Check if the viewport is valid (has positive dimensions).
     pub fn is_valid(&self) -> bool {
-        self.width > 0.0 && self.height > 0.0 && self.scale_factor > 0.0
+        self.size.width > 0.0 && self.size.height > 0.0 && self.scale_factor.0 > 0.0
     }
 
     /// Get the size in logical pixels.
-    pub fn to_logical(&self) -> Size<f32> {
-        Size {
-            width: self.width / self.scale_factor as f32,
-            height: self.height / self.scale_factor as f32,
-        }
+    pub fn to_logical(&self) -> LogicalSize<f32> {
+        self.size.to_logical(self.scale_factor)
+    }
+
+    /// Get the width in physical pixels.
+    pub fn width(&self) -> f32 {
+        self.size.width
+    }
+
+    /// Get the height in physical pixels.
+    pub fn height(&self) -> f32 {
+        self.size.height
+    }
+
+    /// Get the x position in physical pixels.
+    pub fn x(&self) -> f32 {
+        self.position.x
+    }
+
+    /// Get the y position in physical pixels.
+    pub fn y(&self) -> f32 {
+        self.position.y
     }
 }
 
@@ -84,12 +124,9 @@ impl WindowContext {
         context: Arc<GraphicsContext>,
         descriptor: WindowContextDescriptor,
     ) -> Self {
-        let scale_factor = window.window.scale_factor();
-        let Size { width, height } = window.size();
-        let (width, height) = (
-            (width as f64 * scale_factor) as u32,
-            (height as f64 * scale_factor) as u32,
-        );
+        let scale_factor = window.scale_factor();
+        let logical_size = window.logical_size();
+        let physical_size = logical_size.to_physical(scale_factor);
 
         let surface = context
             .instance
@@ -97,7 +134,7 @@ impl WindowContext {
             .expect("Failed to create surface");
 
         let mut config = surface
-            .get_default_config(&context.adapter, width, height)
+            .get_default_config(&context.adapter, physical_size.width, physical_size.height)
             .expect("Failed to get default surface configuration");
 
         if let Some(format) = descriptor.format {
@@ -121,13 +158,16 @@ impl WindowContext {
         }
     }
 
-    /// Handle window resize event
-    pub fn resized(&mut self, new_size: Size<u32>) {
-        let scale_factor = self.window.window.scale_factor();
-        self.reconfigure.resize = Some(PhysicalSize {
-            width: (new_size.width as f64 * scale_factor) as u32,
-            height: (new_size.height as f64 * scale_factor) as u32,
-        });
+    /// Handle window resize event (logical size).
+    pub fn resized(&mut self, new_size: LogicalSize<u32>) {
+        let scale_factor = self.window.scale_factor();
+        let physical_size = new_size.to_physical(scale_factor);
+        self.reconfigure.resize = Some(physical_size);
+    }
+
+    /// Handle window resize event (physical size).
+    pub fn resized_physical(&mut self, new_size: PhysicalSize<u32>) {
+        self.reconfigure.resize = Some(new_size);
     }
 
     pub fn window(&self) -> &Window {
@@ -146,22 +186,26 @@ impl WindowContext {
         &self.config
     }
 
-    /// Get the size of the window.
-    pub fn size(&self) -> Size<u32> {
-        self.window.size()
+    /// Get the logical size of the window.
+    pub fn logical_size(&self) -> LogicalSize<u32> {
+        self.window.logical_size()
     }
 
-    pub fn size_f32(&self) -> Size<f32> {
-        let size = self.size();
-        Size {
-            width: size.width as f32,
-            height: size.height as f32,
-        }
+    /// Get the physical size of the window.
+    pub fn physical_size(&self) -> PhysicalSize<u32> {
+        self.window.physical_size()
     }
 
-    /// Get the inner size of the window.
-    pub fn inner_size(&self) -> PhysicalSize<u32> {
-        self.window.inner_size()
+    /// Get the logical size as f32.
+    pub fn logical_size_f32(&self) -> LogicalSize<f32> {
+        let size = self.logical_size();
+        LogicalSize::new(size.width as f32, size.height as f32)
+    }
+
+    /// Get the physical size as f32.
+    pub fn physical_size_f32(&self) -> PhysicalSize<f32> {
+        let size = self.physical_size();
+        PhysicalSize::new(size.width as f32, size.height as f32)
     }
 
     /// Reconfigure the surface with a new configuration.
@@ -249,29 +293,34 @@ impl RenderableWindow {
         &mut self.context
     }
 
-    /// Handle window resize event
-    pub fn resized(&mut self, new_size: Size<u32>) {
+    /// Handle window resize event (logical size).
+    pub fn resized(&mut self, new_size: LogicalSize<u32>) {
         self.context.resized(new_size);
     }
 
-    /// Get the inner size of the window.
-    pub fn inner_size(&self) -> PhysicalSize<u32> {
-        self.context.inner_size()
+    /// Handle window resize event (physical size).
+    pub fn resized_physical(&mut self, new_size: PhysicalSize<u32>) {
+        self.context.resized_physical(new_size);
     }
 
-    pub fn scale_factor(&self) -> f64 {
-        self.window.window.scale_factor()
+    /// Get the physical size of the window.
+    pub fn physical_size(&self) -> PhysicalSize<u32> {
+        self.context.physical_size()
     }
 
+    /// Get the scale factor.
+    pub fn scale_factor(&self) -> ScaleFactor {
+        self.window().scale_factor()
+    }
+
+    /// Get the viewport for this window.
     pub fn viewport(&self) -> Viewport {
-        let PhysicalSize { width, height } = self.inner_size();
+        let physical_size = self.physical_size();
         let scale_factor = self.scale_factor();
 
         Viewport {
-            x: 0.0,
-            y: 0.0,
-            width: width as f32,
-            height: height as f32,
+            position: PhysicalPosition::new(0.0, 0.0),
+            size: PhysicalSize::new(physical_size.width as f32, physical_size.height as f32),
             scale_factor,
         }
     }

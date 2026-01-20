@@ -71,6 +71,10 @@ bitflags! {
 
         /// BGRA8 unorm storage texture support.
         const BGRA8UNORM_STORAGE = 1 << 16;
+
+        /// Timestamp queries for GPU profiling.
+        /// Allows measuring GPU execution time with high precision.
+        const TIMESTAMP_QUERY = 1 << 17;
     }
 }
 
@@ -126,6 +130,9 @@ impl GpuFeatures {
         }
         if self.contains(GpuFeatures::BGRA8UNORM_STORAGE) {
             features |= wgpu::Features::BGRA8UNORM_STORAGE;
+        }
+        if self.contains(GpuFeatures::TIMESTAMP_QUERY) {
+            features |= wgpu::Features::TIMESTAMP_QUERY;
         }
 
         features
@@ -184,6 +191,9 @@ impl GpuFeatures {
         }
         if features.contains(wgpu::Features::BGRA8UNORM_STORAGE) {
             gpu_features |= GpuFeatures::BGRA8UNORM_STORAGE;
+        }
+        if features.contains(wgpu::Features::TIMESTAMP_QUERY) {
+            gpu_features |= GpuFeatures::TIMESTAMP_QUERY;
         }
 
         gpu_features
@@ -247,7 +257,8 @@ mod tests {
     fn test_gpu_features_roundtrip() {
         let features = GpuFeatures::INDIRECT_FIRST_INSTANCE
             | GpuFeatures::MULTI_DRAW_INDIRECT
-            | GpuFeatures::PUSH_CONSTANTS;
+            | GpuFeatures::PUSH_CONSTANTS
+            | GpuFeatures::TIMESTAMP_QUERY;
 
         let wgpu_features = features.to_wgpu();
         let back = GpuFeatures::from_wgpu(wgpu_features);

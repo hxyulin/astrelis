@@ -4,16 +4,14 @@
 //! positions and sizes using the Taffy layout engine without requiring GPU.
 
 use astrelis_ui::{UiCore, WidgetId};
-use astrelis_core::geometry::Size;
+use astrelis_core::geometry::{Size, PhysicalPosition, PhysicalSize, ScaleFactor};
 use astrelis_render::Viewport;
 
 fn default_viewport() -> Viewport {
     Viewport {
-        x: 0.0,
-        y: 0.0,
-        width: 800.0,
-        height: 600.0,
-        scale_factor: 1.0,
+        position: PhysicalPosition::new(0.0, 0.0),
+        size: PhysicalSize::new(800.0, 600.0),
+        scale_factor: ScaleFactor(1.0),
     }
 }
 
@@ -203,11 +201,9 @@ fn test_layout_viewport_change() {
 
     // Change viewport
     ui.set_viewport(Viewport {
-        x: 0.0,
-        y: 0.0,
-        width: 1920.0,
-        height: 1080.0,
-        scale_factor: 1.0,
+        position: PhysicalPosition::new(0.0, 0.0),
+        size: PhysicalSize::new(1920.0, 1080.0),
+        scale_factor: ScaleFactor(1.0),
     });
     ui.compute_layout();
 

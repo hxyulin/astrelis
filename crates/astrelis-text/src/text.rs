@@ -1,5 +1,6 @@
 use cosmic_text::Color as CosmicColor;
 
+use crate::decoration::{TextDecoration, UnderlineStyle, StrikethroughStyle};
 use crate::effects::{TextEffect, TextEffects};
 use crate::font::{FontAttributes, FontStretch, FontStyle, FontWeight};
 use crate::sdf::TextRenderMode;
@@ -44,12 +45,24 @@ pub enum VerticalAlign {
 }
 
 
-/// Text wrapping mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Text wrapping mode controlling how text breaks across lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TextWrap {
+    /// No wrapping - text extends past boundaries on a single line.
     None,
+
+    /// Word-based wrapping - breaks only at word boundaries.
+    /// This is the default and most common mode.
+    #[default]
     Word,
+
+    /// Glyph/character-based wrapping - breaks at any character.
+    /// Useful for CJK text or very narrow containers.
     Glyph,
+
+    /// Try word wrapping first, fall back to glyph if a word is too long.
+    /// Best for mixed content (URLs, code, CJK text mixed with Latin).
+    WordOrGlyph,
 }
 
 impl TextWrap {
@@ -58,7 +71,92 @@ impl TextWrap {
             TextWrap::None => cosmic_text::Wrap::None,
             TextWrap::Word => cosmic_text::Wrap::Word,
             TextWrap::Glyph => cosmic_text::Wrap::Glyph,
+            TextWrap::WordOrGlyph => cosmic_text::Wrap::WordOrGlyph,
         }
+    }
+}
+
+/// Configuration for line breaking behavior.
+///
+/// Provides control over how text wraps and breaks across lines.
+/// Currently uses cosmic-text's built-in line breaking.
+/// Future versions will support UAX#14 customization.
+///
+/// # Example
+///
+/// ```ignore
+/// use astrelis_text::{LineBreakConfig, TextWrap};
+///
+/// let config = LineBreakConfig::new(TextWrap::WordOrGlyph)
+///     .with_hyphen_breaks(true);
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct LineBreakConfig {
+    /// The wrapping mode to use.
+    pub wrap: TextWrap,
+
+    /// Whether to allow breaks at hyphens (e.g., "self-aware" can break at "-").
+    /// Default: true
+    pub break_at_hyphens: bool,
+
+    /// Reserved for future UAX#14 Unicode line breaking customization.
+    /// This field is intentionally private and zero-sized.
+    _uax14_reserved: (),
+}
+
+impl LineBreakConfig {
+    /// Create a new line break configuration with the specified wrap mode.
+    ///
+    /// # Arguments
+    ///
+    /// * `wrap` - The text wrapping mode to use
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{LineBreakConfig, TextWrap};
+    ///
+    /// let config = LineBreakConfig::new(TextWrap::Word);
+    /// ```
+    pub fn new(wrap: TextWrap) -> Self {
+        Self {
+            wrap,
+            break_at_hyphens: true,
+            _uax14_reserved: (),
+        }
+    }
+
+    /// Configure whether to allow breaks at hyphens.
+    ///
+    /// When enabled, hyphenated words like "self-aware" can break at the hyphen.
+    /// Default is `true`.
+    ///
+    /// # Arguments
+    ///
+    /// * `allow` - Whether to allow breaks at hyphens
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{LineBreakConfig, TextWrap};
+    ///
+    /// // Disable hyphen breaks for technical terms
+    /// let config = LineBreakConfig::new(TextWrap::Word)
+    ///     .with_hyphen_breaks(false);
+    /// ```
+    pub fn with_hyphen_breaks(mut self, allow: bool) -> Self {
+        self.break_at_hyphens = allow;
+        self
+    }
+
+    /// Get the wrap mode.
+    pub fn wrap(&self) -> TextWrap {
+        self.wrap
+    }
+
+    /// Check if hyphen breaks are enabled.
+    pub fn breaks_at_hyphens(&self) -> bool {
+        self.break_at_hyphens
     }
 }
 
@@ -118,10 +216,14 @@ pub struct Text {
     max_height: Option<f32>,
     letter_spacing: f32,
     word_spacing: f32,
+    /// Whether to allow breaks at hyphens (stored for future use)
+    break_at_hyphens: bool,
     /// Optional text effects (shadows, outlines, glows)
     effects: Option<TextEffects>,
     /// Render mode (Bitmap or SDF) - auto-selected when effects are present
     render_mode: Option<TextRenderMode>,
+    /// Optional text decoration (underline, strikethrough, background)
+    decoration: Option<TextDecoration>,
 }
 
 impl Text {
@@ -140,8 +242,10 @@ impl Text {
             max_height: None,
             letter_spacing: 0.0,
             word_spacing: 0.0,
+            break_at_hyphens: true,
             effects: None,
             render_mode: None,
+            decoration: None,
         }
     }
 
@@ -208,6 +312,33 @@ impl Text {
     /// Set the text wrapping mode.
     pub fn wrap(mut self, wrap: TextWrap) -> Self {
         self.wrap = wrap;
+        self
+    }
+
+    /// Set line breaking configuration for advanced control.
+    ///
+    /// This provides more control than `.wrap()` alone, allowing configuration
+    /// of hyphen breaks and future UAX#14 options.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - The line break configuration
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{Text, LineBreakConfig, TextWrap};
+    ///
+    /// let text = Text::new("Long text with a-very-long-hyphenated-word")
+    ///     .line_break(
+    ///         LineBreakConfig::new(TextWrap::WordOrGlyph)
+    ///             .with_hyphen_breaks(true)
+    ///     )
+    ///     .max_width(200.0);
+    /// ```
+    pub fn line_break(mut self, config: LineBreakConfig) -> Self {
+        self.wrap = config.wrap;
+        self.break_at_hyphens = config.break_at_hyphens;
         self
     }
 
@@ -293,6 +424,11 @@ impl Text {
 
     pub fn get_word_spacing(&self) -> f32 {
         self.word_spacing
+    }
+
+    /// Check if hyphen breaks are enabled.
+    pub fn get_break_at_hyphens(&self) -> bool {
+        self.break_at_hyphens
     }
 
     // ========== Effects Builder Methods ==========
@@ -540,6 +676,118 @@ impl Text {
         self.effects
             .as_ref()
             .map(|e| e.has_enabled_effects())
+            .unwrap_or(false)
+    }
+
+    // ========== Decoration Builder Methods ==========
+
+    /// Set text decoration (underline, strikethrough, background).
+    ///
+    /// Text decorations are rendered separately from the text glyphs:
+    /// - Background: colored quad behind text (rendered first)
+    /// - Underline: line below the text baseline
+    /// - Strikethrough: line through the middle of text
+    ///
+    /// # Arguments
+    ///
+    /// * `decoration` - The decoration configuration
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{Text, TextDecoration, UnderlineStyle, Color};
+    ///
+    /// let decoration = TextDecoration::new()
+    ///     .underline(UnderlineStyle::solid(Color::BLUE, 1.0))
+    ///     .background(Color::YELLOW);
+    ///
+    /// let text = Text::new("Important text")
+    ///     .with_decoration(decoration);
+    /// ```
+    pub fn with_decoration(mut self, decoration: TextDecoration) -> Self {
+        self.decoration = Some(decoration);
+        self
+    }
+
+    /// Add a solid underline with the specified color.
+    ///
+    /// Convenience method for adding a simple solid underline.
+    /// For more control (thickness, offset, style), use `with_decoration()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - The underline color
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{Text, Color};
+    ///
+    /// let text = Text::new("Underlined")
+    ///     .underline(Color::BLUE);
+    /// ```
+    pub fn underline(self, color: Color) -> Self {
+        let decoration = self.decoration.clone().unwrap_or_default()
+            .underline(UnderlineStyle::solid(color, 1.0));
+        self.with_decoration(decoration)
+    }
+
+    /// Add a solid strikethrough with the specified color.
+    ///
+    /// Convenience method for adding a simple solid strikethrough.
+    /// For more control (thickness, offset, style), use `with_decoration()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - The strikethrough color
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{Text, Color};
+    ///
+    /// let text = Text::new("Deleted")
+    ///     .strikethrough(Color::RED);
+    /// ```
+    pub fn strikethrough(self, color: Color) -> Self {
+        let decoration = self.decoration.clone().unwrap_or_default()
+            .strikethrough(StrikethroughStyle::solid(color, 1.0));
+        self.with_decoration(decoration)
+    }
+
+    /// Add a background highlight color.
+    ///
+    /// Convenience method for adding a simple background highlight.
+    /// For more control (padding), use `with_decoration()`.
+    ///
+    /// # Arguments
+    ///
+    /// * `color` - The background highlight color
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_text::{Text, Color};
+    ///
+    /// let text = Text::new("Highlighted")
+    ///     .background_color(Color::YELLOW);
+    /// ```
+    pub fn background_color(self, color: Color) -> Self {
+        let decoration = self.decoration.clone().unwrap_or_default()
+            .background(color);
+        self.with_decoration(decoration)
+    }
+
+    /// Get the text decoration, if any.
+    pub fn get_decoration(&self) -> Option<&TextDecoration> {
+        self.decoration.as_ref()
+    }
+
+    /// Check if this text has any decoration configured.
+    pub fn has_decoration(&self) -> bool {
+        self.decoration
+            .as_ref()
+            .map(|d| d.has_decoration())
             .unwrap_or(false)
     }
 

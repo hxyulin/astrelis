@@ -15,8 +15,7 @@ use astrelis_render::{
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    event::PhysicalSize,
-    window::{WindowBackend, WindowDescriptor},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -60,7 +59,7 @@ fn main() {
             let window = ctx
                 .create_window(WindowDescriptor {
                     title: format!("Window {} - Multi-Window Example", i + 1),
-                    size: Some(PhysicalSize::new(400.0, 300.0)),
+                    size: Some(WinitPhysicalSize::new(400.0, 300.0)),
                     ..Default::default()
                 })
                 .expect("Failed to create window");

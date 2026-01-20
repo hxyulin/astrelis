@@ -24,7 +24,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::{EventBatch, Event, HandleStatus, Key},
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -52,7 +52,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Theme Switcher - Light/Dark Mode Demo".to_string(),
-                size: Some(PhysicalSize::new(1200.0, 800.0)),
+                size: Some(WinitPhysicalSize::new(1200.0, 800.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
@@ -67,7 +67,7 @@ fn main() {
         );
 
         let window_id = window.id();
-        let size = window.inner_size();
+        let size = window.physical_size();
 
         let mut ui = UiSystem::new(graphics_ctx.clone());
         ui.set_viewport(window.viewport());
@@ -586,7 +586,7 @@ impl App for ThemeSwitcherApp {
             println!("  🎨 Switched to {} theme", theme_name);
             tracing::info!("Theme switched to: {}", theme_name);
 
-            let size = self.window.inner_size();
+            let size = self.window.physical_size();
             build_themed_ui(
                 &mut self.ui,
                 size.width as f32,

@@ -1,4 +1,5 @@
 use crate::context::GraphicsContext;
+use crate::types::{GpuTexture, TypedBuffer, UniformBuffer};
 use std::sync::Arc;
 
 /// Low-level extensible renderer that simplifies WGPU resource management.
@@ -360,6 +361,89 @@ impl Renderer {
         I: IntoIterator<Item = wgpu::CommandBuffer>,
     {
         self.context.queue.submit(command_buffers);
+    }
+
+    // =========================================================================
+    // Typed Buffer Methods
+    // =========================================================================
+
+    /// Create a typed vertex buffer with data.
+    ///
+    /// Returns a `TypedBuffer<T>` that tracks element count and provides type-safe operations.
+    pub fn create_typed_vertex_buffer<T: bytemuck::Pod>(
+        &self,
+        label: Option<&str>,
+        data: &[T],
+    ) -> TypedBuffer<T> {
+        TypedBuffer::new(
+            &self.context.device,
+            label,
+            data,
+            wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        )
+    }
+
+    /// Create a typed index buffer with data.
+    ///
+    /// Returns a `TypedBuffer<T>` that tracks element count and provides type-safe operations.
+    pub fn create_typed_index_buffer<T: bytemuck::Pod>(
+        &self,
+        label: Option<&str>,
+        data: &[T],
+    ) -> TypedBuffer<T> {
+        TypedBuffer::new(
+            &self.context.device,
+            label,
+            data,
+            wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+        )
+    }
+
+    /// Create a typed uniform buffer with data.
+    ///
+    /// Returns a `UniformBuffer<T>` that provides type-safe uniform operations.
+    pub fn create_typed_uniform<T: bytemuck::Pod>(
+        &self,
+        label: Option<&str>,
+        data: &T,
+    ) -> UniformBuffer<T> {
+        UniformBuffer::new_uniform(&self.context.device, label, data)
+    }
+
+    /// Create a GPU texture with cached view and metadata.
+    ///
+    /// Returns a `GpuTexture` that provides convenient access to the texture, view, and metadata.
+    pub fn create_gpu_texture_2d(
+        &self,
+        label: Option<&str>,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        usage: wgpu::TextureUsages,
+    ) -> GpuTexture {
+        GpuTexture::new_2d(&self.context.device, label, width, height, format, usage)
+    }
+
+    /// Create a GPU texture from raw data.
+    ///
+    /// Returns a `GpuTexture` with data uploaded to the GPU.
+    pub fn create_gpu_texture_from_data(
+        &self,
+        label: Option<&str>,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+        data: &[u8],
+    ) -> GpuTexture {
+        GpuTexture::from_data(
+            &self.context.device,
+            &self.context.queue,
+            label,
+            width,
+            height,
+            format,
+            data,
+        )
     }
 }
 

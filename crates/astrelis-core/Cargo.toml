@@ -9,6 +9,10 @@ publish.workspace = true
 repository.workspace = true
 description = "Core utilities for Astrelis engine"
 
+[features]
+default = ["winit"]
+winit = ["dep:winit"]
+
 [dependencies]
 tracing.workspace = true
 puffin.workspace = true
@@ -19,6 +23,7 @@ bytemuck = { workspace = true, features = ["derive"] }
 tracing-subscriber.workspace = true
 ahash.workspace = true
 static_assertions = "1.1"
+winit = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion.workspace = true

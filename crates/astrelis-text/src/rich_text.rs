@@ -29,7 +29,7 @@
 //! ```
 
 use crate::font::{FontAttributes, FontStyle, FontWeight};
-use crate::text::{Text, TextAlign, TextWrap, VerticalAlign};
+use crate::text::{LineBreakConfig, Text, TextAlign, TextWrap, VerticalAlign};
 use astrelis_render::Color;
 
 /// A span of text with specific styling.
@@ -180,6 +180,8 @@ pub struct RichText {
     vertical_align: VerticalAlign,
     /// Text wrapping mode
     wrap: TextWrap,
+    /// Whether to allow breaks at hyphens
+    break_at_hyphens: bool,
     /// Maximum width
     max_width: Option<f32>,
     /// Maximum height
@@ -199,6 +201,7 @@ impl RichText {
             align: TextAlign::Left,
             vertical_align: VerticalAlign::Top,
             wrap: TextWrap::Word,
+            break_at_hyphens: true,
             max_width: None,
             max_height: None,
             line_height: 1.2,
@@ -274,6 +277,15 @@ impl RichText {
     /// Set text wrapping.
     pub fn set_wrap(&mut self, wrap: TextWrap) {
         self.wrap = wrap;
+    }
+
+    /// Set line breaking configuration.
+    ///
+    /// This provides more control than `set_wrap()` alone, allowing configuration
+    /// of hyphen breaks and future UAX#14 options.
+    pub fn set_line_break(&mut self, config: LineBreakConfig) {
+        self.wrap = config.wrap;
+        self.break_at_hyphens = config.break_at_hyphens;
     }
 
     /// Set maximum width.
@@ -584,6 +596,15 @@ impl RichTextBuilder {
     /// Set text wrapping.
     pub fn wrap(mut self, wrap: TextWrap) -> Self {
         self.rich_text.set_wrap(wrap);
+        self
+    }
+
+    /// Set line breaking configuration.
+    ///
+    /// This provides more control than `.wrap()` alone, allowing configuration
+    /// of hyphen breaks and future UAX#14 options.
+    pub fn line_break(mut self, config: LineBreakConfig) -> Self {
+        self.rich_text.set_line_break(config);
         self
     }
 

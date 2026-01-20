@@ -441,6 +441,219 @@ impl<'a> RenderPass<'a> {
     pub fn finish(self) {
         drop(self);
     }
+
+    // =========================================================================
+    // Viewport/Scissor Methods
+    // =========================================================================
+
+    /// Set the viewport using physical coordinates.
+    ///
+    /// The viewport defines the transformation from normalized device coordinates
+    /// to window coordinates.
+    ///
+    /// # Arguments
+    ///
+    /// * `rect` - The viewport rectangle in physical (pixel) coordinates
+    /// * `min_depth` - Minimum depth value (typically 0.0)
+    /// * `max_depth` - Maximum depth value (typically 1.0)
+    pub fn set_viewport_physical(
+        &mut self,
+        rect: astrelis_core::geometry::PhysicalRect<f32>,
+        min_depth: f32,
+        max_depth: f32,
+    ) {
+        self.descriptor().set_viewport(
+            rect.x,
+            rect.y,
+            rect.width,
+            rect.height,
+            min_depth,
+            max_depth,
+        );
+    }
+
+    /// Set the viewport using logical coordinates (converts with scale factor).
+    ///
+    /// # Arguments
+    ///
+    /// * `rect` - The viewport rectangle in logical coordinates
+    /// * `min_depth` - Minimum depth value (typically 0.0)
+    /// * `max_depth` - Maximum depth value (typically 1.0)
+    /// * `scale` - Scale factor for logical to physical conversion
+    pub fn set_viewport_logical(
+        &mut self,
+        rect: astrelis_core::geometry::LogicalRect<f32>,
+        min_depth: f32,
+        max_depth: f32,
+        scale: astrelis_core::geometry::ScaleFactor,
+    ) {
+        let physical = rect.to_physical_f32(scale);
+        self.set_viewport_physical(physical, min_depth, max_depth);
+    }
+
+    /// Set the viewport from a Viewport struct.
+    ///
+    /// Uses the viewport's position and size, with depth range 0.0 to 1.0.
+    pub fn set_viewport(&mut self, viewport: &crate::Viewport) {
+        self.descriptor().set_viewport(
+            viewport.position.x,
+            viewport.position.y,
+            viewport.size.width,
+            viewport.size.height,
+            0.0,
+            1.0,
+        );
+    }
+
+    /// Set the scissor rectangle using physical coordinates.
+    ///
+    /// The scissor rectangle defines the area of the render target that
+    /// can be modified by drawing commands.
+    ///
+    /// # Arguments
+    ///
+    /// * `rect` - The scissor rectangle in physical (pixel) coordinates
+    pub fn set_scissor_physical(&mut self, rect: astrelis_core::geometry::PhysicalRect<u32>) {
+        self.descriptor()
+            .set_scissor_rect(rect.x, rect.y, rect.width, rect.height);
+    }
+
+    /// Set the scissor rectangle using logical coordinates.
+    ///
+    /// # Arguments
+    ///
+    /// * `rect` - The scissor rectangle in logical coordinates
+    /// * `scale` - Scale factor for logical to physical conversion
+    pub fn set_scissor_logical(
+        &mut self,
+        rect: astrelis_core::geometry::LogicalRect<f32>,
+        scale: astrelis_core::geometry::ScaleFactor,
+    ) {
+        let physical = rect.to_physical(scale);
+        self.set_scissor_physical(physical);
+    }
+
+    // =========================================================================
+    // Convenience Drawing Methods
+    // =========================================================================
+
+    /// Set the pipeline for this render pass.
+    pub fn set_pipeline(&mut self, pipeline: &'a wgpu::RenderPipeline) {
+        self.descriptor().set_pipeline(pipeline);
+    }
+
+    /// Set a bind group for this render pass.
+    pub fn set_bind_group(
+        &mut self,
+        index: u32,
+        bind_group: &'a wgpu::BindGroup,
+        offsets: &[u32],
+    ) {
+        self.descriptor().set_bind_group(index, bind_group, offsets);
+    }
+
+    /// Set the vertex buffer for this render pass.
+    pub fn set_vertex_buffer(&mut self, slot: u32, buffer_slice: wgpu::BufferSlice<'a>) {
+        self.descriptor().set_vertex_buffer(slot, buffer_slice);
+    }
+
+    /// Set the index buffer for this render pass.
+    pub fn set_index_buffer(&mut self, buffer_slice: wgpu::BufferSlice<'a>, format: wgpu::IndexFormat) {
+        self.descriptor().set_index_buffer(buffer_slice, format);
+    }
+
+    /// Draw primitives.
+    pub fn draw(&mut self, vertices: std::ops::Range<u32>, instances: std::ops::Range<u32>) {
+        self.descriptor().draw(vertices, instances);
+        self.context.increment_draw_calls();
+    }
+
+    /// Draw indexed primitives.
+    pub fn draw_indexed(
+        &mut self,
+        indices: std::ops::Range<u32>,
+        base_vertex: i32,
+        instances: std::ops::Range<u32>,
+    ) {
+        self.descriptor().draw_indexed(indices, base_vertex, instances);
+        self.context.increment_draw_calls();
+    }
+
+    /// Insert a debug marker.
+    pub fn insert_debug_marker(&mut self, label: &str) {
+        self.descriptor().insert_debug_marker(label);
+    }
+
+    /// Push a debug group.
+    pub fn push_debug_group(&mut self, label: &str) {
+        self.descriptor().push_debug_group(label);
+    }
+
+    /// Pop a debug group.
+    pub fn pop_debug_group(&mut self) {
+        self.descriptor().pop_debug_group();
+    }
+
+    // =========================================================================
+    // Push Constants
+    // =========================================================================
+
+    /// Set push constants for a range of shader stages.
+    ///
+    /// Push constants are a fast way to pass small amounts of data to shaders
+    /// without the overhead of buffer updates. They are limited in size
+    /// (typically 128-256 bytes depending on the GPU).
+    ///
+    /// **Requires the `PUSH_CONSTANTS` feature to be enabled.**
+    ///
+    /// # Arguments
+    ///
+    /// * `stages` - Which shader stages can access this data
+    /// * `offset` - Byte offset within the push constant range
+    /// * `data` - The data to set (must be Pod)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// #[repr(C)]
+    /// #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+    /// struct PushConstants {
+    ///     transform: [[f32; 4]; 4],
+    ///     color: [f32; 4],
+    /// }
+    ///
+    /// let constants = PushConstants {
+    ///     transform: /* ... */,
+    ///     color: [1.0, 0.0, 0.0, 1.0],
+    /// };
+    ///
+    /// pass.set_push_constants(
+    ///     wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+    ///     0,
+    ///     &constants,
+    /// );
+    /// ```
+    pub fn set_push_constants<T: bytemuck::Pod>(
+        &mut self,
+        stages: wgpu::ShaderStages,
+        offset: u32,
+        data: &T,
+    ) {
+        self.descriptor()
+            .set_push_constants(stages, offset, bytemuck::bytes_of(data));
+    }
+
+    /// Set push constants from raw bytes.
+    ///
+    /// Use this when you need more control over the data layout.
+    pub fn set_push_constants_raw(
+        &mut self,
+        stages: wgpu::ShaderStages,
+        offset: u32,
+        data: &[u8],
+    ) {
+        self.descriptor().set_push_constants(stages, offset, data);
+    }
 }
 
 impl Drop for RenderPass<'_> {

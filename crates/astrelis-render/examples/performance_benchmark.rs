@@ -16,7 +16,7 @@ use astrelis_winit::{
     WindowId,
     app::{App, AppCtx, run_app},
     event::{EventBatch, Event, HandleStatus, Key, NamedKey},
-    window::{PhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -42,7 +42,7 @@ fn main() {
         let window = ctx
             .create_window(WindowDescriptor {
                 title: "Performance Benchmark - Render Stress Test".to_string(),
-                size: Some(PhysicalSize::new(1280.0, 720.0)),
+                size: Some(WinitPhysicalSize::new(1280.0, 720.0)),
                 ..Default::default()
             })
             .expect("Failed to create window");
