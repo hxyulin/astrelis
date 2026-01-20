@@ -55,6 +55,7 @@
 //! - `TextPlugin` - Text rendering capabilities
 //! - `InputPlugin` - Input state management
 
+pub mod application;
 pub mod engine;
 pub mod plugin;
 pub mod resource;
@@ -104,6 +105,7 @@ pub use engine::{Engine, EngineBuilder};
 pub use plugin::{Plugin, FnPlugin, PluginGroup};
 pub use resource::{Resource, Resources};
 pub use time::Time;
+pub use application::ApplicationBuilder;
 
 // Re-export plugin types when available
 #[cfg(feature = "assets")]
@@ -130,6 +132,7 @@ pub mod prelude {
     pub use crate::plugin::{Plugin, FnPlugin};
     pub use crate::resource::{Resource, Resources};
     pub use crate::time::Time;
+    pub use crate::application::ApplicationBuilder;
 
     // Core math types
     pub use astrelis_core::math::{Mat4, Vec2, Vec3, Vec4};

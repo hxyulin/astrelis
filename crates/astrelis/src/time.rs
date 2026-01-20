@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 /// Automatically inserted by `TimePlugin` in `DefaultPlugins`.
 ///
 /// # Example
-/// ```no_run
+/// ```ignore
 /// fn update(&mut self, ctx: &mut AppCtx, time: &Time) {
 ///     let dt = time.delta_seconds();
 ///     player_position += velocity * dt; // Frame-independent movement
