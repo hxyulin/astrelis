@@ -7,7 +7,7 @@ use std::sync::Arc;
 use astrelis_core::alloc::sparse_set::{IndexSlot, SparseSet};
 
 use crate::error::AssetError;
-use crate::handle::{Handle, HandleId};
+use crate::handle::{Handle, HandleId, UntypedHandle};
 use crate::state::{AssetEntry, AssetState};
 use crate::source::AssetSource;
 use crate::Asset;
@@ -216,6 +216,9 @@ pub trait ErasedAssets: Send + Sync {
     /// Check if an asset is ready.
     fn is_ready_untyped(&self, slot: IndexSlot) -> bool;
 
+    /// Get the source for an asset by its slot.
+    fn source_for_slot(&self, slot: IndexSlot) -> Option<&AssetSource>;
+
     /// Get as Any for downcasting.
     fn as_any(&self) -> &dyn Any;
 
@@ -233,6 +236,10 @@ impl<T: Asset> ErasedAssets for Assets<T> {
             .try_get(slot)
             .map(|e| e.is_ready())
             .unwrap_or(false)
+    }
+
+    fn source_for_slot(&self, slot: IndexSlot) -> Option<&AssetSource> {
+        self.entries.try_get(slot).map(|e| &e.source)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -287,6 +294,17 @@ impl AssetStorages {
     /// Check if storage exists for a type.
     pub fn has<T: Asset>(&self) -> bool {
         self.storages.contains_key(&TypeId::of::<T>())
+    }
+
+    /// Find the source for an untyped handle by searching all storages.
+    ///
+    /// This is used for hot reload to find which file to watch for changes.
+    pub fn find_source(&self, handle: &UntypedHandle) -> Option<&AssetSource> {
+        // Try to find the storage for this handle's type
+        let storage = self.storages.get(&handle.type_id())?;
+
+        // Get the source using the slot from the handle
+        storage.source_for_slot(handle.id().slot)
     }
 }
 

@@ -9,9 +9,17 @@ publish.workspace = true
 repository.workspace = true
 description = "Asset management module for Astrelis game engine"
 
+[features]
+default = []
+hot-reload = ["dep:notify"]
+
 [dependencies]
 astrelis-core.workspace = true
 futures-lite = "2.3"
+tracing.workspace = true
+
+# Optional: file watching for hot reload
+notify = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3.14"

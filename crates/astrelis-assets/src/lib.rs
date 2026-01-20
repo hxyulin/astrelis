@@ -67,6 +67,7 @@
 pub mod error;
 pub mod event;
 pub mod handle;
+pub mod hot_reload;
 pub mod io;
 pub mod loader;
 pub mod server;

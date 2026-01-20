@@ -74,6 +74,9 @@ pub struct AssetServer {
     file_reader: FileReader,
     /// Memory reader for embedded/memory assets.
     memory_reader: MemoryReader,
+    /// File watcher for hot-reload support.
+    #[cfg(feature = "hot-reload")]
+    watcher: Option<crate::hot_reload::AssetWatcher>,
 }
 
 impl AssetServer {
@@ -93,6 +96,8 @@ impl AssetServer {
             pending: VecDeque::new(),
             file_reader: FileReader::new(base_path),
             memory_reader: MemoryReader::new(),
+            #[cfg(feature = "hot-reload")]
+            watcher: None,
         }
     }
 
@@ -437,6 +442,88 @@ impl AssetServer {
     /// Check if any loader is registered for a type.
     pub fn has_loader_for_type<T: 'static>(&self) -> bool {
         self.loaders.has_loader_for_type::<T>()
+    }
+
+    /// Enable hot reload support for a directory.
+    ///
+    /// When enabled, the asset server will watch the specified directory
+    /// for file changes and automatically reload affected assets.
+    ///
+    /// # Feature Flag
+    ///
+    /// This method is only available with the `hot-reload` feature enabled.
+    #[cfg(feature = "hot-reload")]
+    pub fn enable_hot_reload(&mut self, watch_dir: impl AsRef<Path>) -> Result<(), String> {
+        use crate::hot_reload::AssetWatcher;
+
+        if self.watcher.is_none() {
+            self.watcher = Some(AssetWatcher::new().map_err(|e| e.to_string())?);
+        }
+
+        if let Some(watcher) = &mut self.watcher {
+            watcher.watch_directory(&watch_dir).map_err(|e| e.to_string())?;
+            tracing::info!("Hot reload enabled for directory: {}", watch_dir.as_ref().display());
+        }
+
+        Ok(())
+    }
+
+    /// Process hot reload events.
+    ///
+    /// Call this each frame to check for file changes and reload affected assets.
+    /// Returns the number of assets that were reloaded.
+    ///
+    /// # Feature Flag
+    ///
+    /// This method is only available with the `hot-reload` feature enabled.
+    #[cfg(feature = "hot-reload")]
+    pub fn process_hot_reload(&mut self) -> usize {
+        let Some(watcher) = &mut self.watcher else {
+            return 0;
+        };
+
+        let changed_handles = watcher.poll_changes();
+        if changed_handles.is_empty() {
+            return 0;
+        }
+
+        tracing::debug!("Hot reload: {} assets changed", changed_handles.len());
+
+        let mut reloaded = 0;
+        for handle in changed_handles {
+            // Find the source for this handle and queue a reload
+            // We need to look through all storages to find the asset
+            if let Some(source) = self.storages.find_source(&handle) {
+                tracing::debug!("Reloading asset from: {:?}", source);
+
+                // Queue for reload
+                self.pending.push_back(PendingLoad {
+                    handle,
+                    source: source.clone(),
+                    bytes: None,
+                    extension: source.extension().map(String::from),
+                });
+
+                reloaded += 1;
+            }
+        }
+
+        reloaded
+    }
+
+    /// Register a file path with the hot reload system.
+    ///
+    /// This is called automatically when assets are loaded, but can be called
+    /// manually if needed.
+    ///
+    /// # Feature Flag
+    ///
+    /// This method is only available with the `hot-reload` feature enabled.
+    #[cfg(feature = "hot-reload")]
+    pub fn register_hot_reload_path(&mut self, path: impl AsRef<Path>, handle: UntypedHandle) {
+        if let Some(watcher) = &mut self.watcher {
+            watcher.register_file(path, handle);
+        }
     }
 }
 

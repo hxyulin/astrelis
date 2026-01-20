@@ -88,6 +88,9 @@ async-executor = "1.13"
 futures-lite = "2.5"
 num_cpus = "1.16"
 
+# File watching
+notify = "7.0"
+
 # Testing
 tempfile = "3.10"
 
