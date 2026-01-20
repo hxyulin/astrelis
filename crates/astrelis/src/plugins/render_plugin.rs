@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use astrelis_core::geometry::LogicalSize;
-use astrelis_render::{GraphicsContext, WindowContext, WindowContextDescriptor};
+use astrelis_render::{GraphicsContext, WindowContext, WindowContextDescriptor, WindowManager};
 use astrelis_winit::window::Window;
 use astrelis_winit::WindowId;
 
@@ -110,14 +110,44 @@ impl RenderContexts {
 /// # Resources Provided
 ///
 /// - `Arc<GraphicsContext>` - The main GPU context (shared ownership)
-/// - `RenderContexts` - Manager for window render contexts
+/// - `RenderContexts` - Manager for window render contexts (legacy)
+/// - `WindowManager` - High-level window management with automatic event handling (recommended)
 ///
-/// # Example
+/// # Example (Using WindowManager - Recommended)
 ///
 /// ```ignore
 /// use astrelis::prelude::*;
 ///
-/// // In your App::render():
+/// struct MyApp {
+///     window_manager: Option<WindowManager>,
+/// }
+///
+/// impl App for MyApp {
+///     fn on_start(&mut self, ctx: &mut AppCtx) {
+///         // Get WindowManager from engine resources
+///         let window_manager = self.engine.get::<WindowManager>().unwrap().clone();
+///         self.window_manager = Some(window_manager);
+///     }
+///
+///     fn render(&mut self, ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
+///         let wm = self.window_manager.as_mut().unwrap();
+///         wm.render_window(window_id, events, |window, _events| {
+///             // Resize handled automatically!
+///             let mut frame = window.begin_drawing();
+///             frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
+///                 // Your rendering
+///             });
+///             frame.finish();
+///         });
+///     }
+/// }
+/// ```
+///
+/// # Example (Using RenderContexts - Legacy)
+///
+/// ```ignore
+/// use astrelis::prelude::*;
+///
 /// fn render(&mut self, ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
 ///     let render_contexts = self.engine.get_mut::<RenderContexts>().unwrap();
 ///
@@ -144,7 +174,10 @@ impl Plugin for RenderPlugin {
         );
 
         resources.insert(graphics.clone());
-        resources.insert(RenderContexts::with_graphics(graphics));
+        resources.insert(RenderContexts::with_graphics(graphics.clone()));
+        resources.insert(WindowManager::new(graphics));
+
+        tracing::debug!("RenderPlugin: Registered GraphicsContext, RenderContexts, and WindowManager");
     }
 }
 

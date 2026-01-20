@@ -39,6 +39,7 @@ mod sprite;
 mod target;
 mod types;
 mod window;
+mod window_manager;
 
 // Re-export all modules
 pub use atlas::*;
@@ -64,6 +65,7 @@ pub use sprite::*;
 pub use target::*;
 pub use types::*;
 pub use window::*;
+pub use window_manager::*;
 
 // Re-export wgpu under 'wgpu' module
 pub use wgpu;

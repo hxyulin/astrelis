@@ -151,6 +151,7 @@ pub mod prelude {
     #[cfg(feature = "render")]
     pub use astrelis_render::{
         Color, ComputePassBuilder, FrameContext, GraphicsContext, RenderPassBuilder, WindowContext,
+        WindowManager,
     };
 
     // Text types
