@@ -32,7 +32,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.1.0"
 rust-version = "1.90.0"
 edition = "2024"
 authors = ["hxyulin <hxyulin@proton.me>"]
@@ -41,19 +41,19 @@ publish = true
 repository = "https://github.com/hxyulin/astrelis"
 
 [workspace.dependencies]
-astrelis = { path = "crates/astrelis", version = "0.0.1" }
-astrelis-assets = { path = "crates/astrelis-assets", version = "0.0.1" }
-astrelis-audio = { path = "crates/astrelis-audio", version = "0.0.1" }
-astrelis-core = { path = "crates/astrelis-core", version = "0.0.1" }
-astrelis-ecs = { path = "crates/astrelis-ecs", version = "0.0.1" }
-astrelis-egui = { path = "crates/astrelis-egui", version = "0.0.1" }
-astrelis-input = { path = "crates/astrelis-input", version = "0.0.1" }
-astrelis-render = { path = "crates/astrelis-render", version = "0.0.1" }
-astrelis-scene = { path = "crates/astrelis-scene", version = "0.0.1" }
-astrelis-test-utils = { path = "crates/astrelis-test-utils", version = "0.0.1" }
-astrelis-text = { path = "crates/astrelis-text", version = "0.0.1" }
-astrelis-ui = { path = "crates/astrelis-ui", version = "0.0.1" }
-astrelis-winit = { path = "crates/astrelis-winit", version = "0.0.1" }
+astrelis = { path = "crates/astrelis", version = "0.1.0" }
+astrelis-assets = { path = "crates/astrelis-assets", version = "0.1.0" }
+astrelis-audio = { path = "crates/astrelis-audio", version = "0.1.0" }
+astrelis-core = { path = "crates/astrelis-core", version = "0.1.0" }
+astrelis-ecs = { path = "crates/astrelis-ecs", version = "0.1.0" }
+astrelis-egui = { path = "crates/astrelis-egui", version = "0.1.0" }
+astrelis-input = { path = "crates/astrelis-input", version = "0.1.0" }
+astrelis-render = { path = "crates/astrelis-render", version = "0.1.0" }
+astrelis-scene = { path = "crates/astrelis-scene", version = "0.1.0" }
+astrelis-test-utils = { path = "crates/astrelis-test-utils", version = "0.1.0" }
+astrelis-text = { path = "crates/astrelis-text", version = "0.1.0" }
+astrelis-ui = { path = "crates/astrelis-ui", version = "0.1.0" }
+astrelis-winit = { path = "crates/astrelis-winit", version = "0.1.0" }
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }

@@ -13,7 +13,7 @@
 use astrelis_core::logging;
 use astrelis_render::{Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu};
 use astrelis_winit::{
-    WindowId,
+    FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::{EventBatch, Event, HandleStatus, Key, NamedKey},
     window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
@@ -54,7 +54,7 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        );
+        ).expect("Failed to create renderable window");
 
         let window_id = window.id();
 

@@ -463,6 +463,125 @@ impl TextBounds {
     }
 }
 
+/// Generate line quads for a given line style.
+///
+/// This helper function generates the appropriate quads for different line styles:
+/// - Solid: Single rectangular quad
+/// - Dashed: Multiple rectangular quads with gaps
+/// - Dotted: Multiple small square quads
+/// - Wavy: Multiple rectangular quads forming a sine wave pattern
+///
+/// # Arguments
+///
+/// * `quads` - Output vector to append generated quads to
+/// * `x` - Starting X position of the line
+/// * `y` - Y position (center) of the line
+/// * `width` - Total width of the line
+/// * `thickness` - Line thickness in pixels
+/// * `color` - Line color
+/// * `style` - Line style (Solid, Dashed, Dotted, Wavy)
+/// * `quad_type` - Type of decoration quad (Underline or Strikethrough)
+fn generate_line_quads(
+    quads: &mut Vec<DecorationQuad>,
+    x: f32,
+    y: f32,
+    width: f32,
+    thickness: f32,
+    color: Color,
+    style: LineStyle,
+    quad_type: DecorationQuadType,
+) {
+    match style {
+        LineStyle::Solid => {
+            // Single solid quad
+            quads.push(DecorationQuad::new(x, y, width, thickness, color, quad_type));
+        }
+        LineStyle::Dashed => {
+            // Dashed line: dash_length = 4 * thickness, gap_length = 2 * thickness
+            let dash_length = (4.0 * thickness).max(3.0);
+            let gap_length = (2.0 * thickness).max(2.0);
+            let segment_length = dash_length + gap_length;
+
+            let mut current_x = x;
+            while current_x < x + width {
+                let remaining = (x + width) - current_x;
+                let dash_width = dash_length.min(remaining);
+
+                if dash_width > 0.5 {
+                    quads.push(DecorationQuad::new(
+                        current_x,
+                        y,
+                        dash_width,
+                        thickness,
+                        color,
+                        quad_type,
+                    ));
+                }
+
+                current_x += segment_length;
+            }
+        }
+        LineStyle::Dotted => {
+            // Dotted line: dots are squares with size = thickness, spaced by 2 * thickness
+            let dot_size = thickness;
+            let dot_spacing = (2.0 * thickness).max(2.0);
+            let segment_length = dot_size + dot_spacing;
+
+            let mut current_x = x;
+            while current_x < x + width {
+                let remaining = (x + width) - current_x;
+                let dot_width = dot_size.min(remaining);
+
+                if dot_width > 0.5 {
+                    quads.push(DecorationQuad::new(
+                        current_x,
+                        y,
+                        dot_width,
+                        thickness,
+                        color,
+                        quad_type,
+                    ));
+                }
+
+                current_x += segment_length;
+            }
+        }
+        LineStyle::Wavy => {
+            // Wavy line: sine wave pattern
+            // Wave parameters
+            let wave_height = (thickness * 1.5).max(2.0); // Amplitude of the wave
+            let wave_length = (thickness * 8.0).max(8.0); // One complete wave cycle
+            let segment_width = wave_length / 8.0; // Divide wave into segments for smooth curve
+
+            let mut current_x = x;
+            let mut segment_index = 0;
+
+            while current_x < x + width {
+                let remaining = (x + width) - current_x;
+                let seg_width = segment_width.min(remaining);
+
+                if seg_width > 0.5 {
+                    // Calculate Y offset based on sine wave
+                    let phase = segment_index as f32 * segment_width / wave_length * 2.0 * std::f32::consts::PI;
+                    let y_offset = phase.sin() * wave_height * 0.5;
+
+                    quads.push(DecorationQuad::new(
+                        current_x,
+                        y + y_offset,
+                        seg_width,
+                        thickness,
+                        color,
+                        quad_type,
+                    ));
+                }
+
+                current_x += segment_width;
+                segment_index += 1;
+            }
+        }
+    }
+}
+
 /// Generate decoration quads from text bounds and decoration configuration.
 ///
 /// This function generates all the quads needed to render decorations for a piece of text.
@@ -472,6 +591,12 @@ impl TextBounds {
 /// 1. Background quads (rendered first, behind text)
 /// 2. Underline quads (rendered after text)
 /// 3. Strikethrough quads (rendered after text)
+///
+/// Supports all line styles:
+/// - **Solid**: Continuous line
+/// - **Dashed**: Alternating dashes and gaps
+/// - **Dotted**: Series of dots
+/// - **Wavy**: Sine wave pattern
 ///
 /// # Arguments
 ///
@@ -485,14 +610,19 @@ impl TextBounds {
 /// # Example
 ///
 /// ```ignore
-/// use astrelis_text::{TextDecoration, UnderlineStyle, TextBounds, generate_decoration_quads};
+/// use astrelis_text::{TextDecoration, UnderlineStyle, TextBounds, generate_decoration_quads, LineStyle};
 ///
 /// let bounds = TextBounds::new(10.0, 20.0, 100.0, 24.0, 18.0);
+///
+/// // Solid underline
 /// let decoration = TextDecoration::new()
 ///     .underline(UnderlineStyle::solid(Color::BLUE, 1.0));
 ///
+/// // Wavy underline
+/// let decoration = TextDecoration::new()
+///     .underline(UnderlineStyle::wavy(Color::RED, 1.5));
+///
 /// let quads = generate_decoration_quads(&bounds, &decoration);
-/// // quads now contains one underline quad
 /// ```
 pub fn generate_decoration_quads(bounds: &TextBounds, decoration: &TextDecoration) -> Vec<DecorationQuad> {
     let mut quads = Vec::new();
@@ -510,31 +640,43 @@ pub fn generate_decoration_quads(bounds: &TextBounds, decoration: &TextDecoratio
 
     // Underline (rendered after text)
     if let Some(ul_style) = decoration.underline {
-        // Only support solid lines for now (MVP)
-        if matches!(ul_style.style, LineStyle::Solid) {
-            let baseline_y = bounds.y + bounds.baseline_offset;
-            let y = baseline_y + ul_style.offset;
-            let x = bounds.x;
-            let width = bounds.width;
-            let thickness = ul_style.thickness;
+        let baseline_y = bounds.y + bounds.baseline_offset;
+        let y = baseline_y + ul_style.offset;
+        let x = bounds.x;
+        let width = bounds.width;
+        let thickness = ul_style.thickness;
 
-            quads.push(DecorationQuad::underline(x, y, width, thickness, ul_style.color));
-        }
+        generate_line_quads(
+            &mut quads,
+            x,
+            y,
+            width,
+            thickness,
+            ul_style.color,
+            ul_style.style,
+            DecorationQuadType::Underline { thickness },
+        );
     }
 
     // Strikethrough (rendered after text)
     if let Some(st_style) = decoration.strikethrough {
-        // Only support solid lines for now (MVP)
-        if matches!(st_style.style, LineStyle::Solid) {
-            // Strikethrough at ~40% of line height from baseline (approximately middle of x-height)
-            let baseline_y = bounds.y + bounds.baseline_offset;
-            let y = baseline_y - (bounds.height * 0.35) + st_style.offset;
-            let x = bounds.x;
-            let width = bounds.width;
-            let thickness = st_style.thickness;
+        // Strikethrough at ~40% of line height from baseline (approximately middle of x-height)
+        let baseline_y = bounds.y + bounds.baseline_offset;
+        let y = baseline_y - (bounds.height * 0.35) + st_style.offset;
+        let x = bounds.x;
+        let width = bounds.width;
+        let thickness = st_style.thickness;
 
-            quads.push(DecorationQuad::strikethrough(x, y, width, thickness, st_style.color));
-        }
+        generate_line_quads(
+            &mut quads,
+            x,
+            y,
+            width,
+            thickness,
+            st_style.color,
+            st_style.style,
+            DecorationQuadType::Strikethrough { thickness },
+        );
     }
 
     quads
@@ -654,5 +796,105 @@ mod tests {
         assert_eq!(x, -5.0); // left padding
         assert_eq!(width, 210.0); // original 200 + left 5 + right 5
         assert_eq!(height, 26.0); // original 20 + top 3 + bottom 3
+    }
+
+    #[test]
+    fn test_solid_line_style() {
+        let bounds = TextBounds::new(0.0, 0.0, 100.0, 20.0, 15.0);
+        let decoration = TextDecoration::new()
+            .underline(UnderlineStyle::solid(Color::RED, 1.0));
+
+        let quads = generate_decoration_quads(&bounds, &decoration);
+
+        // Solid line should generate exactly 1 quad
+        assert_eq!(quads.len(), 1);
+        assert!(quads[0].is_underline());
+        assert_eq!(quads[0].color, Color::RED);
+    }
+
+    #[test]
+    fn test_dashed_line_style() {
+        let bounds = TextBounds::new(0.0, 0.0, 100.0, 20.0, 15.0);
+        let decoration = TextDecoration::new()
+            .underline(UnderlineStyle::dashed(Color::BLUE, 2.0));
+
+        let quads = generate_decoration_quads(&bounds, &decoration);
+
+        // Dashed line should generate multiple quads (dashes with gaps)
+        assert!(quads.len() > 1, "Dashed line should generate multiple quads");
+        assert!(quads[0].is_underline());
+        assert_eq!(quads[0].color, Color::BLUE);
+    }
+
+    #[test]
+    fn test_dotted_line_style() {
+        let bounds = TextBounds::new(0.0, 0.0, 100.0, 20.0, 15.0);
+        let decoration = TextDecoration::new()
+            .underline(UnderlineStyle::dotted(Color::GREEN, 1.5));
+
+        let quads = generate_decoration_quads(&bounds, &decoration);
+
+        // Dotted line should generate multiple quads (dots with gaps)
+        assert!(quads.len() > 1, "Dotted line should generate multiple quads");
+        assert!(quads[0].is_underline());
+        assert_eq!(quads[0].color, Color::GREEN);
+    }
+
+    #[test]
+    fn test_wavy_line_style() {
+        let bounds = TextBounds::new(0.0, 0.0, 100.0, 20.0, 15.0);
+        let decoration = TextDecoration::new()
+            .underline(UnderlineStyle::wavy(Color::YELLOW, 1.0));
+
+        let quads = generate_decoration_quads(&bounds, &decoration);
+
+        // Wavy line should generate multiple quads forming a wave
+        assert!(quads.len() > 1, "Wavy line should generate multiple quads");
+        assert!(quads[0].is_underline());
+        assert_eq!(quads[0].color, Color::YELLOW);
+
+        // Verify that y positions vary (wave effect)
+        if quads.len() >= 2 {
+            let y_positions: Vec<f32> = quads.iter().map(|q| q.bounds.1).collect();
+            let all_same = y_positions.windows(2).all(|w| w[0] == w[1]);
+            assert!(!all_same, "Wavy line should have varying y positions");
+        }
+    }
+
+    #[test]
+    fn test_strikethrough_line_styles() {
+        let bounds = TextBounds::new(0.0, 0.0, 100.0, 20.0, 15.0);
+
+        // Test solid strikethrough
+        let decoration = TextDecoration::new()
+            .strikethrough(StrikethroughStyle::solid(Color::BLACK, 1.0));
+        let quads = generate_decoration_quads(&bounds, &decoration);
+        assert_eq!(quads.len(), 1);
+        assert!(quads[0].is_strikethrough());
+
+        // Test dashed strikethrough
+        let decoration = TextDecoration::new()
+            .strikethrough(StrikethroughStyle::dashed(Color::BLACK, 1.0));
+        let quads = generate_decoration_quads(&bounds, &decoration);
+        assert!(quads.len() > 1);
+        assert!(quads[0].is_strikethrough());
+    }
+
+    #[test]
+    fn test_combined_decorations_with_line_styles() {
+        let bounds = TextBounds::new(0.0, 0.0, 100.0, 20.0, 15.0);
+        let decoration = TextDecoration::new()
+            .background(Color::YELLOW)
+            .underline(UnderlineStyle::wavy(Color::RED, 1.0))
+            .strikethrough(StrikethroughStyle::dashed(Color::BLACK, 1.0));
+
+        let quads = generate_decoration_quads(&bounds, &decoration);
+
+        // Should have: 1 background + multiple underline + multiple strikethrough
+        assert!(quads.len() > 3, "Combined decorations should generate multiple quads");
+
+        // First quad should be background
+        assert!(quads[0].is_background());
+        assert_eq!(quads[0].color, Color::YELLOW);
     }
 }

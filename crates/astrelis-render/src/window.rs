@@ -9,7 +9,7 @@ use astrelis_winit::{
 use std::sync::Arc;
 
 use crate::{
-    context::GraphicsContext,
+    context::{GraphicsContext, GraphicsError},
     frame::{FrameContext, FrameStats, Surface},
 };
 
@@ -123,7 +123,7 @@ impl WindowContext {
         window: Window,
         context: Arc<GraphicsContext>,
         descriptor: WindowContextDescriptor,
-    ) -> Self {
+    ) -> Result<Self, GraphicsError> {
         let scale_factor = window.scale_factor();
         let logical_size = window.logical_size();
         let physical_size = logical_size.to_physical(scale_factor);
@@ -131,11 +131,13 @@ impl WindowContext {
         let surface = context
             .instance
             .create_surface(window.window.clone())
-            .expect("Failed to create surface");
+            .map_err(|e| GraphicsError::SurfaceCreationFailed(e.to_string()))?;
 
         let mut config = surface
             .get_default_config(&context.adapter, physical_size.width, physical_size.height)
-            .expect("Failed to get default surface configuration");
+            .ok_or_else(|| GraphicsError::SurfaceConfigurationFailed(
+                "No suitable surface configuration found".to_string()
+            ))?;
 
         if let Some(format) = descriptor.format {
             config.format = format;
@@ -149,13 +151,13 @@ impl WindowContext {
 
         surface.configure(&context.device, &config);
 
-        Self {
+        Ok(Self {
             window,
             surface,
             config,
             reconfigure: PendingReconfigure::new(),
             context,
-        }
+        })
     }
 
     /// Handle window resize event (logical size).
@@ -232,7 +234,10 @@ impl WindowBackend for WindowContext {
             self.surface.configure(&self.context.device, &self.config);
         }
 
-        let frame = self.surface.get_current_texture().unwrap();
+        let frame = self.surface.get_current_texture().unwrap_or_else(|e| {
+            tracing::error!("Failed to acquire surface texture: {}. This may indicate the surface is lost or outdated.", e);
+            panic!("Surface texture acquisition failed: {}. Consider handling surface recreation in your application.", e);
+        });
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -264,7 +269,7 @@ pub struct RenderableWindow {
 }
 
 impl RenderableWindow {
-    pub fn new(window: Window, context: Arc<GraphicsContext>) -> Self {
+    pub fn new(window: Window, context: Arc<GraphicsContext>) -> Result<Self, GraphicsError> {
         Self::new_with_descriptor(window, context, WindowContextDescriptor::default())
     }
 
@@ -272,9 +277,9 @@ impl RenderableWindow {
         window: Window,
         context: Arc<GraphicsContext>,
         descriptor: WindowContextDescriptor,
-    ) -> Self {
-        let context = WindowContext::new(window, context, descriptor);
-        Self { context }
+    ) -> Result<Self, GraphicsError> {
+        let context = WindowContext::new(window, context, descriptor)?;
+        Ok(Self { context })
     }
 
     pub fn id(&self) -> WindowId {

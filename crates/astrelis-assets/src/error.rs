@@ -63,6 +63,12 @@ pub enum AssetError {
         path: String,
     },
 
+    /// Lock was poisoned (RwLock/Mutex).
+    LockPoisoned {
+        /// Description of the poisoned lock.
+        message: String,
+    },
+
     /// Generic error with a message.
     Other {
         /// Error message.
@@ -101,6 +107,9 @@ impl fmt::Display for AssetError {
             AssetError::NotReady { path } => {
                 write!(f, "Asset not ready: {}", path)
             }
+            AssetError::LockPoisoned { message } => {
+                write!(f, "Lock poisoned (likely due to panic in another thread): {}", message)
+            }
             AssetError::Other { message } => {
                 write!(f, "Asset error: {}", message)
             }
@@ -122,6 +131,14 @@ impl From<std::io::Error> for AssetError {
         AssetError::IoError {
             path: PathBuf::new(),
             source: err,
+        }
+    }
+}
+
+impl<T> From<std::sync::PoisonError<T>> for AssetError {
+    fn from(err: std::sync::PoisonError<T>) -> Self {
+        AssetError::LockPoisoned {
+            message: err.to_string(),
         }
     }
 }

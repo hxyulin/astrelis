@@ -26,7 +26,7 @@ use astrelis_render::{
 };
 use astrelis_text::{FontRenderer, FontSystem, Text, TextEditor};
 use astrelis_winit::{
-    WindowId,
+    FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::{EventBatch, Event, HandleStatus, Key, NamedKey},
     window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
@@ -61,7 +61,7 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        );
+        ).expect("Failed to create renderable window");
 
         let window_id = window.id();
 

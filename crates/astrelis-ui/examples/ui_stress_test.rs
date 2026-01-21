@@ -44,7 +44,7 @@ fn main() {
         let window = RenderableWindow::new_with_descriptor(window, graphics_ctx.clone(), WindowContextDescriptor {
             format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
             ..Default::default()
-        });
+        }).expect("Failed to create renderable window");
 
         let window_id = window.id();
         let mut ui = UiSystem::new(graphics_ctx.clone());

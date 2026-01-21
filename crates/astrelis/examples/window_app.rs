@@ -87,7 +87,8 @@ fn main() {
 
         // Create a renderable window
         let renderable =
-            RenderableWindow::new_with_descriptor(window, graphics.clone(), WindowContextDescriptor::default());
+            RenderableWindow::new_with_descriptor(window, graphics.clone(), WindowContextDescriptor::default())
+                .expect("Failed to create renderable window");
 
         Box::new(WindowApp {
             engine,

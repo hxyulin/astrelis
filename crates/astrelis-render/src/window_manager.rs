@@ -29,7 +29,8 @@ use crate::{
 /// ```no_run
 /// use astrelis_render::{WindowManager, GraphicsContext, RenderTarget, Color};
 /// use astrelis_winit::app::{App, AppCtx};
-/// use astrelis_winit::window::{WindowId, WindowDescriptor};
+/// use astrelis_winit::{WindowId, FrameTime};
+/// use astrelis_winit::window::WindowBackend;
 /// use astrelis_winit::event::EventBatch;
 ///
 /// struct MyApp {
@@ -37,11 +38,12 @@ use crate::{
 /// }
 ///
 /// impl App for MyApp {
-///     fn render(&mut self, ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
+///     fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {}
+///     fn render(&mut self, _ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
 ///         self.window_manager.render_window(window_id, events, |window, _events| {
 ///             // Resize already handled automatically!
 ///             let mut frame = window.begin_drawing();
-///             frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
+///             frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |_pass| {
 ///                 // Your rendering here
 ///             });
 ///             frame.finish();
@@ -81,16 +83,19 @@ impl WindowManager {
     ///
     /// ```no_run
     /// use astrelis_render::WindowManager;
-    /// use astrelis_winit::window::WindowDescriptor;
+    /// use astrelis_winit::window::{WindowDescriptor, WindowBackend};
     ///
     /// # fn example(window_manager: &mut WindowManager, ctx: &mut astrelis_winit::app::AppCtx) {
     /// let window_id = window_manager.create_window(
     ///     ctx,
-    ///     WindowDescriptor::default().with_title("My Window"),
+    ///     WindowDescriptor {
+    ///         title: "My Window".to_string(),
+    ///         ..Default::default()
+    ///     },
     /// );
     /// # }
     /// ```
-    pub fn create_window(&mut self, ctx: &mut AppCtx, descriptor: WindowDescriptor) -> WindowId {
+    pub fn create_window(&mut self, ctx: &mut AppCtx, descriptor: WindowDescriptor) -> Result<WindowId, crate::context::GraphicsError> {
         self.create_window_with_descriptor(ctx, descriptor, WindowContextDescriptor::default())
     }
 
@@ -99,8 +104,8 @@ impl WindowManager {
     /// # Example
     ///
     /// ```no_run
-    /// use astrelis_render::{WindowManager, WindowContextDescriptor};
-    /// use astrelis_winit::window::WindowDescriptor;
+    /// use astrelis_render::{WindowManager, WindowContextDescriptor, wgpu};
+    /// use astrelis_winit::window::{WindowDescriptor, WindowBackend};
     ///
     /// # fn example(window_manager: &mut WindowManager, ctx: &mut astrelis_winit::app::AppCtx) {
     /// let window_id = window_manager.create_window_with_descriptor(
@@ -118,12 +123,12 @@ impl WindowManager {
         ctx: &mut AppCtx,
         descriptor: WindowDescriptor,
         window_descriptor: WindowContextDescriptor,
-    ) -> WindowId {
+    ) -> Result<WindowId, crate::context::GraphicsError> {
         let window = ctx.create_window(descriptor).expect("Failed to create window");
         let id = window.id();
-        let renderable = RenderableWindow::new_with_descriptor(window, self.graphics.clone(), window_descriptor);
+        let renderable = RenderableWindow::new_with_descriptor(window, self.graphics.clone(), window_descriptor)?;
         self.windows.insert(id, renderable);
-        id
+        Ok(id)
     }
 
     /// Gets a reference to a window by its ID.
@@ -168,18 +173,19 @@ impl WindowManager {
     ///
     /// ```no_run
     /// use astrelis_render::{WindowManager, RenderTarget, Color};
+    /// use astrelis_winit::window::WindowBackend;
     ///
     /// # fn example(window_manager: &mut WindowManager, window_id: astrelis_winit::WindowId, events: &mut astrelis_winit::event::EventBatch) {
     /// window_manager.render_window(window_id, events, |window, events| {
     ///     // Handle custom events if needed
-    ///     events.dispatch(|event| {
+    ///     events.dispatch(|_event| {
     ///         // Your event handling
     ///         astrelis_winit::event::HandleStatus::ignored()
     ///     });
     ///
     ///     // Render
     ///     let mut frame = window.begin_drawing();
-    ///     frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
+    ///     frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |_pass| {
     ///         // Your rendering
     ///     });
     ///     frame.finish();
@@ -217,11 +223,12 @@ impl WindowManager {
     ///
     /// ```no_run
     /// use astrelis_render::{WindowManager, RenderTarget, Color};
+    /// use astrelis_winit::window::WindowBackend;
     ///
     /// # fn example(window_manager: &mut WindowManager, window_id: astrelis_winit::WindowId, events: &mut astrelis_winit::event::EventBatch) -> Result<(), String> {
     /// window_manager.render_window_result(window_id, events, |window, _events| {
     ///     let mut frame = window.begin_drawing();
-    ///     frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
+    ///     frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |_pass| {
     ///         // Rendering that might fail
     ///     });
     ///     frame.finish();

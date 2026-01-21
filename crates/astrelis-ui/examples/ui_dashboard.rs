@@ -72,7 +72,7 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        );
+        ).expect("Failed to create renderable window");
 
         let window_id = renderable_window.id();
         let viewport = renderable_window.viewport();
@@ -181,7 +181,7 @@ fn build_dashboard(ui: &mut UiSystem) {
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::app::FrameTime) {
+    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::FrameTime) {
         new_frame();
         let now = Instant::now();
         let _dt = now.duration_since(self.last_update).as_secs_f32();

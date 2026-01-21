@@ -54,6 +54,31 @@ use super::shared::{
     TextRendererConfig, TextVertex,
 };
 
+/// Helper macro to handle RwLock write poisoning gracefully.
+macro_rules! lock_or_recover {
+    ($lock:expr, $error_msg:expr, $default:expr) => {
+        match $lock.write() {
+            Ok(guard) => guard,
+            Err(e) => {
+                tracing::error!("{}: {}. Attempting recovery.", $error_msg, e);
+                $lock.write().unwrap_or_else(|poisoned| {
+                    tracing::warn!("Clearing poisoned lock");
+                    poisoned.into_inner()
+                })
+            }
+        }
+    };
+    ($lock:expr, $error_msg:expr) => {
+        match $lock.write() {
+            Ok(guard) => guard,
+            Err(e) => {
+                tracing::error!("{}: {}. Returning default.", $error_msg, e);
+                return Default::default();
+            }
+        }
+    };
+}
+
 /// Bitmap text renderer backend.
 ///
 /// Manages the bitmap glyph atlas and rendering pipeline.
@@ -210,8 +235,8 @@ impl BitmapBackend {
         }
 
         // Rasterize the glyph
-        let mut font_system = shared.font_system.write().unwrap();
-        let mut swash_cache = shared.swash_cache.write().unwrap();
+        let mut font_system = shared.font_system.write().ok()?;
+        let mut swash_cache = shared.swash_cache.write().ok()?;
         let image = match swash_cache.get_image(&mut font_system, cache_key) {
             Some(img) => img,
             None => return None,
@@ -324,7 +349,10 @@ impl BitmapTextRenderer {
     pub fn measure_text(&self, text: &Text) -> (f32, f32) {
         profile_function!();
         let scale = self.shared.scale_factor();
-        let mut font_system = self.shared.font_system.write().unwrap();
+        let mut font_system = lock_or_recover!(
+            self.shared.font_system,
+            "Font system lock poisoned in measure_text"
+        );
         let mut buffer = TextBuffer::new(&mut font_system);
         buffer.set_text(&mut font_system, text, scale);
         buffer.layout(&mut font_system);
@@ -379,7 +407,16 @@ impl BitmapTextRenderer {
     /// Prepare text for rendering.
     pub fn prepare(&mut self, text: &Text) -> TextBuffer {
         profile_function!();
-        let mut font_system = self.shared.font_system.write().unwrap();
+        let mut font_system = match self.shared.font_system.write() {
+            Ok(guard) => guard,
+            Err(e) => {
+                tracing::error!("Font system lock poisoned in prepare: {}. Attempting recovery.", e);
+                self.shared.font_system.write().unwrap_or_else(|poisoned| {
+                    tracing::warn!("Clearing poisoned lock");
+                    poisoned.into_inner()
+                })
+            }
+        };
         let mut buffer = TextBuffer::new(&mut font_system);
         buffer.set_text(&mut font_system, text, self.shared.scale_factor());
         buffer.layout(&mut font_system);
@@ -391,7 +428,10 @@ impl BitmapTextRenderer {
         profile_function!();
 
         let scale = self.shared.scale_factor();
-        let mut font_system = self.shared.font_system.write().unwrap();
+        let mut font_system = lock_or_recover!(
+            self.shared.font_system,
+            "Font system lock poisoned in draw_text"
+        );
         buffer.layout(&mut font_system);
         drop(font_system);
 
@@ -409,8 +449,14 @@ impl BitmapTextRenderer {
                 };
 
                 // Get glyph placement info
-                let mut font_system = self.shared.font_system.write().unwrap();
-                let mut swash_cache = self.shared.swash_cache.write().unwrap();
+                let Ok(mut font_system) = self.shared.font_system.write() else {
+                    tracing::error!("Font system lock poisoned in draw_text (glyph loop)");
+                    continue;
+                };
+                let Ok(mut swash_cache) = self.shared.swash_cache.write() else {
+                    tracing::error!("Swash cache lock poisoned in draw_text (glyph loop)");
+                    continue;
+                };
 
                 if let Some(image) = swash_cache.get_image(&mut font_system, cache_key) {
                     let x = physical_glyph.x as f32 + image.placement.left as f32;
@@ -571,8 +617,8 @@ impl BitmapTextRenderer {
 
     /// Get glyph placement information.
     pub fn get_glyph_placement(&mut self, cache_key: CacheKey) -> Option<GlyphPlacement> {
-        let mut font_system = self.shared.font_system.write().unwrap();
-        let mut swash_cache = self.shared.swash_cache.write().unwrap();
+        let mut font_system = self.shared.font_system.write().ok()?;
+        let mut swash_cache = self.shared.swash_cache.write().ok()?;
 
         let image = swash_cache
             .get_image(&mut font_system, cache_key)
@@ -595,8 +641,8 @@ impl BitmapTextRenderer {
     ) -> Option<(AtlasEntry, GlyphPlacement)> {
         let atlas_entry = self.backend.ensure_glyph(&self.shared, cache_key)?.clone();
 
-        let mut font_system = self.shared.font_system.write().unwrap();
-        let mut swash_cache = self.shared.swash_cache.write().unwrap();
+        let mut font_system = self.shared.font_system.write().ok()?;
+        let mut swash_cache = self.shared.swash_cache.write().ok()?;
 
         let image = swash_cache
             .get_image(&mut font_system, cache_key)

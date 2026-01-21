@@ -36,7 +36,7 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        );
+        ).expect("Failed to create renderable window");
 
         let shader = graphics_ctx
             .device
@@ -234,7 +234,7 @@ fn main() {
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::app::FrameTime) {
+    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::FrameTime) {
         // Global logic (none needed for this example)
     }
 

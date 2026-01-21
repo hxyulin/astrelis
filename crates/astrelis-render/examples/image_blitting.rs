@@ -187,7 +187,7 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        );
+        ).expect("Failed to create renderable window");
 
         let window_id = renderable_window.id();
         windows.insert(window_id, renderable_window);
@@ -388,7 +388,7 @@ fn main() {
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::app::FrameTime) {
+    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::FrameTime) {
         let time = self.start_time.elapsed().as_secs_f32();
         
         // Animate the CPU-side image buffer

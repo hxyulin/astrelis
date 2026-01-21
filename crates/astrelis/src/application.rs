@@ -337,9 +337,13 @@ impl ApplicationBuilder {
                         let window_manager_ptr = window_manager as *const WindowManager as *mut WindowManager;
                         unsafe {
                             if let Some(window_desc) = data.window_descriptor {
-                                (*window_manager_ptr).create_window_with_descriptor(ctx, descriptor, window_desc);
+                                if let Err(e) = (*window_manager_ptr).create_window_with_descriptor(ctx, descriptor, window_desc) {
+                                    tracing::error!("Failed to create window with descriptor: {}", e);
+                                }
                             } else {
-                                (*window_manager_ptr).create_window(ctx, descriptor);
+                                if let Err(e) = (*window_manager_ptr).create_window(ctx, descriptor) {
+                                    tracing::error!("Failed to create window: {}", e);
+                                }
                             }
                         }
                     }

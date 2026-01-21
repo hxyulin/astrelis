@@ -49,7 +49,7 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        );
+        ).expect("Failed to create renderable window");
 
         let window_id = renderable_window.id();
         windows.insert(window_id, renderable_window);
@@ -382,7 +382,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::app::FrameTime) {
+    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::FrameTime) {
         // No updates needed for this static demo
     }
 

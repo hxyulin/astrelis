@@ -57,7 +57,7 @@ fn main() {
                     format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                     ..Default::default()
                 },
-            );
+            ).expect("Failed to create window");
 
             window_colors.insert(window_id, *color);
         }

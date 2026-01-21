@@ -722,6 +722,163 @@ impl UiTree {
             self.mark_dirty_flags(node_id, DirtyFlags::STYLE | DirtyFlags::LAYOUT);
         }
     }
+
+    /// Remove a node and all its descendants from the tree.
+    ///
+    /// This properly cleans up both the UI tree and the underlying Taffy layout tree.
+    /// If the node has a parent, it will be removed from the parent's children list.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_id` - The node to remove
+    ///
+    /// # Returns
+    ///
+    /// `true` if the node was removed, `false` if it didn't exist
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Remove a node from virtual scrolling when it scrolls out of view
+    /// if tree.remove_node(old_node_id) {
+    ///     // Node was successfully removed
+    /// }
+    /// ```
+    pub fn remove_node(&mut self, node_id: NodeId) -> bool {
+        // Check if node exists
+        if !self.nodes.contains_key(&node_id) {
+            return false;
+        }
+
+        // Collect all descendant nodes to remove (depth-first traversal)
+        let mut to_remove = Vec::new();
+        let mut stack = vec![node_id];
+
+        while let Some(id) = stack.pop() {
+            to_remove.push(id);
+            if let Some(node) = self.nodes.get(&id) {
+                stack.extend(node.children.iter().copied());
+            }
+        }
+
+        // Remove from parent's children list
+        if let Some(node) = self.nodes.get(&node_id) {
+            if let Some(parent_id) = node.parent {
+                if let Some(parent_node) = self.nodes.get_mut(&parent_id) {
+                    parent_node.children.retain(|&child| child != node_id);
+                    // Mark parent dirty since children changed
+                    self.mark_dirty_flags(parent_id, DirtyFlags::CHILDREN_ORDER);
+                }
+            }
+        }
+
+        // Remove all nodes (children first, then parent)
+        for id in to_remove.iter().rev() {
+            if let Some(node) = self.nodes.shift_remove(id) {
+                // Remove from Taffy
+                self.taffy.remove(node.taffy_node).ok();
+                // Remove from dirty tracking
+                self.dirty_nodes.remove(id);
+                self.dirty_roots.remove(id);
+            }
+        }
+
+        // If we removed the root, clear it
+        if self.root == Some(node_id) {
+            self.root = None;
+        }
+
+        true
+    }
+
+    /// Remove a child from a parent node without removing it from the tree.
+    ///
+    /// This is useful for reorganizing the tree structure without destroying nodes.
+    ///
+    /// # Arguments
+    ///
+    /// * `parent` - The parent node
+    /// * `child` - The child to remove from the parent
+    ///
+    /// # Returns
+    ///
+    /// `true` if the child was removed from the parent, `false` otherwise
+    pub fn remove_child(&mut self, parent: NodeId, child: NodeId) -> bool {
+        // Get taffy nodes before any mutable borrows
+        let (parent_taffy, child_taffy) = match (self.nodes.get(&parent), self.nodes.get(&child)) {
+            (Some(p), Some(c)) => (p.taffy_node, c.taffy_node),
+            _ => return false,
+        };
+
+        // Check if parent has this child
+        let had_child = self
+            .nodes
+            .get(&parent)
+            .map(|p| p.children.contains(&child))
+            .unwrap_or(false);
+
+        if !had_child {
+            return false;
+        }
+
+        // Remove child from parent's children list
+        if let Some(parent_node) = self.nodes.get_mut(&parent) {
+            parent_node.children.retain(|&c| c != child);
+        }
+
+        // Update Taffy
+        self.taffy.remove_child(parent_taffy, child_taffy).ok();
+
+        // Clear child's parent
+        if let Some(child_node) = self.nodes.get_mut(&child) {
+            child_node.parent = None;
+        }
+
+        self.mark_dirty_flags(parent, DirtyFlags::CHILDREN_ORDER);
+        true
+    }
+
+    /// Apply a position offset to a node for effects like scrolling.
+    ///
+    /// This modifies the layout position without affecting the Taffy layout,
+    /// useful for virtual scrolling or other transform effects.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_id` - The node to offset
+    /// * `x_offset` - X position offset in pixels
+    /// * `y_offset` - Y position offset in pixels
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Apply scroll offset to virtually scrolled items
+    /// let scroll_offset = 100.0;
+    /// tree.set_position_offset(item_node, 0.0, item_y - scroll_offset);
+    /// ```
+    pub fn set_position_offset(&mut self, node_id: NodeId, x_offset: f32, y_offset: f32) {
+        if let Some(node) = self.nodes.get_mut(&node_id) {
+            // Store the Taffy-computed position if not already stored
+            // This assumes layout has been computed
+            if let Ok(layout) = self.taffy.layout(node.taffy_node) {
+                // Apply offset to the Taffy position
+                node.layout.x = layout.location.x + x_offset;
+                node.layout.y = layout.location.y + y_offset;
+            }
+        }
+    }
+
+    /// Get the computed layout position without any applied offsets.
+    ///
+    /// This returns the position as computed by Taffy, ignoring any manual offsets.
+    pub fn get_base_position(&self, node_id: NodeId) -> Option<(f32, f32)> {
+        self.nodes.get(&node_id).and_then(|node| {
+            self.taffy
+                .layout(node.taffy_node)
+                .ok()
+                .map(|layout| (layout.location.x, layout.location.y))
+        })
+    }
 }
 
 impl Default for UiTree {

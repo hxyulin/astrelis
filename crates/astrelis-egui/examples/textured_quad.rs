@@ -3,7 +3,7 @@ use astrelis_core::logging;
 use astrelis_egui::Egui;
 use astrelis_render::{GraphicsContext, RenderableWindow};
 use astrelis_winit::{
-    WindowId,
+    FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
     window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
@@ -44,7 +44,7 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new(window, graphics_ctx.clone());
+        let window = RenderableWindow::new(window, graphics_ctx.clone()).expect("Failed to create renderable window");
         let window_id = window.id();
         let egui = Egui::new(&window, &graphics_ctx);
 

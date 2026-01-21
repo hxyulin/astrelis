@@ -278,8 +278,12 @@ impl SdfBackend {
         };
 
         // Rasterize the glyph at base size
-        let mut font_system = shared.font_system.write().unwrap();
-        let mut swash_cache = shared.swash_cache.write().unwrap();
+        let mut font_system = shared.font_system.write()
+            .map_err(|e| crate::error::TextError::LockPoisoned(e.to_string()))
+            .ok()?;
+        let mut swash_cache = shared.swash_cache.write()
+            .map_err(|e| crate::error::TextError::LockPoisoned(e.to_string()))
+            .ok()?;
         let image = match swash_cache.get_image(&mut font_system, base_cache_key) {
             Some(img) => img.clone(),
             None => return None,
@@ -429,7 +433,16 @@ impl SdfTextRenderer {
     pub fn measure_text(&self, text: &Text) -> (f32, f32) {
         profile_function!();
         let scale = self.shared.scale_factor();
-        let mut font_system = self.shared.font_system.write().unwrap();
+
+        // Handle lock poisoning gracefully
+        let mut font_system = match self.shared.font_system.write() {
+            Ok(guard) => guard,
+            Err(e) => {
+                tracing::error!("Font system lock poisoned: {}. Returning zero size.", e);
+                return (0.0, 0.0);
+            }
+        };
+
         let mut buffer = TextBuffer::new(&mut font_system);
         buffer.set_text(&mut font_system, text, scale);
         buffer.layout(&mut font_system);
@@ -489,7 +502,20 @@ impl SdfTextRenderer {
     /// Prepare text for rendering.
     pub fn prepare(&mut self, text: &Text) -> TextBuffer {
         profile_function!();
-        let mut font_system = self.shared.font_system.write().unwrap();
+
+        // Handle lock poisoning gracefully - create empty buffer on error
+        let mut font_system = match self.shared.font_system.write() {
+            Ok(guard) => guard,
+            Err(e) => {
+                tracing::error!("Font system lock poisoned during prepare: {}. Attempting recovery.", e);
+                // Try to recover by taking the poisoned lock
+                self.shared.font_system.write().unwrap_or_else(|poisoned| {
+                    tracing::warn!("Clearing poisoned lock and continuing");
+                    poisoned.into_inner()
+                })
+            }
+        };
+
         let mut buffer = TextBuffer::new(&mut font_system);
         buffer.set_text(&mut font_system, text, self.shared.scale_factor());
         buffer.layout(&mut font_system);
@@ -526,7 +552,16 @@ impl SdfTextRenderer {
         profile_function!();
 
         let scale = self.shared.scale_factor();
-        let mut font_system = self.shared.font_system.write().unwrap();
+
+        // Handle lock poisoning gracefully
+        let mut font_system = match self.shared.font_system.write() {
+            Ok(guard) => guard,
+            Err(e) => {
+                tracing::error!("Font system lock poisoned during draw: {}. Skipping layout.", e);
+                return; // Skip rendering on error
+            }
+        };
+
         buffer.layout(&mut font_system);
         drop(font_system);
 

@@ -1,5 +1,5 @@
 use astrelis_winit::{
-    WindowId,
+    FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
     window::{Window, WindowDescriptor},

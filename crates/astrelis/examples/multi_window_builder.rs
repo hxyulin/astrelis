@@ -25,7 +25,7 @@
 ///!                 size: Some(WinitPhysicalSize::new(800.0, 600.0)),
 ///!                 ..Default::default()
 ///!             },
-///!         );
+///!         ).expect("Failed to create window");
 ///!
 ///!         // 4. Manual Engine building
 ///!         let engine = EngineBuilder::new()

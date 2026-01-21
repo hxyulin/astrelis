@@ -156,7 +156,7 @@ impl TextEditor {
 
     /// Check if there's an active selection.
     pub fn has_selection(&self) -> bool {
-        self.selection.is_some() && !self.selection.as_ref().unwrap().is_empty()
+        self.selection.as_ref().map_or(false, |sel| !sel.is_empty())
     }
 
     /// Set the cursor position (byte offset).

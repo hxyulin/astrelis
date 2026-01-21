@@ -10,19 +10,20 @@ use std::time::{Duration, Instant};
 ///
 /// ```no_run
 /// use astrelis_winit::app::{App, AppCtx};
-/// use astrelis_winit::time::FrameTime;
-/// use astrelis_winit::window::WindowId;
+/// use astrelis_winit::{FrameTime, WindowId};
 /// use astrelis_winit::event::EventBatch;
+/// use astrelis_winit::window::WindowBackend;
 ///
 /// struct MyApp;
 ///
 /// impl App for MyApp {
-///     fn update(&mut self, ctx: &mut AppCtx, time: &FrameTime) {
+///     fn update(&mut self, _ctx: &mut AppCtx, time: &FrameTime) {
 ///         let dt = time.delta_seconds();
 ///         // Use dt for frame-independent movement
+///         let _ = dt; // silence unused warning
 ///     }
 ///
-///     fn render(&mut self, ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
+///     fn render(&mut self, _ctx: &mut AppCtx, _window_id: WindowId, _events: &mut EventBatch) {
 ///         // rendering
 ///     }
 /// }

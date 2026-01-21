@@ -43,7 +43,7 @@ impl RenderContexts {
     /// Create a render context for a window.
     ///
     /// The window is consumed and owned by the WindowContext.
-    pub fn create_for_window(&mut self, window: Window) -> &mut WindowContext {
+    pub fn create_for_window(&mut self, window: Window) -> Result<&mut WindowContext, astrelis_render::GraphicsError> {
         let graphics = self
             .graphics
             .as_ref()
@@ -58,15 +58,15 @@ impl RenderContexts {
         window: Window,
         graphics: Arc<GraphicsContext>,
         descriptor: WindowContextDescriptor,
-    ) -> &mut WindowContext {
+    ) -> Result<&mut WindowContext, astrelis_render::GraphicsError> {
         let window_id = window.id();
 
-        self.contexts.entry(window_id).or_insert_with(|| {
-            
-            WindowContext::new(window, graphics, descriptor)
-        });
+        if !self.contexts.contains_key(&window_id) {
+            let context = WindowContext::new(window, graphics, descriptor)?;
+            self.contexts.insert(window_id, context);
+        }
 
-        self.contexts.get_mut(&window_id).unwrap()
+        Ok(self.contexts.get_mut(&window_id).unwrap())
     }
 
     /// Get a render context for a window.

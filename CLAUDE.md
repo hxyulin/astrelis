@@ -267,3 +267,29 @@ let assets = engine.get::<AssetServer>().unwrap();
 - Document public APIs with `///` doc comments
 - Use `tracing` macros (trace!, debug!, info!, warn!, error!) not println!
 - Initialize profiling in examples with `init_profiling(ProfilingBackend::PuffinHttp)`
+
+## Documentation Resources
+
+**Getting Started Guides** (`docs/src/guides/getting-started/`):
+- **00-for-unity-developers.md**: Concept mapping for Unity developers (GameObject → Entity, MonoBehaviour → App trait, etc.)
+- **00-for-bevy-developers.md**: Architectural differences vs Bevy (ECS vs manual state management)
+- **01-installation.md**: Platform dependencies, Cargo setup, dependency versions
+- **02-architecture-overview.md**: Modular crate design, Arc-based ownership, RAII patterns, plugin system
+- **03-hello-window.md**: First app tutorial (App trait, render loop, RAII FrameContext)
+- **04-rendering-fundamentals.md**: GraphicsContext, FrameContext, RenderPass, render targets, surface loss handling
+- **05-first-ui.md**: UiSystem initialization, declarative building, layout with Flexbox, event handling, shared state patterns
+- **06-incremental-updates.md**: Dirty flags (COLOR_ONLY, TEXT_SHAPING, LAYOUT), performance optimization, when to rebuild vs update
+
+**Key Concepts for Claude**:
+- **Arc pattern**: GraphicsContext uses `Arc<GraphicsContext>` - always `.clone()` when sharing
+- **RAII lifecycle**: `FrameContext::finish()` submits commands; render passes auto-drop in `clear_and_render()` closure
+- **Dirty flags**: UI updates are fast (<1ms) via `update_text()`, `update_color()`; avoid full rebuilds in update loop
+- **Generational handles**: `Handle<T>` prevents use-after-free with generation counters
+- **Plugin dependencies**: Topologically sorted, type-safe resource access
+
+**Learning Paths** (for helping users):
+- **New to Astrelis**: Installation → Hello Window → Rendering Fundamentals → First UI
+- **Unity dev**: Unity migration guide → Architecture overview → Hello Window
+- **Bevy dev**: Bevy migration guide → Architecture overview (understand manual vs ECS)
+- **UI focus**: First UI → Incremental Updates → (Phase 2) Custom Widgets guide
+- **Rendering focus**: Rendering Fundamentals → (Phase 3) Custom Shaders guide

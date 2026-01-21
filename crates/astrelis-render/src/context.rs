@@ -16,6 +16,15 @@ pub enum GraphicsError {
         adapter_name: String,
         supported: GpuFeatures,
     },
+
+    /// Failed to create a surface.
+    SurfaceCreationFailed(String),
+
+    /// Failed to get surface configuration.
+    SurfaceConfigurationFailed(String),
+
+    /// Failed to acquire surface texture.
+    SurfaceTextureAcquisitionFailed(String),
 }
 
 impl std::fmt::Display for GraphicsError {
@@ -33,6 +42,15 @@ impl std::fmt::Display for GraphicsError {
                     "Required GPU features not supported by adapter '{}': {:?}\nSupported: {:?}",
                     adapter_name, missing, supported
                 )
+            }
+            GraphicsError::SurfaceCreationFailed(msg) => {
+                write!(f, "Failed to create surface: {}", msg)
+            }
+            GraphicsError::SurfaceConfigurationFailed(msg) => {
+                write!(f, "Failed to get surface configuration: {}", msg)
+            }
+            GraphicsError::SurfaceTextureAcquisitionFailed(msg) => {
+                write!(f, "Failed to acquire surface texture: {}", msg)
             }
         }
     }

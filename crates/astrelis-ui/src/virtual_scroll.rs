@@ -591,10 +591,8 @@ impl<T> VirtualScrollView<T> {
         // Unmount items that are no longer visible
         for index in to_unmount {
             if let Some(node_id) = self.state.unmount_item(index) {
-                // TODO: Implement proper node removal when UiTree supports it
-                // For now, we just track the removal - the node remains in the tree
-                // but won't be rendered if culling is enabled
-                let _ = node_id;
+                // Remove the node from the tree to free memory
+                tree.remove_node(node_id);
                 update.removed.push((index, node_id));
             }
         }
@@ -628,14 +626,15 @@ impl<T> VirtualScrollView<T> {
     }
 
     /// Updates the Y positions of all mounted items.
-    fn update_item_positions(&self, _tree: &mut UiTree) {
-        // TODO: Implement position updates when UiTree supports transforms
-        // For now, positions are managed through layout constraints
-        let _scroll_offset = self.state.scroll_offset();
+    fn update_item_positions(&self, tree: &mut UiTree) {
+        let scroll_offset = self.state.scroll_offset();
 
-        for (_index, _item) in self.state.mounted_items() {
-            // let y = item.y_offset - scroll_offset;
-            // tree.set_transform(item.node_id, 0.0, y);
+        for (_index, item) in self.state.mounted_items() {
+            // Calculate the visual Y position by subtracting scroll offset
+            let visual_y = item.y_offset - scroll_offset;
+
+            // Apply position offset for scrolling
+            tree.set_position_offset(item.node_id, 0.0, visual_y);
         }
     }
 }

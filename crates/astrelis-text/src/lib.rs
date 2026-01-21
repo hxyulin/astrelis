@@ -123,6 +123,7 @@ pub mod cache;
 pub mod decoration;
 pub mod editor;
 pub mod effects;
+pub mod error;
 pub mod font;
 pub mod pipeline;
 pub mod renderer;
@@ -145,6 +146,7 @@ pub use editor::{TextCursor, TextEditor, TextSelection};
 pub use effects::{
     EffectRenderConfig, TextEffect, TextEffectType, TextEffects, TextEffectsBuilder,
 };
+pub use error::{TextError, TextResult};
 pub use font::{FontAttributes, FontDatabase, FontStretch, FontStyle, FontSystem, FontWeight};
 pub use pipeline::{
     RequestId, ShapedTextResult as PipelineShapedTextResult, SyncTextShaper, TextPipeline,
