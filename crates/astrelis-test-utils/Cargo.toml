@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+description = "Test utilities for Astrelis projects"
 
 [features]
 # Enable mock GPU types for testing without a real GPU
