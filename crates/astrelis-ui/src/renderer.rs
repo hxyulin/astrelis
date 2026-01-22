@@ -1,9 +1,11 @@
 //! UI renderer for drawing widgets with WGPU.
 
+use crate::clip::{ClipRect, should_clip};
 use crate::draw_list::{DrawCommand, DrawList};
 use crate::glyph_atlas::glyphs_to_instances;
 use crate::gpu_types::{ImageInstance, QuadInstance, QuadVertex, TextInstance};
 use crate::instance_buffer::InstanceBuffer;
+use crate::style::Overflow;
 use crate::tree::{NodeId, UiTree};
 use crate::widgets::{Button, Container, Image, ImageTexture, Text};
 use astrelis_core::alloc::HashMap;
@@ -42,6 +44,17 @@ struct ImageBatch {
     count: u32,
 }
 
+/// Batched rendering data for a specific clip rect.
+#[derive(Clone)]
+struct ClipBatch {
+    /// The clip rect for this batch
+    clip_rect: ClipRect,
+    /// Quad instance range (start, count)
+    quad_range: (u32, u32),
+    /// Text instance range (start, count)
+    text_range: (u32, u32),
+}
+
 /// UI renderer for rendering all widgets.
 pub struct UiRenderer {
     renderer: Renderer,
@@ -73,6 +86,10 @@ pub struct UiRenderer {
     image_instances: InstanceBuffer<ImageInstance>,
     /// Current frame's image batches (grouped by texture)
     image_batches: Vec<ImageBatch>,
+    /// Current frame's clip batches (for scissor rect rendering)
+    clip_batches: Vec<ClipBatch>,
+    /// Whether any non-infinite clip rects exist (enables scissor rendering)
+    has_clipping: bool,
     scale_factor: f64,
 }
 
@@ -418,6 +435,8 @@ impl UiRenderer {
             text_instances,
             image_instances,
             image_batches: Vec::new(),
+            clip_batches: Vec::new(),
+            has_clipping: false,
             scale_factor: 1.0,
         }
     }
@@ -512,9 +531,10 @@ impl UiRenderer {
             // Process pending shaping
             self.process_text_shaping();
 
-            // Now rebuild with shaped text available
+            // Now rebuild with shaped text available (using proper inherited clips)
             for &node_id in &dirty_nodes {
-                self.update_single_node(tree, node_id);
+                let clip = self.compute_inherited_clip(tree, node_id);
+                self.update_single_node_with_clip(tree, node_id, clip);
             }
         }
 
@@ -543,7 +563,7 @@ impl UiRenderer {
 
         // Request shaping for text widgets
         if let Some(text) = widget.as_any().downcast_ref::<Text>() {
-            let font_id = 0;
+            let font_id = text.font_id;
             self.text_pipeline.request_shape(
                 text.content.clone(),
                 font_id,
@@ -551,7 +571,7 @@ impl UiRenderer {
                 None,
             );
         } else if let Some(button) = widget.as_any().downcast_ref::<Button>() {
-            let font_id = 0;
+            let font_id = button.font_id;
             self.text_pipeline.request_shape(
                 button.label.clone(),
                 font_id,
@@ -563,15 +583,106 @@ impl UiRenderer {
 
     /// Build all nodes recursively (for initial render).
     fn build_all_nodes_recursive(&mut self, tree: &UiTree, node_id: NodeId) {
-        // Build this node
-        self.update_single_node(tree, node_id);
+        self.build_all_nodes_recursive_with_clip(tree, node_id, ClipRect::infinite());
+    }
 
-        // Recurse to children
+    /// Build all nodes recursively with inherited clip rect.
+    fn build_all_nodes_recursive_with_clip(
+        &mut self,
+        tree: &UiTree,
+        node_id: NodeId,
+        inherited_clip: ClipRect,
+    ) {
+        // Compute this node's clip rect (may modify inherited_clip for children)
+        let (node_clip, child_clip) = self.compute_node_clip(tree, node_id, inherited_clip);
+
+        // Build this node with its clip rect
+        self.update_single_node_with_clip(tree, node_id, node_clip);
+
+        // Recurse to children with potentially modified clip
         if let Some(widget) = tree.get_widget(node_id) {
             for &child_id in widget.children() {
-                self.build_all_nodes_recursive(tree, child_id);
+                self.build_all_nodes_recursive_with_clip(tree, child_id, child_clip);
             }
         }
+    }
+
+    /// Compute the clip rect for a node based on its overflow settings.
+    ///
+    /// Returns (clip for this node's content, clip to pass to children).
+    fn compute_node_clip(
+        &self,
+        tree: &UiTree,
+        node_id: NodeId,
+        inherited_clip: ClipRect,
+    ) -> (ClipRect, ClipRect) {
+        let Some(widget) = tree.get_widget(node_id) else {
+            return (inherited_clip, inherited_clip);
+        };
+
+        let Some(layout) = tree.get_layout(node_id) else {
+            return (inherited_clip, inherited_clip);
+        };
+
+        // Check if this node has overflow clipping
+        let (overflow_x, overflow_y) = if let Some(container) = widget.as_any().downcast_ref::<Container>() {
+            (container.style.overflow_x, container.style.overflow_y)
+        } else {
+            (Overflow::Visible, Overflow::Visible)
+        };
+
+        // If this node clips its children, compute the new clip rect
+        if should_clip(overflow_x, overflow_y) {
+            // Calculate absolute position
+            let mut abs_x = layout.x;
+            let mut abs_y = layout.y;
+            let mut current_parent = tree.get_node(node_id).and_then(|n| n.parent);
+
+            while let Some(parent_id) = current_parent {
+                if let Some(parent_layout) = tree.get_layout(parent_id) {
+                    abs_x += parent_layout.x;
+                    abs_y += parent_layout.y;
+                }
+                current_parent = tree.get_node(parent_id).and_then(|n| n.parent);
+            }
+
+            // Create clip rect from node bounds
+            let node_bounds = ClipRect::from_bounds(abs_x, abs_y, layout.width, layout.height);
+
+            // Intersect with inherited clip (for nested clipping)
+            let child_clip = inherited_clip.intersect(&node_bounds);
+
+            // Container clips both its own content and children
+            (child_clip, child_clip)
+        } else {
+            // No clipping, pass through inherited
+            (inherited_clip, inherited_clip)
+        }
+    }
+
+    /// Compute the inherited clip rect for a node by walking up to ancestors.
+    ///
+    /// This is used by the dirty update path to determine the correct clip rect
+    /// for a node without rebuilding the entire tree.
+    fn compute_inherited_clip(&self, tree: &UiTree, node_id: NodeId) -> ClipRect {
+        let mut clip = ClipRect::infinite();
+
+        // Walk up the tree collecting ancestors
+        let mut current = tree.get_node(node_id).and_then(|n| n.parent);
+        let mut ancestors = Vec::new();
+
+        while let Some(parent_id) = current {
+            ancestors.push(parent_id);
+            current = tree.get_node(parent_id).and_then(|n| n.parent);
+        }
+
+        // Process from root down to build proper nested clips
+        for &ancestor_id in ancestors.iter().rev() {
+            let (_, child_clip) = self.compute_node_clip(tree, ancestor_id, clip);
+            clip = child_clip;
+        }
+
+        clip
     }
 
     /// Recursively collect dirty nodes from the tree.
@@ -595,8 +706,13 @@ impl UiRenderer {
         }
     }
 
-    /// Update commands for a single node.
-    fn update_single_node(&mut self, tree: &UiTree, node_id: NodeId) {
+    /// Update commands for a single node with a specific clip rect.
+    fn update_single_node_with_clip(
+        &mut self,
+        tree: &UiTree,
+        node_id: NodeId,
+        clip_rect: ClipRect,
+    ) {
         profile_function!();
 
         let Some(widget) = tree.get_widget(node_id) else {
@@ -628,30 +744,37 @@ impl UiRenderer {
         if let Some(container) = widget.as_any().downcast_ref::<Container>() {
             // Background quad
             if let Some(bg_color) = container.style.background_color {
-                commands.push(DrawCommand::Quad(crate::draw_list::QuadCommand::rounded(
-                    Vec2::new(abs_x, abs_y),
-                    Vec2::new(layout.width, layout.height),
-                    bg_color,
-                    container.style.border_radius,
-                    0,
-                )));
+                commands.push(DrawCommand::Quad(
+                    crate::draw_list::QuadCommand::rounded(
+                        Vec2::new(abs_x, abs_y),
+                        Vec2::new(layout.width, layout.height),
+                        bg_color,
+                        container.style.border_radius,
+                        0,
+                    )
+                    .with_clip(clip_rect),
+                ));
             }
 
             // Border quad
             if container.style.border_width > 0.0
-                && let Some(border_color) = container.style.border_color {
-                    commands.push(DrawCommand::Quad(crate::draw_list::QuadCommand::bordered(
+                && let Some(border_color) = container.style.border_color
+            {
+                commands.push(DrawCommand::Quad(
+                    crate::draw_list::QuadCommand::bordered(
                         Vec2::new(abs_x, abs_y),
                         Vec2::new(layout.width, layout.height),
                         border_color,
                         container.style.border_width,
                         container.style.border_radius,
                         0,
-                    )));
-                }
+                    )
+                    .with_clip(clip_rect),
+                ));
+            }
         } else if let Some(text) = widget.as_any().downcast_ref::<Text>() {
-            // Request text shaping
-            let font_id = 0; // TODO: Get actual font ID
+            // Request text shaping using widget's font_id
+            let font_id = text.font_id;
             let request_id = self.text_pipeline.request_shape(
                 text.content.clone(),
                 font_id,
@@ -670,32 +793,38 @@ impl UiRenderer {
                     VerticalAlign::Bottom => abs_y + (layout.height - text_height),
                 };
 
-                commands.push(DrawCommand::Text(crate::draw_list::TextCommand::new(
-                    Vec2::new(abs_x, text_y),
-                    shaped,
-                    text.color,
-                    0,
-                )));
+                commands.push(DrawCommand::Text(
+                    crate::draw_list::TextCommand::new(
+                        Vec2::new(abs_x, text_y),
+                        shaped,
+                        text.color,
+                        0,
+                    )
+                    .with_clip(clip_rect),
+                ));
             }
         } else if let Some(button) = widget.as_any().downcast_ref::<Button>() {
             // Use current background color based on state
             let bg_color = button.current_bg_color();
 
             // Background
-            commands.push(DrawCommand::Quad(crate::draw_list::QuadCommand::rounded(
-                Vec2::new(abs_x, abs_y),
-                Vec2::new(layout.width, layout.height),
-                bg_color,
-                4.0,
-                0,
-            )));
+            commands.push(DrawCommand::Quad(
+                crate::draw_list::QuadCommand::rounded(
+                    Vec2::new(abs_x, abs_y),
+                    Vec2::new(layout.width, layout.height),
+                    bg_color,
+                    4.0,
+                    0,
+                )
+                .with_clip(clip_rect),
+            ));
 
-            // Text label
-            let font_id = 0;
+            // Text label using widget's font_id
+            let font_id = button.font_id;
             let request_id = self.text_pipeline.request_shape(
                 button.label.clone(),
                 font_id,
-                16.0,
+                button.font_size,
                 None,
             );
 
@@ -712,25 +841,31 @@ impl UiRenderer {
                 // to account for visual weight being above center
                 let text_y = abs_y + (layout.height - text_height) * 0.5;
 
-                commands.push(DrawCommand::Text(crate::draw_list::TextCommand::new(
-                    Vec2::new(text_x, text_y),
-                    shaped,
-                    Color::WHITE,
-                    1,
-                )));
+                commands.push(DrawCommand::Text(
+                    crate::draw_list::TextCommand::new(
+                        Vec2::new(text_x, text_y),
+                        shaped,
+                        Color::WHITE,
+                        1,
+                    )
+                    .with_clip(clip_rect),
+                ));
             }
         } else if let Some(image) = widget.as_any().downcast_ref::<Image>() {
             // Image widget - render textured quad
             if let Some(texture) = &image.texture {
-                commands.push(DrawCommand::Image(crate::draw_list::ImageCommand::new(
-                    Vec2::new(abs_x, abs_y),
-                    Vec2::new(layout.width, layout.height),
-                    texture.clone(),
-                    image.uv,
-                    image.tint,
-                    image.border_radius,
-                    0,
-                )));
+                commands.push(DrawCommand::Image(
+                    crate::draw_list::ImageCommand::new(
+                        Vec2::new(abs_x, abs_y),
+                        Vec2::new(layout.width, layout.height),
+                        texture.clone(),
+                        image.uv,
+                        image.tint,
+                        image.border_radius,
+                        0,
+                    )
+                    .with_clip(clip_rect),
+                ));
             }
         }
 
@@ -742,76 +877,115 @@ impl UiRenderer {
     fn encode_instances(&mut self) {
         profile_function!();
 
-        let mut quad_instances = Vec::new();
-        let mut text_instances = Vec::new();
-        
-        // Group image instances by texture
-        // Key: Arc pointer address, Value: (texture, instances)
-        let mut image_groups: HashMap<usize, (ImageTexture, Vec<ImageInstance>)> = HashMap::new();
+        // First pass: check if any clipping is needed and collect unique clip rects
+        self.has_clipping = false;
+        let mut clip_rect_set: Vec<ClipRect> = Vec::new();
 
         for cmd in self.draw_list.commands() {
-            match cmd {
-                DrawCommand::Quad(q) => {
-                    quad_instances.push(QuadInstance {
-                        position: [q.position.x, q.position.y],
-                        size: [q.size.x, q.size.y],
-                        color: [q.color.r, q.color.g, q.color.b, q.color.a],
-                        border_radius: q.border_radius,
-                        border_thickness: q.border_thickness,
-                        _padding: [0.0; 2],
-                    });
-                }
-                DrawCommand::Text(t) => {
-                    let instances = glyphs_to_instances(
-                        &mut self.font_renderer,
-                        &t.shaped_text.inner.glyphs,
-                        t.position,
-                        t.color,
-                    );
-                    text_instances.extend(instances);
-                }
-                DrawCommand::Image(i) => {
-                    // Use Arc pointer address as key for grouping
-                    let texture_key = std::sync::Arc::as_ptr(&i.texture) as usize;
-                    
-                    let instance = ImageInstance {
-                        position: [i.position.x, i.position.y],
-                        size: [i.size.x, i.size.y],
-                        uv_min: [i.uv.u_min, i.uv.v_min],
-                        uv_max: [i.uv.u_max, i.uv.v_max],
-                        tint: [i.tint.r, i.tint.g, i.tint.b, i.tint.a],
-                        border_radius: i.border_radius,
-                        texture_index: 0, // Not used for now
-                        _padding: [0.0; 2],
-                    };
-                    
-                    image_groups
-                        .entry(texture_key)
-                        .or_insert_with(|| (i.texture.clone(), Vec::new()))
-                        .1
-                        .push(instance);
+            let clip = cmd.clip_rect();
+            if !clip.is_infinite() {
+                self.has_clipping = true;
+                // Add to set if not already present
+                if !clip_rect_set.iter().any(|c| c == clip) {
+                    clip_rect_set.push(*clip);
                 }
             }
         }
 
-        // Build image batches with bind groups
+        // Always include infinite clip rect (for unclipped content)
+        if !clip_rect_set.iter().any(|c| c.is_infinite()) {
+            clip_rect_set.insert(0, ClipRect::infinite());
+        }
+
+        // Group by clip rect
+        self.clip_batches.clear();
+        let mut quad_instances = Vec::new();
+        let mut text_instances = Vec::new();
+        let mut image_groups: HashMap<usize, (ImageTexture, Vec<ImageInstance>)> = HashMap::new();
+
+        for clip_rect in &clip_rect_set {
+            let quad_start = quad_instances.len() as u32;
+            let text_start = text_instances.len() as u32;
+
+            for cmd in self.draw_list.commands() {
+                if cmd.clip_rect() != clip_rect {
+                    continue;
+                }
+
+                match cmd {
+                    DrawCommand::Quad(q) => {
+                        quad_instances.push(QuadInstance {
+                            position: [q.position.x, q.position.y],
+                            size: [q.size.x, q.size.y],
+                            color: [q.color.r, q.color.g, q.color.b, q.color.a],
+                            border_radius: q.border_radius,
+                            border_thickness: q.border_thickness,
+                            _padding: [0.0; 2],
+                        });
+                    }
+                    DrawCommand::Text(t) => {
+                        let instances = glyphs_to_instances(
+                            &mut self.font_renderer,
+                            &t.shaped_text.inner.glyphs,
+                            t.position,
+                            t.color,
+                        );
+                        text_instances.extend(instances);
+                    }
+                    DrawCommand::Image(i) => {
+                        // Use Arc pointer address as key for grouping
+                        let texture_key = std::sync::Arc::as_ptr(&i.texture) as usize;
+
+                        let instance = ImageInstance {
+                            position: [i.position.x, i.position.y],
+                            size: [i.size.x, i.size.y],
+                            uv_min: [i.uv.u_min, i.uv.v_min],
+                            uv_max: [i.uv.u_max, i.uv.v_max],
+                            tint: [i.tint.r, i.tint.g, i.tint.b, i.tint.a],
+                            border_radius: i.border_radius,
+                            texture_index: 0, // Not used for now
+                            _padding: [0.0; 2],
+                        };
+
+                        image_groups
+                            .entry(texture_key)
+                            .or_insert_with(|| (i.texture.clone(), Vec::new()))
+                            .1
+                            .push(instance);
+                    }
+                }
+            }
+
+            let quad_count = quad_instances.len() as u32 - quad_start;
+            let text_count = text_instances.len() as u32 - text_start;
+
+            if quad_count > 0 || text_count > 0 {
+                self.clip_batches.push(ClipBatch {
+                    clip_rect: *clip_rect,
+                    quad_range: (quad_start, quad_count),
+                    text_range: (text_start, text_count),
+                });
+            }
+        }
+
+        // Build image batches with bind groups (images don't support clipping yet)
         self.image_batches.clear();
         let mut all_image_instances = Vec::new();
-        
+
         for (texture_key, (texture, instances)) in image_groups {
             let start_index = all_image_instances.len() as u32;
             let count = instances.len() as u32;
-            
+
             // Get or create bind group for this texture
             let bind_group = self.get_or_create_image_bind_group(texture_key, &texture);
-            
+
             self.image_batches.push(ImageBatch {
                 texture,
                 bind_group,
                 start_index,
                 count,
             });
-            
+
             all_image_instances.extend(instances);
         }
 
@@ -880,32 +1054,59 @@ impl UiRenderer {
             bytemuck::cast_slice(&projection),
         );
 
-        // Render quads
-        if !self.quad_instances.is_empty() {
-            render_pass.set_pipeline(&self.quad_instanced_pipeline);
-            render_pass.set_bind_group(0, &self.projection_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
-            render_pass.set_vertex_buffer(1, self.quad_instances.buffer().slice(..));
-            render_pass.draw(0..6, 0..self.quad_instances.len() as u32);
+        let viewport_width = viewport.size.width as u32;
+        let viewport_height = viewport.size.height as u32;
+
+        // Render with clip batches (handles scissor rects)
+        for batch in &self.clip_batches.clone() {
+            // Set scissor rect for this batch
+            if batch.clip_rect.is_infinite() {
+                render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+            } else {
+                let physical = batch.clip_rect.to_physical(viewport.scale_factor.0);
+                let clamped = physical.clamp_to_viewport(viewport_width, viewport_height);
+                if clamped.width == 0 || clamped.height == 0 {
+                    continue; // Skip empty clip rects
+                }
+                render_pass.set_scissor_rect(clamped.x, clamped.y, clamped.width, clamped.height);
+            }
+
+            // Render quads for this clip batch
+            if batch.quad_range.1 > 0 {
+                render_pass.set_pipeline(&self.quad_instanced_pipeline);
+                render_pass.set_bind_group(0, &self.projection_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
+                render_pass.set_vertex_buffer(1, self.quad_instances.buffer().slice(..));
+                render_pass.draw(
+                    0..6,
+                    batch.quad_range.0..(batch.quad_range.0 + batch.quad_range.1),
+                );
+            }
+
+            // Render text for this clip batch
+            if batch.text_range.1 > 0 {
+                render_pass.set_pipeline(&self.text_instanced_pipeline);
+                render_pass.set_bind_group(0, &self.text_atlas_bind_group, &[]);
+                render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
+                render_pass.set_vertex_buffer(1, self.text_instances.buffer().slice(..));
+                render_pass.draw(
+                    0..6,
+                    batch.text_range.0..(batch.text_range.0 + batch.text_range.1),
+                );
+            }
         }
 
-        // Render text
-        if !self.text_instances.is_empty() {
-            render_pass.set_pipeline(&self.text_instanced_pipeline);
-            render_pass.set_bind_group(0, &self.text_atlas_bind_group, &[]);
-            render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
-            render_pass.set_vertex_buffer(1, self.text_instances.buffer().slice(..));
-            render_pass.draw(0..6, 0..self.text_instances.len() as u32);
-        }
-        
+        // Reset scissor rect for images (they don't support clipping yet)
+        render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+
         // Render images (batched by texture)
         if !self.image_batches.is_empty() {
             render_pass.set_pipeline(&self.image_instanced_pipeline);
             render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]); // Reuse projection
             render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
             render_pass.set_vertex_buffer(1, self.image_instances.buffer().slice(..));
-            
+
             for batch in &self.image_batches {
                 render_pass.set_bind_group(0, &batch.bind_group, &[]);
                 render_pass.draw(0..6, batch.start_index..(batch.start_index + batch.count));
@@ -946,6 +1147,58 @@ impl UiRenderer {
             self.text_pipeline.cache_stats().2,
             self.text_pipeline.cache_hit_rate()
         );
+    }
+
+    /// Apply a scissor rect to the render pass.
+    ///
+    /// Converts a logical ClipRect to physical pixel coordinates and sets
+    /// the scissor rect on the render pass. Handles clamping to viewport bounds.
+    ///
+    /// # Arguments
+    /// * `render_pass` - The render pass to set the scissor on
+    /// * `clip_rect` - The logical clip rectangle
+    /// * `viewport` - The current viewport for scale factor and bounds
+    ///
+    /// # Returns
+    /// `true` if the scissor rect has positive area (rendering should proceed),
+    /// `false` if the clip rect is zero/negative area (skip rendering).
+    pub fn apply_scissor_rect(
+        render_pass: &mut wgpu::RenderPass,
+        clip_rect: &ClipRect,
+        viewport: &Viewport,
+    ) -> bool {
+        let viewport_width = viewport.size.width as u32;
+        let viewport_height = viewport.size.height as u32;
+
+        // Skip if infinite (no clipping needed)
+        if clip_rect.is_infinite() {
+            // Reset to full viewport
+            render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+            return true;
+        }
+
+        // Convert to physical coordinates
+        let physical = clip_rect.to_physical(viewport.scale_factor.0);
+
+        // Clamp to viewport bounds
+        let clamped = physical.clamp_to_viewport(viewport_width, viewport_height);
+
+        // Skip if no area to render
+        if clamped.width == 0 || clamped.height == 0 {
+            return false;
+        }
+
+        render_pass.set_scissor_rect(clamped.x, clamped.y, clamped.width, clamped.height);
+        true
+    }
+
+    /// Reset the scissor rect to the full viewport.
+    ///
+    /// Call this after clipped rendering to restore normal rendering.
+    pub fn reset_scissor_rect(render_pass: &mut wgpu::RenderPass, viewport: &Viewport) {
+        let viewport_width = viewport.size.width as u32;
+        let viewport_height = viewport.size.height as u32;
+        render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
     }
 }
 

@@ -8,6 +8,156 @@ use crate::widgets::{
     Tooltip, Widget,
 };
 
+/// Macro to generate common style methods for widget builders.
+///
+/// This reduces code duplication by generating the same style methods
+/// for all widget builder types.
+macro_rules! impl_style_methods {
+    ($widget_field:ident) => {
+        /// Apply a complete style to the widget.
+        pub fn style(mut self, style: Style) -> Self {
+            self.$widget_field.style = style;
+            self
+        }
+
+        /// Set the width of the widget.
+        pub fn width(mut self, width: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.width(width);
+            self
+        }
+
+        /// Set the height of the widget.
+        pub fn height(mut self, height: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.height(height);
+            self
+        }
+
+        /// Set uniform padding on all sides.
+        pub fn padding(mut self, padding: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.padding(padding);
+            self
+        }
+
+        /// Set uniform margin on all sides.
+        pub fn margin(mut self, margin: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.margin(margin);
+            self
+        }
+
+        /// Set minimum width constraint.
+        pub fn min_width(mut self, width: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.min_width(width);
+            self
+        }
+
+        /// Set minimum height constraint.
+        pub fn min_height(mut self, height: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.min_height(height);
+            self
+        }
+
+        /// Set maximum width constraint.
+        pub fn max_width(mut self, width: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.max_width(width);
+            self
+        }
+
+        /// Set maximum height constraint.
+        pub fn max_height(mut self, height: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.max_height(height);
+            self
+        }
+    };
+}
+
+/// Macro to generate layout-related style methods for container builders.
+macro_rules! impl_layout_methods {
+    ($widget_field:ident) => {
+        /// Set background color.
+        pub fn background_color(mut self, color: astrelis_render::Color) -> Self {
+            self.$widget_field.style = self.$widget_field.style.background_color(color);
+            self
+        }
+
+        /// Set border color.
+        pub fn border_color(mut self, color: astrelis_render::Color) -> Self {
+            self.$widget_field.style = self.$widget_field.style.border_color(color);
+            self
+        }
+
+        /// Set border width.
+        pub fn border_width(mut self, width: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.border_width(width);
+            self
+        }
+
+        /// Set border radius.
+        pub fn border_radius(mut self, radius: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.border_radius(radius);
+            self
+        }
+
+        /// Set overflow behavior for both axes.
+        pub fn overflow(mut self, overflow: crate::Overflow) -> Self {
+            self.$widget_field.style = self.$widget_field.style.overflow(overflow);
+            self
+        }
+
+        /// Set overflow behavior for x-axis only.
+        pub fn overflow_x(mut self, overflow: crate::Overflow) -> Self {
+            self.$widget_field.style = self.$widget_field.style.overflow_x(overflow);
+            self
+        }
+
+        /// Set overflow behavior for y-axis only.
+        pub fn overflow_y(mut self, overflow: crate::Overflow) -> Self {
+            self.$widget_field.style = self.$widget_field.style.overflow_y(overflow);
+            self
+        }
+
+        /// Set the aspect ratio constraint.
+        pub fn aspect_ratio(mut self, ratio: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.aspect_ratio(ratio);
+            self
+        }
+    };
+}
+
+/// Macro to generate flexbox-related style methods for container builders.
+macro_rules! impl_flex_methods {
+    ($widget_field:ident) => {
+        /// Set flex direction.
+        pub fn flex_direction(mut self, direction: taffy::FlexDirection) -> Self {
+            self.$widget_field.style = self.$widget_field.style.flex_direction(direction);
+            self
+        }
+
+        /// Set justify content.
+        pub fn justify_content(mut self, justify: taffy::JustifyContent) -> Self {
+            self.$widget_field.style = self.$widget_field.style.justify_content(justify);
+            self
+        }
+
+        /// Set align items.
+        pub fn align_items(mut self, align: taffy::AlignItems) -> Self {
+            self.$widget_field.style = self.$widget_field.style.align_items(align);
+            self
+        }
+
+        /// Set gap between items.
+        pub fn gap(mut self, gap: f32) -> Self {
+            self.$widget_field.style = self.$widget_field.style.gap(gap);
+            self
+        }
+
+        /// Set flex wrap.
+        pub fn flex_wrap(mut self, wrap: taffy::FlexWrap) -> Self {
+            self.$widget_field.style = self.$widget_field.style.flex_wrap(wrap);
+            self
+        }
+    };
+}
+
 /// Builder for constructing UI trees declaratively.
 pub struct UiBuilder<'a> {
     tree: &'a mut UiTree,
@@ -199,105 +349,10 @@ impl<'b, 'a> ContainerBuilder<'b, 'a> {
         node_id
     }
 
-    /// Set background color.
-    pub fn background_color(mut self, color: astrelis_render::Color) -> Self {
-        self.container.style = self.container.style.background_color(color);
-        self
-    }
-
-    /// Set border color.
-    pub fn border_color(mut self, color: astrelis_render::Color) -> Self {
-        self.container.style = self.container.style.border_color(color);
-        self
-    }
-
-    /// Set border width.
-    pub fn border_width(mut self, width: f32) -> Self {
-        self.container.style = self.container.style.border_width(width);
-        self
-    }
-
-    /// Set border radius.
-    pub fn border_radius(mut self, radius: f32) -> Self {
-        self.container.style = self.container.style.border_radius(radius);
-        self
-    }
-
-    /// Set flex direction.
-    pub fn flex_direction(mut self, direction: taffy::FlexDirection) -> Self {
-        self.container.style = self.container.style.flex_direction(direction);
-        self
-    }
-
-    /// Set justify content.
-    pub fn justify_content(mut self, justify: taffy::JustifyContent) -> Self {
-        self.container.style = self.container.style.justify_content(justify);
-        self
-    }
-
-    /// Set align items.
-    pub fn align_items(mut self, align: taffy::AlignItems) -> Self {
-        self.container.style = self.container.style.align_items(align);
-        self
-    }
-
-    /// Set gap between items.
-    pub fn gap(mut self, gap: f32) -> Self {
-        self.container.style = self.container.style.gap(gap);
-        self
-    }
-
-    /// Set flex wrap.
-    pub fn flex_wrap(mut self, wrap: taffy::FlexWrap) -> Self {
-        self.container.style = self.container.style.flex_wrap(wrap);
-        self
-    }
-
-    // WidgetBuilder methods inlined
-    pub fn style(mut self, style: Style) -> Self {
-        self.container.style = style;
-        self
-    }
-
-    pub fn width(mut self, width: f32) -> Self {
-        self.container.style = self.container.style.width(width);
-        self
-    }
-
-    pub fn height(mut self, height: f32) -> Self {
-        self.container.style = self.container.style.height(height);
-        self
-    }
-
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.container.style = self.container.style.padding(padding);
-        self
-    }
-
-    pub fn margin(mut self, margin: f32) -> Self {
-        self.container.style = self.container.style.margin(margin);
-        self
-    }
-
-    pub fn min_width(mut self, width: f32) -> Self {
-        self.container.style = self.container.style.min_width(width);
-        self
-    }
-
-    pub fn min_height(mut self, height: f32) -> Self {
-        self.container.style = self.container.style.min_height(height);
-        self
-    }
-
-    pub fn max_width(mut self, width: f32) -> Self {
-        self.container.style = self.container.style.max_width(width);
-        self
-    }
-
-    pub fn max_height(mut self, height: f32) -> Self {
-        self.container.style = self.container.style.max_height(height);
-        self
-    }
+    // Style methods generated by macro
+    impl_style_methods!(container);
+    impl_layout_methods!(container);
+    impl_flex_methods!(container);
 }
 
 /// Builder for text widgets.
@@ -343,6 +398,12 @@ impl<'b, 'a> TextBuilder<'b, 'a> {
         self
     }
 
+    /// Set font ID for font selection.
+    pub fn font_id(mut self, font_id: u32) -> Self {
+        self.text = self.text.font_id(font_id);
+        self
+    }
+
     /// Build the text widget and add it to the tree.
     pub fn build(self) -> NodeId {
         let node_id = self.builder.add_widget(Box::new(self.text));
@@ -355,51 +416,8 @@ impl<'b, 'a> TextBuilder<'b, 'a> {
 }
 
 impl<'b, 'a> TextBuilder<'b, 'a> {
-    // WidgetBuilder methods inlined
-    pub fn style(mut self, style: Style) -> Self {
-        self.text.style = style;
-        self
-    }
-
-    pub fn width(mut self, width: f32) -> Self {
-        self.text.style = self.text.style.width(width);
-        self
-    }
-
-    pub fn height(mut self, height: f32) -> Self {
-        self.text.style = self.text.style.height(height);
-        self
-    }
-
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.text.style = self.text.style.padding(padding);
-        self
-    }
-
-    pub fn margin(mut self, margin: f32) -> Self {
-        self.text.style = self.text.style.margin(margin);
-        self
-    }
-
-    pub fn min_width(mut self, width: f32) -> Self {
-        self.text.style = self.text.style.min_width(width);
-        self
-    }
-
-    pub fn min_height(mut self, height: f32) -> Self {
-        self.text.style = self.text.style.min_height(height);
-        self
-    }
-
-    pub fn max_width(mut self, width: f32) -> Self {
-        self.text.style = self.text.style.max_width(width);
-        self
-    }
-
-    pub fn max_height(mut self, height: f32) -> Self {
-        self.text.style = self.text.style.max_height(height);
-        self
-    }
+    // Style methods generated by macro
+    impl_style_methods!(text);
 }
 
 /// Builder for button widgets.
@@ -434,6 +452,12 @@ impl<'b, 'a> ButtonBuilder<'b, 'a> {
         self
     }
 
+    /// Set font ID for font selection.
+    pub fn font_id(mut self, font_id: u32) -> Self {
+        self.button = self.button.font_id(font_id);
+        self
+    }
+
     /// Set widget ID for later reference.
     pub fn id(mut self, id: WidgetId) -> Self {
         self.widget_id = Some(id);
@@ -461,51 +485,8 @@ impl<'b, 'a> ButtonBuilder<'b, 'a> {
 }
 
 impl<'b, 'a> ButtonBuilder<'b, 'a> {
-    // WidgetBuilder methods inlined
-    pub fn style(mut self, style: Style) -> Self {
-        self.button.style = style;
-        self
-    }
-
-    pub fn width(mut self, width: f32) -> Self {
-        self.button.style = self.button.style.width(width);
-        self
-    }
-
-    pub fn height(mut self, height: f32) -> Self {
-        self.button.style = self.button.style.height(height);
-        self
-    }
-
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.button.style = self.button.style.padding(padding);
-        self
-    }
-
-    pub fn margin(mut self, margin: f32) -> Self {
-        self.button.style = self.button.style.margin(margin);
-        self
-    }
-
-    pub fn min_width(mut self, width: f32) -> Self {
-        self.button.style = self.button.style.min_width(width);
-        self
-    }
-
-    pub fn min_height(mut self, height: f32) -> Self {
-        self.button.style = self.button.style.min_height(height);
-        self
-    }
-
-    pub fn max_width(mut self, width: f32) -> Self {
-        self.button.style = self.button.style.max_width(width);
-        self
-    }
-
-    pub fn max_height(mut self, height: f32) -> Self {
-        self.button.style = self.button.style.max_height(height);
-        self
-    }
+    // Style methods generated by macro
+    impl_style_methods!(button);
 }
 
 /// Builder for row layout widgets.
@@ -561,51 +542,8 @@ impl<'b, 'a> RowBuilder<'b, 'a> {
 }
 
 impl<'b, 'a> RowBuilder<'b, 'a> {
-    // WidgetBuilder methods inlined
-    pub fn style(mut self, style: Style) -> Self {
-        self.row.style = style;
-        self
-    }
-
-    pub fn width(mut self, width: f32) -> Self {
-        self.row.style = self.row.style.width(width);
-        self
-    }
-
-    pub fn height(mut self, height: f32) -> Self {
-        self.row.style = self.row.style.height(height);
-        self
-    }
-
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.row.style = self.row.style.padding(padding);
-        self
-    }
-
-    pub fn margin(mut self, margin: f32) -> Self {
-        self.row.style = self.row.style.margin(margin);
-        self
-    }
-
-    pub fn min_width(mut self, width: f32) -> Self {
-        self.row.style = self.row.style.min_width(width);
-        self
-    }
-
-    pub fn min_height(mut self, height: f32) -> Self {
-        self.row.style = self.row.style.min_height(height);
-        self
-    }
-
-    pub fn max_width(mut self, width: f32) -> Self {
-        self.row.style = self.row.style.max_width(width);
-        self
-    }
-
-    pub fn max_height(mut self, height: f32) -> Self {
-        self.row.style = self.row.style.max_height(height);
-        self
-    }
+    // Style methods generated by macro
+    impl_style_methods!(row);
 }
 
 /// Builder for column layout widgets.
@@ -661,51 +599,8 @@ impl<'b, 'a> ColumnBuilder<'b, 'a> {
 }
 
 impl<'b, 'a> ColumnBuilder<'b, 'a> {
-    // WidgetBuilder methods inlined
-    pub fn style(mut self, style: Style) -> Self {
-        self.column.style = style;
-        self
-    }
-
-    pub fn width(mut self, width: f32) -> Self {
-        self.column.style = self.column.style.width(width);
-        self
-    }
-
-    pub fn height(mut self, height: f32) -> Self {
-        self.column.style = self.column.style.height(height);
-        self
-    }
-
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.column.style = self.column.style.padding(padding);
-        self
-    }
-
-    pub fn margin(mut self, margin: f32) -> Self {
-        self.column.style = self.column.style.margin(margin);
-        self
-    }
-
-    pub fn min_width(mut self, width: f32) -> Self {
-        self.column.style = self.column.style.min_width(width);
-        self
-    }
-
-    pub fn min_height(mut self, height: f32) -> Self {
-        self.column.style = self.column.style.min_height(height);
-        self
-    }
-
-    pub fn max_width(mut self, width: f32) -> Self {
-        self.column.style = self.column.style.max_width(width);
-        self
-    }
-
-    pub fn max_height(mut self, height: f32) -> Self {
-        self.column.style = self.column.style.max_height(height);
-        self
-    }
+    // Style methods generated by macro
+    impl_style_methods!(column);
 }
 
 /// Builder for text input widgets.
@@ -771,41 +666,8 @@ impl<'b, 'a> TextInputBuilder<'b, 'a> {
         node_id
     }
 
-    // WidgetBuilder methods
-    pub fn style(mut self, style: Style) -> Self {
-        self.text_input.style = style;
-        self
-    }
-
-    pub fn width(mut self, width: f32) -> Self {
-        self.text_input.style = self.text_input.style.width(width);
-        self
-    }
-
-    pub fn height(mut self, height: f32) -> Self {
-        self.text_input.style = self.text_input.style.height(height);
-        self
-    }
-
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.text_input.style = self.text_input.style.padding(padding);
-        self
-    }
-
-    pub fn margin(mut self, margin: f32) -> Self {
-        self.text_input.style = self.text_input.style.margin(margin);
-        self
-    }
-
-    pub fn min_width(mut self, width: f32) -> Self {
-        self.text_input.style = self.text_input.style.min_width(width);
-        self
-    }
-
-    pub fn min_height(mut self, height: f32) -> Self {
-        self.text_input.style = self.text_input.style.min_height(height);
-        self
-    }
+    // Style methods generated by macro
+    impl_style_methods!(text_input);
 }
 
 /// Builder for tooltip widgets.
@@ -840,21 +702,8 @@ impl<'b, 'a> TooltipBuilder<'b, 'a> {
         node_id
     }
 
-    // WidgetBuilder methods
-    pub fn style(mut self, style: Style) -> Self {
-        self.tooltip.style = style;
-        self
-    }
-
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.tooltip.style = self.tooltip.style.padding(padding);
-        self
-    }
-
-    pub fn margin(mut self, margin: f32) -> Self {
-        self.tooltip.style = self.tooltip.style.margin(margin);
-        self
-    }
+    // Style methods generated by macro
+    impl_style_methods!(tooltip);
 }
 
 /// Builder for image widgets.
@@ -911,49 +760,6 @@ impl<'b, 'a> ImageBuilder<'b, 'a> {
         node_id
     }
 
-    // WidgetBuilder methods inlined
-    pub fn style(mut self, style: Style) -> Self {
-        self.image.style = style;
-        self
-    }
-
-    pub fn width(mut self, width: f32) -> Self {
-        self.image.style = self.image.style.width(width);
-        self
-    }
-
-    pub fn height(mut self, height: f32) -> Self {
-        self.image.style = self.image.style.height(height);
-        self
-    }
-
-    pub fn padding(mut self, padding: f32) -> Self {
-        self.image.style = self.image.style.padding(padding);
-        self
-    }
-
-    pub fn margin(mut self, margin: f32) -> Self {
-        self.image.style = self.image.style.margin(margin);
-        self
-    }
-
-    pub fn min_width(mut self, width: f32) -> Self {
-        self.image.style = self.image.style.min_width(width);
-        self
-    }
-
-    pub fn min_height(mut self, height: f32) -> Self {
-        self.image.style = self.image.style.min_height(height);
-        self
-    }
-
-    pub fn max_width(mut self, width: f32) -> Self {
-        self.image.style = self.image.style.max_width(width);
-        self
-    }
-
-    pub fn max_height(mut self, height: f32) -> Self {
-        self.image.style = self.image.style.max_height(height);
-        self
-    }
+    // Style methods generated by macro
+    impl_style_methods!(image);
 }

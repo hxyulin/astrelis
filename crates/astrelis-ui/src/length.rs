@@ -3,6 +3,7 @@
 //! Provides enum-based alternatives to raw floats for better type safety
 //! and clearer intent in style declarations.
 
+use astrelis_core::math::Vec2;
 use std::fmt;
 
 /// Length value for UI dimensions.
@@ -16,6 +17,7 @@ use std::fmt;
 /// let fixed = Length::Px(100.0);
 /// let relative = Length::Percent(50.0);
 /// let auto_size = Length::Auto;
+/// let viewport_width = Length::Vw(80.0); // 80% of viewport width
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
@@ -25,6 +27,14 @@ pub enum Length {
     Percent(f32),
     /// Automatic sizing based on content
     Auto,
+    /// Percentage of viewport width (0.0 - 100.0)
+    Vw(f32),
+    /// Percentage of viewport height (0.0 - 100.0)
+    Vh(f32),
+    /// Percentage of smaller viewport dimension (0.0 - 100.0)
+    Vmin(f32),
+    /// Percentage of larger viewport dimension (0.0 - 100.0)
+    Vmax(f32),
 }
 
 impl Length {
@@ -43,12 +53,79 @@ impl Length {
         Self::Auto
     }
 
+    /// Create a viewport width length (1vw = 1% of viewport width).
+    pub fn vw(value: f32) -> Self {
+        Self::Vw(value)
+    }
+
+    /// Create a viewport height length (1vh = 1% of viewport height).
+    pub fn vh(value: f32) -> Self {
+        Self::Vh(value)
+    }
+
+    /// Create a viewport minimum length (1vmin = 1% of smaller viewport dimension).
+    pub fn vmin(value: f32) -> Self {
+        Self::Vmin(value)
+    }
+
+    /// Create a viewport maximum length (1vmax = 1% of larger viewport dimension).
+    pub fn vmax(value: f32) -> Self {
+        Self::Vmax(value)
+    }
+
+    /// Resolve viewport-relative units to pixels.
+    ///
+    /// Converts vw/vh/vmin/vmax units to absolute pixel values based on the viewport size.
+    /// Other unit types (Px, Percent, Auto) are returned unchanged.
+    ///
+    /// # Arguments
+    /// * `viewport_size` - The viewport dimensions (width, height) in pixels
+    ///
+    /// # Examples
+    /// ```
+    /// use astrelis_ui::Length;
+    /// use astrelis_core::math::Vec2;
+    ///
+    /// let viewport = Vec2::new(1280.0, 720.0);
+    ///
+    /// let width = Length::Vw(50.0).resolve(viewport);
+    /// assert_eq!(width, Length::Px(640.0)); // 50% of 1280px
+    ///
+    /// let height = Length::Vh(100.0).resolve(viewport);
+    /// assert_eq!(height, Length::Px(720.0)); // 100% of 720px
+    /// ```
+    pub fn resolve(self, viewport_size: Vec2) -> Self {
+        match self {
+            Length::Vw(v) => Length::Px(v * viewport_size.x / 100.0),
+            Length::Vh(v) => Length::Px(v * viewport_size.y / 100.0),
+            Length::Vmin(v) => {
+                let min = viewport_size.x.min(viewport_size.y);
+                Length::Px(v * min / 100.0)
+            }
+            Length::Vmax(v) => {
+                let max = viewport_size.x.max(viewport_size.y);
+                Length::Px(v * max / 100.0)
+            }
+            other => other, // Px/Percent/Auto unchanged
+        }
+    }
+
     /// Convert to Taffy Dimension.
+    ///
+    /// # Panics
+    /// Panics if called on viewport-relative units (Vw/Vh/Vmin/Vmax).
+    /// These must be resolved to pixels first using [`Length::resolve`].
     pub fn to_dimension(self) -> taffy::Dimension {
         match self {
             Length::Px(v) => taffy::Dimension::Length(v),
             Length::Percent(v) => taffy::Dimension::Percent(v / 100.0),
             Length::Auto => taffy::Dimension::Auto,
+            Length::Vw(_) | Length::Vh(_) | Length::Vmin(_) | Length::Vmax(_) => {
+                panic!(
+                    "Viewport-relative units must be resolved to pixels before converting to Taffy dimension. \
+                     Call .resolve(viewport_size) first."
+                );
+            }
         }
     }
 
@@ -75,6 +152,14 @@ impl Length {
     pub fn is_auto(&self) -> bool {
         matches!(self, Length::Auto)
     }
+
+    /// Check if this is a viewport-relative unit.
+    pub fn is_viewport(&self) -> bool {
+        matches!(
+            self,
+            Length::Vw(_) | Length::Vh(_) | Length::Vmin(_) | Length::Vmax(_)
+        )
+    }
 }
 
 impl From<f32> for Length {
@@ -95,6 +180,10 @@ impl fmt::Display for Length {
             Length::Px(v) => write!(f, "{}px", v),
             Length::Percent(v) => write!(f, "{}%", v),
             Length::Auto => write!(f, "auto"),
+            Length::Vw(v) => write!(f, "{}vw", v),
+            Length::Vh(v) => write!(f, "{}vh", v),
+            Length::Vmin(v) => write!(f, "{}vmin", v),
+            Length::Vmax(v) => write!(f, "{}vmax", v),
         }
     }
 }
@@ -110,6 +199,14 @@ pub enum LengthAuto {
     Percent(f32),
     /// Automatic positioning
     Auto,
+    /// Percentage of viewport width (0.0 - 100.0)
+    Vw(f32),
+    /// Percentage of viewport height (0.0 - 100.0)
+    Vh(f32),
+    /// Percentage of smaller viewport dimension (0.0 - 100.0)
+    Vmin(f32),
+    /// Percentage of larger viewport dimension (0.0 - 100.0)
+    Vmax(f32),
 }
 
 impl LengthAuto {
@@ -128,12 +225,59 @@ impl LengthAuto {
         Self::Auto
     }
 
+    /// Create a viewport width length (1vw = 1% of viewport width).
+    pub fn vw(value: f32) -> Self {
+        Self::Vw(value)
+    }
+
+    /// Create a viewport height length (1vh = 1% of viewport height).
+    pub fn vh(value: f32) -> Self {
+        Self::Vh(value)
+    }
+
+    /// Create a viewport minimum length (1vmin = 1% of smaller viewport dimension).
+    pub fn vmin(value: f32) -> Self {
+        Self::Vmin(value)
+    }
+
+    /// Create a viewport maximum length (1vmax = 1% of larger viewport dimension).
+    pub fn vmax(value: f32) -> Self {
+        Self::Vmax(value)
+    }
+
+    /// Resolve viewport-relative units to pixels.
+    pub fn resolve(self, viewport_size: Vec2) -> Self {
+        match self {
+            LengthAuto::Vw(v) => LengthAuto::Px(v * viewport_size.x / 100.0),
+            LengthAuto::Vh(v) => LengthAuto::Px(v * viewport_size.y / 100.0),
+            LengthAuto::Vmin(v) => {
+                let min = viewport_size.x.min(viewport_size.y);
+                LengthAuto::Px(v * min / 100.0)
+            }
+            LengthAuto::Vmax(v) => {
+                let max = viewport_size.x.max(viewport_size.y);
+                LengthAuto::Px(v * max / 100.0)
+            }
+            other => other,
+        }
+    }
+
     /// Convert to Taffy LengthPercentageAuto.
+    ///
+    /// # Panics
+    /// Panics if called on viewport-relative units (Vw/Vh/Vmin/Vmax).
+    /// These must be resolved to pixels first using [`LengthAuto::resolve`].
     pub fn to_length_percentage_auto(self) -> taffy::LengthPercentageAuto {
         match self {
             LengthAuto::Px(v) => taffy::LengthPercentageAuto::Length(v),
             LengthAuto::Percent(v) => taffy::LengthPercentageAuto::Percent(v / 100.0),
             LengthAuto::Auto => taffy::LengthPercentageAuto::Auto,
+            LengthAuto::Vw(_) | LengthAuto::Vh(_) | LengthAuto::Vmin(_) | LengthAuto::Vmax(_) => {
+                panic!(
+                    "Viewport-relative units must be resolved to pixels before converting to Taffy dimension. \
+                     Call .resolve(viewport_size) first."
+                );
+            }
         }
     }
 
@@ -159,6 +303,10 @@ impl From<Length> for LengthAuto {
             Length::Px(v) => LengthAuto::Px(v),
             Length::Percent(v) => LengthAuto::Percent(v),
             Length::Auto => LengthAuto::Auto,
+            Length::Vw(v) => LengthAuto::Vw(v),
+            Length::Vh(v) => LengthAuto::Vh(v),
+            Length::Vmin(v) => LengthAuto::Vmin(v),
+            Length::Vmax(v) => LengthAuto::Vmax(v),
         }
     }
 }
@@ -175,6 +323,10 @@ impl fmt::Display for LengthAuto {
             LengthAuto::Px(v) => write!(f, "{}px", v),
             LengthAuto::Percent(v) => write!(f, "{}%", v),
             LengthAuto::Auto => write!(f, "auto"),
+            LengthAuto::Vw(v) => write!(f, "{}vw", v),
+            LengthAuto::Vh(v) => write!(f, "{}vh", v),
+            LengthAuto::Vmin(v) => write!(f, "{}vmin", v),
+            LengthAuto::Vmax(v) => write!(f, "{}vmax", v),
         }
     }
 }
@@ -188,6 +340,14 @@ pub enum LengthPercentage {
     Px(f32),
     /// Percentage of parent size (0.0 - 100.0)
     Percent(f32),
+    /// Percentage of viewport width (0.0 - 100.0)
+    Vw(f32),
+    /// Percentage of viewport height (0.0 - 100.0)
+    Vh(f32),
+    /// Percentage of smaller viewport dimension (0.0 - 100.0)
+    Vmin(f32),
+    /// Percentage of larger viewport dimension (0.0 - 100.0)
+    Vmax(f32),
 }
 
 impl LengthPercentage {
@@ -201,11 +361,61 @@ impl LengthPercentage {
         Self::Percent(value)
     }
 
+    /// Create a viewport width length (1vw = 1% of viewport width).
+    pub fn vw(value: f32) -> Self {
+        Self::Vw(value)
+    }
+
+    /// Create a viewport height length (1vh = 1% of viewport height).
+    pub fn vh(value: f32) -> Self {
+        Self::Vh(value)
+    }
+
+    /// Create a viewport minimum length (1vmin = 1% of smaller viewport dimension).
+    pub fn vmin(value: f32) -> Self {
+        Self::Vmin(value)
+    }
+
+    /// Create a viewport maximum length (1vmax = 1% of larger viewport dimension).
+    pub fn vmax(value: f32) -> Self {
+        Self::Vmax(value)
+    }
+
+    /// Resolve viewport-relative units to pixels.
+    pub fn resolve(self, viewport_size: Vec2) -> Self {
+        match self {
+            LengthPercentage::Vw(v) => LengthPercentage::Px(v * viewport_size.x / 100.0),
+            LengthPercentage::Vh(v) => LengthPercentage::Px(v * viewport_size.y / 100.0),
+            LengthPercentage::Vmin(v) => {
+                let min = viewport_size.x.min(viewport_size.y);
+                LengthPercentage::Px(v * min / 100.0)
+            }
+            LengthPercentage::Vmax(v) => {
+                let max = viewport_size.x.max(viewport_size.y);
+                LengthPercentage::Px(v * max / 100.0)
+            }
+            other => other,
+        }
+    }
+
     /// Convert to Taffy LengthPercentage.
+    ///
+    /// # Panics
+    /// Panics if called on viewport-relative units (Vw/Vh/Vmin/Vmax).
+    /// These must be resolved to pixels first using [`LengthPercentage::resolve`].
     pub fn to_length_percentage(self) -> taffy::LengthPercentage {
         match self {
             LengthPercentage::Px(v) => taffy::LengthPercentage::Length(v),
             LengthPercentage::Percent(v) => taffy::LengthPercentage::Percent(v / 100.0),
+            LengthPercentage::Vw(_)
+            | LengthPercentage::Vh(_)
+            | LengthPercentage::Vmin(_)
+            | LengthPercentage::Vmax(_) => {
+                panic!(
+                    "Viewport-relative units must be resolved to pixels before converting to Taffy dimension. \
+                     Call .resolve(viewport_size) first."
+                );
+            }
         }
     }
 
@@ -235,6 +445,10 @@ impl fmt::Display for LengthPercentage {
         match self {
             LengthPercentage::Px(v) => write!(f, "{}px", v),
             LengthPercentage::Percent(v) => write!(f, "{}%", v),
+            LengthPercentage::Vw(v) => write!(f, "{}vw", v),
+            LengthPercentage::Vh(v) => write!(f, "{}vh", v),
+            LengthPercentage::Vmin(v) => write!(f, "{}vmin", v),
+            LengthPercentage::Vmax(v) => write!(f, "{}vmax", v),
         }
     }
 }
@@ -252,6 +466,54 @@ pub fn percent(value: f32) -> taffy::Dimension {
 /// Helper function to create auto dimension.
 pub fn auto() -> taffy::Dimension {
     taffy::Dimension::Auto
+}
+
+/// Helper function to create a viewport width length.
+///
+/// # Examples
+/// ```
+/// use astrelis_ui::vw;
+///
+/// let width = vw(80.0); // 80% of viewport width
+/// ```
+pub fn vw(value: f32) -> Length {
+    Length::Vw(value)
+}
+
+/// Helper function to create a viewport height length.
+///
+/// # Examples
+/// ```
+/// use astrelis_ui::vh;
+///
+/// let height = vh(100.0); // 100% of viewport height
+/// ```
+pub fn vh(value: f32) -> Length {
+    Length::Vh(value)
+}
+
+/// Helper function to create a viewport minimum length.
+///
+/// # Examples
+/// ```
+/// use astrelis_ui::vmin;
+///
+/// let size = vmin(50.0); // 50% of smaller viewport dimension
+/// ```
+pub fn vmin(value: f32) -> Length {
+    Length::Vmin(value)
+}
+
+/// Helper function to create a viewport maximum length.
+///
+/// # Examples
+/// ```
+/// use astrelis_ui::vmax;
+///
+/// let size = vmax(50.0); // 50% of larger viewport dimension
+/// ```
+pub fn vmax(value: f32) -> Length {
+    Length::Vmax(value)
 }
 
 #[cfg(test)]

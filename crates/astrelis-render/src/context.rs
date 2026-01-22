@@ -25,6 +25,20 @@ pub enum GraphicsError {
 
     /// Failed to acquire surface texture.
     SurfaceTextureAcquisitionFailed(String),
+
+    /// Surface is lost and needs to be recreated.
+    /// This is a recoverable condition - call `reconfigure_surface()` and retry.
+    SurfaceLost,
+
+    /// Surface texture is outdated (e.g., window was resized).
+    /// This is a recoverable condition - call `reconfigure_surface()` and retry.
+    SurfaceOutdated,
+
+    /// Not enough memory to acquire surface texture.
+    SurfaceOutOfMemory,
+
+    /// Surface acquisition timed out.
+    SurfaceTimeout,
 }
 
 impl std::fmt::Display for GraphicsError {
@@ -51,6 +65,18 @@ impl std::fmt::Display for GraphicsError {
             }
             GraphicsError::SurfaceTextureAcquisitionFailed(msg) => {
                 write!(f, "Failed to acquire surface texture: {}", msg)
+            }
+            GraphicsError::SurfaceLost => {
+                write!(f, "Surface lost - needs recreation (window minimize, GPU reset, etc.)")
+            }
+            GraphicsError::SurfaceOutdated => {
+                write!(f, "Surface outdated - needs reconfiguration (window resized)")
+            }
+            GraphicsError::SurfaceOutOfMemory => {
+                write!(f, "Out of memory acquiring surface texture")
+            }
+            GraphicsError::SurfaceTimeout => {
+                write!(f, "Timeout acquiring surface texture")
             }
         }
     }

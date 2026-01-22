@@ -317,14 +317,14 @@ impl ApplicationBuilder {
                 factory: Box<dyn FnOnce(&mut AppCtx, &Engine) -> Box<dyn App>>,
             }
 
-            let data = APP_BUILDER_DATA.with(|d| d.borrow_mut().take())
+            let mut data = APP_BUILDER_DATA.with(|d| d.borrow_mut().take())
                 .expect("ApplicationBuilder data not found");
 
             #[cfg(all(feature = "render", feature = "winit"))]
             {
                 // Create initial window if requested
                 if data.create_window {
-                    if let Some(window_manager) = data.engine.get::<WindowManager>() {
+                    if let Some(window_manager) = data.engine.get_mut::<WindowManager>() {
                         // Use WindowManager if available
                         let descriptor = WindowDescriptor {
                             title: data.title.clone(),
@@ -332,19 +332,12 @@ impl ApplicationBuilder {
                             ..Default::default()
                         };
 
-                        // SAFETY: We need to mutably borrow window_manager to create window
-                        // This is safe because we're the only code running at this point
-                        let window_manager_ptr = window_manager as *const WindowManager as *mut WindowManager;
-                        unsafe {
-                            if let Some(window_desc) = data.window_descriptor {
-                                if let Err(e) = (*window_manager_ptr).create_window_with_descriptor(ctx, descriptor, window_desc) {
-                                    tracing::error!("Failed to create window with descriptor: {}", e);
-                                }
-                            } else {
-                                if let Err(e) = (*window_manager_ptr).create_window(ctx, descriptor) {
-                                    tracing::error!("Failed to create window: {}", e);
-                                }
+                        if let Some(window_desc) = data.window_descriptor.take() {
+                            if let Err(e) = window_manager.create_window_with_descriptor(ctx, descriptor, window_desc) {
+                                tracing::error!("Failed to create window with descriptor: {}", e);
                             }
+                        } else if let Err(e) = window_manager.create_window(ctx, descriptor) {
+                            tracing::error!("Failed to create window: {}", e);
                         }
                     }
                 }

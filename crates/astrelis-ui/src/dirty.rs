@@ -8,39 +8,43 @@ bitflags! {
     /// These flags allow selective recomputation based on what actually changed.
     /// For example, a color-only change doesn't need layout recomputation.
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-    pub struct DirtyFlags: u8 {
+    pub struct DirtyFlags: u16 {
         /// No changes
-        const NONE              = 0b00000000;
+        const NONE              = 0b0000_0000_0000;
 
         /// Style properties changed (generic style flag)
-        const STYLE             = 0b00000001;
+        const STYLE             = 0b0000_0000_0001;
 
         /// Layout-affecting properties changed (size, position, flex, padding, etc.)
         /// Requires Taffy recomputation.
-        const LAYOUT            = 0b00000010;
+        const LAYOUT            = 0b0000_0000_0010;
 
         /// Geometry changed (border width, border radius)
         /// Requires geometry rebuild but not necessarily layout.
-        const GEOMETRY          = 0b00000100;
+        const GEOMETRY          = 0b0000_0000_0100;
 
         /// Text content or font properties changed
         /// Requires text reshaping and possibly layout if wrapping changes.
-        const TEXT_SHAPING      = 0b00001000;
+        const TEXT_SHAPING      = 0b0000_0000_1000;
 
         /// Only colors changed (background, border color)
         /// Can skip layout and text shaping, only update paint data.
-        const COLOR_ONLY        = 0b00010000;
+        const COLOR_ONLY        = 0b0000_0001_0000;
 
         /// Only opacity changed
         /// Can skip layout and text shaping, only update alpha channel.
-        const OPACITY_ONLY      = 0b00100000;
+        const OPACITY_ONLY      = 0b0000_0010_0000;
 
         /// Transform properties changed (position, rotation)
-        const TRANSFORM         = 0b01000000;
+        const TRANSFORM         = 0b0000_0100_0000;
 
         /// Children were added, removed, or reordered
         /// Requires layout recomputation for parent and children.
-        const CHILDREN_ORDER    = 0b10000000;
+        const CHILDREN_ORDER    = 0b0000_1000_0000;
+
+        /// Clip bounds changed (overflow property or layout affecting clip rect).
+        /// Requires recalculation of scissor rects for rendering.
+        const CLIP              = 0b0001_0000_0000;
     }
 }
 
@@ -80,6 +84,12 @@ impl DirtyFlags {
                 | Self::CHILDREN_ORDER
                 | Self::TRANSFORM,
         )
+    }
+
+    /// Returns true if clip rects need to be recalculated.
+    #[inline]
+    pub fn needs_clip_update(&self) -> bool {
+        self.intersects(Self::CLIP | Self::LAYOUT | Self::CHILDREN_ORDER | Self::TRANSFORM)
     }
 
     /// Returns true if the node should propagate dirty flags to ancestors.
@@ -157,5 +167,16 @@ mod tests {
         assert!(DirtyFlags::TRANSFORM.needs_geometry_rebuild());
         assert!(!DirtyFlags::COLOR_ONLY.needs_geometry_rebuild());
         assert!(!DirtyFlags::OPACITY_ONLY.needs_geometry_rebuild());
+    }
+
+    #[test]
+    fn test_clip_update() {
+        assert!(DirtyFlags::CLIP.needs_clip_update());
+        assert!(DirtyFlags::LAYOUT.needs_clip_update());
+        assert!(DirtyFlags::CHILDREN_ORDER.needs_clip_update());
+        assert!(DirtyFlags::TRANSFORM.needs_clip_update());
+        assert!(!DirtyFlags::COLOR_ONLY.needs_clip_update());
+        assert!(!DirtyFlags::OPACITY_ONLY.needs_clip_update());
+        assert!(!DirtyFlags::GEOMETRY.needs_clip_update());
     }
 }

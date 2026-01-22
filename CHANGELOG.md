@@ -5,6 +5,135 @@ All notable changes to the Astrelis Game Engine will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-01-22
+
+### Added
+
+#### Style API Constraint Integration (`astrelis-ui`)
+- **Style methods now accept `Constraint`** - All dimension-related Style methods (width, height, min_width, etc.) now accept `Constraint` values in addition to raw `f32` values
+  - Enables advanced responsive layouts with calc expressions
+  - Backward compatible - existing `f32` usage continues to work
+  - Supports all constraint types: Px, Percent, Auto, viewport units (Vw, Vh, Vmin, Vmax), calc, min, max, clamp
+
+- **New constraint exports** - Added top-level exports for constraint system:
+  - `Constraint`, `CalcExpr` - Core constraint types
+  - `ConstraintResolver`, `ResolveContext` - Resolution utilities
+  - Builder helpers: `px`, `calc`, `min2`, `min_of`, `max2`, `max_of`, `clamp`
+
+#### Frame Context Improvements (`astrelis-render`)
+- **Fallible access methods** - Added try_ variants to FrameContext and RenderPass:
+  - `try_surface()`, `has_surface()` - Check surface availability
+  - `try_encoder()`, `has_encoder()` - Check encoder availability
+  - `try_encoder_and_surface()` - Get both if available
+  - `try_descriptor()`, `is_valid()` on RenderPass
+
+#### Asset System Improvements (`astrelis-assets`)
+- **Thread-safety documentation** - Comprehensive documentation for AssetServer thread-safety requirements and recommended patterns
+
+### Changed
+
+#### Breaking: Widget System Consolidation (`astrelis-ui`)
+- **Deprecated capability-based widget system** - The experimental `widget/` module is now marked as `#[doc(hidden)]` and internal
+  - The `widgets` module (widgets.rs) is the stable, actively-used widget system
+  - Removed confusing `Cap`-prefixed exports (`CapButton`, `CapContainer`, `CapText`)
+  - Types like `WidgetHandle`, `WidgetStorage`, `TextWidget`, `ParentWidget`, `ColorWidget` are no longer re-exported
+  - **Migration**: Use `widgets::Button`, `widgets::Container`, `widgets::Text` instead
+
+#### Breaking: Style Methods Accept Constraint
+- Style dimension methods now accept `impl Into<Constraint>` instead of `impl Into<Length>`
+  - This is backward compatible for simple values (f32, Length)
+  - **Note**: Viewport units (Vw, Vh, Vmin, Vmax) and complex constraints (calc, min, max, clamp) must be resolved before passing to Taffy. The UI layout system handles this automatically.
+
+### Upgrade Guide
+
+#### For Users of Cap-prefixed Widget Types
+
+```rust
+// Before (0.1.1):
+use astrelis_ui::{CapButton, CapContainer, CapText};
+
+// After (0.1.2):
+// These types were experimental and not integrated.
+// Use the widgets module instead:
+use astrelis_ui::widgets::{Button, Container, Text};
+```
+
+#### Using Constraint in Style
+
+```rust
+use astrelis_ui::{Style, Constraint, calc, percent, px, min2};
+
+// Simple usage (unchanged)
+let style = Style::new().width(400.0);
+
+// Using Constraint directly
+let style = Style::new()
+    .width(Constraint::Percent(50.0))
+    .height(Constraint::Auto);
+
+// Using constraint builders
+let style = Style::new()
+    .width(min2(percent(50.0), px(400.0)));  // min(50%, 400px)
+```
+
+---
+
+## [0.1.1] - 2026-01-21
+
+### Added
+
+#### Constraint System (`astrelis-ui`)
+- **CSS-like constraint expressions** - Responsive dimension values for layouts
+  - `Constraint::Px(f32)` - Fixed pixel values
+  - `Constraint::Percent(f32)` - Percentage of parent dimension
+  - `Constraint::Auto` - Automatic sizing based on content
+  - `Constraint::Vw(f32)` - Percentage of viewport width
+  - `Constraint::Vh(f32)` - Percentage of viewport height
+  - `Constraint::Vmin(f32)` - Percentage of minimum viewport dimension
+  - `Constraint::Vmax(f32)` - Percentage of maximum viewport dimension
+  - `Constraint::Calc(CalcExpr)` - Arithmetic expressions like `calc(100% - 40px)`
+  - `Constraint::Min(Vec)` - Minimum value: `min(50%, 400px)`
+  - `Constraint::Max(Vec)` - Maximum value: `max(200px, 30%)`
+  - `Constraint::Clamp { min, val, max }` - Bounded value: `clamp(100px, 50%, 800px)`
+
+- **Constraint builder helpers** - Ergonomic constructors for constraint expressions
+  - `px()`, `percent()`, `vw()`, `vh()`, `vmin()`, `vmax()` - Simple value constructors
+  - `calc()` - Build calc expressions with operator overloading (`+`, `-`, `*`, `/`)
+  - `min2()`, `min3()`, `max2()`, `max3()` - Min/max with 2-3 values
+  - `clamp()` - Bounded value constructor
+
+- **Constraint resolver** - Resolves constraints to absolute pixel values given parent size and viewport context
+
+#### Viewport Context (`astrelis-ui`)
+- **ViewportContext** - Context for resolving viewport-relative units (vw, vh, vmin, vmax)
+  - `ViewportContext::new(viewport_size)` - Create from viewport dimensions
+  - `width()`, `height()`, `vmin()`, `vmax()` - Accessors for viewport metrics
+
+#### Overflow Clipping (`astrelis-ui`)
+- **Overflow style property** - Control content overflow behavior
+  - `Overflow::Visible` - Content renders beyond bounds (default)
+  - `Overflow::Hidden` - Content clipped at container bounds
+  - `Overflow::Scroll` - Scrollable with scrollbars (planned)
+  - `overflow_x()`, `overflow_y()`, `overflow_xy()` - Style builder methods
+
+- **ClipRect** - GPU scissor-based clipping rectangles
+  - `ClipRect::infinite()` - No clipping
+  - `ClipRect::from_bounds()` - Create from position and size
+  - `intersect()` - Combine nested clip regions
+  - `contains()` - Point containment testing
+  - Automatic conversion to physical pixel coordinates for GPU scissor tests
+
+#### Examples
+- **constraint_showcase.rs** - Demonstrates constraint expressions and viewport units
+- **overflow_demo.rs** - Demonstrates overflow clipping with scrollable lists
+
+### Fixed
+
+- **Overflow clipping on dirty updates** - Fixed clipping not persisting through incremental updates
+  - Root cause: Dirty update path bypassed clip rect computation, always using infinite clip
+  - Added `compute_inherited_clip()` method to walk up tree and compute proper inherited clips
+  - Clipping now persists correctly through window resizes and incremental updates
+
 ## [0.1.0] - 2025-01-21
 
 ### Added
@@ -185,4 +314,6 @@ let window_id = match window_manager.create_window(ctx, descriptor) {
 
 ---
 
+[0.1.2]: https://github.com/hxyulin/astrelis/releases/tag/v0.1.2
+[0.1.1]: https://github.com/hxyulin/astrelis/releases/tag/v0.1.1
 [0.1.0]: https://github.com/hxyulin/astrelis/releases/tag/v0.1.0

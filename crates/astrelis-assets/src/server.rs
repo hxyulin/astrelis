@@ -60,6 +60,26 @@ struct PendingLoad {
 ///     }
 /// }
 /// ```
+///
+/// # Thread Safety
+///
+/// `AssetServer` is **not** thread-safe and must be accessed from a single thread.
+/// All methods require `&mut self` to ensure exclusive access.
+///
+/// For multi-threaded applications, use one of these patterns:
+///
+/// 1. **Main thread ownership**: Keep the AssetServer on the main thread and pass
+///    loaded assets to worker threads via handles.
+///
+/// 2. **Mutex wrapper**: Wrap in `Arc<Mutex<AssetServer>>` for synchronized access
+///    (may introduce contention).
+///
+/// 3. **Channel-based**: Use message passing to queue load requests from worker
+///    threads to a dedicated asset loading thread.
+///
+/// Handles (`Handle<T>`) are `Send + Sync` and can be safely passed between threads.
+/// The underlying asset data can be accessed through `Assets<T>::get()` which
+/// returns a reference valid only while the storage is borrowed.
 pub struct AssetServer {
     /// Per-type asset storage.
     storages: AssetStorages,
@@ -345,17 +365,40 @@ impl AssetServer {
             .load(&pending.source, &bytes, pending.extension.as_deref());
 
         match result {
-            Ok(_asset) => {
-                // We need to set the asset in storage, but we don't know the type here
-                // This is a limitation of the type-erased approach
-                // For now, we just emit the event - the typed API handles storage
-                self.events.push(AssetEvent::Created {
-                    handle: pending.handle,
-                    type_id: pending.handle.type_id(),
-                    version: 1,
-                });
+            Ok(asset) => {
+                // Store the type-erased asset in the appropriate storage
+                if self.storages.set_loaded_erased(&pending.handle, asset) {
+                    let version = self
+                        .storages
+                        .version_erased(&pending.handle)
+                        .unwrap_or(1);
+                    self.events.push(AssetEvent::Created {
+                        handle: pending.handle,
+                        type_id: pending.handle.type_id(),
+                        version,
+                    });
+                } else {
+                    // Failed to store - this shouldn't happen normally
+                    tracing::error!(
+                        "Failed to store loaded asset for handle {:?}",
+                        pending.handle.id()
+                    );
+                    self.events.push(AssetEvent::LoadFailed {
+                        handle: pending.handle,
+                        type_id: pending.handle.type_id(),
+                        error: "Failed to store loaded asset".to_string(),
+                    });
+                }
             }
             Err(err) => {
+                // Set the asset to failed state in storage
+                self.storages.set_failed_erased(
+                    &pending.handle,
+                    AssetError::LoaderError {
+                        path: pending.source.display_path(),
+                        message: err.to_string(),
+                    },
+                );
                 self.events.push(AssetEvent::LoadFailed {
                     handle: pending.handle,
                     type_id: pending.handle.type_id(),

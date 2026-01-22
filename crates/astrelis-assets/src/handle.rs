@@ -145,6 +145,20 @@ impl UntypedHandle {
         self.id.type_id
     }
 
+    /// Create an UntypedHandle for testing purposes only.
+    ///
+    /// This creates a handle with the given index and generation, using
+    /// a dummy type ID. Should only be used in tests.
+    #[cfg(test)]
+    pub(crate) fn test_handle(index: u32, generation: u32) -> Self {
+        Self {
+            id: HandleId::new(
+                IndexSlot::new(index, generation),
+                TypeId::of::<()>(),
+            ),
+        }
+    }
+
     /// Try to convert to a typed handle.
     ///
     /// Returns `None` if the type doesn't match.
@@ -198,7 +212,9 @@ pub struct StrongHandle<T: Asset> {
 impl<T: Asset> StrongHandle<T> {
     /// Create a new strong handle.
     pub(crate) fn new(handle: Handle<T>, refcount: Arc<AtomicU32>) -> Self {
-        refcount.fetch_add(1, Ordering::Relaxed);
+        // Use Acquire ordering to ensure we see any previous modifications
+        // to data associated with this handle before incrementing.
+        refcount.fetch_add(1, Ordering::Acquire);
         Self { handle, refcount }
     }
 
@@ -222,12 +238,16 @@ impl<T: Asset> StrongHandle<T> {
 
     /// Get the current reference count.
     pub fn ref_count(&self) -> u32 {
-        self.refcount.load(Ordering::Relaxed)
+        // Use Acquire to ensure we see the most recent count
+        self.refcount.load(Ordering::Acquire)
     }
 }
 
 impl<T: Asset> Clone for StrongHandle<T> {
     fn clone(&self) -> Self {
+        // Use Relaxed here because cloning doesn't need synchronization with
+        // other operations - we already have a valid reference.
+        // The Arc clone provides the necessary synchronization.
         self.refcount.fetch_add(1, Ordering::Relaxed);
         Self {
             handle: self.handle,
@@ -238,6 +258,9 @@ impl<T: Asset> Clone for StrongHandle<T> {
 
 impl<T: Asset> Drop for StrongHandle<T> {
     fn drop(&mut self) {
+        // Use Release ordering to ensure all previous writes to data associated
+        // with this handle are visible before the reference count is decremented.
+        // This synchronizes with the Acquire in upgrade() to prevent use-after-free.
         self.refcount.fetch_sub(1, Ordering::Release);
     }
 }
@@ -274,7 +297,10 @@ impl<T: Asset> WeakHandle<T> {
     /// Returns `None` if all strong handles have been dropped.
     pub fn upgrade(&self) -> Option<StrongHandle<T>> {
         self.refcount.upgrade().map(|refcount| {
-            refcount.fetch_add(1, Ordering::Relaxed);
+            // Use Acquire ordering to synchronize with the Release in Drop.
+            // This ensures we see all writes that happened before the last
+            // strong handle was dropped, preventing use-after-free.
+            refcount.fetch_add(1, Ordering::Acquire);
             StrongHandle {
                 handle: self.handle,
                 refcount,

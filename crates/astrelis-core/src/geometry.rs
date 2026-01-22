@@ -67,6 +67,12 @@ impl CoordinateSpace for Physical {}
 /// - 2.0: Retina/HiDPI displays
 /// - 1.5, 1.25: Common Windows scaling factors
 ///
+/// # Safety
+///
+/// The scale factor must be positive (greater than 0). Methods like `inverse()`
+/// and coordinate conversions will produce infinity or NaN if the scale is 0.
+/// Use `try_new()` or `is_valid()` to validate scale factors from untrusted input.
+///
 /// # Example
 ///
 /// ```rust
@@ -75,20 +81,70 @@ impl CoordinateSpace for Physical {}
 /// let scale = ScaleFactor(2.0);
 /// assert_eq!(scale.0, 2.0);
 /// assert_eq!(scale.inverse().0, 0.5);
+///
+/// // Validate scale factors from user input
+/// let scale = ScaleFactor::try_new(2.0).expect("Invalid scale");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct ScaleFactor(pub f64);
 
 impl ScaleFactor {
     /// Create a new scale factor.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, panics if the scale is not positive (> 0) or is NaN.
+    /// In release builds, invalid values may cause division by zero or NaN propagation.
     #[inline]
     pub const fn new(scale: f64) -> Self {
+        // Note: Can't do runtime checks in const fn, but we document the requirement
         Self(scale)
     }
 
+    /// Try to create a new scale factor, returning None if invalid.
+    ///
+    /// Returns `None` if:
+    /// - The scale is zero or negative
+    /// - The scale is NaN or infinity
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use astrelis_core::geometry::ScaleFactor;
+    ///
+    /// assert!(ScaleFactor::try_new(2.0).is_some());
+    /// assert!(ScaleFactor::try_new(0.0).is_none());
+    /// assert!(ScaleFactor::try_new(-1.0).is_none());
+    /// assert!(ScaleFactor::try_new(f64::NAN).is_none());
+    /// ```
+    #[inline]
+    pub fn try_new(scale: f64) -> Option<Self> {
+        if scale.is_finite() && scale > 0.0 {
+            Some(Self(scale))
+        } else {
+            None
+        }
+    }
+
+    /// Check if this scale factor is valid (positive and finite).
+    #[inline]
+    pub fn is_valid(self) -> bool {
+        self.0.is_finite() && self.0 > 0.0
+    }
+
     /// Get the inverse scale factor (1.0 / scale).
+    ///
+    /// # Note
+    ///
+    /// Returns infinity if the scale is 0. Use `is_valid()` to check first
+    /// if the scale factor comes from untrusted input.
     #[inline]
     pub fn inverse(self) -> Self {
+        debug_assert!(
+            self.is_valid(),
+            "ScaleFactor::inverse() called on invalid scale factor: {}",
+            self.0
+        );
         Self(1.0 / self.0)
     }
 

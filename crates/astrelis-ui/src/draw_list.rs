@@ -4,6 +4,7 @@
 //! The draw list is API-agnostic and can be encoded to different GPU backends.
 //! It tracks which nodes contribute which draw commands for efficient updates.
 
+use crate::clip::ClipRect;
 use crate::dirty_ranges::DirtyRanges;
 use crate::tree::NodeId;
 use crate::widgets::{ImageTexture, ImageUV};
@@ -64,6 +65,24 @@ impl DrawCommand {
             DrawCommand::Image(i) => i.node_id = node_id,
         }
     }
+
+    /// Get the clip rectangle for this command.
+    pub fn clip_rect(&self) -> &ClipRect {
+        match self {
+            DrawCommand::Quad(q) => &q.clip_rect,
+            DrawCommand::Text(t) => &t.clip_rect,
+            DrawCommand::Image(i) => &i.clip_rect,
+        }
+    }
+
+    /// Set the clip rectangle for this command.
+    pub fn set_clip_rect(&mut self, clip_rect: ClipRect) {
+        match self {
+            DrawCommand::Quad(q) => q.clip_rect = clip_rect,
+            DrawCommand::Text(t) => t.clip_rect = clip_rect,
+            DrawCommand::Image(i) => i.clip_rect = clip_rect,
+        }
+    }
 }
 
 /// Command to draw a quad (rectangle).
@@ -83,6 +102,8 @@ pub struct QuadCommand {
     pub border_thickness: f32,
     /// Z-index for depth sorting
     pub z_index: u16,
+    /// Clip rectangle for scissor clipping
+    pub clip_rect: ClipRect,
 }
 
 impl QuadCommand {
@@ -96,6 +117,7 @@ impl QuadCommand {
             border_radius: 0.0,
             border_thickness: 0.0,
             z_index,
+            clip_rect: ClipRect::infinite(),
         }
     }
 
@@ -115,6 +137,7 @@ impl QuadCommand {
             border_radius,
             border_thickness: 0.0,
             z_index,
+            clip_rect: ClipRect::infinite(),
         }
     }
 
@@ -135,7 +158,14 @@ impl QuadCommand {
             border_radius,
             border_thickness,
             z_index,
+            clip_rect: ClipRect::infinite(),
         }
+    }
+
+    /// Set the clip rectangle for this quad.
+    pub fn with_clip(mut self, clip_rect: ClipRect) -> Self {
+        self.clip_rect = clip_rect;
+        self
     }
 }
 
@@ -156,6 +186,8 @@ pub struct TextCommand {
     pub effects: Option<TextEffects>,
     /// Render mode (Bitmap or SDF) - auto-selected when effects are present
     pub render_mode: TextRenderMode,
+    /// Clip rectangle for scissor clipping
+    pub clip_rect: ClipRect,
 }
 
 impl TextCommand {
@@ -174,6 +206,7 @@ impl TextCommand {
             z_index,
             effects: None,
             render_mode: TextRenderMode::Bitmap,
+            clip_rect: ClipRect::infinite(),
         }
     }
 
@@ -225,6 +258,7 @@ impl TextCommand {
             z_index,
             effects: Some(effects),
             render_mode: TextRenderMode::SDF { spread: 4.0 },
+            clip_rect: ClipRect::infinite(),
         }
     }
 
@@ -248,6 +282,12 @@ impl TextCommand {
     pub fn requires_sdf(&self) -> bool {
         self.render_mode.is_sdf() || self.effects.is_some()
     }
+
+    /// Set the clip rectangle for this text.
+    pub fn with_clip(mut self, clip_rect: ClipRect) -> Self {
+        self.clip_rect = clip_rect;
+        self
+    }
 }
 
 /// Command to draw an image (textured quad).
@@ -269,6 +309,8 @@ pub struct ImageCommand {
     pub border_radius: f32,
     /// Z-index for depth sorting
     pub z_index: u16,
+    /// Clip rectangle for scissor clipping
+    pub clip_rect: ClipRect,
 }
 
 impl std::fmt::Debug for ImageCommand {
@@ -281,6 +323,7 @@ impl std::fmt::Debug for ImageCommand {
             .field("tint", &self.tint)
             .field("border_radius", &self.border_radius)
             .field("z_index", &self.z_index)
+            .field("clip_rect", &self.clip_rect)
             .finish()
     }
 }
@@ -305,6 +348,7 @@ impl ImageCommand {
             tint,
             border_radius,
             z_index,
+            clip_rect: ClipRect::infinite(),
         }
     }
 
@@ -319,6 +363,12 @@ impl ImageCommand {
             0.0,
             z_index,
         )
+    }
+
+    /// Set the clip rectangle for this image.
+    pub fn with_clip(mut self, clip_rect: ClipRect) -> Self {
+        self.clip_rect = clip_rect;
+        self
     }
 }
 

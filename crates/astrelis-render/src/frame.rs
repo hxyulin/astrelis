@@ -48,8 +48,24 @@ pub struct FrameContext {
 }
 
 impl FrameContext {
+    /// Get the surface for this frame.
+    ///
+    /// # Panics
+    /// Panics if the surface has already been consumed. Use `try_surface()` for fallible access.
     pub fn surface(&self) -> &Surface {
-        self.surface.as_ref().unwrap()
+        self.surface.as_ref().expect("Surface already consumed or not acquired")
+    }
+
+    /// Try to get the surface for this frame.
+    ///
+    /// Returns `None` if the surface has already been consumed.
+    pub fn try_surface(&self) -> Option<&Surface> {
+        self.surface.as_ref()
+    }
+
+    /// Check if the surface is available.
+    pub fn has_surface(&self) -> bool {
+        self.surface.is_some()
     }
 
     pub fn surface_format(&self) -> wgpu::TextureFormat {
@@ -72,15 +88,46 @@ impl FrameContext {
         &self.context
     }
 
+    /// Get the command encoder for this frame.
+    ///
+    /// # Panics
+    /// Panics if the encoder has already been taken. Use `try_encoder()` for fallible access.
     pub fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
         self.encoder.as_mut().expect("Encoder already taken")
     }
 
+    /// Try to get the command encoder for this frame.
+    ///
+    /// Returns `None` if the encoder has already been taken.
+    pub fn try_encoder(&mut self) -> Option<&mut wgpu::CommandEncoder> {
+        self.encoder.as_mut()
+    }
+
+    /// Check if the encoder is available.
+    pub fn has_encoder(&self) -> bool {
+        self.encoder.is_some()
+    }
+
+    /// Get the encoder and surface together.
+    ///
+    /// # Panics
+    /// Panics if either the encoder or surface has been consumed.
+    /// Use `try_encoder_and_surface()` for fallible access.
     pub fn encoder_and_surface(&mut self) -> (&mut wgpu::CommandEncoder, &Surface) {
         (
             self.encoder.as_mut().expect("Encoder already taken"),
-            self.surface.as_ref().unwrap(),
+            self.surface.as_ref().expect("Surface already consumed"),
         )
+    }
+
+    /// Try to get the encoder and surface together.
+    ///
+    /// Returns `None` if either has been consumed.
+    pub fn try_encoder_and_surface(&mut self) -> Option<(&mut wgpu::CommandEncoder, &Surface)> {
+        match (self.encoder.as_mut(), self.surface.as_ref()) {
+            (Some(encoder), Some(surface)) => Some((encoder, surface)),
+            _ => None,
+        }
     }
 
     pub fn finish(self) {
@@ -434,8 +481,26 @@ pub struct RenderPass<'a> {
 }
 
 impl<'a> RenderPass<'a> {
+    /// Get the underlying wgpu RenderPass descriptor.
+    ///
+    /// # Panics
+    /// Panics if the render pass has already been consumed (dropped or finished).
+    /// Use `try_descriptor()` for fallible access.
     pub fn descriptor(&mut self) -> &mut wgpu::RenderPass<'static> {
-        self.descriptor.as_mut().unwrap()
+        self.descriptor.as_mut()
+            .expect("RenderPass already consumed - ensure it wasn't dropped or finished early")
+    }
+
+    /// Try to get the underlying wgpu RenderPass descriptor.
+    ///
+    /// Returns `None` if the render pass has already been consumed.
+    pub fn try_descriptor(&mut self) -> Option<&mut wgpu::RenderPass<'static>> {
+        self.descriptor.as_mut()
+    }
+
+    /// Check if the render pass is still valid and can be used.
+    pub fn is_valid(&self) -> bool {
+        self.descriptor.is_some()
     }
 
     pub fn finish(self) {

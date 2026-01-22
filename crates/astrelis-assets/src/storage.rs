@@ -42,10 +42,9 @@ impl<T: Asset> Assets<T> {
 
     /// Insert a new asset and return a handle to it.
     pub fn insert(&mut self, source: AssetSource, asset: T) -> Handle<T> {
-        let key = source.key().to_string();
-
-        // Check if already exists
-        if let Some(&handle_id) = self.source_to_handle.get(&key) {
+        // Check if already exists using &str (no allocation)
+        let key_ref = source.key();
+        if let Some(&handle_id) = self.source_to_handle.get(key_ref) {
             // Update existing
             if let Some(entry) = self.entries.try_get_mut(handle_id.slot) {
                 entry.state = AssetState::Ready(Arc::new(asset));
@@ -53,6 +52,9 @@ impl<T: Asset> Assets<T> {
             }
             return Handle::new(handle_id);
         }
+
+        // Only allocate String if we need to insert a new entry
+        let key = key_ref.to_string();
 
         // Insert new entry
         let entry = AssetEntry::with_asset(source.clone(), asset);
@@ -67,12 +69,14 @@ impl<T: Asset> Assets<T> {
 
     /// Reserve a handle for an asset that will be loaded later.
     pub fn reserve(&mut self, source: AssetSource) -> Handle<T> {
-        let key = source.key().to_string();
-
-        // Check if already exists
-        if let Some(&handle_id) = self.source_to_handle.get(&key) {
+        // Check if already exists using &str (no allocation)
+        let key_ref = source.key();
+        if let Some(&handle_id) = self.source_to_handle.get(key_ref) {
             return Handle::new(handle_id);
         }
+
+        // Only allocate String if we need to insert a new entry
+        let key = key_ref.to_string();
 
         // Insert placeholder entry
         let entry = AssetEntry::new(source.clone());
@@ -157,8 +161,8 @@ impl<T: Asset> Assets<T> {
         // Check if the entry exists and generation matches
         if self.entries.try_get(slot).is_some() {
             let entry = self.entries.remove(slot);
-            let key = entry.source.key().to_string();
-            self.source_to_handle.remove(&key);
+            // Use &str directly - no allocation needed (HashMap implements Borrow<str>)
+            self.source_to_handle.remove(entry.source.key());
             self.ref_counts.remove(&slot.index());
             Some(entry)
         } else {
@@ -219,6 +223,18 @@ pub trait ErasedAssets: Send + Sync {
     /// Get the source for an asset by its slot.
     fn source_for_slot(&self, slot: IndexSlot) -> Option<&AssetSource>;
 
+    /// Set a loaded asset from a type-erased value.
+    ///
+    /// Returns `true` if the asset was successfully stored, `false` if the type doesn't match
+    /// or the slot doesn't exist.
+    fn set_loaded_erased(&mut self, slot: IndexSlot, asset: Box<dyn Any + Send + Sync>) -> bool;
+
+    /// Set an asset to failed state.
+    fn set_failed_erased(&mut self, slot: IndexSlot, error: AssetError);
+
+    /// Get the version of an asset by slot.
+    fn version_for_slot(&self, slot: IndexSlot) -> Option<u32>;
+
     /// Get as Any for downcasting.
     fn as_any(&self) -> &dyn Any;
 
@@ -240,6 +256,37 @@ impl<T: Asset> ErasedAssets for Assets<T> {
 
     fn source_for_slot(&self, slot: IndexSlot) -> Option<&AssetSource> {
         self.entries.try_get(slot).map(|e| &e.source)
+    }
+
+    fn set_loaded_erased(&mut self, slot: IndexSlot, asset: Box<dyn Any + Send + Sync>) -> bool {
+        // Try to downcast the asset to the expected type
+        let Some(typed_asset) = asset.downcast::<T>().ok() else {
+            tracing::error!(
+                "Type mismatch storing asset: expected {}, got different type",
+                T::type_name()
+            );
+            return false;
+        };
+
+        // Get the entry and update it
+        let Some(entry) = self.entries.try_get_mut(slot) else {
+            tracing::error!("Slot not found for asset: {:?}", slot);
+            return false;
+        };
+
+        entry.state = AssetState::Ready(Arc::new(*typed_asset));
+        entry.version.increment();
+        true
+    }
+
+    fn set_failed_erased(&mut self, slot: IndexSlot, error: AssetError) {
+        if let Some(entry) = self.entries.try_get_mut(slot) {
+            entry.state = AssetState::Failed(Arc::new(error));
+        }
+    }
+
+    fn version_for_slot(&self, slot: IndexSlot) -> Option<u32> {
+        self.entries.try_get(slot).map(|e| e.version.get())
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -305,6 +352,42 @@ impl AssetStorages {
 
         // Get the source using the slot from the handle
         storage.source_for_slot(handle.id().slot)
+    }
+
+    /// Set a loaded asset using a type-erased value and untyped handle.
+    ///
+    /// This is used by the async loading system to store assets without knowing
+    /// the concrete type at compile time.
+    ///
+    /// Returns `true` if the asset was successfully stored, `false` if the storage
+    /// doesn't exist or the type doesn't match.
+    pub fn set_loaded_erased(
+        &mut self,
+        handle: &UntypedHandle,
+        asset: Box<dyn Any + Send + Sync>,
+    ) -> bool {
+        let Some(storage) = self.storages.get_mut(&handle.type_id()) else {
+            tracing::error!(
+                "No storage found for type {:?}",
+                handle.type_id()
+            );
+            return false;
+        };
+
+        storage.set_loaded_erased(handle.id().slot, asset)
+    }
+
+    /// Set an asset to failed state using an untyped handle.
+    pub fn set_failed_erased(&mut self, handle: &UntypedHandle, error: AssetError) {
+        if let Some(storage) = self.storages.get_mut(&handle.type_id()) {
+            storage.set_failed_erased(handle.id().slot, error);
+        }
+    }
+
+    /// Get the version of an asset using an untyped handle.
+    pub fn version_erased(&self, handle: &UntypedHandle) -> Option<u32> {
+        let storage = self.storages.get(&handle.type_id())?;
+        storage.version_for_slot(handle.id().slot)
     }
 }
 

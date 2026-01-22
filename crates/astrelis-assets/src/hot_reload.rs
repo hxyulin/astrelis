@@ -156,6 +156,8 @@ impl AssetWatcher {
 mod tests {
     use super::*;
     use std::fs;
+    use std::thread;
+    use std::time::Duration;
     use tempfile::TempDir;
 
     #[test]
@@ -174,6 +176,111 @@ mod tests {
         assert_eq!(watcher.watched_directories().len(), 1);
     }
 
-    // TODO: Add tests for register/unregister and file change detection
-    // These require creating UntypedHandle instances which need AssetServer integration
+    #[test]
+    fn test_watch_same_directory_twice() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut watcher = AssetWatcher::new().unwrap();
+
+        watcher.watch_directory(temp_dir.path()).unwrap();
+        watcher.watch_directory(temp_dir.path()).unwrap();
+
+        // Should only have one entry, not two
+        assert_eq!(watcher.watched_directories().len(), 1);
+    }
+
+    #[test]
+    fn test_register_file() {
+        let mut watcher = AssetWatcher::new().unwrap();
+        let handle = UntypedHandle::test_handle(0, 1);
+
+        watcher.register_file("/some/path/file.txt", handle);
+
+        // Verify the file is registered
+        assert!(watcher.path_to_handle.contains_key(Path::new("/some/path/file.txt")));
+    }
+
+    #[test]
+    fn test_register_multiple_handles_for_same_file() {
+        let mut watcher = AssetWatcher::new().unwrap();
+        let handle1 = UntypedHandle::test_handle(0, 1);
+        let handle2 = UntypedHandle::test_handle(1, 1);
+
+        watcher.register_file("/path/file.txt", handle1);
+        watcher.register_file("/path/file.txt", handle2);
+
+        let handles = watcher.path_to_handle.get(Path::new("/path/file.txt")).unwrap();
+        assert_eq!(handles.len(), 2);
+    }
+
+    #[test]
+    fn test_unregister_file() {
+        let mut watcher = AssetWatcher::new().unwrap();
+        let handle1 = UntypedHandle::test_handle(0, 1);
+        let handle2 = UntypedHandle::test_handle(1, 1);
+
+        watcher.register_file("/path/file.txt", handle1);
+        watcher.register_file("/path/file.txt", handle2);
+
+        // Unregister handle1
+        watcher.unregister_file("/path/file.txt", &handle1);
+
+        let handles = watcher.path_to_handle.get(Path::new("/path/file.txt")).unwrap();
+        assert_eq!(handles.len(), 1);
+        assert_eq!(handles[0].id().slot.index(), 1);
+    }
+
+    #[test]
+    fn test_unregister_last_handle_removes_path() {
+        let mut watcher = AssetWatcher::new().unwrap();
+        let handle = UntypedHandle::test_handle(0, 1);
+
+        watcher.register_file("/path/file.txt", handle);
+        watcher.unregister_file("/path/file.txt", &handle);
+
+        // Path should be removed when no handles remain
+        assert!(!watcher.path_to_handle.contains_key(Path::new("/path/file.txt")));
+    }
+
+    #[test]
+    fn test_poll_changes_no_events() {
+        let mut watcher = AssetWatcher::new().unwrap();
+        let changes = watcher.poll_changes();
+        assert!(changes.is_empty());
+    }
+
+    #[test]
+    fn test_poll_changes_deduplicates() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut watcher = AssetWatcher::new().unwrap();
+        watcher.watch_directory(temp_dir.path()).unwrap();
+
+        let file_path = temp_dir.path().join("test.txt");
+        let handle = UntypedHandle::test_handle(0, 1);
+
+        // Create the file
+        fs::write(&file_path, "initial content").unwrap();
+
+        // Register the file with the watcher
+        watcher.register_file(&file_path, handle);
+
+        // Give the watcher time to notice the file
+        thread::sleep(Duration::from_millis(100));
+
+        // Drain any initial events
+        let _ = watcher.poll_changes();
+
+        // Modify the file multiple times rapidly
+        fs::write(&file_path, "modified content 1").unwrap();
+        fs::write(&file_path, "modified content 2").unwrap();
+
+        // Give the watcher time to process events
+        thread::sleep(Duration::from_millis(200));
+
+        // Poll should return deduped handles
+        let changes = watcher.poll_changes();
+
+        // Even with multiple modifications, we should only get one handle back
+        // (due to deduplication)
+        assert!(changes.len() <= 1, "Expected at most 1 change, got {}", changes.len());
+    }
 }

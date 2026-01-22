@@ -217,10 +217,48 @@ impl WindowContext {
     }
 }
 
+impl WindowContext {
+    /// Try to acquire a surface texture, handling recoverable errors by reconfiguring.
+    ///
+    /// This method will attempt to reconfigure the surface if it's lost or outdated,
+    /// providing automatic recovery for common scenarios like window minimize/restore.
+    fn try_acquire_surface_texture(&mut self) -> Result<wgpu::SurfaceTexture, GraphicsError> {
+        // First attempt
+        match self.surface.get_current_texture() {
+            Ok(frame) => return Ok(frame),
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                // Surface needs reconfiguration - try to recover
+                tracing::debug!("Surface lost/outdated, reconfiguring...");
+                self.surface.configure(&self.context.device, &self.config);
+            }
+            Err(wgpu::SurfaceError::OutOfMemory) => {
+                return Err(GraphicsError::SurfaceOutOfMemory);
+            }
+            Err(wgpu::SurfaceError::Timeout) => {
+                return Err(GraphicsError::SurfaceTimeout);
+            }
+            Err(e) => {
+                return Err(GraphicsError::SurfaceTextureAcquisitionFailed(e.to_string()));
+            }
+        }
+
+        // Second attempt after reconfiguration
+        match self.surface.get_current_texture() {
+            Ok(frame) => Ok(frame),
+            Err(wgpu::SurfaceError::Lost) => Err(GraphicsError::SurfaceLost),
+            Err(wgpu::SurfaceError::Outdated) => Err(GraphicsError::SurfaceOutdated),
+            Err(wgpu::SurfaceError::OutOfMemory) => Err(GraphicsError::SurfaceOutOfMemory),
+            Err(wgpu::SurfaceError::Timeout) => Err(GraphicsError::SurfaceTimeout),
+            Err(e) => Err(GraphicsError::SurfaceTextureAcquisitionFailed(e.to_string())),
+        }
+    }
+}
+
 impl WindowBackend for WindowContext {
     type FrameContext = FrameContext;
+    type Error = GraphicsError;
 
-    fn begin_drawing(&mut self) -> Self::FrameContext {
+    fn try_begin_drawing(&mut self) -> Result<Self::FrameContext, Self::Error> {
         profile_function!();
 
         let mut configure_needed = false;
@@ -234,10 +272,7 @@ impl WindowBackend for WindowContext {
             self.surface.configure(&self.context.device, &self.config);
         }
 
-        let frame = self.surface.get_current_texture().unwrap_or_else(|e| {
-            tracing::error!("Failed to acquire surface texture: {}. This may indicate the surface is lost or outdated.", e);
-            panic!("Surface texture acquisition failed: {}. Consider handling surface recreation in your application.", e);
-        });
+        let frame = self.try_acquire_surface_texture()?;
         let view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
@@ -249,7 +284,7 @@ impl WindowBackend for WindowContext {
                 label: Some("Frame Encoder"),
             });
 
-        FrameContext {
+        Ok(FrameContext {
             surface: Some(Surface {
                 texture: frame,
                 view,
@@ -259,7 +294,7 @@ impl WindowBackend for WindowContext {
             stats: FrameStats::new(),
             window: self.window.window.clone(),
             surface_format: self.config.format,
-        }
+        })
     }
 }
 
@@ -347,8 +382,9 @@ impl std::ops::DerefMut for RenderableWindow {
 
 impl WindowBackend for RenderableWindow {
     type FrameContext = FrameContext;
+    type Error = GraphicsError;
 
-    fn begin_drawing(&mut self) -> Self::FrameContext {
-        self.context.begin_drawing()
+    fn try_begin_drawing(&mut self) -> Result<Self::FrameContext, Self::Error> {
+        self.context.try_begin_drawing()
     }
 }

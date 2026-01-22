@@ -89,8 +89,26 @@ impl Window {
 
 pub trait WindowBackend {
     type FrameContext;
+    type Error;
 
-    fn begin_drawing(&mut self) -> Self::FrameContext;
+    /// Begin drawing a new frame.
+    ///
+    /// Returns a frame context that can be used to issue draw commands.
+    /// May fail if the surface is lost or outdated - in that case, the caller
+    /// should handle the error (e.g., by skipping this frame or reconfiguring the surface).
+    fn try_begin_drawing(&mut self) -> Result<Self::FrameContext, Self::Error>;
+
+    /// Begin drawing a new frame, panicking on error.
+    ///
+    /// This is a convenience method that panics if the surface cannot be acquired.
+    /// For production code, prefer `try_begin_drawing()` which allows graceful error handling.
+    fn begin_drawing(&mut self) -> Self::FrameContext
+    where
+        Self::Error: std::fmt::Debug,
+    {
+        self.try_begin_drawing()
+            .expect("Failed to begin drawing - consider using try_begin_drawing() for graceful error handling")
+    }
 }
 
 pub trait WindowExt {

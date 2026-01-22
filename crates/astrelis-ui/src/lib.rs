@@ -40,6 +40,10 @@
 pub mod animation;
 pub mod auto_dirty;
 pub mod builder;
+pub mod clip;
+pub mod constraint;
+pub mod constraint_builder;
+pub mod constraint_resolver;
 pub mod culling;
 pub mod debug;
 pub mod dirty;
@@ -61,13 +65,20 @@ pub mod middleware;
 pub mod overlay;
 pub mod renderer;
 pub mod style;
+pub use style::Overflow;
 pub mod theme;
 pub mod tooltip;
 pub mod tree;
+pub mod viewport_context;
 pub mod virtual_scroll;
-pub mod widget;
 pub mod widget_id;
 pub mod widgets;
+
+// NOTE: The capability-based widget system in `widget/` is experimental and not yet integrated
+// with the builder/renderer. It may be removed or significantly changed in future versions.
+// For now, use the `widgets` module which is the stable, actively-used widget system.
+#[doc(hidden)]
+pub mod widget;
 
 use astrelis_core::geometry::Size;
 use std::sync::Arc;
@@ -76,6 +87,7 @@ pub use animation::{
     WidgetAnimations, bounce, fade_in, fade_out, scale, slide_in_left, slide_in_top,
 };
 pub use auto_dirty::{NumericValue, TextValue, Value};
+pub use clip::{ClipRect, PhysicalClipRect};
 pub use debug::DebugOverlay;
 pub use dirty::DirtyFlags;
 pub use dirty_ranges::DirtyRanges;
@@ -85,19 +97,19 @@ pub use glyph_atlas::{
 };
 pub use gpu_types::{ImageInstance, QuadInstance, QuadVertex, TextInstance};
 pub use instance_buffer::InstanceBuffer;
-pub use length::{Length, LengthAuto, LengthPercentage, auto, length, percent};
+pub use length::{Length, LengthAuto, LengthPercentage, auto, length, percent, vw, vh, vmin, vmax};
+// Re-export constraint system for advanced responsive layouts
+pub use constraint::{Constraint, CalcExpr};
+pub use constraint_builder::{px, calc, min2, min_of, max2, max_of, clamp};
+pub use constraint_resolver::{ConstraintResolver, ResolveContext};
 pub use metrics::UiMetrics;
+pub use viewport_context::ViewportContext;
 pub use astrelis_text::{TextPipeline, TextShapeRequest, TextShaper, SyncTextShaper};
 pub use widget_id::{WidgetId, WidgetIdRegistry};
 pub use widgets::{Image, ImageFit, ImageTexture, ImageUV};
 
-// Re-export new widget system types
-pub use widget::{
-    Button as CapButton, Checkbox, ClickableWidget, ColorWidget, Container as CapContainer,
-    ParentWidget, ParentWidgetHandle, RadioButton, Slider, SliderOrientation, SizedWidget,
-    Text as CapText, TextWidget, TextWidgetHandle, WidgetHandle, WidgetStorage,
-    AnyWidgetHandle, ColorWidgetHandle,
-};
+// NOTE: The `widget` module contains an experimental capability-based system that is
+// NOT integrated with the builder/renderer. Use `widgets::*` for actual UI development.
 
 // Re-export main types
 pub use builder::{ImageBuilder, UiBuilder, WidgetBuilder};

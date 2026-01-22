@@ -8,7 +8,7 @@ use astrelis_text::ShapedTextData;
 use crate::widgets::Widget;
 use astrelis_core::alloc::HashSet;
 use astrelis_core::math::Vec2;
-use astrelis_core::profiling::profile_function;
+use astrelis_core::profiling::{profile_function, profile_scope};
 use astrelis_text::FontRenderer;
 use indexmap::IndexMap;
 use std::sync::Arc;
@@ -497,6 +497,11 @@ impl UiTree {
         viewport_size: astrelis_core::geometry::Size<f32>,
         font_renderer: Option<&FontRenderer>,
     ) {
+        profile_scope!("compute_layout_internal");
+
+        // Resolve viewport-relative units before layout computation
+        self.resolve_viewport_units(viewport_size);
+
         // If no dirty roots but dirty nodes exist, default to root
         if self.dirty_roots.is_empty() && !self.dirty_nodes.is_empty()
              && let Some(root) = self.root {
@@ -639,6 +644,25 @@ impl UiTree {
                 node.layout.y = y;
             }
         }
+    }
+
+    /// Resolve viewport-relative units (vw, vh, vmin, vmax) to absolute pixels.
+    ///
+    /// This must be called before Taffy layout computation to convert viewport units
+    /// into pixel values that Taffy can understand.
+    ///
+    /// NOTE: This is a placeholder implementation for Phase 1. The challenge is that
+    /// once Length values are converted to Taffy dimensions, we lose the viewport unit
+    /// information. A full implementation would require:
+    /// - Storing original Length values alongside Taffy dimensions
+    /// - Or resolving viewport units at style-setting time
+    /// - Or adding metadata to track which dimensions need viewport resolution
+    ///
+    /// For now, viewport units work when set via the builder API which can resolve
+    /// them before passing to Taffy.
+    fn resolve_viewport_units(&mut self, _viewport_size: astrelis_core::geometry::Size<f32>) {
+        // Placeholder - actual resolution happens at style-setting time
+        // This will be expanded in a future phase to support dynamic viewport changes
     }
 
     /// Cache layout results from Taffy into our nodes.

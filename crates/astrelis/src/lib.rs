@@ -102,7 +102,7 @@ pub use astrelis_egui as egui;
 pub use astrelis_audio as audio;
 
 // Re-export engine types
-pub use engine::{Engine, EngineBuilder};
+pub use engine::{Engine, EngineBuilder, EngineError};
 pub use plugin::{Plugin, FnPlugin, PluginGroup};
 pub use resource::{Resource, Resources};
 pub use task_pool::TaskPool;
@@ -133,7 +133,7 @@ pub use plugins::{DefaultPlugins, MinimalPlugins};
 
 /// Prelude module for convenient imports
 pub mod prelude {
-    pub use crate::engine::{Engine, EngineBuilder};
+    pub use crate::engine::{Engine, EngineBuilder, EngineError};
     pub use crate::plugin::{Plugin, FnPlugin};
     pub use crate::resource::{Resource, Resources};
     pub use crate::task_pool::TaskPool;

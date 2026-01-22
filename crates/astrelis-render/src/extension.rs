@@ -146,13 +146,13 @@ impl<'a> AsWgpu for FrameContext {
     type WgpuType = wgpu::CommandEncoder;
 
     fn as_wgpu(&self) -> &Self::WgpuType {
-        self.encoder.as_ref().expect("Encoder already taken")
+        self.encoder.as_ref().expect("FrameContext encoder already taken - ensure finish() wasn't called early")
     }
 }
 
 impl<'a> AsWgpuMut for FrameContext {
     fn as_wgpu_mut(&mut self) -> &mut Self::WgpuType {
-        self.encoder.as_mut().expect("Encoder already taken")
+        self.encoder.as_mut().expect("FrameContext encoder already taken - ensure finish() wasn't called early")
     }
 }
 
@@ -160,13 +160,13 @@ impl<'a> AsWgpu for RenderPass<'a> {
     type WgpuType = wgpu::RenderPass<'static>;
 
     fn as_wgpu(&self) -> &Self::WgpuType {
-        self.descriptor.as_ref().unwrap()
+        self.descriptor.as_ref().expect("RenderPass already consumed - ensure it wasn't dropped early")
     }
 }
 
 impl<'a> AsWgpuMut for RenderPass<'a> {
     fn as_wgpu_mut(&mut self) -> &mut Self::WgpuType {
-        self.descriptor.as_mut().unwrap()
+        self.descriptor.as_mut().expect("RenderPass already consumed - ensure it wasn't dropped early")
     }
 }
 
@@ -174,13 +174,13 @@ impl<'a> AsWgpu for ComputePass<'a> {
     type WgpuType = wgpu::ComputePass<'static>;
 
     fn as_wgpu(&self) -> &Self::WgpuType {
-        self.pass.as_ref().unwrap()
+        self.pass.as_ref().expect("ComputePass already consumed - ensure it wasn't dropped early")
     }
 }
 
 impl<'a> AsWgpuMut for ComputePass<'a> {
     fn as_wgpu_mut(&mut self) -> &mut Self::WgpuType {
-        self.pass.as_mut().unwrap()
+        self.pass.as_mut().expect("ComputePass already consumed - ensure it wasn't dropped early")
     }
 }
 
@@ -213,10 +213,22 @@ pub trait FrameContextExt {
     fn encoder_mut(&mut self) -> Option<&mut wgpu::CommandEncoder>;
 
     /// Get the surface texture view for this frame.
+    ///
+    /// # Panics
+    /// Panics if the surface has been consumed. Use `try_surface_view()` for fallible access.
     fn surface_view(&self) -> &wgpu::TextureView;
 
+    /// Try to get the surface texture view for this frame.
+    fn try_surface_view(&self) -> Option<&wgpu::TextureView>;
+
     /// Get the surface texture for this frame.
+    ///
+    /// # Panics
+    /// Panics if the surface has been consumed. Use `try_surface_texture()` for fallible access.
     fn surface_texture(&self) -> &wgpu::Texture;
+
+    /// Try to get the surface texture for this frame.
+    fn try_surface_texture(&self) -> Option<&wgpu::Texture>;
 }
 
 impl FrameContextExt for FrameContext {
@@ -232,8 +244,16 @@ impl FrameContextExt for FrameContext {
         self.surface().view()
     }
 
+    fn try_surface_view(&self) -> Option<&wgpu::TextureView> {
+        self.try_surface().map(|s| s.view())
+    }
+
     fn surface_texture(&self) -> &wgpu::Texture {
         self.surface().texture()
+    }
+
+    fn try_surface_texture(&self) -> Option<&wgpu::Texture> {
+        self.try_surface().map(|s| s.texture())
     }
 }
 

@@ -341,6 +341,9 @@ pub struct Text {
     pub align: TextAlign,
     pub vertical_align: VerticalAlign,
     pub style: Style,
+    /// Font ID for font selection (index into FontSystem).
+    /// Default is 0 (the first/default font).
+    pub font_id: u32,
 }
 
 impl Text {
@@ -353,7 +356,14 @@ impl Text {
             align: TextAlign::Left,
             vertical_align: VerticalAlign::Top,
             style: Style::new(),
+            font_id: 0,
         }
+    }
+
+    /// Set the font ID for font selection.
+    pub fn font_id(mut self, font_id: u32) -> Self {
+        self.font_id = font_id;
+        self
     }
 
     pub fn size(mut self, size: f32) -> Self {
@@ -483,6 +493,9 @@ pub struct Button {
     pub is_hovered: bool,
     pub is_pressed: bool,
     pub on_click: Option<ButtonCallback>,
+    /// Font ID for font selection (index into FontSystem).
+    /// Default is 0 (the first/default font).
+    pub font_id: u32,
 }
 
 impl Button {
@@ -501,7 +514,14 @@ impl Button {
             is_hovered: false,
             is_pressed: false,
             on_click: None,
+            font_id: 0,
         }
+    }
+
+    /// Set the font ID for font selection.
+    pub fn font_id(mut self, font_id: u32) -> Self {
+        self.font_id = font_id;
+        self
     }
 
     pub fn on_click<F>(mut self, callback: F) -> Self

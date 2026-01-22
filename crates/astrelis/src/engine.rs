@@ -5,6 +5,48 @@ use std::collections::HashSet;
 use crate::plugin::{Plugin, PluginDyn, PluginGroup, PluginGroupAdapter};
 use crate::resource::Resources;
 
+/// Errors that can occur during engine construction.
+#[derive(Debug, Clone)]
+pub enum EngineError {
+    /// A circular dependency was detected between plugins.
+    CircularDependency {
+        /// The plugin that caused the circular dependency to be detected.
+        plugin: &'static str,
+        /// The chain of plugins involved in the cycle (if available).
+        chain: Vec<&'static str>,
+    },
+    /// A plugin dependency was not found.
+    MissingDependency {
+        /// The plugin that has the missing dependency.
+        plugin: &'static str,
+        /// The name of the missing dependency.
+        dependency: &'static str,
+    },
+    /// A plugin with the same name was added twice.
+    DuplicatePlugin {
+        /// The name of the duplicate plugin.
+        name: &'static str,
+    },
+}
+
+impl std::fmt::Display for EngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EngineError::CircularDependency { plugin, chain } => {
+                write!(f, "Circular dependency detected involving plugin '{}'. Chain: {:?}", plugin, chain)
+            }
+            EngineError::MissingDependency { plugin, dependency } => {
+                write!(f, "Plugin '{}' requires dependency '{}' which was not added", plugin, dependency)
+            }
+            EngineError::DuplicatePlugin { name } => {
+                write!(f, "Plugin '{}' was added more than once", name)
+            }
+        }
+    }
+}
+
+impl std::error::Error for EngineError {}
+
 /// The main engine struct that holds all resources and manages plugins.
 ///
 /// The engine is typically created using `EngineBuilder` and then
@@ -167,9 +209,16 @@ impl EngineBuilder {
     /// 1. Sort plugins by dependencies
     /// 2. Call `build()` on each plugin
     /// 3. Call `finish()` on each plugin
-    pub fn build(mut self) -> Engine {
+    ///
+    /// # Errors
+    ///
+    /// Returns `EngineError` if:
+    /// - A circular dependency is detected between plugins
+    /// - A plugin dependency is not found
+    /// - A plugin with the same name is added twice
+    pub fn try_build(mut self) -> Result<Engine, EngineError> {
         // Sort plugins by dependencies and collect indices
-        let sorted_indices = self.sort_plugins_by_dependency_indices();
+        let sorted_indices = self.try_sort_plugins_by_dependency_indices()?;
 
         // Track plugin names
         let mut plugin_names = HashSet::new();
@@ -197,11 +246,27 @@ impl EngineBuilder {
         // We need plugins in dependency order so cleanup can reverse it
         let sorted_plugins = Self::reorder_plugins(self.plugins, &sorted_indices);
 
-        Engine {
+        Ok(Engine {
             resources: self.resources,
             plugin_names,
             plugins: sorted_plugins,
-        }
+        })
+    }
+
+    /// Build the engine, panicking on error.
+    ///
+    /// This is a convenience method for examples and tests where error handling
+    /// is not needed. For production code, prefer `try_build()` which returns
+    /// a `Result`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if:
+    /// - A circular dependency is detected between plugins
+    /// - A plugin dependency is not found
+    /// - A plugin with the same name is added twice
+    pub fn build(self) -> Engine {
+        self.try_build().expect("Failed to build engine")
     }
 
     /// Reorder plugins according to sorted indices
@@ -218,11 +283,21 @@ impl EngineBuilder {
     }
 
     /// Sort plugins by dependencies using topological sort, returning indices.
-    fn sort_plugins_by_dependency_indices(&self) -> Vec<usize> {
-        // Simple topological sort
-        let mut sorted = Vec::new();
-        let mut visited = HashSet::new();
-        let mut visiting = HashSet::new();
+    ///
+    /// # Errors
+    ///
+    /// Returns `EngineError` if:
+    /// - A circular dependency is detected
+    /// - A plugin dependency is not found among registered plugins
+    /// - Duplicate plugin names are detected
+    fn try_sort_plugins_by_dependency_indices(&self) -> Result<Vec<usize>, EngineError> {
+        // Check for duplicate plugin names
+        let mut seen_names = HashSet::new();
+        for plugin in &self.plugins {
+            if !seen_names.insert(plugin.name()) {
+                return Err(EngineError::DuplicatePlugin { name: plugin.name() });
+            }
+        }
 
         // Create a name -> index map
         let plugin_map: std::collections::HashMap<_, _> = self
@@ -232,35 +307,64 @@ impl EngineBuilder {
             .map(|(i, p)| (p.name(), i))
             .collect();
 
+        // Check for missing dependencies
+        for plugin in &self.plugins {
+            for dep in plugin.dependencies() {
+                if !plugin_map.contains_key(dep) {
+                    return Err(EngineError::MissingDependency {
+                        plugin: plugin.name(),
+                        dependency: dep,
+                    });
+                }
+            }
+        }
+
+        // Topological sort with cycle detection
+        let mut sorted = Vec::new();
+        let mut visited = HashSet::new();
+        let mut visiting = HashSet::new();
+        let mut visit_stack = Vec::new();
+
         fn visit(
             name: &'static str,
             plugins: &[Box<dyn PluginDyn>],
             plugin_map: &std::collections::HashMap<&'static str, usize>,
             visited: &mut HashSet<&'static str>,
             visiting: &mut HashSet<&'static str>,
+            visit_stack: &mut Vec<&'static str>,
             sorted: &mut Vec<usize>,
-        ) {
+        ) -> Result<(), EngineError> {
             if visited.contains(name) {
-                return;
+                return Ok(());
             }
 
             if visiting.contains(name) {
-                tracing::warn!("Circular plugin dependency detected involving: {}", name);
-                return;
+                // Build the cycle chain
+                let cycle_start = visit_stack.iter().position(|&n| n == name).unwrap_or(0);
+                let mut chain: Vec<&'static str> = visit_stack[cycle_start..].to_vec();
+                chain.push(name);
+                return Err(EngineError::CircularDependency {
+                    plugin: name,
+                    chain,
+                });
             }
 
             if let Some(&idx) = plugin_map.get(name) {
                 visiting.insert(name);
+                visit_stack.push(name);
 
                 // Visit dependencies first
                 for dep in plugins[idx].dependencies() {
-                    visit(dep, plugins, plugin_map, visited, visiting, sorted);
+                    visit(dep, plugins, plugin_map, visited, visiting, visit_stack, sorted)?;
                 }
 
+                visit_stack.pop();
                 visiting.remove(name);
                 visited.insert(name);
                 sorted.push(idx);
             }
+
+            Ok(())
         }
 
         for plugin in &self.plugins {
@@ -270,11 +374,12 @@ impl EngineBuilder {
                 &plugin_map,
                 &mut visited,
                 &mut visiting,
+                &mut visit_stack,
                 &mut sorted,
-            );
+            )?;
         }
 
-        sorted
+        Ok(sorted)
     }
 }
 
