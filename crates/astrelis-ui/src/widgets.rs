@@ -344,6 +344,9 @@ pub struct Text {
     /// Font ID for font selection (index into FontSystem).
     /// Default is 0 (the first/default font).
     pub font_id: u32,
+    /// Wrap width constraint for text (resolved at layout time).
+    /// If set, text will wrap at this width.
+    pub wrap_width_constraint: Option<crate::constraint::Constraint>,
 }
 
 impl Text {
@@ -357,6 +360,7 @@ impl Text {
             vertical_align: VerticalAlign::Top,
             style: Style::new(),
             font_id: 0,
+            wrap_width_constraint: None,
         }
     }
 
@@ -396,8 +400,24 @@ impl Text {
         self
     }
 
+    /// Set the wrap width constraint for text.
+    ///
+    /// Accepts f32 (pixels), or any Constraint type including viewport units.
+    /// The constraint is resolved at layout time with the current viewport.
+    pub fn max_wrap_width(mut self, width: impl Into<crate::constraint::Constraint>) -> Self {
+        self.wrap_width_constraint = Some(width.into());
+        self
+    }
+
     /// Build a TextStyle for rendering.
     pub fn build_text_style(&self) -> TextStyle {
+        self.build_text_style_with_viewport(None)
+    }
+
+    /// Build a TextStyle for rendering with optional viewport for constraint resolution.
+    pub fn build_text_style_with_viewport(&self, viewport: Option<Vec2>) -> TextStyle {
+        use crate::constraint_resolver::{ConstraintResolver, ResolveContext};
+
         let mut text = TextStyle::new(&self.content)
             .size(self.font_size)
             .color(self.color)
@@ -405,7 +425,25 @@ impl Text {
             .align(self.align)
             .vertical_align(self.vertical_align);
 
-        // Apply max width from style if set
+        // First, check if we have a wrap width constraint
+        if let Some(ref constraint) = self.wrap_width_constraint {
+            if let Some(vp) = viewport {
+                let ctx = ResolveContext::viewport_only(vp);
+                if let Some(width) = ConstraintResolver::resolve(constraint, &ctx) {
+                    text = text.max_width(width);
+                    return text;
+                }
+            }
+            // If viewport not available but constraint is simple (pixels), use it directly
+            if let Some(dim) = constraint.try_to_dimension() {
+                if let taffy::Dimension::Length(width) = dim {
+                    text = text.max_width(width);
+                    return text;
+                }
+            }
+        }
+
+        // Fallback: Apply max width from style if set
         if let taffy::Dimension::Length(width) = self.style.layout.size.width {
             text = text.max_width(width);
         }
@@ -666,7 +704,7 @@ impl Row {
         }
     }
 
-    pub fn gap(mut self, gap: f32) -> Self {
+    pub fn gap(mut self, gap: impl Into<crate::constraint::Constraint> + Copy) -> Self {
         self.style = self.style.gap(gap);
         self
     }
@@ -1008,7 +1046,7 @@ impl Column {
         }
     }
 
-    pub fn gap(mut self, gap: f32) -> Self {
+    pub fn gap(mut self, gap: impl Into<crate::constraint::Constraint> + Copy) -> Self {
         self.style = self.style.gap(gap);
         self
     }

@@ -294,6 +294,29 @@ impl Constraint {
         }
     }
 
+    /// Try to convert to Taffy LengthPercentageAuto.
+    ///
+    /// Returns `None` for viewport units and complex constraints that need resolution.
+    pub fn try_to_length_percentage_auto(&self) -> Option<taffy::LengthPercentageAuto> {
+        match self {
+            Constraint::Px(v) => Some(taffy::LengthPercentageAuto::Length(*v)),
+            Constraint::Percent(v) => Some(taffy::LengthPercentageAuto::Percent(*v / 100.0)),
+            Constraint::Auto => Some(taffy::LengthPercentageAuto::Auto),
+            _ => None,
+        }
+    }
+
+    /// Try to convert to Taffy LengthPercentage.
+    ///
+    /// Returns `None` for Auto, viewport units, and complex constraints.
+    pub fn try_to_length_percentage(&self) -> Option<taffy::LengthPercentage> {
+        match self {
+            Constraint::Px(v) => Some(taffy::LengthPercentage::Length(*v)),
+            Constraint::Percent(v) => Some(taffy::LengthPercentage::Percent(*v / 100.0)),
+            _ => None,
+        }
+    }
+
     /// Convert to Taffy LengthPercentageAuto.
     ///
     /// # Panics
@@ -336,6 +359,14 @@ impl Constraint {
                 );
             }
         }
+    }
+
+    /// Check if this constraint requires viewport resolution.
+    ///
+    /// Returns true if this constraint needs to be resolved with a viewport context
+    /// (either because it uses viewport units or is a complex expression).
+    pub fn needs_resolution(&self) -> bool {
+        self.try_to_dimension().is_none()
     }
 }
 

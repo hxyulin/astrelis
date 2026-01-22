@@ -1,6 +1,7 @@
 //! UI tree structure with Taffy layout integration.
 
 use crate::auto_dirty::StyleGuard;
+use crate::constraint_resolver::{ConstraintResolver, ResolveContext};
 use crate::dirty::DirtyFlags;
 use crate::metrics::{DirtyStats, MetricsTimer, UiMetrics};
 use crate::style::Style;
@@ -94,6 +95,8 @@ pub struct UiTree {
     dirty_roots: HashSet<NodeId>,
     /// Performance metrics from last update
     last_metrics: Option<UiMetrics>,
+    /// Nodes with viewport-dependent constraints (vw, vh, vmin, vmax, calc, min, max, clamp)
+    viewport_constraint_nodes: HashSet<NodeId>,
 }
 
 impl UiTree {
@@ -107,6 +110,7 @@ impl UiTree {
             dirty_nodes: HashSet::new(),
             dirty_roots: HashSet::new(),
             last_metrics: None,
+            viewport_constraint_nodes: HashSet::new(),
         }
     }
 
@@ -114,6 +118,11 @@ impl UiTree {
     pub fn add_widget(&mut self, widget: Box<dyn Widget>) -> NodeId {
         let node_id = NodeId(self.next_id);
         self.next_id += 1;
+
+        // Track nodes with viewport-dependent constraints
+        if widget.style().has_unresolved_constraints() {
+            self.viewport_constraint_nodes.insert(node_id);
+        }
 
         // Create Taffy node with widget's style
         let style = widget.style().layout.clone();
@@ -646,23 +655,173 @@ impl UiTree {
         }
     }
 
-    /// Resolve viewport-relative units (vw, vh, vmin, vmax) to absolute pixels.
+    /// Resolve viewport-relative units (vw, vh, vmin, vmax) and complex constraints to absolute pixels.
     ///
-    /// This must be called before Taffy layout computation to convert viewport units
-    /// into pixel values that Taffy can understand.
+    /// This is called before Taffy layout computation to convert viewport units
+    /// and complex constraints into pixel values that Taffy can understand.
+    fn resolve_viewport_units(&mut self, viewport_size: astrelis_core::geometry::Size<f32>) {
+        profile_scope!("resolve_viewport_units");
+
+        if self.viewport_constraint_nodes.is_empty() {
+            return;
+        }
+
+        let viewport = Vec2::new(viewport_size.width, viewport_size.height);
+        let ctx = ResolveContext::viewport_only(viewport);
+
+        // Collect nodes to avoid borrowing issues
+        let constraint_nodes: Vec<NodeId> = self.viewport_constraint_nodes.iter().copied().collect();
+
+        for node_id in constraint_nodes {
+            if let Some(node) = self.nodes.get_mut(&node_id) {
+                let style = node.widget.style_mut();
+                let mut changed = false;
+
+                // Resolve width
+                if let Some(ref constraint) = style.width_constraint {
+                    if constraint.needs_resolution() {
+                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
+                            style.layout.size.width = taffy::Dimension::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Resolve height
+                if let Some(ref constraint) = style.height_constraint {
+                    if constraint.needs_resolution() {
+                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
+                            style.layout.size.height = taffy::Dimension::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Resolve min_width
+                if let Some(ref constraint) = style.min_width_constraint {
+                    if constraint.needs_resolution() {
+                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
+                            style.layout.min_size.width = taffy::Dimension::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Resolve min_height
+                if let Some(ref constraint) = style.min_height_constraint {
+                    if constraint.needs_resolution() {
+                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
+                            style.layout.min_size.height = taffy::Dimension::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Resolve max_width
+                if let Some(ref constraint) = style.max_width_constraint {
+                    if constraint.needs_resolution() {
+                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
+                            style.layout.max_size.width = taffy::Dimension::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Resolve max_height
+                if let Some(ref constraint) = style.max_height_constraint {
+                    if constraint.needs_resolution() {
+                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
+                            style.layout.max_size.height = taffy::Dimension::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Resolve padding
+                if let Some(ref constraints) = style.padding_constraints {
+                    if constraints.iter().any(|c| c.needs_resolution()) {
+                        if let Some(px) = ConstraintResolver::resolve(&constraints[0], &ctx) {
+                            style.layout.padding.left = taffy::LengthPercentage::Length(px);
+                            changed = true;
+                        }
+                        if let Some(px) = ConstraintResolver::resolve(&constraints[1], &ctx) {
+                            style.layout.padding.top = taffy::LengthPercentage::Length(px);
+                            changed = true;
+                        }
+                        if let Some(px) = ConstraintResolver::resolve(&constraints[2], &ctx) {
+                            style.layout.padding.right = taffy::LengthPercentage::Length(px);
+                            changed = true;
+                        }
+                        if let Some(px) = ConstraintResolver::resolve(&constraints[3], &ctx) {
+                            style.layout.padding.bottom = taffy::LengthPercentage::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Resolve margin
+                if let Some(ref constraints) = style.margin_constraints {
+                    if constraints.iter().any(|c| c.needs_resolution()) {
+                        if let Some(px) = ConstraintResolver::resolve(&constraints[0], &ctx) {
+                            style.layout.margin.left = taffy::LengthPercentageAuto::Length(px);
+                            changed = true;
+                        }
+                        if let Some(px) = ConstraintResolver::resolve(&constraints[1], &ctx) {
+                            style.layout.margin.top = taffy::LengthPercentageAuto::Length(px);
+                            changed = true;
+                        }
+                        if let Some(px) = ConstraintResolver::resolve(&constraints[2], &ctx) {
+                            style.layout.margin.right = taffy::LengthPercentageAuto::Length(px);
+                            changed = true;
+                        }
+                        if let Some(px) = ConstraintResolver::resolve(&constraints[3], &ctx) {
+                            style.layout.margin.bottom = taffy::LengthPercentageAuto::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Resolve gap
+                if let Some(ref constraint) = style.gap_constraint {
+                    if constraint.needs_resolution() {
+                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
+                            style.layout.gap.width = taffy::LengthPercentage::Length(px);
+                            style.layout.gap.height = taffy::LengthPercentage::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Resolve flex_basis
+                if let Some(ref constraint) = style.flex_basis_constraint {
+                    if constraint.needs_resolution() {
+                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
+                            style.layout.flex_basis = taffy::Dimension::Length(px);
+                            changed = true;
+                        }
+                    }
+                }
+
+                // Update Taffy with the resolved style if anything changed
+                if changed {
+                    let taffy_node = node.taffy_node;
+                    let layout_style = style.layout.clone();
+                    self.taffy.set_style(taffy_node, layout_style).ok();
+                    self.taffy.mark_dirty(taffy_node).ok();
+                }
+            }
+        }
+    }
+
+    /// Mark all viewport-constraint nodes as needing layout.
     ///
-    /// NOTE: This is a placeholder implementation for Phase 1. The challenge is that
-    /// once Length values are converted to Taffy dimensions, we lose the viewport unit
-    /// information. A full implementation would require:
-    /// - Storing original Length values alongside Taffy dimensions
-    /// - Or resolving viewport units at style-setting time
-    /// - Or adding metadata to track which dimensions need viewport resolution
-    ///
-    /// For now, viewport units work when set via the builder API which can resolve
-    /// them before passing to Taffy.
-    fn resolve_viewport_units(&mut self, _viewport_size: astrelis_core::geometry::Size<f32>) {
-        // Placeholder - actual resolution happens at style-setting time
-        // This will be expanded in a future phase to support dynamic viewport changes
+    /// Called when viewport size changes to trigger re-resolution of viewport units.
+    pub fn mark_viewport_dirty(&mut self) {
+        // Collect IDs to avoid borrowing issues
+        let node_ids: Vec<NodeId> = self.viewport_constraint_nodes.iter().copied().collect();
+        for node_id in node_ids {
+            self.mark_dirty_flags(node_id, DirtyFlags::LAYOUT);
+        }
     }
 
     /// Cache layout results from Taffy into our nodes.
@@ -721,6 +880,7 @@ impl UiTree {
         self.next_id = 0;
         self.dirty_nodes.clear();
         self.dirty_roots.clear();
+        self.viewport_constraint_nodes.clear();
     }
 
     /// Iterate over all nodes.
@@ -804,6 +964,8 @@ impl UiTree {
                 // Remove from dirty tracking
                 self.dirty_nodes.remove(id);
                 self.dirty_roots.remove(id);
+                // Remove from viewport constraint tracking
+                self.viewport_constraint_nodes.remove(id);
             }
         }
 

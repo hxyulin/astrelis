@@ -193,9 +193,21 @@ impl UiCore {
     }
 
     /// Set the viewport size for layout calculations.
+    ///
+    /// When the viewport size changes, any constraints using viewport units
+    /// (vw, vh, vmin, vmax) or complex expressions will be automatically
+    /// re-resolved during the next layout computation.
     pub fn set_viewport(&mut self, viewport: Viewport) {
-        self.viewport_size = viewport.to_logical().into();
+        let new_size = viewport.to_logical().into();
+        let size_changed = self.viewport_size != new_size;
+
+        self.viewport_size = new_size;
         self.viewport = viewport;
+
+        // If size changed, mark viewport-constrained nodes as dirty
+        if size_changed {
+            self.tree.mark_viewport_dirty();
+        }
     }
 
     /// Get the current viewport size.

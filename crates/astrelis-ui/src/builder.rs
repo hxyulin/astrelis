@@ -12,6 +12,11 @@ use crate::widgets::{
 ///
 /// This reduces code duplication by generating the same style methods
 /// for all widget builder types.
+///
+/// All dimension methods now accept `impl Into<Constraint>`, allowing:
+/// - Simple pixel values: `400.0`
+/// - Viewport units: `Constraint::Vw(50.0)`
+/// - Complex expressions: `Constraint::calc(percent(100.0) - px(40.0))`
 macro_rules! impl_style_methods {
     ($widget_field:ident) => {
         /// Apply a complete style to the widget.
@@ -21,50 +26,74 @@ macro_rules! impl_style_methods {
         }
 
         /// Set the width of the widget.
-        pub fn width(mut self, width: f32) -> Self {
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn width(mut self, width: impl Into<crate::constraint::Constraint>) -> Self {
             self.$widget_field.style = self.$widget_field.style.width(width);
             self
         }
 
         /// Set the height of the widget.
-        pub fn height(mut self, height: f32) -> Self {
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn height(mut self, height: impl Into<crate::constraint::Constraint>) -> Self {
             self.$widget_field.style = self.$widget_field.style.height(height);
             self
         }
 
         /// Set uniform padding on all sides.
-        pub fn padding(mut self, padding: f32) -> Self {
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn padding(mut self, padding: impl Into<crate::constraint::Constraint> + Copy) -> Self {
             self.$widget_field.style = self.$widget_field.style.padding(padding);
             self
         }
 
         /// Set uniform margin on all sides.
-        pub fn margin(mut self, margin: f32) -> Self {
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn margin(mut self, margin: impl Into<crate::constraint::Constraint> + Copy) -> Self {
             self.$widget_field.style = self.$widget_field.style.margin(margin);
             self
         }
 
         /// Set minimum width constraint.
-        pub fn min_width(mut self, width: f32) -> Self {
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn min_width(mut self, width: impl Into<crate::constraint::Constraint>) -> Self {
             self.$widget_field.style = self.$widget_field.style.min_width(width);
             self
         }
 
         /// Set minimum height constraint.
-        pub fn min_height(mut self, height: f32) -> Self {
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn min_height(mut self, height: impl Into<crate::constraint::Constraint>) -> Self {
             self.$widget_field.style = self.$widget_field.style.min_height(height);
             self
         }
 
         /// Set maximum width constraint.
-        pub fn max_width(mut self, width: f32) -> Self {
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn max_width(mut self, width: impl Into<crate::constraint::Constraint>) -> Self {
             self.$widget_field.style = self.$widget_field.style.max_width(width);
             self
         }
 
         /// Set maximum height constraint.
-        pub fn max_height(mut self, height: f32) -> Self {
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn max_height(mut self, height: impl Into<crate::constraint::Constraint>) -> Self {
             self.$widget_field.style = self.$widget_field.style.max_height(height);
+            self
+        }
+
+        /// Set the flex basis.
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn flex_basis(mut self, basis: impl Into<crate::constraint::Constraint>) -> Self {
+            self.$widget_field.style = self.$widget_field.style.flex_basis(basis);
             self
         }
     };
@@ -145,7 +174,9 @@ macro_rules! impl_flex_methods {
         }
 
         /// Set gap between items.
-        pub fn gap(mut self, gap: f32) -> Self {
+        ///
+        /// Accepts f32 (pixels), or any Constraint type including viewport units.
+        pub fn gap(mut self, gap: impl Into<crate::constraint::Constraint> + Copy) -> Self {
             self.$widget_field.style = self.$widget_field.style.gap(gap);
             self
         }
@@ -292,17 +323,17 @@ pub trait WidgetBuilder {
     /// Apply a style to the widget.
     fn style(self, style: Style) -> Self;
 
-    /// Set width.
-    fn width(self, width: f32) -> Self;
+    /// Set width. Accepts f32 (pixels), or any Constraint type.
+    fn width(self, width: impl Into<crate::constraint::Constraint>) -> Self;
 
-    /// Set height.
-    fn height(self, height: f32) -> Self;
+    /// Set height. Accepts f32 (pixels), or any Constraint type.
+    fn height(self, height: impl Into<crate::constraint::Constraint>) -> Self;
 
-    /// Set padding.
-    fn padding(self, padding: f32) -> Self;
+    /// Set padding. Accepts f32 (pixels), or any Constraint type.
+    fn padding(self, padding: impl Into<crate::constraint::Constraint> + Copy) -> Self;
 
-    /// Set margin.
-    fn margin(self, margin: f32) -> Self;
+    /// Set margin. Accepts f32 (pixels), or any Constraint type.
+    fn margin(self, margin: impl Into<crate::constraint::Constraint> + Copy) -> Self;
 }
 
 /// Builder for container widgets.
@@ -401,6 +432,15 @@ impl<'b, 'a> TextBuilder<'b, 'a> {
     /// Set font ID for font selection.
     pub fn font_id(mut self, font_id: u32) -> Self {
         self.text = self.text.font_id(font_id);
+        self
+    }
+
+    /// Set the maximum wrap width for text.
+    ///
+    /// Accepts f32 (pixels), or any Constraint type including viewport units.
+    /// When set, text will wrap at this width instead of the widget's width.
+    pub fn max_wrap_width(mut self, width: impl Into<crate::constraint::Constraint>) -> Self {
+        self.text = self.text.max_wrap_width(width);
         self
     }
 
@@ -509,7 +549,9 @@ impl<'b, 'a> RowBuilder<'b, 'a> {
     }
 
     /// Set gap between items.
-    pub fn gap(mut self, gap: f32) -> Self {
+    ///
+    /// Accepts f32 (pixels), or any Constraint type including viewport units.
+    pub fn gap(mut self, gap: impl Into<crate::constraint::Constraint> + Copy) -> Self {
         self.row = self.row.gap(gap);
         self
     }
@@ -566,7 +608,9 @@ impl<'b, 'a> ColumnBuilder<'b, 'a> {
     }
 
     /// Set gap between items.
-    pub fn gap(mut self, gap: f32) -> Self {
+    ///
+    /// Accepts f32 (pixels), or any Constraint type including viewport units.
+    pub fn gap(mut self, gap: impl Into<crate::constraint::Constraint> + Copy) -> Self {
         self.column = self.column.gap(gap);
         self
     }
