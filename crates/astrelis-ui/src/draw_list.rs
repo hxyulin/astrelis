@@ -307,6 +307,8 @@ pub struct ImageCommand {
     pub tint: Color,
     /// Border radius for rounded corners
     pub border_radius: f32,
+    /// Sampling mode for texture filtering
+    pub sampling: astrelis_render::ImageSampling,
     /// Z-index for depth sorting
     pub z_index: u16,
     /// Clip rectangle for scissor clipping
@@ -322,6 +324,7 @@ impl std::fmt::Debug for ImageCommand {
             .field("uv", &self.uv)
             .field("tint", &self.tint)
             .field("border_radius", &self.border_radius)
+            .field("sampling", &self.sampling)
             .field("z_index", &self.z_index)
             .field("clip_rect", &self.clip_rect)
             .finish()
@@ -337,6 +340,7 @@ impl ImageCommand {
         uv: ImageUV,
         tint: Color,
         border_radius: f32,
+        sampling: astrelis_render::ImageSampling,
         z_index: u16,
     ) -> Self {
         Self {
@@ -347,12 +351,13 @@ impl ImageCommand {
             uv,
             tint,
             border_radius,
+            sampling,
             z_index,
             clip_rect: ClipRect::infinite(),
         }
     }
 
-    /// Create a simple image command with default UV (full texture).
+    /// Create a simple image command with default UV and sampling (full texture, linear filtering).
     pub fn simple(position: Vec2, size: Vec2, texture: ImageTexture, z_index: u16) -> Self {
         Self::new(
             position,
@@ -361,6 +366,7 @@ impl ImageCommand {
             ImageUV::default(),
             Color::WHITE,
             0.0,
+            astrelis_render::ImageSampling::default(),
             z_index,
         )
     }

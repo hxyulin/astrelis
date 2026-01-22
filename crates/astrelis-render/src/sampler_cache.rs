@@ -53,6 +53,57 @@ impl Hash for SamplerKey {
 }
 
 impl SamplerKey {
+    /// Create a key for a repeating nearest (point) sampler.
+    pub fn nearest_repeat() -> Self {
+        Self {
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            address_mode_w: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: 0.0f32.to_bits(),
+            lod_max_clamp: f32::MAX.to_bits(),
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        }
+    }
+
+    /// Create a key for a mirrored linear sampler.
+    pub fn linear_mirror() -> Self {
+        Self {
+            address_mode_u: wgpu::AddressMode::MirrorRepeat,
+            address_mode_v: wgpu::AddressMode::MirrorRepeat,
+            address_mode_w: wgpu::AddressMode::MirrorRepeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            lod_min_clamp: 0.0f32.to_bits(),
+            lod_max_clamp: f32::MAX.to_bits(),
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        }
+    }
+
+    /// Create a key for a mirrored nearest (point) sampler.
+    pub fn nearest_mirror() -> Self {
+        Self {
+            address_mode_u: wgpu::AddressMode::MirrorRepeat,
+            address_mode_v: wgpu::AddressMode::MirrorRepeat,
+            address_mode_w: wgpu::AddressMode::MirrorRepeat,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            lod_min_clamp: 0.0f32.to_bits(),
+            lod_max_clamp: f32::MAX.to_bits(),
+            compare: None,
+            anisotropy_clamp: 1,
+            border_color: None,
+        }
+    }
+
     /// Create a key from a sampler descriptor.
     pub fn from_descriptor(desc: &wgpu::SamplerDescriptor) -> Self {
         Self {
@@ -136,6 +187,41 @@ impl SamplerKey {
             compare: None,
             anisotropy_clamp: 1,
             border_color: None,
+        }
+    }
+}
+
+/// Sampling mode for image textures.
+///
+/// This is a user-friendly enum for selecting common texture sampling configurations.
+/// It maps to underlying `SamplerKey` configurations for cache lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ImageSampling {
+    /// Smooth bilinear filtering (default). Good for photos and gradients.
+    #[default]
+    Linear,
+    /// Pixel-perfect nearest-neighbor filtering. Ideal for pixel art.
+    Nearest,
+    /// Linear filtering with UV wrapping (repeat). For tiled textures.
+    LinearRepeat,
+    /// Nearest filtering with UV wrapping. For tiled pixel art.
+    NearestRepeat,
+    /// Linear filtering with mirrored UV wrapping.
+    LinearMirror,
+    /// Nearest filtering with mirrored UV wrapping.
+    NearestMirror,
+}
+
+impl ImageSampling {
+    /// Convert to a SamplerKey for cache lookup.
+    pub fn to_sampler_key(&self) -> SamplerKey {
+        match self {
+            Self::Linear => SamplerKey::linear(),
+            Self::Nearest => SamplerKey::nearest(),
+            Self::LinearRepeat => SamplerKey::linear_repeat(),
+            Self::NearestRepeat => SamplerKey::nearest_repeat(),
+            Self::LinearMirror => SamplerKey::linear_mirror(),
+            Self::NearestMirror => SamplerKey::nearest_mirror(),
         }
     }
 }
@@ -235,6 +321,26 @@ impl SamplerCache {
     /// Get a repeating linear sampler.
     pub fn linear_repeat(&self, device: &wgpu::Device) -> Arc<wgpu::Sampler> {
         self.get_or_create(device, SamplerKey::linear_repeat())
+    }
+
+    /// Get a repeating nearest sampler.
+    pub fn nearest_repeat(&self, device: &wgpu::Device) -> Arc<wgpu::Sampler> {
+        self.get_or_create(device, SamplerKey::nearest_repeat())
+    }
+
+    /// Get a mirrored linear sampler.
+    pub fn linear_mirror(&self, device: &wgpu::Device) -> Arc<wgpu::Sampler> {
+        self.get_or_create(device, SamplerKey::linear_mirror())
+    }
+
+    /// Get a mirrored nearest sampler.
+    pub fn nearest_mirror(&self, device: &wgpu::Device) -> Arc<wgpu::Sampler> {
+        self.get_or_create(device, SamplerKey::nearest_mirror())
+    }
+
+    /// Get a sampler for the given sampling mode.
+    pub fn from_sampling(&self, device: &wgpu::Device, sampling: ImageSampling) -> Arc<wgpu::Sampler> {
+        self.get_or_create(device, sampling.to_sampler_key())
     }
 
     /// Get the number of cached samplers.

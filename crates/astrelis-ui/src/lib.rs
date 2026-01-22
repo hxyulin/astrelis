@@ -107,6 +107,7 @@ pub use viewport_context::ViewportContext;
 pub use astrelis_text::{TextPipeline, TextShapeRequest, TextShaper, SyncTextShaper};
 pub use widget_id::{WidgetId, WidgetIdRegistry};
 pub use widgets::{Image, ImageFit, ImageTexture, ImageUV};
+pub use astrelis_render::ImageSampling;
 
 // NOTE: The `widget` module contains an experimental capability-based system that is
 // NOT integrated with the builder/renderer. Use `widgets::*` for actual UI development.

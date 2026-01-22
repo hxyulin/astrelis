@@ -794,6 +794,19 @@ impl<'b, 'a> ImageBuilder<'b, 'a> {
         self
     }
 
+    /// Set the sampling mode for the image texture.
+    pub fn sampling(mut self, sampling: astrelis_render::ImageSampling) -> Self {
+        self.image = self.image.sampling(sampling);
+        self
+    }
+
+    /// Shorthand for pixel-perfect rendering (Nearest filtering).
+    ///
+    /// Ideal for pixel art or any image where you want crisp, non-interpolated pixels.
+    pub fn pixel_perfect(self) -> Self {
+        self.sampling(astrelis_render::ImageSampling::Nearest)
+    }
+
     /// Build the image widget and add it to the tree.
     pub fn build(self) -> NodeId {
         let node_id = self.builder.add_widget(Box::new(self.image));

@@ -55,6 +55,16 @@ struct ClipBatch {
     text_range: (u32, u32),
 }
 
+/// Composite key for image bind group caching.
+///
+/// Combines texture pointer and sampling mode to uniquely identify
+/// bind groups that need different samplers for the same texture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ImageBindGroupKey {
+    texture_ptr: usize,
+    sampling: astrelis_render::ImageSampling,
+}
+
 /// UI renderer for rendering all widgets.
 pub struct UiRenderer {
     renderer: Renderer,
@@ -74,10 +84,10 @@ pub struct UiRenderer {
     
     /// Bind group layout for image textures (reused for each texture)
     image_texture_bind_group_layout: wgpu::BindGroupLayout,
-    /// Sampler for image textures
-    image_sampler: wgpu::Sampler,
-    /// Cache of bind groups for image textures (keyed by Arc pointer address)
-    image_bind_group_cache: HashMap<usize, wgpu::BindGroup>,
+    /// Sampler cache for different sampling modes
+    sampler_cache: astrelis_render::SamplerCache,
+    /// Cache of bind groups for image textures (keyed by texture pointer + sampling mode)
+    image_bind_group_cache: HashMap<ImageBindGroupKey, wgpu::BindGroup>,
 
     text_pipeline: TextPipeline,
     draw_list: DrawList,
@@ -252,17 +262,8 @@ impl UiRenderer {
             ],
         );
 
-        // Create image sampler (linear filtering for smooth scaling)
-        let image_sampler = context.device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Image Sampler"),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
+        // Create sampler cache for different sampling modes
+        let sampler_cache = astrelis_render::SamplerCache::new();
 
         // 6. Create instanced pipelines
         let quad_instanced_layout = renderer.create_pipeline_layout(
@@ -427,7 +428,7 @@ impl UiRenderer {
             text_atlas_bind_group,
             text_projection_bind_group,
             image_texture_bind_group_layout,
-            image_sampler,
+            sampler_cache,
             image_bind_group_cache: HashMap::new(),
             text_pipeline,
             draw_list,
@@ -862,6 +863,7 @@ impl UiRenderer {
                         image.uv,
                         image.tint,
                         image.border_radius,
+                        image.sampling,
                         0,
                     )
                     .with_clip(clip_rect),
@@ -901,7 +903,7 @@ impl UiRenderer {
         self.clip_batches.clear();
         let mut quad_instances = Vec::new();
         let mut text_instances = Vec::new();
-        let mut image_groups: HashMap<usize, (ImageTexture, Vec<ImageInstance>)> = HashMap::new();
+        let mut image_groups: HashMap<ImageBindGroupKey, (ImageTexture, Vec<ImageInstance>)> = HashMap::new();
 
         for clip_rect in &clip_rect_set {
             let quad_start = quad_instances.len() as u32;
@@ -933,8 +935,11 @@ impl UiRenderer {
                         text_instances.extend(instances);
                     }
                     DrawCommand::Image(i) => {
-                        // Use Arc pointer address as key for grouping
-                        let texture_key = std::sync::Arc::as_ptr(&i.texture) as usize;
+                        // Use texture pointer + sampling mode as composite key for grouping
+                        let bind_group_key = ImageBindGroupKey {
+                            texture_ptr: std::sync::Arc::as_ptr(&i.texture) as usize,
+                            sampling: i.sampling,
+                        };
 
                         let instance = ImageInstance {
                             position: [i.position.x, i.position.y],
@@ -948,7 +953,7 @@ impl UiRenderer {
                         };
 
                         image_groups
-                            .entry(texture_key)
+                            .entry(bind_group_key)
                             .or_insert_with(|| (i.texture.clone(), Vec::new()))
                             .1
                             .push(instance);
@@ -972,12 +977,12 @@ impl UiRenderer {
         self.image_batches.clear();
         let mut all_image_instances = Vec::new();
 
-        for (texture_key, (texture, instances)) in image_groups {
+        for (bind_group_key, (texture, instances)) in image_groups {
             let start_index = all_image_instances.len() as u32;
             let count = instances.len() as u32;
 
-            // Get or create bind group for this texture
-            let bind_group = self.get_or_create_image_bind_group(texture_key, &texture);
+            // Get or create bind group for this texture + sampling mode combination
+            let bind_group = self.get_or_create_image_bind_group(bind_group_key, &texture);
 
             self.image_batches.push(ImageBatch {
                 texture,
@@ -997,12 +1002,19 @@ impl UiRenderer {
             .set_instances(self.renderer.device(), all_image_instances);
     }
     
-    /// Get or create a bind group for an image texture.
-    fn get_or_create_image_bind_group(&mut self, texture_key: usize, texture: &ImageTexture) -> wgpu::BindGroup {
-        if let Some(bind_group) = self.image_bind_group_cache.get(&texture_key) {
+    /// Get or create a bind group for an image texture with a specific sampling mode.
+    fn get_or_create_image_bind_group(
+        &mut self,
+        key: ImageBindGroupKey,
+        texture: &ImageTexture,
+    ) -> wgpu::BindGroup {
+        if let Some(bind_group) = self.image_bind_group_cache.get(&key) {
             return bind_group.clone();
         }
-        
+
+        // Get the appropriate sampler for this sampling mode
+        let sampler = self.sampler_cache.from_sampling(&self.context.device, key.sampling);
+
         let bind_group = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Image Texture Bind Group"),
             layout: &self.image_texture_bind_group_layout,
@@ -1013,12 +1025,12 @@ impl UiRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&self.image_sampler),
+                    resource: wgpu::BindingResource::Sampler(&sampler),
                 },
             ],
         });
-        
-        self.image_bind_group_cache.insert(texture_key, bind_group.clone());
+
+        self.image_bind_group_cache.insert(key, bind_group.clone());
         bind_group
     }
 

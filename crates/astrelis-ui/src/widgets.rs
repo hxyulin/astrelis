@@ -154,6 +154,8 @@ pub struct Image {
     pub natural_height: f32,
     /// Border radius for rounded corners
     pub border_radius: f32,
+    /// Sampling mode for texture filtering
+    pub sampling: astrelis_render::ImageSampling,
     /// Style
     pub style: Style,
 }
@@ -169,6 +171,7 @@ impl Image {
             natural_width: 0.0,
             natural_height: 0.0,
             border_radius: 0.0,
+            sampling: astrelis_render::ImageSampling::default(),
             style: Style::new(),
         }
     }
@@ -183,6 +186,7 @@ impl Image {
             natural_width: width,
             natural_height: height,
             border_radius: 0.0,
+            sampling: astrelis_render::ImageSampling::default(),
             style: Style::new().width(width).height(height),
         }
     }
@@ -221,6 +225,12 @@ impl Image {
     /// Set border radius for rounded corners.
     pub fn border_radius(mut self, radius: f32) -> Self {
         self.border_radius = radius;
+        self
+    }
+
+    /// Set the sampling mode for texture filtering.
+    pub fn sampling(mut self, sampling: astrelis_render::ImageSampling) -> Self {
+        self.sampling = sampling;
         self
     }
 
