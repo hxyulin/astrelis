@@ -37,7 +37,7 @@
 ///
 /// Constraints can be simple values (pixels, percentages, viewport units)
 /// or complex expressions (calc, min, max, clamp).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum Constraint {
     /// Fixed pixel value.
     Px(f32),
@@ -46,6 +46,7 @@ pub enum Constraint {
     Percent(f32),
 
     /// Automatic sizing based on content.
+    #[default]
     Auto,
 
     /// Percentage of viewport width.
@@ -162,9 +163,7 @@ impl Constraint {
         match self {
             Self::Vw(_) | Self::Vh(_) | Self::Vmin(_) | Self::Vmax(_) => true,
             Self::Calc(expr) => expr.has_viewport_units(),
-            Self::Min(values) | Self::Max(values) => {
-                values.iter().any(|c| c.has_viewport_units())
-            }
+            Self::Min(values) | Self::Max(values) => values.iter().any(|c| c.has_viewport_units()),
             Self::Clamp { min, val, max } => {
                 min.has_viewport_units() || val.has_viewport_units() || max.has_viewport_units()
             }
@@ -177,20 +176,12 @@ impl Constraint {
         match self {
             Self::Percent(_) => true,
             Self::Calc(expr) => expr.has_percentages(),
-            Self::Min(values) | Self::Max(values) => {
-                values.iter().any(|c| c.has_percentages())
-            }
+            Self::Min(values) | Self::Max(values) => values.iter().any(|c| c.has_percentages()),
             Self::Clamp { min, val, max } => {
                 min.has_percentages() || val.has_percentages() || max.has_percentages()
             }
             _ => false,
         }
-    }
-}
-
-impl Default for Constraint {
-    fn default() -> Self {
-        Self::Auto
     }
 }
 
@@ -273,7 +264,10 @@ impl Constraint {
                      Use ConstraintResolver::resolve() first."
                 );
             }
-            Constraint::Calc(_) | Constraint::Min(_) | Constraint::Max(_) | Constraint::Clamp { .. } => {
+            Constraint::Calc(_)
+            | Constraint::Min(_)
+            | Constraint::Max(_)
+            | Constraint::Clamp { .. } => {
                 panic!(
                     "Complex constraints (calc/min/max/clamp) must be resolved to pixels before converting to Taffy dimension. \
                      Use ConstraintResolver::resolve() first."
@@ -327,14 +321,13 @@ impl Constraint {
             Constraint::Percent(v) => taffy::LengthPercentageAuto::Percent(*v / 100.0),
             Constraint::Auto => taffy::LengthPercentageAuto::Auto,
             Constraint::Vw(_) | Constraint::Vh(_) | Constraint::Vmin(_) | Constraint::Vmax(_) => {
-                panic!(
-                    "Viewport-relative constraints must be resolved to pixels first."
-                );
+                panic!("Viewport-relative constraints must be resolved to pixels first.");
             }
-            Constraint::Calc(_) | Constraint::Min(_) | Constraint::Max(_) | Constraint::Clamp { .. } => {
-                panic!(
-                    "Complex constraints must be resolved to pixels first."
-                );
+            Constraint::Calc(_)
+            | Constraint::Min(_)
+            | Constraint::Max(_)
+            | Constraint::Clamp { .. } => {
+                panic!("Complex constraints must be resolved to pixels first.");
             }
         }
     }
@@ -349,14 +342,13 @@ impl Constraint {
             Constraint::Percent(v) => taffy::LengthPercentage::Percent(*v / 100.0),
             Constraint::Auto => panic!("Auto is not valid for LengthPercentage"),
             Constraint::Vw(_) | Constraint::Vh(_) | Constraint::Vmin(_) | Constraint::Vmax(_) => {
-                panic!(
-                    "Viewport-relative constraints must be resolved to pixels first."
-                );
+                panic!("Viewport-relative constraints must be resolved to pixels first.");
             }
-            Constraint::Calc(_) | Constraint::Min(_) | Constraint::Max(_) | Constraint::Clamp { .. } => {
-                panic!(
-                    "Complex constraints must be resolved to pixels first."
-                );
+            Constraint::Calc(_)
+            | Constraint::Min(_)
+            | Constraint::Max(_)
+            | Constraint::Clamp { .. } => {
+                panic!("Complex constraints must be resolved to pixels first.");
             }
         }
     }
@@ -448,9 +440,7 @@ impl CalcExpr {
 
                 match &expr {
                     // px * scalar = px
-                    Self::Value(Constraint::Px(v)) => {
-                        Self::Value(Constraint::Px(v * scalar))
-                    }
+                    Self::Value(Constraint::Px(v)) => Self::Value(Constraint::Px(v * scalar)),
                     // x * 1 = x
                     _ if (scalar - 1.0).abs() < f32::EPSILON => expr,
                     // x * 0 = 0
@@ -465,9 +455,7 @@ impl CalcExpr {
 
                 match &expr {
                     // px / scalar = px
-                    Self::Value(Constraint::Px(v)) => {
-                        Self::Value(Constraint::Px(v / scalar))
-                    }
+                    Self::Value(Constraint::Px(v)) => Self::Value(Constraint::Px(v / scalar)),
                     // x / 1 = x
                     _ if (scalar - 1.0).abs() < f32::EPSILON => expr,
                     _ => Self::Div(Box::new(expr), scalar),

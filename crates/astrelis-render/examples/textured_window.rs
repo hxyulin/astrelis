@@ -1,3 +1,12 @@
+//! Basic textured quad rendering example.
+//!
+//! Demonstrates the fundamental wgpu rendering pipeline in Astrelis:
+//! 1. Shader compilation (WGSL)
+//! 2. Procedural texture creation and GPU upload
+//! 3. Sampler and bind group setup
+//! 4. Render pipeline configuration
+//! 5. Per-frame rendering via `clear_and_render`
+
 use astrelis_core::logging;
 use astrelis_render::{
     Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
@@ -20,7 +29,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -38,13 +47,17 @@ fn main() {
             },
         ).expect("Failed to create renderable window");
 
+        // --- Shader ---
         let shader = graphics_ctx
-            .device
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Texture Shader"),
                 source: wgpu::ShaderSource::Wgsl(include_str!("textured_window.wgsl").into()),
             });
 
+        // --- Texture Upload ---
+        // Create a 256x256 RGBA texture with a procedural gradient pattern.
+        // Rgba8UnormSrgb applies sRGB gamma correction so colors appear correct on screen.
         let texture_size = wgpu::Extent3d {
             width: 256,
             height: 256,
@@ -52,7 +65,7 @@ fn main() {
         };
 
         let texture = graphics_ctx
-            .device
+            .device()
             .create_texture(&wgpu::TextureDescriptor {
                 label: Some("Example Texture"),
                 size: texture_size,
@@ -75,7 +88,7 @@ fn main() {
             }
         }
 
-        graphics_ctx.queue.write_texture(
+        graphics_ctx.queue().write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
@@ -91,9 +104,12 @@ fn main() {
             texture_size,
         );
 
+        // --- Sampler ---
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // ClampToEdge prevents sampling beyond texture edges; Linear mag filter
+        // gives smooth results when the quad is larger than the texture.
         let sampler = graphics_ctx
-            .device
+            .device()
             .create_sampler(&wgpu::SamplerDescriptor {
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
                 address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -104,9 +120,12 @@ fn main() {
                 ..Default::default()
             });
 
+        // --- Bind Group ---
+        // Binding 0: texture (Float filterable = supports linear sampling)
+        // Binding 1: sampler (Filtering = pairs with filterable textures)
         let bind_group_layout =
             graphics_ctx
-                .device
+                .device()
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("Texture Bind Group Layout"),
                     entries: &[
@@ -130,7 +149,7 @@ fn main() {
                 });
 
         let bind_group = graphics_ctx
-            .device
+            .device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Texture Bind Group"),
                 layout: &bind_group_layout,
@@ -146,9 +165,10 @@ fn main() {
                 ],
             });
 
+        // --- Pipeline ---
         let pipeline_layout =
             graphics_ctx
-                .device
+                .device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Render Pipeline Layout"),
                     bind_group_layouts: &[&bind_group_layout],
@@ -157,7 +177,7 @@ fn main() {
 
         let pipeline =
             graphics_ctx
-                .device
+                .device()
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("Render Pipeline"),
                     layout: Some(&pipeline_layout),
@@ -165,6 +185,7 @@ fn main() {
                         module: &shader,
                         entry_point: Some("vs_main"),
                         buffers: &[wgpu::VertexBufferLayout {
+                            // 4 floats × 4 bytes = 16 bytes per vertex (2×f32 pos + 2×f32 UV)
                             array_stride: 4 * 4,
                             step_mode: wgpu::VertexStepMode::Vertex,
                             attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
@@ -210,7 +231,7 @@ fn main() {
             -0.8,  0.8,  0.0, 0.0,
         ];
 
-        let vertex_buffer = graphics_ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        let vertex_buffer = graphics_ctx.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Vertex Buffer"),
             size: (vertices.len() * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
@@ -218,7 +239,7 @@ fn main() {
         });
 
         graphics_ctx
-            .queue
+            .queue()
             .write_buffer(&vertex_buffer, 0, bytemuck::cast_slice(vertices));
 
         let window_id = window.id();
@@ -258,14 +279,16 @@ impl astrelis_winit::app::App for App {
             }
         });
 
+        // --- Render Loop ---
         let mut frame = self.window.begin_drawing();
 
-        // Render with automatic scoping (no manual {} block needed)
+        // clear_and_render handles render pass scoping automatically:
+        // the pass is created, the closure runs, then the pass drops.
         frame.clear_and_render(
             RenderTarget::Surface,
             Color::rgb(0.1, 0.2, 0.3),
             |pass| {
-                let pass = pass.descriptor();
+                let pass = pass.wgpu_pass();
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));

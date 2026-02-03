@@ -57,7 +57,9 @@ pub use context::{MiddlewareContext, OverlayContext};
 pub use inspector::InspectorMiddleware;
 pub use keybind::{Keybind, KeybindRegistry, Modifiers};
 pub use manager::MiddlewareManager;
-pub use overlay_draw_list::{OverlayCommand, OverlayDrawList, OverlayLine, OverlayQuadCmd, OverlayText};
+pub use overlay_draw_list::{
+    OverlayCommand, OverlayDrawList, OverlayLine, OverlayQuadCmd, OverlayText,
+};
 pub use overlay_renderer::OverlayRenderer;
 
 use crate::tree::UiTree;

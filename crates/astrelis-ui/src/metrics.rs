@@ -29,7 +29,7 @@ pub struct UiMetrics {
     /// Number of nodes with TEXT_SHAPING dirty flag
     pub nodes_text_dirty: usize,
 
-    /// Number of nodes with COLOR_ONLY dirty flag
+    /// Number of nodes with COLOR dirty flag
     pub nodes_paint_dirty: usize,
 
     /// Number of nodes with GEOMETRY dirty flag
@@ -278,7 +278,7 @@ mod tests {
     fn test_dirty_stats() {
         let mut stats = DirtyStats::new();
         stats.add_node(DirtyFlags::LAYOUT);
-        stats.add_node(DirtyFlags::COLOR_ONLY);
+        stats.add_node(DirtyFlags::COLOR);
         stats.add_node(DirtyFlags::TEXT_SHAPING);
 
         assert_eq!(stats.layout_count, 2); // LAYOUT + TEXT_SHAPING

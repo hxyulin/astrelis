@@ -14,15 +14,14 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
-use astrelis_ui::UiSystem;
+use astrelis_ui::{ColorPalette, UiSystem};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
-    event::{EventBatch, Event, HandleStatus, Key, NamedKey},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    event::{Event, EventBatch, HandleStatus, Key, NamedKey},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 
 struct AnimationShowcaseApp {
@@ -38,7 +37,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -55,7 +54,8 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = window.id();
         let size = window.physical_size();
@@ -92,12 +92,21 @@ fn build_animation_ui(ui: &mut UiSystem, width: f32, height: f32, time: f32) {
     // Calculate progress (0.0 to 1.0) for 2-second animation cycle
     let progress = (time % 2.0) / 2.0;
 
+    let theme = ui.theme().clone();
+    let colors = theme.colors.clone();
+
+    let bg = colors.background;
+    let surface = colors.surface;
+    let text_primary = colors.text_primary;
+    let text_secondary = colors.text_secondary;
+    let info = colors.info;
+
     ui.build(|root| {
         root.container()
             .width(width)
             .height(height)
             .padding(30.0)
-            .background_color(Color::from_rgb_u8(20, 20, 30))
+            .background_color(bg)
             .child(|root| {
                 root.column()
                     .gap(20.0)
@@ -110,20 +119,20 @@ fn build_animation_ui(ui: &mut UiSystem, width: f32, height: f32, time: f32) {
                                     .child(|root| {
                                         root.text("Animation & Easing Showcase")
                                             .size(32.0)
-                                            .color(Color::WHITE)
+                                            .color(text_primary)
                                             .bold()
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text("Watch different easing functions in action")
                                             .size(14.0)
-                                            .color(Color::from_rgb_u8(150, 150, 170))
+                                            .color(text_secondary)
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text(format!("Progress: {:.1}%", progress * 100.0))
                                             .size(16.0)
-                                            .color(Color::from_rgb_u8(100, 200, 255))
+                                            .color(info)
                                             .build()
                                     })
                                     .build()
@@ -134,30 +143,20 @@ fn build_animation_ui(ui: &mut UiSystem, width: f32, height: f32, time: f32) {
                         // Easing function demonstrations grid
                         root.column()
                             .gap(15.0)
+                            .child(|root| build_easing_row(root, "Linear", progress, linear, &colors))
+                            .child(|root| build_easing_row(root, "Ease In", progress, ease_in, &colors))
+                            .child(|root| build_easing_row(root, "Ease Out", progress, ease_out, &colors))
                             .child(|root| {
-                                build_easing_row(root, "Linear", progress, linear)
+                                build_easing_row(root, "Ease In-Out", progress, ease_in_out, &colors)
                             })
-                            .child(|root| {
-                                build_easing_row(root, "Ease In", progress, ease_in)
-                            })
-                            .child(|root| {
-                                build_easing_row(root, "Ease Out", progress, ease_out)
-                            })
-                            .child(|root| {
-                                build_easing_row(root, "Ease In-Out", progress, ease_in_out)
-                            })
-                            .child(|root| {
-                                build_easing_row(root, "Bounce", progress, bounce)
-                            })
-                            .child(|root| {
-                                build_easing_row(root, "Elastic", progress, elastic)
-                            })
+                            .child(|root| build_easing_row(root, "Bounce", progress, bounce, &colors))
+                            .child(|root| build_easing_row(root, "Elastic", progress, elastic, &colors))
                             .build()
                     })
                     .child(|root| {
                         // Controls info
                         root.container()
-                            .background_color(Color::from_rgb_u8(35, 35, 50))
+                            .background_color(surface)
                             .border_radius(8.0)
                             .padding(15.0)
                             .child(|root| {
@@ -166,20 +165,20 @@ fn build_animation_ui(ui: &mut UiSystem, width: f32, height: f32, time: f32) {
                                     .child(|root| {
                                         root.text("Controls:")
                                             .size(16.0)
-                                            .color(Color::WHITE)
+                                            .color(text_primary)
                                             .bold()
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text("• Space: Start/restart animations")
                                             .size(13.0)
-                                            .color(Color::from_rgb_u8(180, 180, 200))
+                                            .color(text_secondary)
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text("• R: Reset animations")
                                             .size(13.0)
-                                            .color(Color::from_rgb_u8(180, 180, 200))
+                                            .color(text_secondary)
                                             .build()
                                     })
                                     .build()
@@ -197,13 +196,19 @@ fn build_easing_row(
     name: &str,
     progress: f32,
     easing_fn: fn(f32) -> f32,
+    colors: &ColorPalette,
 ) -> astrelis_ui::NodeId {
     let eased = easing_fn(progress);
     let travel_distance = 580.0; // Max travel within the track
     let offset = eased * travel_distance;
 
+    let surface = colors.surface;
+    let bg = colors.background;
+    let text_primary = colors.text_primary;
+    let info = colors.info;
+
     root.container()
-        .background_color(Color::from_rgb_u8(30, 30, 45))
+        .background_color(surface)
         .border_radius(8.0)
         .padding(15.0)
         .min_height(80.0)
@@ -217,7 +222,7 @@ fn build_easing_row(
                         .child(|root| {
                             root.text(name)
                                 .size(16.0)
-                                .color(Color::from_rgb_u8(200, 200, 220))
+                                .color(text_primary)
                                 .bold()
                                 .build()
                         })
@@ -225,8 +230,9 @@ fn build_easing_row(
                 })
                 .child(|root| {
                     // Track with positioned box
-                    let mut track = root.container()
-                        .background_color(Color::from_rgb_u8(40, 40, 60))
+                    let mut track = root
+                        .container()
+                        .background_color(bg)
                         .border_radius(4.0)
                         .min_width(650.0)
                         .min_height(50.0)
@@ -237,18 +243,14 @@ fn build_easing_row(
 
                         // Add spacer to create offset effect
                         if offset > 0.0 {
-                            row = row.child(|root| {
-                                root.container()
-                                    .width(offset)
-                                    .height(1.0)
-                                    .build()
-                            });
+                            row = row
+                                .child(|root| root.container().width(offset).height(1.0).build());
                         }
 
                         // Add animated box
                         row = row.child(|root| {
                             root.container()
-                                .background_color(Color::from_rgb_u8(100, 180, 255))
+                                .background_color(info)
                                 .border_radius(6.0)
                                 .width(40.0)
                                 .height(40.0)
@@ -335,8 +337,11 @@ impl App for AnimationShowcaseApp {
             // Print debug info every second
             if (self.animation_time * 10.0) as i32 % 10 == 0 {
                 let cycle = (self.animation_time % 2.0) / 2.0;
-                tracing::debug!("Animation time: {:.2}s, cycle progress: {:.1}%",
-                    self.animation_time, cycle * 100.0);
+                tracing::debug!(
+                    "Animation time: {:.2}s, cycle progress: {:.1}%",
+                    self.animation_time,
+                    cycle * 100.0
+                );
             }
         }
 
@@ -353,7 +358,12 @@ impl App for AnimationShowcaseApp {
             if let Event::WindowResized(size) = event {
                 self.window.resized(*size);
                 self.ui.set_viewport(self.window.viewport());
-                build_animation_ui(&mut self.ui, size.width as f32, size.height as f32, self.animation_time);
+                build_animation_ui(
+                    &mut self.ui,
+                    size.width as f32,
+                    size.height as f32,
+                    self.animation_time,
+                );
                 return HandleStatus::consumed();
             }
             HandleStatus::ignored()
@@ -366,8 +376,15 @@ impl App for AnimationShowcaseApp {
                     match key.logical_key {
                         Key::Named(NamedKey::Space) => {
                             self.is_animating = !self.is_animating;
-                            let status = if self.is_animating { "STARTED" } else { "PAUSED" };
-                            println!("  ▶️  Animation {} (time: {:.2}s)", status, self.animation_time);
+                            let status = if self.is_animating {
+                                "STARTED"
+                            } else {
+                                "PAUSED"
+                            };
+                            println!(
+                                "  ▶️  Animation {} (time: {:.2}s)",
+                                status, self.animation_time
+                            );
                             tracing::info!("Animation {}", status);
                             return HandleStatus::consumed();
                         }
@@ -391,17 +408,23 @@ impl App for AnimationShowcaseApp {
         // Rebuild UI if animation time changed
         if self.is_animating {
             let size = self.window.physical_size();
-            build_animation_ui(&mut self.ui, size.width as f32, size.height as f32, self.animation_time);
+            build_animation_ui(
+                &mut self.ui,
+                size.width as f32,
+                size.height as f32,
+                self.animation_time,
+            );
         }
 
         // Begin frame and render
+        let bg = self.ui.theme().colors.background;
         let mut frame = self.window.begin_drawing();
 
         frame.clear_and_render(
             RenderTarget::Surface,
-            Color::from_rgb_u8(20, 20, 30),
+            bg,
             |pass| {
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

@@ -40,7 +40,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -194,12 +194,12 @@ impl App for TextEffectsDemo {
             .bold();
 
         // Prepare all text buffers
-        let mut shadow_buffer = self.font_renderer.prepare(&shadow_text);
-        let mut blurred_buffer = self.font_renderer.prepare(&blurred_text);
-        let mut outline_buffer = self.font_renderer.prepare(&outline_text);
-        let mut glow_buffer = self.font_renderer.prepare(&glow_text);
-        let mut inner_buffer = self.font_renderer.prepare(&inner_text);
-        let mut combined_buffer = self.font_renderer.prepare(&combined_text);
+        let shadow_buffer = self.font_renderer.prepare(&shadow_text);
+        let blurred_buffer = self.font_renderer.prepare(&blurred_text);
+        let outline_buffer = self.font_renderer.prepare(&outline_text);
+        let glow_buffer = self.font_renderer.prepare(&glow_text);
+        let inner_buffer = self.font_renderer.prepare(&inner_text);
+        let combined_buffer = self.font_renderer.prepare(&combined_text);
 
         // Info text
         let info_text = Text::new("Text Effect Types:")
@@ -268,7 +268,7 @@ impl App for TextEffectsDemo {
             RenderTarget::Surface,
             Color::from_rgb_u8(20, 20, 30),
             |pass| {
-                self.font_renderer.render(pass.descriptor());
+                self.font_renderer.render(pass.wgpu_pass());
             },
         );
 

@@ -13,15 +13,14 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::UiSystem;
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
-    event::{EventBatch, Event, HandleStatus},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    event::{Event, EventBatch, HandleStatus},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 
 struct ComplexUiApp {
@@ -55,7 +54,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -72,7 +71,8 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = window.id();
         let size = window.physical_size();
@@ -110,12 +110,15 @@ fn main() {
 }
 
 fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats) {
+    let theme = ui.theme().clone();
+    let colors = &theme.colors;
+
     ui.build(|root| {
         // Main container - full screen
         root.container()
             .width(width)
             .height(height)
-            .background_color(Color::from_rgb_u8(18, 18, 25))
+            .background_color(colors.background)
             .child(|root| {
                 // Horizontal layout - sidebar + main content
                 root.row()
@@ -123,8 +126,8 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                         // Left sidebar - navigation
                         root.container()
                             .width(250.0)
-                            .background_color(Color::from_rgb_u8(25, 25, 35))
-                            .border_color(Color::from_rgb_u8(50, 50, 70))
+                            .background_color(colors.background)
+                            .border_color(colors.border)
                             .border_width(1.0)
                             .padding(20.0)
                             .child(|root| {
@@ -137,7 +140,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                             .child(|root| {
                                                 root.text("Astrelis")
                                                     .size(28.0)
-                                                    .color(Color::from_rgb_u8(100, 180, 255))
+                                                    .color(colors.info)
                                                     .bold()
                                                     .build()
                                             })
@@ -149,8 +152,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                             .gap(8.0)
                                             .child(|root| {
                                                 root.button("Dashboard")
-                                                    .background_color(Color::from_rgb_u8(60, 120, 200))
-                                                    .hover_color(Color::from_rgb_u8(70, 130, 210))
+                                                    .background_color(colors.primary)
                                                     .padding(12.0)
                                                     .font_size(14.0)
                                                     .min_width(200.0)
@@ -158,8 +160,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                             })
                                             .child(|root| {
                                                 root.button("Analytics")
-                                                    .background_color(Color::from_rgb_u8(45, 45, 65))
-                                                    .hover_color(Color::from_rgb_u8(55, 55, 75))
+                                                    .background_color(colors.surface)
                                                     .padding(12.0)
                                                     .font_size(14.0)
                                                     .min_width(200.0)
@@ -167,8 +168,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                             })
                                             .child(|root| {
                                                 root.button("Settings")
-                                                    .background_color(Color::from_rgb_u8(45, 45, 65))
-                                                    .hover_color(Color::from_rgb_u8(55, 55, 75))
+                                                    .background_color(colors.surface)
                                                     .padding(12.0)
                                                     .font_size(14.0)
                                                     .min_width(200.0)
@@ -176,8 +176,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                             })
                                             .child(|root| {
                                                 root.button("Users")
-                                                    .background_color(Color::from_rgb_u8(45, 45, 65))
-                                                    .hover_color(Color::from_rgb_u8(55, 55, 75))
+                                                    .background_color(colors.surface)
                                                     .padding(12.0)
                                                     .font_size(14.0)
                                                     .min_width(200.0)
@@ -192,7 +191,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                             .child(|root| {
                                                 root.text("Version 0.1.0")
                                                     .size(11.0)
-                                                    .color(Color::from_rgb_u8(100, 100, 120))
+                                                    .color(colors.text_disabled)
                                                     .build()
                                             })
                                             .build()
@@ -204,7 +203,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                     .child(|root| {
                         // Main content area
                         root.container()
-                            .background_color(Color::from_rgb_u8(22, 22, 32))
+                            .background_color(colors.background)
                             .padding(30.0)
                             .child(|root| {
                                 root.column()
@@ -218,14 +217,14 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                                     .child(|root| {
                                                         root.text("Dashboard Overview")
                                                             .size(32.0)
-                                                            .color(Color::WHITE)
+                                                            .color(colors.text_primary)
                                                             .bold()
                                                             .build()
                                                     })
                                                     .child(|root| {
                                                         root.text("Real-time application metrics and controls")
                                                             .size(14.0)
-                                                            .color(Color::from_rgb_u8(150, 150, 170))
+                                                            .color(colors.text_secondary)
                                                             .build()
                                                     })
                                                     .build()
@@ -237,22 +236,22 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                         root.row()
                                             .gap(20.0)
                                             .child(|root| {
-                                                build_stat_card(root, "Active Users",
+                                                build_stat_card(root, &theme, "Active Users",
                                                     &format!("{}", stats.active_users),
                                                     Color::from_rgb_u8(100, 200, 150))
                                             })
                                             .child(|root| {
-                                                build_stat_card(root, "Revenue",
+                                                build_stat_card(root, &theme, "Revenue",
                                                     &format!("${:.2}", stats.total_revenue),
                                                     Color::from_rgb_u8(100, 180, 255))
                                             })
                                             .child(|root| {
-                                                build_stat_card(root, "Tasks",
+                                                build_stat_card(root, &theme, "Tasks",
                                                     &format!("{}", stats.tasks_completed),
                                                     Color::from_rgb_u8(255, 180, 100))
                                             })
                                             .child(|root| {
-                                                build_stat_card(root, "Success Rate",
+                                                build_stat_card(root, &theme, "Success Rate",
                                                     &format!("{:.1}%", stats.success_rate),
                                                     Color::from_rgb_u8(200, 100, 255))
                                             })
@@ -265,7 +264,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                             .child(|root| {
                                                 // Left column - Form
                                                 root.container()
-                                                    .background_color(Color::from_rgb_u8(30, 30, 45))
+                                                    .background_color(colors.surface)
                                                     .border_radius(12.0)
                                                     .padding(20.0)
                                                     .min_width(400.0)
@@ -275,14 +274,14 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                                             .child(|root| {
                                                                 root.text("Create New Task")
                                                                     .size(20.0)
-                                                                    .color(Color::WHITE)
+                                                                    .color(colors.text_primary)
                                                                     .bold()
                                                                     .build()
                                                             })
                                                             .child(|root| {
                                                                 root.text("Task Name")
                                                                     .size(12.0)
-                                                                    .color(Color::from_rgb_u8(180, 180, 200))
+                                                                    .color(colors.text_secondary)
                                                                     .build()
                                                             })
                                                             .child(|root| {
@@ -294,7 +293,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                                             .child(|root| {
                                                                 root.text("Description")
                                                                     .size(12.0)
-                                                                    .color(Color::from_rgb_u8(180, 180, 200))
+                                                                    .color(colors.text_secondary)
                                                                     .build()
                                                             })
                                                             .child(|root| {
@@ -309,16 +308,14 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                                                     .gap(10.0)
                                                                     .child(|root| {
                                                                         root.button("Create Task")
-                                                                            .background_color(Color::from_rgb_u8(60, 180, 60))
-                                                                            .hover_color(Color::from_rgb_u8(70, 200, 70))
+                                                                            .background_color(colors.success)
                                                                             .padding(12.0)
                                                                             .font_size(14.0)
                                                                             .build()
                                                                     })
                                                                     .child(|root| {
                                                                         root.button("Cancel")
-                                                                            .background_color(Color::from_rgb_u8(100, 100, 120))
-                                                                            .hover_color(Color::from_rgb_u8(120, 120, 140))
+                                                                            .background_color(colors.surface)
                                                                             .padding(12.0)
                                                                             .font_size(14.0)
                                                                             .build()
@@ -332,7 +329,7 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                             .child(|root| {
                                                 // Right column - Recent activity list
                                                 root.container()
-                                                    .background_color(Color::from_rgb_u8(30, 30, 45))
+                                                    .background_color(colors.surface)
                                                     .border_radius(12.0)
                                                     .padding(20.0)
                                                     .child(|root| {
@@ -341,24 +338,24 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
                                                             .child(|root| {
                                                                 root.text("Recent Activity")
                                                                     .size(20.0)
-                                                                    .color(Color::WHITE)
+                                                                    .color(colors.text_primary)
                                                                     .bold()
                                                                     .build()
                                                             })
                                                             .child(|root| {
-                                                                build_activity_item(root, "User logged in", "2 minutes ago")
+                                                                build_activity_item(root, &theme, "User logged in", "2 minutes ago")
                                                             })
                                                             .child(|root| {
-                                                                build_activity_item(root, "Task completed", "15 minutes ago")
+                                                                build_activity_item(root, &theme, "Task completed", "15 minutes ago")
                                                             })
                                                             .child(|root| {
-                                                                build_activity_item(root, "New user registered", "1 hour ago")
+                                                                build_activity_item(root, &theme, "New user registered", "1 hour ago")
                                                             })
                                                             .child(|root| {
-                                                                build_activity_item(root, "System backup completed", "3 hours ago")
+                                                                build_activity_item(root, &theme, "System backup completed", "3 hours ago")
                                                             })
                                                             .child(|root| {
-                                                                build_activity_item(root, "Database optimized", "6 hours ago")
+                                                                build_activity_item(root, &theme, "Database optimized", "6 hours ago")
                                                             })
                                                             .build()
                                                     })
@@ -376,9 +373,16 @@ fn build_complex_ui(ui: &mut UiSystem, width: f32, height: f32, stats: AppStats)
     });
 }
 
-fn build_stat_card(root: &mut astrelis_ui::UiBuilder, title: &str, value: &str, color: Color) -> astrelis_ui::NodeId {
+fn build_stat_card(
+    root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
+    title: &str,
+    value: &str,
+    color: Color,
+) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
     root.container()
-        .background_color(Color::from_rgb_u8(35, 35, 50))
+        .background_color(colors.surface)
         .border_radius(10.0)
         .padding(20.0)
         .min_width(150.0)
@@ -388,24 +392,24 @@ fn build_stat_card(root: &mut astrelis_ui::UiBuilder, title: &str, value: &str, 
                 .child(|root| {
                     root.text(title)
                         .size(12.0)
-                        .color(Color::from_rgb_u8(150, 150, 170))
+                        .color(colors.text_secondary)
                         .build()
                 })
-                .child(|root| {
-                    root.text(value)
-                        .size(26.0)
-                        .color(color)
-                        .bold()
-                        .build()
-                })
+                .child(|root| root.text(value).size(26.0).color(color).bold().build())
                 .build()
         })
         .build()
 }
 
-fn build_activity_item(root: &mut astrelis_ui::UiBuilder, title: &str, time: &str) -> astrelis_ui::NodeId {
+fn build_activity_item(
+    root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
+    title: &str,
+    time: &str,
+) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
     root.container()
-        .background_color(Color::from_rgb_u8(40, 40, 60))
+        .background_color(colors.surface)
         .border_radius(6.0)
         .padding(12.0)
         .child(|root| {
@@ -414,13 +418,13 @@ fn build_activity_item(root: &mut astrelis_ui::UiBuilder, title: &str, time: &st
                 .child(|root| {
                     root.text(title)
                         .size(14.0)
-                        .color(Color::from_rgb_u8(220, 220, 240))
+                        .color(colors.text_primary)
                         .build()
                 })
                 .child(|root| {
                     root.text(time)
                         .size(11.0)
-                        .color(Color::from_rgb_u8(120, 120, 140))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .build()
@@ -444,7 +448,12 @@ impl App for ComplexUiApp {
             if let Event::WindowResized(size) = event {
                 self.window.resized(*size);
                 self.ui.set_viewport(self.window.viewport());
-                build_complex_ui(&mut self.ui, size.width as f32, size.height as f32, self.stats);
+                build_complex_ui(
+                    &mut self.ui,
+                    size.width as f32,
+                    size.height as f32,
+                    self.stats,
+                );
                 return HandleStatus::consumed();
             }
             HandleStatus::ignored()
@@ -454,13 +463,14 @@ impl App for ComplexUiApp {
         self.ui.handle_events(events);
 
         // Begin frame and render
+        let bg = self.ui.theme().colors.background;
         let mut frame = self.window.begin_drawing();
 
         frame.clear_and_render(
             RenderTarget::Surface,
-            Color::from_rgb_u8(18, 18, 25),
+            bg,
             |pass| {
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

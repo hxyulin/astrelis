@@ -1,5 +1,7 @@
 //! Framebuffer abstraction for offscreen rendering.
 
+use astrelis_core::profiling::profile_function;
+
 use crate::context::GraphicsContext;
 use crate::types::GpuTexture;
 
@@ -198,6 +200,7 @@ impl FramebufferBuilder {
 
     /// Build the framebuffer.
     pub fn build(self, context: &GraphicsContext) -> Framebuffer {
+        profile_function!();
         let label_prefix = self.label.unwrap_or("Framebuffer");
 
         let size = wgpu::Extent3d {
@@ -208,7 +211,7 @@ impl FramebufferBuilder {
 
         // Create color texture (always sample_count=1, used as resolve target or direct render)
         let color = GpuTexture::new(
-            &context.device,
+            context.device(),
             &wgpu::TextureDescriptor {
                 label: Some(&format!("{} Color", label_prefix)),
                 size,
@@ -226,7 +229,7 @@ impl FramebufferBuilder {
         // Create MSAA texture if sample_count > 1
         let msaa = if self.sample_count > 1 {
             Some(GpuTexture::new(
-                &context.device,
+                context.device(),
                 &wgpu::TextureDescriptor {
                     label: Some(&format!("{} MSAA", label_prefix)),
                     size,
@@ -251,7 +254,7 @@ impl FramebufferBuilder {
             };
 
             Some(GpuTexture::new(
-                &context.device,
+                context.device(),
                 &wgpu::TextureDescriptor {
                     label: Some(&format!("{} Depth", label_prefix)),
                     size,

@@ -112,45 +112,45 @@ impl ColorPalette {
         }
     }
 
-    /// Create a dark color palette.
+    /// Create a dark color palette (high-contrast, near-black aesthetic).
     pub fn dark() -> Self {
         Self {
-            primary: Color::from_rgb_u8(60, 120, 200),
-            secondary: Color::from_rgb_u8(100, 180, 100),
-            background: Color::from_rgb_u8(18, 18, 18),
-            surface: Color::from_rgb_u8(30, 30, 30),
-            error: Color::from_rgb_u8(220, 60, 60),
-            warning: Color::from_rgb_u8(255, 180, 60),
-            success: Color::from_rgb_u8(80, 200, 120),
-            info: Color::from_rgb_u8(100, 180, 255),
-            text_primary: Color::from_rgb_u8(255, 255, 255),
-            text_secondary: Color::from_rgb_u8(180, 180, 180),
-            text_disabled: Color::from_rgb_u8(100, 100, 100),
-            border: Color::from_rgb_u8(60, 60, 60),
-            divider: Color::from_rgb_u8(40, 40, 40),
-            hover_overlay: Color::from_rgba_u8(255, 255, 255, 20),
-            active_overlay: Color::from_rgba_u8(255, 255, 255, 40),
+            primary: Color::from_rgb_u8(140, 120, 255),
+            secondary: Color::from_rgb_u8(100, 150, 235),
+            background: Color::from_rgb_u8(10, 10, 14),
+            surface: Color::from_rgb_u8(18, 18, 24),
+            error: Color::from_rgb_u8(240, 80, 100),
+            warning: Color::from_rgb_u8(240, 180, 70),
+            success: Color::from_rgb_u8(60, 200, 130),
+            info: Color::from_rgb_u8(90, 175, 245),
+            text_primary: Color::from_rgb_u8(240, 240, 252),
+            text_secondary: Color::from_rgb_u8(120, 120, 145),
+            text_disabled: Color::from_rgb_u8(65, 65, 82),
+            border: Color::from_rgb_u8(35, 35, 48),
+            divider: Color::from_rgb_u8(25, 25, 35),
+            hover_overlay: Color::from_rgba_u8(255, 255, 255, 10),
+            active_overlay: Color::from_rgba_u8(255, 255, 255, 20),
         }
     }
 
-    /// Create a light color palette.
+    /// Create a light color palette (cool minimal aesthetic).
     pub fn light() -> Self {
         Self {
-            primary: Color::from_rgb_u8(50, 100, 200),
-            secondary: Color::from_rgb_u8(80, 160, 80),
-            background: Color::from_rgb_u8(250, 250, 250),
+            primary: Color::from_rgb_u8(100, 80, 220),
+            secondary: Color::from_rgb_u8(70, 110, 195),
+            background: Color::from_rgb_u8(248, 248, 252),
             surface: Color::from_rgb_u8(255, 255, 255),
-            error: Color::from_rgb_u8(200, 50, 50),
-            warning: Color::from_rgb_u8(220, 150, 50),
-            success: Color::from_rgb_u8(60, 180, 100),
-            info: Color::from_rgb_u8(80, 150, 220),
-            text_primary: Color::from_rgb_u8(0, 0, 0),
-            text_secondary: Color::from_rgb_u8(100, 100, 100),
-            text_disabled: Color::from_rgb_u8(180, 180, 180),
-            border: Color::from_rgb_u8(200, 200, 200),
-            divider: Color::from_rgb_u8(230, 230, 230),
-            hover_overlay: Color::from_rgba_u8(0, 0, 0, 15),
-            active_overlay: Color::from_rgba_u8(0, 0, 0, 30),
+            error: Color::from_rgb_u8(210, 65, 80),
+            warning: Color::from_rgb_u8(205, 150, 50),
+            success: Color::from_rgb_u8(50, 165, 100),
+            info: Color::from_rgb_u8(70, 140, 210),
+            text_primary: Color::from_rgb_u8(25, 25, 35),
+            text_secondary: Color::from_rgb_u8(100, 100, 120),
+            text_disabled: Color::from_rgb_u8(165, 165, 180),
+            border: Color::from_rgb_u8(225, 225, 235),
+            divider: Color::from_rgb_u8(235, 235, 242),
+            hover_overlay: Color::from_rgba_u8(0, 0, 0, 8),
+            active_overlay: Color::from_rgba_u8(0, 0, 0, 16),
         }
     }
 }
@@ -279,10 +279,10 @@ impl Shapes {
     pub fn new() -> Self {
         Self {
             none: 0.0,
-            sm: 2.0,
-            md: 4.0,
-            lg: 8.0,
-            xl: 16.0,
+            sm: 4.0,
+            md: 6.0,
+            lg: 10.0,
+            xl: 14.0,
             full: 9999.0, // Large value for fully rounded
         }
     }
@@ -480,14 +480,14 @@ mod tests {
     #[test]
     fn test_dark_theme() {
         let theme = Theme::dark();
-        assert_eq!(theme.colors.primary, Color::from_rgb_u8(60, 120, 200));
+        assert_eq!(theme.colors.primary, Color::from_rgb_u8(140, 120, 255));
         assert_eq!(theme.typography.body_size, 14.0);
     }
 
     #[test]
     fn test_light_theme() {
         let theme = Theme::light();
-        assert_eq!(theme.colors.background, Color::from_rgb_u8(250, 250, 250));
+        assert_eq!(theme.colors.background, Color::from_rgb_u8(248, 248, 252));
     }
 
     #[test]
@@ -521,9 +521,9 @@ mod tests {
     #[test]
     fn test_shapes() {
         let shapes = Shapes::new();
-        assert_eq!(shapes.sm, 2.0);
-        assert_eq!(shapes.lg, 8.0);
-        assert_eq!(shapes.get("md"), 4.0);
+        assert_eq!(shapes.sm, 4.0);
+        assert_eq!(shapes.lg, 10.0);
+        assert_eq!(shapes.get("md"), 6.0);
     }
 
     #[test]

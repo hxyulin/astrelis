@@ -5,6 +5,8 @@ use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::Arc;
 
+use astrelis_core::profiling::profile_function;
+
 use crate::error::AssetError;
 use crate::event::{AssetEvent, AssetEventBuffer};
 use crate::handle::{Handle, UntypedHandle};
@@ -151,6 +153,7 @@ impl AssetServer {
     /// Returns a handle immediately. The asset will be loaded in the background.
     /// Check if ready using `is_ready()` or `get()`.
     pub fn load<T: Asset>(&mut self, path: impl AsRef<Path>) -> Handle<T> {
+        profile_function!();
         let source = AssetSource::disk(path.as_ref());
         self.load_from_source::<T>(source)
     }
@@ -193,6 +196,7 @@ impl AssetServer {
     /// Load an asset synchronously (blocking).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load_sync<T: Asset>(&mut self, path: impl AsRef<Path>) -> Result<Handle<T>, AssetError> {
+        profile_function!();
         let source = AssetSource::disk(path.as_ref());
         self.load_from_source_sync::<T>(source)
     }
@@ -203,6 +207,7 @@ impl AssetServer {
         &mut self,
         source: AssetSource,
     ) -> Result<Handle<T>, AssetError> {
+        profile_function!();
         let storage = self.storages.get_or_create::<T>();
 
         // Check if already loaded (use canonical key for dedup)
@@ -249,6 +254,7 @@ impl AssetServer {
 
     /// Insert an already-loaded asset directly.
     pub fn insert<T: Asset>(&mut self, source: AssetSource, asset: T) -> Handle<T> {
+        profile_function!();
         let storage = self.storages.get_or_create::<T>();
         let handle = storage.insert(source, asset);
 
@@ -265,6 +271,7 @@ impl AssetServer {
 
     /// Get an asset if it's ready.
     pub fn get<T: Asset>(&self, handle: &Handle<T>) -> Option<&Arc<T>> {
+        profile_function!();
         self.storages.get::<T>().and_then(|s| s.get(handle))
     }
 
@@ -316,6 +323,7 @@ impl AssetServer {
     /// Returns the number of loads processed.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn process_pending(&mut self, max_loads: usize) -> usize {
+        profile_function!();
         let mut processed = 0;
 
         while processed < max_loads {
@@ -439,6 +447,7 @@ impl AssetServer {
     /// the asset should already be ready.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn ensure_loaded<T: Asset>(&mut self, handle: &Handle<T>) -> Option<&Arc<T>> {
+        profile_function!();
         // If already ready, return immediately
         if self.is_ready(handle) {
             return self.get(handle);
@@ -521,6 +530,7 @@ impl AssetServer {
     /// This method is only available with the `hot-reload` feature enabled.
     #[cfg(feature = "hot-reload")]
     pub fn process_hot_reload(&mut self) -> usize {
+        profile_function!();
         let Some(watcher) = &mut self.watcher else {
             return 0;
         };

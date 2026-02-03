@@ -1,10 +1,11 @@
-///! WindowManager - Manages multiple windows and eliminates boilerplate
-///!
-///! This module provides a high-level abstraction for managing multiple windows,
-///! automatically handling common events like resizing and providing a clean API
-///! for rendering.
+//! WindowManager - Manages multiple windows and eliminates boilerplate
+//!
+//! This module provides a high-level abstraction for managing multiple windows,
+//! automatically handling common events like resizing and providing a clean API
+//! for rendering.
 
-use std::collections::HashMap;
+use ahash::{HashMap, HashMapExt};
+use astrelis_core::profiling::profile_function;
 use std::sync::Arc;
 
 use astrelis_winit::{
@@ -65,7 +66,7 @@ impl WindowManager {
     /// use astrelis_render::{WindowManager, GraphicsContext};
     /// use std::sync::Arc;
     ///
-    /// let graphics = GraphicsContext::new_owned_sync_or_panic();
+    /// let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
     /// let window_manager = WindowManager::new(graphics);
     /// ```
     pub fn new(graphics: Arc<GraphicsContext>) -> Self {
@@ -124,6 +125,7 @@ impl WindowManager {
         descriptor: WindowDescriptor,
         window_descriptor: WindowContextDescriptor,
     ) -> Result<WindowId, crate::context::GraphicsError> {
+        profile_function!();
         let window = ctx.create_window(descriptor).expect("Failed to create window");
         let id = window.id();
         let renderable = RenderableWindow::new_with_descriptor(window, self.graphics.clone(), window_descriptor)?;
@@ -196,6 +198,7 @@ impl WindowManager {
     where
         F: FnMut(&mut RenderableWindow, &mut EventBatch),
     {
+        profile_function!();
         let Some(window) = self.windows.get_mut(&id) else {
             return;
         };
@@ -282,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_window_manager_creation() {
-        let graphics = GraphicsContext::new_owned_sync_or_panic();
+        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let manager = WindowManager::new(graphics.clone());
 
         assert_eq!(manager.window_count(), 0);
@@ -291,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_window_manager_window_count() {
-        let graphics = GraphicsContext::new_owned_sync_or_panic();
+        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let manager = WindowManager::new(graphics);
 
         assert_eq!(manager.window_count(), 0);
@@ -302,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_window_manager_window_ids_empty() {
-        let graphics = GraphicsContext::new_owned_sync_or_panic();
+        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let manager = WindowManager::new(graphics);
 
         assert_eq!(manager.window_ids().count(), 0);

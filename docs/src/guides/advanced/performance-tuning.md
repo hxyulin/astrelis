@@ -246,7 +246,7 @@ let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
     pass.write_timestamp(&query_set, 0); // Start
 
     // Render operations
-    ui.render(pass.descriptor());
+    ui.render(pass.wgpu_pass());
 
     pass.write_timestamp(&query_set, 1); // End
 }
@@ -771,7 +771,7 @@ impl App for ProfilingDemo {
             Color::from_rgb(30, 30, 40),
             |pass| {
                 puffin::profile_scope!("ui_render");
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

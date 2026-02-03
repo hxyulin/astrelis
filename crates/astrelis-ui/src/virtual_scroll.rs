@@ -9,6 +9,9 @@ use astrelis_core::alloc::HashMap;
 
 use crate::tree::{NodeId, UiTree};
 
+/// Builder function type for creating UI nodes from virtual scroll items.
+type ItemBuilder<T> = Box<dyn Fn(usize, &T, &mut UiTree) -> NodeId>;
+
 /// Configuration for virtual scrolling behavior.
 #[derive(Debug, Clone)]
 pub struct VirtualScrollConfig {
@@ -65,9 +68,10 @@ impl ItemHeight {
     pub fn get(&self, index: usize) -> f32 {
         match self {
             Self::Fixed(h) => *h,
-            Self::Variable { estimated, measured } => {
-                measured.get(&index).copied().unwrap_or(*estimated)
-            }
+            Self::Variable {
+                estimated,
+                measured,
+            } => measured.get(&index).copied().unwrap_or(*estimated),
         }
     }
 
@@ -229,7 +233,10 @@ impl VirtualScrollState {
 
         match &self.item_height {
             ItemHeight::Fixed(h) => *h * self.total_items as f32,
-            ItemHeight::Variable { estimated, measured } => {
+            ItemHeight::Variable {
+                estimated,
+                measured,
+            } => {
                 let mut height = 0.0;
                 for i in 0..self.total_items {
                     height += measured.get(&i).copied().unwrap_or(*estimated);
@@ -319,7 +326,10 @@ impl VirtualScrollState {
     pub fn get_item_offset(&self, index: usize) -> f32 {
         match &self.item_height {
             ItemHeight::Fixed(h) => *h * index as f32,
-            ItemHeight::Variable { estimated, measured } => {
+            ItemHeight::Variable {
+                estimated,
+                measured,
+            } => {
                 let mut offset = 0.0;
                 for i in 0..index {
                     offset += measured.get(&i).copied().unwrap_or(*estimated);
@@ -344,7 +354,10 @@ impl VirtualScrollState {
                     None
                 }
             }
-            ItemHeight::Variable { estimated, measured } => {
+            ItemHeight::Variable {
+                estimated,
+                measured,
+            } => {
                 let mut offset = 0.0;
                 for i in 0..self.total_items {
                     let height = measured.get(&i).copied().unwrap_or(*estimated);
@@ -422,7 +435,9 @@ impl VirtualScrollState {
             .collect();
 
         // Find items to mount (in new range but not mounted)
-        let to_mount: Vec<usize> = new_range.filter(|i| !self.mounted.contains_key(i)).collect();
+        let to_mount: Vec<usize> = new_range
+            .filter(|i| !self.mounted.contains_key(i))
+            .collect();
 
         (to_mount, to_unmount)
     }
@@ -505,7 +520,7 @@ pub struct VirtualScrollView<T> {
     /// Scroll state.
     state: VirtualScrollState,
     /// Item builder function.
-    builder: Box<dyn Fn(usize, &T, &mut UiTree) -> NodeId>,
+    builder: ItemBuilder<T>,
 }
 
 impl<T> VirtualScrollView<T> {
@@ -707,7 +722,11 @@ mod tests {
         let range = state.calculate_visible_range();
         assert_eq!(range.start, 0);
         // The visible range calculation: start_index=0-2=0, end_index=(3+1)+2=6
-        assert!(range.end >= 4, "end should be at least 4, got {}", range.end);
+        assert!(
+            range.end >= 4,
+            "end should be at least 4, got {}",
+            range.end
+        );
     }
 
     #[test]
@@ -839,7 +858,7 @@ mod tests {
         let mut state = VirtualScrollState::new(1000, ItemHeight::fixed(50.0));
         state.set_viewport_height(400.0);
         state.update_visible(); // Update visible range
-        state.update_stats();   // Update stats
+        state.update_stats(); // Update stats
 
         let stats = state.stats();
         assert_eq!(stats.total_items, 1000);

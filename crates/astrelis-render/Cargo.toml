@@ -12,6 +12,10 @@ description = "Astrelis Core Rendering Module"
 [features]
 # Enable mock GPU types for testing
 mock = ["astrelis-test-utils/mock"]
+# Enable image export (PNG screenshots via GpuReadback::save_png)
+image = ["dep:image"]
+# Enable GPU timestamp profiling via wgpu-profiler with puffin visualization
+gpu-profiling = ["dep:wgpu-profiler", "dep:puffin", "astrelis-core/profiling"]
 
 [dependencies]
 tracing.workspace = true
@@ -24,3 +28,6 @@ bytemuck.workspace = true
 bitflags.workspace = true
 ahash.workspace = true
 glam.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+wgpu-profiler = { workspace = true, optional = true, features = ["puffin"] }
+puffin = { workspace = true, optional = true }

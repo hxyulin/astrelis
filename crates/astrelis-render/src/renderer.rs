@@ -1,3 +1,5 @@
+use astrelis_core::profiling::profile_function;
+
 use crate::context::GraphicsContext;
 use crate::types::{GpuTexture, TypedBuffer, UniformBuffer};
 use std::sync::Arc;
@@ -23,18 +25,19 @@ impl Renderer {
 
     /// Get the device.
     pub fn device(&self) -> &wgpu::Device {
-        &self.context.device
+        self.context.device()
     }
 
     /// Get the queue.
     pub fn queue(&self) -> &wgpu::Queue {
-        &self.context.queue
+        self.context.queue()
     }
 
     /// Create a shader module from WGSL source.
     pub fn create_shader(&self, label: Option<&str>, source: &str) -> wgpu::ShaderModule {
+        profile_function!();
         self.context
-            .device
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label,
                 source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -47,7 +50,8 @@ impl Renderer {
         label: Option<&str>,
         data: &[T],
     ) -> wgpu::Buffer {
-        let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+        profile_function!();
+        let buffer = self.context.device().create_buffer(&wgpu::BufferDescriptor {
             label,
             size: std::mem::size_of_val(data) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
@@ -55,7 +59,7 @@ impl Renderer {
         });
 
         self.context
-            .queue
+            .queue()
             .write_buffer(&buffer, 0, bytemuck::cast_slice(data));
 
         buffer
@@ -67,7 +71,8 @@ impl Renderer {
         label: Option<&str>,
         data: &[T],
     ) -> wgpu::Buffer {
-        let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+        profile_function!();
+        let buffer = self.context.device().create_buffer(&wgpu::BufferDescriptor {
             label,
             size: std::mem::size_of_val(data) as u64,
             usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
@@ -75,7 +80,7 @@ impl Renderer {
         });
 
         self.context
-            .queue
+            .queue()
             .write_buffer(&buffer, 0, bytemuck::cast_slice(data));
 
         buffer
@@ -87,14 +92,15 @@ impl Renderer {
         label: Option<&str>,
         data: &T,
     ) -> wgpu::Buffer {
-        let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+        profile_function!();
+        let buffer = self.context.device().create_buffer(&wgpu::BufferDescriptor {
             label,
             size: std::mem::size_of::<T>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        self.context.queue.write_buffer(
+        self.context.queue().write_buffer(
             &buffer,
             0,
             bytemuck::cast_slice(std::slice::from_ref(data)),
@@ -105,7 +111,7 @@ impl Renderer {
 
     /// Update a uniform buffer with new data.
     pub fn update_uniform_buffer<T: bytemuck::Pod>(&self, buffer: &wgpu::Buffer, data: &T) {
-        self.context.queue.write_buffer(
+        self.context.queue().write_buffer(
             buffer,
             0,
             bytemuck::cast_slice(std::slice::from_ref(data)),
@@ -126,6 +132,7 @@ impl Renderer {
         size: u64,
         read_only: bool,
     ) -> wgpu::Buffer {
+        profile_function!();
         let usage = if read_only {
             wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST
         } else {
@@ -134,7 +141,7 @@ impl Renderer {
                 | wgpu::BufferUsages::COPY_SRC
         };
 
-        self.context.device.create_buffer(&wgpu::BufferDescriptor {
+        self.context.device().create_buffer(&wgpu::BufferDescriptor {
             label,
             size,
             usage,
@@ -164,7 +171,7 @@ impl Renderer {
                 | wgpu::BufferUsages::COPY_SRC
         };
 
-        let buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = self.context.device().create_buffer(&wgpu::BufferDescriptor {
             label,
             size: std::mem::size_of_val(data) as u64,
             usage,
@@ -172,7 +179,7 @@ impl Renderer {
         });
 
         self.context
-            .queue
+            .queue()
             .write_buffer(&buffer, 0, bytemuck::cast_slice(data));
 
         buffer
@@ -192,13 +199,13 @@ impl Renderer {
         data: &[T],
     ) {
         self.context
-            .queue
+            .queue()
             .write_buffer(buffer, offset, bytemuck::cast_slice(data));
     }
 
     /// Create a texture with descriptor.
     pub fn create_texture(&self, descriptor: &wgpu::TextureDescriptor) -> wgpu::Texture {
-        self.context.device.create_texture(descriptor)
+        self.context.device().create_texture(descriptor)
     }
 
     /// Create a 2D texture with data.
@@ -219,7 +226,7 @@ impl Renderer {
 
         let texture = self
             .context
-            .device
+            .device()
             .create_texture(&wgpu::TextureDescriptor {
                 label,
                 size,
@@ -233,7 +240,7 @@ impl Renderer {
 
         let bytes_per_pixel = format.block_copy_size(None).unwrap();
 
-        self.context.queue.write_texture(
+        self.context.queue().write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
@@ -254,13 +261,13 @@ impl Renderer {
 
     /// Create a sampler with descriptor.
     pub fn create_sampler(&self, descriptor: &wgpu::SamplerDescriptor) -> wgpu::Sampler {
-        self.context.device.create_sampler(descriptor)
+        self.context.device().create_sampler(descriptor)
     }
 
     /// Create a simple linear sampler.
     pub fn create_linear_sampler(&self, label: Option<&str>) -> wgpu::Sampler {
         self.context
-            .device
+            .device()
             .create_sampler(&wgpu::SamplerDescriptor {
                 label,
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -276,7 +283,7 @@ impl Renderer {
     /// Create a simple nearest sampler.
     pub fn create_nearest_sampler(&self, label: Option<&str>) -> wgpu::Sampler {
         self.context
-            .device
+            .device()
             .create_sampler(&wgpu::SamplerDescriptor {
                 label,
                 address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -295,8 +302,9 @@ impl Renderer {
         label: Option<&str>,
         entries: &[wgpu::BindGroupLayoutEntry],
     ) -> wgpu::BindGroupLayout {
+        profile_function!();
         self.context
-            .device
+            .device()
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label, entries })
     }
 
@@ -307,8 +315,9 @@ impl Renderer {
         layout: &wgpu::BindGroupLayout,
         entries: &[wgpu::BindGroupEntry],
     ) -> wgpu::BindGroup {
+        profile_function!();
         self.context
-            .device
+            .device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label,
                 layout,
@@ -323,8 +332,9 @@ impl Renderer {
         bind_group_layouts: &[&wgpu::BindGroupLayout],
         push_constant_ranges: &[wgpu::PushConstantRange],
     ) -> wgpu::PipelineLayout {
+        profile_function!();
         self.context
-            .device
+            .device()
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label,
                 bind_group_layouts,
@@ -337,7 +347,8 @@ impl Renderer {
         &self,
         descriptor: &wgpu::RenderPipelineDescriptor,
     ) -> wgpu::RenderPipeline {
-        self.context.device.create_render_pipeline(descriptor)
+        profile_function!();
+        self.context.device().create_render_pipeline(descriptor)
     }
 
     /// Create a compute pipeline.
@@ -345,13 +356,14 @@ impl Renderer {
         &self,
         descriptor: &wgpu::ComputePipelineDescriptor,
     ) -> wgpu::ComputePipeline {
-        self.context.device.create_compute_pipeline(descriptor)
+        profile_function!();
+        self.context.device().create_compute_pipeline(descriptor)
     }
 
     /// Create a command encoder.
     pub fn create_command_encoder(&self, label: Option<&str>) -> wgpu::CommandEncoder {
         self.context
-            .device
+            .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label })
     }
 
@@ -360,7 +372,7 @@ impl Renderer {
     where
         I: IntoIterator<Item = wgpu::CommandBuffer>,
     {
-        self.context.queue.submit(command_buffers);
+        self.context.queue().submit(command_buffers);
     }
 
     // =========================================================================
@@ -376,7 +388,7 @@ impl Renderer {
         data: &[T],
     ) -> TypedBuffer<T> {
         TypedBuffer::new(
-            &self.context.device,
+            self.context.device(),
             label,
             data,
             wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
@@ -392,7 +404,7 @@ impl Renderer {
         data: &[T],
     ) -> TypedBuffer<T> {
         TypedBuffer::new(
-            &self.context.device,
+            self.context.device(),
             label,
             data,
             wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
@@ -407,7 +419,7 @@ impl Renderer {
         label: Option<&str>,
         data: &T,
     ) -> UniformBuffer<T> {
-        UniformBuffer::new_uniform(&self.context.device, label, data)
+        UniformBuffer::new_uniform(self.context.device(), label, data)
     }
 
     /// Create a GPU texture with cached view and metadata.
@@ -421,7 +433,7 @@ impl Renderer {
         format: wgpu::TextureFormat,
         usage: wgpu::TextureUsages,
     ) -> GpuTexture {
-        GpuTexture::new_2d(&self.context.device, label, width, height, format, usage)
+        GpuTexture::new_2d(self.context.device(), label, width, height, format, usage)
     }
 
     /// Create a GPU texture from raw data.
@@ -435,9 +447,10 @@ impl Renderer {
         format: wgpu::TextureFormat,
         data: &[u8],
     ) -> GpuTexture {
+        profile_function!();
         GpuTexture::from_data(
-            &self.context.device,
-            &self.context.queue,
+            self.context.device(),
+            self.context.queue(),
             label,
             width,
             height,
@@ -447,7 +460,23 @@ impl Renderer {
     }
 }
 
-/// Builder for creating a render pipeline with common defaults.
+/// Builder for creating a render pipeline with sensible defaults.
+///
+/// # Example
+///
+/// ```ignore
+/// let pipeline = RenderPipelineBuilder::new(&renderer)
+///     .label("My Pipeline")
+///     .shader(&shader)
+///     .layout(&layout)
+///     .vertex_buffer(vertex_layout)
+///     .color_target(wgpu::ColorTargetState {
+///         format: surface_format,
+///         blend: Some(wgpu::BlendState::REPLACE),
+///         write_mask: wgpu::ColorWrites::ALL,
+///     })
+///     .build();
+/// ```
 pub struct RenderPipelineBuilder<'a> {
     renderer: &'a Renderer,
     label: Option<&'a str>,
@@ -463,6 +492,7 @@ pub struct RenderPipelineBuilder<'a> {
 }
 
 impl<'a> RenderPipelineBuilder<'a> {
+    /// Create a new builder with default primitive, depth, and multisample state.
     pub fn new(renderer: &'a Renderer) -> Self {
         Self {
             renderer,
@@ -491,56 +521,71 @@ impl<'a> RenderPipelineBuilder<'a> {
         }
     }
 
+    /// Set a debug label for the pipeline.
     pub fn label(mut self, label: &'a str) -> Self {
         self.label = Some(label);
         self
     }
 
+    /// Set the shader module (required).
     pub fn shader(mut self, shader: &'a wgpu::ShaderModule) -> Self {
         self.shader = Some(shader);
         self
     }
 
+    /// Set the vertex shader entry point. Defaults to `"vs_main"`.
     pub fn vertex_entry(mut self, entry: &'a str) -> Self {
         self.vertex_entry = entry;
         self
     }
 
+    /// Set the fragment shader entry point. Defaults to `"fs_main"`.
     pub fn fragment_entry(mut self, entry: &'a str) -> Self {
         self.fragment_entry = entry;
         self
     }
 
+    /// Set the pipeline layout (required).
     pub fn layout(mut self, layout: &'a wgpu::PipelineLayout) -> Self {
         self.layout = Some(layout);
         self
     }
 
+    /// Add a vertex buffer layout. Can be called multiple times for multiple slots.
     pub fn vertex_buffer(mut self, layout: wgpu::VertexBufferLayout<'a>) -> Self {
         self.vertex_buffers.push(layout);
         self
     }
 
+    /// Add a color target state. Can be called multiple times for MRT.
     pub fn color_target(mut self, target: wgpu::ColorTargetState) -> Self {
         self.color_targets.push(Some(target));
         self
     }
 
+    /// Override the primitive state (topology, cull mode, etc.).
     pub fn primitive(mut self, primitive: wgpu::PrimitiveState) -> Self {
         self.primitive = primitive;
         self
     }
 
+    /// Set the depth/stencil state. Disabled by default.
     pub fn depth_stencil(mut self, depth_stencil: wgpu::DepthStencilState) -> Self {
         self.depth_stencil = Some(depth_stencil);
         self
     }
 
+    /// Override the multisample state. Defaults to 1 sample, no alpha-to-coverage.
     pub fn multisample(mut self, multisample: wgpu::MultisampleState) -> Self {
         self.multisample = multisample;
         self
     }
 
+    /// Build the render pipeline.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `shader` or `layout` has not been set.
     pub fn build(self) -> wgpu::RenderPipeline {
         let shader = self.shader.expect("Shader module is required");
         let layout = self.layout.expect("Pipeline layout is required");

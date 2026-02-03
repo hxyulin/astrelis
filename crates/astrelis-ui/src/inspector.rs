@@ -177,7 +177,7 @@ pub struct TreeViewState {
     /// Expanded node IDs.
     expanded: HashSet<NodeId>,
     /// Scroll offset.
-    scroll_offset: f32,
+    _scroll_offset: f32,
     /// Filter string.
     filter: String,
 }
@@ -308,8 +308,9 @@ impl InspectorGraphs {
         });
 
         // Add dirty count
-        let total_dirty =
-            (metrics.nodes_layout_dirty + metrics.nodes_text_dirty + metrics.nodes_paint_dirty) as f32;
+        let total_dirty = (metrics.nodes_layout_dirty
+            + metrics.nodes_text_dirty
+            + metrics.nodes_paint_dirty) as f32;
         self.dirty_counts.push_back(GraphPoint {
             frame: frame_id,
             value: total_dirty,
@@ -804,7 +805,11 @@ impl UiInspector {
     }
 
     /// Calculate absolute bounds for a node.
-    fn calculate_absolute_bounds(&self, tree: &UiTree, node_id: NodeId) -> Option<(f32, f32, f32, f32)> {
+    fn calculate_absolute_bounds(
+        &self,
+        tree: &UiTree,
+        node_id: NodeId,
+    ) -> Option<(f32, f32, f32, f32)> {
         let layout = tree.get_layout(node_id)?;
         let mut abs_x = layout.x;
         let mut abs_y = layout.y;
@@ -908,7 +913,12 @@ impl UiInspector {
     /// Generate summary text for display.
     pub fn generate_summary_text(&self) -> String {
         let total_nodes = self.tree_view.nodes.len();
-        let dirty_nodes = self.tree_view.nodes.iter().filter(|n| !n.dirty_flags.is_empty()).count();
+        let dirty_nodes = self
+            .tree_view
+            .nodes
+            .iter()
+            .filter(|n| !n.dirty_flags.is_empty())
+            .count();
         let avg_frame_time = self.graphs.avg_frame_time();
 
         format!(
@@ -931,11 +941,7 @@ impl UiInspector {
         for node in self.tree_view.visible_nodes() {
             let indent = "  ".repeat(node.depth);
             let expand_marker = if node.child_count > 0 {
-                if node.is_expanded {
-                    "▼ "
-                } else {
-                    "▶ "
-                }
+                if node.is_expanded { "▼ " } else { "▶ " }
             } else {
                 "  "
             };
@@ -974,11 +980,13 @@ impl UiInspector {
                 PropertyValue::Float(f) => format!("{:.2}", f),
                 PropertyValue::Int(i) => format!("{}", i),
                 PropertyValue::Bool(b) => format!("{}", b),
-                PropertyValue::Color(c) => format!("#{:02X}{:02X}{:02X}{:02X}",
+                PropertyValue::Color(c) => format!(
+                    "#{:02X}{:02X}{:02X}{:02X}",
                     (c.r * 255.0) as u8,
                     (c.g * 255.0) as u8,
                     (c.b * 255.0) as u8,
-                    (c.a * 255.0) as u8),
+                    (c.a * 255.0) as u8
+                ),
                 PropertyValue::String(s) => format!("\"{}\"", s),
                 PropertyValue::Vec2(v) => format!("({:.1}, {:.1})", v.x, v.y),
             };
@@ -1004,9 +1012,9 @@ fn dirty_flags_to_color(flags: DirtyFlags) -> Color {
         Color::rgba(1.0, 0.5, 0.0, 0.8) // Orange for text
     } else if flags.contains(DirtyFlags::GEOMETRY) {
         Color::rgba(1.0, 1.0, 0.0, 0.8) // Yellow for geometry
-    } else if flags.contains(DirtyFlags::COLOR_ONLY) {
+    } else if flags.contains(DirtyFlags::COLOR) {
         Color::rgba(0.0, 1.0, 0.0, 0.8) // Green for color
-    } else if flags.contains(DirtyFlags::OPACITY_ONLY) {
+    } else if flags.contains(DirtyFlags::OPACITY) {
         Color::rgba(0.0, 0.8, 0.8, 0.8) // Cyan for opacity
     } else {
         Color::rgba(0.5, 0.5, 0.5, 0.8) // Gray for other
@@ -1151,7 +1159,7 @@ mod tests {
     fn test_dirty_flags_color() {
         let layout_color = dirty_flags_to_color(DirtyFlags::LAYOUT);
         let text_color = dirty_flags_to_color(DirtyFlags::TEXT_SHAPING);
-        let color_only = dirty_flags_to_color(DirtyFlags::COLOR_ONLY);
+        let color_only = dirty_flags_to_color(DirtyFlags::COLOR);
 
         assert_ne!(layout_color, text_color);
         assert_ne!(text_color, color_only);
@@ -1459,7 +1467,7 @@ mod tests {
     #[test]
     fn test_dirty_flags_to_color_opacity() {
         let layout = dirty_flags_to_color(DirtyFlags::LAYOUT);
-        let opacity = dirty_flags_to_color(DirtyFlags::OPACITY_ONLY);
+        let opacity = dirty_flags_to_color(DirtyFlags::OPACITY);
 
         // Both should have high alpha for visibility
         assert!(layout.a >= 0.8);

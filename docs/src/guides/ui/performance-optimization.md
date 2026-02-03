@@ -135,7 +135,7 @@ for button_id in button_ids {
 // Bad: causes frame stutter
 frame.clear_and_render(target, clear_color, |pass| {
     ui.update_text("fps", &fps_text)?; // DON'T DO THIS
-    ui.render(pass.descriptor());
+    ui.render(pass.wgpu_pass());
 });
 ```
 
@@ -527,7 +527,7 @@ fn render(&mut self, ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBa
     puffin::profile_scope!("ui_render");
     let mut frame = self.window.begin_drawing();
     frame.clear_and_render(target, color, |pass| {
-        ui.render(pass.descriptor());
+        ui.render(pass.wgpu_pass());
     });
     frame.finish();
 }
@@ -838,7 +838,7 @@ ui.set_viewport(Rect::new(
 ));
 
 // Render only visible widgets
-ui.render(pass.descriptor());
+ui.render(pass.wgpu_pass());
 ```
 
 ## Benchmarking Results

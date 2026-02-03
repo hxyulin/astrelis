@@ -98,12 +98,14 @@ impl<'a> OverlayContext<'a> {
 
     /// Draw a filled rectangle.
     pub fn draw_rect(&mut self, position: Vec2, size: Vec2, color: Color) {
-        self.draw_list.add_quad(position, size, color, None, 0.0, 0.0);
+        self.draw_list
+            .add_quad(position, size, color, None, 0.0, 0.0);
     }
 
     /// Draw a filled rectangle with rounded corners.
     pub fn draw_rect_rounded(&mut self, position: Vec2, size: Vec2, color: Color, radius: f32) {
-        self.draw_list.add_quad(position, size, color, None, 0.0, radius);
+        self.draw_list
+            .add_quad(position, size, color, None, 0.0, radius);
     }
 
     /// Draw a bordered rectangle.
@@ -115,7 +117,8 @@ impl<'a> OverlayContext<'a> {
         border: Color,
         border_width: f32,
     ) {
-        self.draw_list.add_quad(position, size, fill, Some(border), border_width, 0.0);
+        self.draw_list
+            .add_quad(position, size, fill, Some(border), border_width, 0.0);
     }
 
     /// Draw a bordered rectangle with rounded corners.
@@ -128,12 +131,14 @@ impl<'a> OverlayContext<'a> {
         border_width: f32,
         radius: f32,
     ) {
-        self.draw_list.add_quad(position, size, fill, Some(border), border_width, radius);
+        self.draw_list
+            .add_quad(position, size, fill, Some(border), border_width, radius);
     }
 
     /// Draw text at a position.
     pub fn draw_text(&mut self, position: Vec2, text: &str, color: Color, size: f32) {
-        self.draw_list.add_text(position, text.to_string(), color, size);
+        self.draw_list
+            .add_text(position, text.to_string(), color, size);
     }
 
     /// Draw a line between two points.
@@ -162,8 +167,8 @@ impl<'a> OverlayContext<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::UiTree;
     use crate::event::UiEventSystem;
+    use crate::tree::UiTree;
     use crate::widget_id::WidgetIdRegistry;
 
     #[test]

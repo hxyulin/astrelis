@@ -4,7 +4,7 @@
 //! with efficient partial updates. Supports any Pod type and tracks dirty ranges
 //! for minimal GPU uploads.
 
-use crate::dirty_ranges::DirtyRanges;
+use crate::dirty::DirtyRanges;
 use astrelis_core::profiling::profile_function;
 use astrelis_render::wgpu;
 use bytemuck::Pod;

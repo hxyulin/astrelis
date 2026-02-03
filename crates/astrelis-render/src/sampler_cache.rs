@@ -3,6 +3,7 @@
 //! Creating GPU samplers is expensive. This module provides a cache
 //! that reuses samplers with identical descriptors.
 
+use astrelis_core::profiling::profile_function;
 use ahash::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
@@ -271,6 +272,7 @@ impl SamplerCache {
     /// # Panics
     /// Panics if the internal RwLock is poisoned (another thread panicked while holding the lock).
     pub fn get_or_create(&self, device: &wgpu::Device, key: SamplerKey) -> Arc<wgpu::Sampler> {
+        profile_function!();
         // Try read lock first (fast path)
         {
             let cache = self.cache.read()

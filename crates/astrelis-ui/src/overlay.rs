@@ -489,10 +489,7 @@ impl OverlayManager {
 
         // Add to layer stack
         let z_index = overlay.config.layer.z_index();
-        self.layer_stacks
-            .entry(z_index)
-            .or_default()
-            .push(id);
+        self.layer_stacks.entry(z_index).or_default().push(id);
 
         // Set as focused if it traps focus
         if overlay.config.trap_focus {
@@ -696,12 +693,10 @@ impl OverlayManager {
 
             let position = match &overlay.config.position {
                 OverlayPosition::Absolute { x, y } => Vec2::new(*x, *y),
-                OverlayPosition::Center => {
-                    Vec2::new(
-                        (viewport_size.x - size.x) / 2.0,
-                        (viewport_size.y - size.y) / 2.0,
-                    )
-                }
+                OverlayPosition::Center => Vec2::new(
+                    (viewport_size.x - size.x) / 2.0,
+                    (viewport_size.y - size.y) / 2.0,
+                ),
                 OverlayPosition::AtCursor { offset } => mouse_position + *offset,
                 OverlayPosition::AnchorTo {
                     anchor_node,
@@ -759,7 +754,7 @@ impl OverlayManager {
     pub fn visible_overlays(&self) -> Vec<&Overlay> {
         let mut result = Vec::new();
 
-        for (_z, stack) in &self.layer_stacks {
+        for stack in self.layer_stacks.values() {
             for &id in stack {
                 if let Some(overlay) = self.overlays.get(&id)
                     && overlay.visible
@@ -1024,15 +1019,23 @@ mod tests {
         let node1 = tree.add_widget(Box::new(crate::widgets::Container::new()));
         let node2 = tree.add_widget(Box::new(crate::widgets::Container::new()));
 
-        let id1 = manager.show(&mut tree, node1, OverlayConfig {
-            layer: ZLayer::Modal,
-            ..Default::default()
-        });
+        let id1 = manager.show(
+            &mut tree,
+            node1,
+            OverlayConfig {
+                layer: ZLayer::Modal,
+                ..Default::default()
+            },
+        );
 
-        let id2 = manager.show(&mut tree, node2, OverlayConfig {
-            layer: ZLayer::Popover,
-            ..Default::default()
-        });
+        let id2 = manager.show(
+            &mut tree,
+            node2,
+            OverlayConfig {
+                layer: ZLayer::Popover,
+                ..Default::default()
+            },
+        );
 
         // Popover should be on top
         let visible = manager.visible_overlays();
@@ -1139,14 +1142,24 @@ mod tests {
         let viewport = Vec2::new(800.0, 600.0);
 
         // BelowLeft should position below the anchor, aligned left
-        let pos = AnchorAlignment::BelowLeft.compute_position(anchor_pos, anchor_size, overlay_size, viewport);
+        let pos = AnchorAlignment::BelowLeft.compute_position(
+            anchor_pos,
+            anchor_size,
+            overlay_size,
+            viewport,
+        );
         assert_eq!(pos.x, 100.0); // Same x as anchor
         assert_eq!(pos.y, 150.0); // Below anchor (100 + 50)
 
         // AboveRight should position above the anchor, aligned right
-        let pos = AnchorAlignment::AboveRight.compute_position(anchor_pos, anchor_size, overlay_size, viewport);
+        let pos = AnchorAlignment::AboveRight.compute_position(
+            anchor_pos,
+            anchor_size,
+            overlay_size,
+            viewport,
+        );
         assert_eq!(pos.x, 220.0); // Anchor right (100 + 200) - overlay width (80)
-        assert_eq!(pos.y, 60.0);  // Above anchor (100 - 40)
+        assert_eq!(pos.y, 60.0); // Above anchor (100 - 40)
     }
 
     #[test]
@@ -1157,7 +1170,12 @@ mod tests {
         let viewport = Vec2::new(800.0, 600.0);
 
         // BelowCenter should position below, centered horizontally
-        let pos = AnchorAlignment::BelowCenter.compute_position(anchor_pos, anchor_size, overlay_size, viewport);
+        let pos = AnchorAlignment::BelowCenter.compute_position(
+            anchor_pos,
+            anchor_size,
+            overlay_size,
+            viewport,
+        );
         // Center x = 100 + (200 - 80) / 2 = 100 + 60 = 160
         assert_eq!(pos.x, 160.0);
         assert_eq!(pos.y, 150.0); // Below anchor
@@ -1196,7 +1214,10 @@ mod tests {
         }
 
         // Verify change persisted
-        assert_eq!(manager.get(id).unwrap().computed_position, Vec2::new(500.0, 300.0));
+        assert_eq!(
+            manager.get(id).unwrap().computed_position,
+            Vec2::new(500.0, 300.0)
+        );
     }
 
     #[test]
@@ -1225,18 +1246,30 @@ mod tests {
         let node3 = tree.add_widget(Box::new(crate::widgets::Container::new()));
 
         // Add in reverse order of z-index
-        let id_popover = manager.show(&mut tree, node1, OverlayConfig {
-            layer: ZLayer::Popover,
-            ..Default::default()
-        });
-        let id_tooltip = manager.show(&mut tree, node2, OverlayConfig {
-            layer: ZLayer::Tooltip,
-            ..Default::default()
-        });
-        let id_modal = manager.show(&mut tree, node3, OverlayConfig {
-            layer: ZLayer::Modal,
-            ..Default::default()
-        });
+        let id_popover = manager.show(
+            &mut tree,
+            node1,
+            OverlayConfig {
+                layer: ZLayer::Popover,
+                ..Default::default()
+            },
+        );
+        let id_tooltip = manager.show(
+            &mut tree,
+            node2,
+            OverlayConfig {
+                layer: ZLayer::Tooltip,
+                ..Default::default()
+            },
+        );
+        let id_modal = manager.show(
+            &mut tree,
+            node3,
+            OverlayConfig {
+                layer: ZLayer::Modal,
+                ..Default::default()
+            },
+        );
 
         let visible = manager.visible_overlays();
         // Should be sorted by z-index: tooltip < modal < popover

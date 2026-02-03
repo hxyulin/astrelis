@@ -1,16 +1,24 @@
-///! WindowManager example demonstrating simplified multi-window management.
-///!
-///! This example creates 3 windows using the WindowManager abstraction:
-///! - Red window
-///! - Green window
-///! - Blue window
-///!
-///! WindowManager automatically handles:
-///! - Window resize events
-///! - Graphics context sharing
-///! - HashMap boilerplate elimination
-///!
-///! Compare this to multi_window.rs to see the boilerplate reduction!
+//! WindowManager Example - Simplified Multi-Window Management
+//!
+//! Demonstrates the `WindowManager` abstraction for managing multiple windows:
+//! - Creates 3 windows with different clear colors (Red, Green, Blue)
+//! - Automatic window resize handling
+//! - Shared graphics context management
+//! - Eliminates HashMap boilerplate
+//!
+//! ## Features Showcased
+//! - `WindowManager` for simplified window management
+//! - Automatic resize event handling
+//! - Shared `GraphicsContext` across windows
+//! - Per-window rendering with different clear colors
+//!
+//! ## Usage
+//! ```bash
+//! cargo run -p astrelis-render --example window_manager_demo
+//! ```
+//!
+//! ## Comparison
+//! Compare this to `multi_window.rs` to see the boilerplate reduction!
 
 use astrelis_core::logging;
 use astrelis_render::{
@@ -34,7 +42,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut window_manager = WindowManager::new(graphics_ctx);
         let mut window_colors = HashMap::new();
 

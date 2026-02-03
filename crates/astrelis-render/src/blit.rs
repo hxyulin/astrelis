@@ -3,6 +3,9 @@
 //! This module provides a simple API for rendering textures to the screen,
 //! useful for video backgrounds, post-processing, and image display.
 
+use astrelis_core::profiling::profile_function;
+
+use crate::capability::{GpuRequirements, RenderCapability};
 use crate::context::GraphicsContext;
 use crate::types::{GpuTexture, TypedBuffer};
 use crate::Renderer;
@@ -21,6 +24,16 @@ use std::sync::Arc;
 /// // In render loop:
 /// blit_renderer.blit(&mut render_pass, &texture_view);
 /// ```
+impl RenderCapability for BlitRenderer {
+    fn requirements() -> GpuRequirements {
+        GpuRequirements::none()
+    }
+
+    fn name() -> &'static str {
+        "BlitRenderer"
+    }
+}
+
 pub struct BlitRenderer {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -46,6 +59,7 @@ impl BlitRenderer {
         target_format: wgpu::TextureFormat,
         options: BlitOptions,
     ) -> Self {
+        profile_function!();
         let renderer = Renderer::new(context.clone());
 
         // Create shader
@@ -55,7 +69,7 @@ impl BlitRenderer {
         );
 
         // Create sampler
-        let sampler = context.device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler = context.device().create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Blit Sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -69,7 +83,7 @@ impl BlitRenderer {
         // Create bind group layout
         let bind_group_layout =
             context
-                .device
+                .device()
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("Blit Bind Group Layout"),
                     entries: &[
@@ -95,7 +109,7 @@ impl BlitRenderer {
         // Create pipeline layout
         let pipeline_layout =
             context
-                .device
+                .device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Blit Pipeline Layout"),
                     bind_group_layouts: &[&bind_group_layout],
@@ -104,7 +118,7 @@ impl BlitRenderer {
 
         // Create pipeline
         let pipeline = context
-            .device
+            .device()
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("Blit Pipeline"),
                 layout: Some(&pipeline_layout),
@@ -175,7 +189,7 @@ impl BlitRenderer {
     /// You can cache this bind group if you're blitting the same texture repeatedly.
     pub fn create_bind_group(&self, texture_view: &wgpu::TextureView) -> wgpu::BindGroup {
         self.context
-            .device
+            .device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Blit Bind Group"),
                 layout: &self.bind_group_layout,
@@ -202,6 +216,7 @@ impl BlitRenderer {
     /// Note: This creates a new bind group each call. For better performance
     /// with frequently-blitted textures, use `create_bind_group` and `blit_with_bind_group`.
     pub fn blit(&self, render_pass: &mut wgpu::RenderPass, texture_view: &wgpu::TextureView) {
+        profile_function!();
         let bind_group = self.create_bind_group(texture_view);
         self.blit_with_bind_group(render_pass, &bind_group);
     }
@@ -214,10 +229,12 @@ impl BlitRenderer {
         render_pass: &mut wgpu::RenderPass,
         bind_group: &wgpu::BindGroup,
     ) {
+        render_pass.push_debug_group("BlitRenderer::blit");
         render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice());
         render_pass.draw(0..6, 0..1);
+        render_pass.pop_debug_group();
     }
 
     /// Get the bind group layout for custom pipelines.
@@ -306,7 +323,7 @@ impl TextureUploader {
         format: wgpu::TextureFormat,
     ) -> Self {
         let texture = GpuTexture::new_2d(
-            &context.device,
+            context.device(),
             Some("Uploadable Texture"),
             width,
             height,
@@ -328,7 +345,7 @@ impl TextureUploader {
         let bytes_per_pixel = self.texture.format().block_copy_size(None).unwrap_or(4);
         let bytes_per_row = self.texture.width() * bytes_per_pixel;
 
-        context.queue.write_texture(
+        context.queue().write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: self.texture.as_wgpu(),
                 mip_level: 0,
@@ -370,7 +387,7 @@ impl TextureUploader {
         let bytes_per_pixel = self.texture.format().block_copy_size(None).unwrap_or(4);
         let bytes_per_row = width * bytes_per_pixel;
 
-        context.queue.write_texture(
+        context.queue().write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: self.texture.as_wgpu(),
                 mip_level: 0,

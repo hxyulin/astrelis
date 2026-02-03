@@ -7,8 +7,8 @@
 //! - Index buffer management
 //! - Instanced rendering
 //!
-//! **Note:** This demonstrates the Mesh API structure. Full rendering
-//! integration is in development.
+//! **Note:** This is a placeholder example demonstrating the Mesh API structure.
+//! Full rendering integration is in development.
 
 use astrelis_core::logging;
 use astrelis_render::{Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu};
@@ -30,7 +30,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {

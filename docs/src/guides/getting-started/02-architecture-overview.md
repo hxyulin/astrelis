@@ -226,7 +226,7 @@ fn render(&mut self, _ctx: &mut AppCtx, _window_id: WindowId, _events: &mut Even
         RenderTarget::Surface,
         Color::BLACK,
         |pass| {
-            self.ui.render(pass.descriptor());
+            self.ui.render(pass.wgpu_pass());
         }, // pass is dropped here - render pass ends
     );
 

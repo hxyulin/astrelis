@@ -1,3 +1,45 @@
+//! Window and surface management for rendering.
+//!
+//! This module provides [`RenderableWindow`], which wraps a [`Window`] and manages
+//! its GPU surface for rendering. It handles surface configuration, frame presentation,
+//! and surface loss recovery.
+//!
+//! # Lifecycle
+//!
+//! 1. Create with [`RenderableWindow::new()`] passing a window and graphics context
+//! 2. Call [`begin_drawing()`](RenderableWindow::begin_drawing) to start a frame
+//! 3. Use the returned [`FrameContext`] for rendering
+//! 4. Drop the frame context to submit commands and present
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use astrelis_render::{GraphicsContext, RenderableWindow, Color};
+//! use astrelis_winit::WindowDescriptor;
+//! # use std::sync::Arc;
+//!
+//! # fn example(window: astrelis_winit::window::Window, graphics: Arc<GraphicsContext>) {
+//! let mut renderable = RenderableWindow::new(window, graphics);
+//!
+//! // In render loop:
+//! let mut frame = renderable.begin_drawing();
+//! frame.clear_and_render(
+//!     astrelis_render::RenderTarget::Surface,
+//!     Color::BLACK,
+//!     |pass| {
+//!         // Rendering commands
+//!     },
+//! );
+//! frame.finish();
+//! # }
+//! ```
+//!
+//! # Surface Loss
+//!
+//! The surface can be lost due to window minimization, GPU driver resets, or other
+//! platform events. [`RenderableWindow`] handles this automatically by recreating
+//! the surface when [`begin_drawing()`](RenderableWindow::begin_drawing) is called.
+
 use astrelis_core::{
     geometry::{LogicalSize, PhysicalPosition, PhysicalSize, ScaleFactor},
     profiling::profile_function,
@@ -11,6 +53,7 @@ use std::sync::Arc;
 use crate::{
     context::{GraphicsContext, GraphicsError},
     frame::{FrameContext, FrameStats, Surface},
+    gpu_profiling::GpuFrameProfiler,
 };
 
 /// Viewport definition for rendering.
@@ -99,8 +142,8 @@ pub struct WindowContextDescriptor {
     pub alpha_mode: Option<wgpu::CompositeAlphaMode>,
 }
 
-pub struct PendingReconfigure {
-    pub resize: Option<PhysicalSize<u32>>,
+pub(crate) struct PendingReconfigure {
+    pub(crate) resize: Option<PhysicalSize<u32>>,
 }
 
 impl PendingReconfigure {
@@ -109,7 +152,11 @@ impl PendingReconfigure {
     }
 }
 
-/// Window rendering context that manages a surface and its configuration.
+/// Manages a wgpu [`Surface`](wgpu::Surface) and its configuration for a single window.
+///
+/// Handles surface creation, reconfiguration on resize, and frame acquisition.
+/// Most users should interact with [`RenderableWindow`] instead, which wraps
+/// this type and adds convenience methods.
 pub struct WindowContext {
     pub(crate) window: Window,
     pub(crate) context: Arc<GraphicsContext>,
@@ -124,17 +171,18 @@ impl WindowContext {
         context: Arc<GraphicsContext>,
         descriptor: WindowContextDescriptor,
     ) -> Result<Self, GraphicsError> {
+        profile_function!();
         let scale_factor = window.scale_factor();
         let logical_size = window.logical_size();
         let physical_size = logical_size.to_physical(scale_factor);
 
         let surface = context
-            .instance
+            .instance()
             .create_surface(window.window.clone())
             .map_err(|e| GraphicsError::SurfaceCreationFailed(e.to_string()))?;
 
         let mut config = surface
-            .get_default_config(&context.adapter, physical_size.width, physical_size.height)
+            .get_default_config(context.adapter(), physical_size.width, physical_size.height)
             .ok_or_else(|| GraphicsError::SurfaceConfigurationFailed(
                 "No suitable surface configuration found".to_string()
             ))?;
@@ -149,7 +197,7 @@ impl WindowContext {
             config.alpha_mode = alpha_mode;
         }
 
-        surface.configure(&context.device, &config);
+        surface.configure(context.device(), &config);
 
         Ok(Self {
             window,
@@ -188,6 +236,15 @@ impl WindowContext {
         &self.config
     }
 
+    /// Get the surface texture format.
+    ///
+    /// This is the format that render pipelines must use when rendering to this
+    /// window's surface. Pass this to renderer constructors like
+    /// [`LineRenderer::new`](crate::LineRenderer::new).
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.config.format
+    }
+
     /// Get the logical size of the window.
     pub fn logical_size(&self) -> LogicalSize<u32> {
         self.window.logical_size()
@@ -213,7 +270,7 @@ impl WindowContext {
     /// Reconfigure the surface with a new configuration.
     pub fn reconfigure_surface(&mut self, config: wgpu::SurfaceConfiguration) {
         self.config = config;
-        self.surface.configure(&self.context.device, &self.config);
+        self.surface.configure(self.context.device(), &self.config);
     }
 }
 
@@ -229,7 +286,7 @@ impl WindowContext {
             Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                 // Surface needs reconfiguration - try to recover
                 tracing::debug!("Surface lost/outdated, reconfiguring...");
-                self.surface.configure(&self.context.device, &self.config);
+                self.surface.configure(self.context.device(), &self.config);
             }
             Err(wgpu::SurfaceError::OutOfMemory) => {
                 return Err(GraphicsError::SurfaceOutOfMemory);
@@ -254,11 +311,15 @@ impl WindowContext {
     }
 }
 
-impl WindowBackend for WindowContext {
-    type FrameContext = FrameContext;
-    type Error = GraphicsError;
-
-    fn try_begin_drawing(&mut self) -> Result<Self::FrameContext, Self::Error> {
+impl WindowContext {
+    /// Begin drawing a frame, optionally with a GPU profiler attached.
+    ///
+    /// This is the internal implementation used by both `WindowBackend::try_begin_drawing`
+    /// and `RenderableWindow::begin_drawing`.
+    pub(crate) fn try_begin_drawing_with_profiler(
+        &mut self,
+        gpu_profiler: Option<Arc<GpuFrameProfiler>>,
+    ) -> Result<FrameContext, GraphicsError> {
         profile_function!();
 
         let mut configure_needed = false;
@@ -269,7 +330,7 @@ impl WindowBackend for WindowContext {
         }
 
         if configure_needed {
-            self.surface.configure(&self.context.device, &self.config);
+            self.surface.configure(self.context.device(), &self.config);
         }
 
         let frame = self.try_acquire_surface_texture()?;
@@ -279,7 +340,7 @@ impl WindowBackend for WindowContext {
 
         let encoder = self
             .context
-            .device
+            .device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Frame Encoder"),
             });
@@ -294,13 +355,36 @@ impl WindowBackend for WindowContext {
             stats: FrameStats::new(),
             window: self.window.window.clone(),
             surface_format: self.config.format,
+            gpu_profiler,
         })
     }
 }
 
-/// A renderable window that combines a window with a rendering context.
+impl WindowBackend for WindowContext {
+    type FrameContext = FrameContext;
+    type Error = GraphicsError;
+
+    fn try_begin_drawing(&mut self) -> Result<Self::FrameContext, Self::Error> {
+        self.try_begin_drawing_with_profiler(None)
+    }
+}
+
+/// A renderable window that combines a winit [`Window`] with a [`WindowContext`].
+///
+/// This is the primary type for rendering to a window. It implements
+/// `Deref<Target = WindowContext>`, so all `WindowContext` methods are
+/// available directly.
+///
+/// # GPU Profiling
+///
+/// Attach a [`GpuFrameProfiler`] via [`set_gpu_profiler`](Self::set_gpu_profiler)
+/// to automatically profile render passes. Once attached, all frames created via
+/// [`begin_drawing`](WindowBackend::begin_drawing) will include GPU profiling:
+/// - Render passes in `with_pass()` / `clear_and_render()` get automatic GPU scopes
+/// - Queries are resolved and the profiler frame is ended in `FrameContext::Drop`
 pub struct RenderableWindow {
     pub(crate) context: WindowContext,
+    pub(crate) gpu_profiler: Option<Arc<GpuFrameProfiler>>,
 }
 
 impl RenderableWindow {
@@ -313,8 +397,12 @@ impl RenderableWindow {
         context: Arc<GraphicsContext>,
         descriptor: WindowContextDescriptor,
     ) -> Result<Self, GraphicsError> {
+        profile_function!();
         let context = WindowContext::new(window, context, descriptor)?;
-        Ok(Self { context })
+        Ok(Self {
+            context,
+            gpu_profiler: None,
+        })
     }
 
     pub fn id(&self) -> WindowId {
@@ -331,6 +419,15 @@ impl RenderableWindow {
 
     pub fn context_mut(&mut self) -> &mut WindowContext {
         &mut self.context
+    }
+
+    /// Get the surface texture format.
+    ///
+    /// This is the format that render pipelines must use when rendering to this
+    /// window's surface. Pass this to renderer constructors like
+    /// [`LineRenderer::new`](crate::LineRenderer::new).
+    pub fn surface_format(&self) -> wgpu::TextureFormat {
+        self.context.surface_format()
     }
 
     /// Handle window resize event (logical size).
@@ -364,6 +461,43 @@ impl RenderableWindow {
             scale_factor,
         }
     }
+
+    /// Attach a GPU profiler to this window for automatic render pass profiling.
+    ///
+    /// Once set, all frames created via [`begin_drawing`](WindowBackend::begin_drawing)
+    /// will automatically:
+    /// - Create GPU profiling scopes around render passes
+    /// - Resolve timestamp queries before command submission
+    /// - End the profiler frame after queue submit
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let profiler = Arc::new(GpuFrameProfiler::new(&graphics_ctx)?);
+    /// window.set_gpu_profiler(profiler);
+    ///
+    /// // Now all frames are automatically profiled:
+    /// let mut frame = window.begin_drawing();
+    /// frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
+    ///     // GPU scope "main_pass" is automatically active
+    /// });
+    /// frame.finish(); // auto: resolve_queries -> submit -> end_frame
+    /// ```
+    pub fn set_gpu_profiler(&mut self, profiler: Arc<GpuFrameProfiler>) {
+        self.gpu_profiler = Some(profiler);
+    }
+
+    /// Remove the GPU profiler from this window.
+    ///
+    /// Returns the profiler if one was attached.
+    pub fn remove_gpu_profiler(&mut self) -> Option<Arc<GpuFrameProfiler>> {
+        self.gpu_profiler.take()
+    }
+
+    /// Get a reference to the GPU profiler, if one is attached.
+    pub fn gpu_profiler(&self) -> Option<&Arc<GpuFrameProfiler>> {
+        self.gpu_profiler.as_ref()
+    }
 }
 
 impl std::ops::Deref for RenderableWindow {
@@ -385,6 +519,7 @@ impl WindowBackend for RenderableWindow {
     type Error = GraphicsError;
 
     fn try_begin_drawing(&mut self) -> Result<Self::FrameContext, Self::Error> {
-        self.context.try_begin_drawing()
+        self.context
+            .try_begin_drawing_with_profiler(self.gpu_profiler.clone())
     }
 }

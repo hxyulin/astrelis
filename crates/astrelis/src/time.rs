@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use astrelis_core::profiling::profile_function;
+
 /// Tracks timing information for the game loop
 ///
 /// Provides delta time, elapsed time, frame counting, time scaling, and fixed timestep support.
@@ -59,6 +61,7 @@ impl Time {
     ///
     /// Should be called once per frame, typically in the game loop.
     pub fn update(&mut self) {
+        profile_function!();
         let now = Instant::now();
         let raw_delta = now.duration_since(self.last_frame_time);
 

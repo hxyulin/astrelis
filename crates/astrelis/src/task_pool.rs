@@ -6,6 +6,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::thread;
 
+use astrelis_core::profiling::profile_function;
 use async_executor::{Executor, Task};
 
 /// A thread pool for executing async tasks.
@@ -43,6 +44,7 @@ impl TaskPool {
     ///
     /// Panics if num_threads is 0.
     pub fn new(num_threads: usize) -> Self {
+        profile_function!();
         assert!(num_threads > 0, "TaskPool must have at least one thread");
 
         let executor = Arc::new(Executor::new());
@@ -98,6 +100,7 @@ impl TaskPool {
     where
         T: Send + 'static,
     {
+        profile_function!();
         self.executor.spawn(future)
     }
 
@@ -111,6 +114,7 @@ impl TaskPool {
     /// This will wait for currently executing tasks to complete, but will not
     /// execute any new tasks that are spawned after shutdown is called.
     pub fn shutdown(mut self) {
+        profile_function!();
         tracing::debug!("Shutting down TaskPool with {} threads", self.threads.len());
 
         // Signal shutdown

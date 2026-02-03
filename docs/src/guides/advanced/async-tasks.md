@@ -630,7 +630,7 @@ impl App for AsyncDemo {
             RenderTarget::Surface,
             Color::from_rgb(30, 30, 40),
             |pass| {
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

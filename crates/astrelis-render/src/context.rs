@@ -1,5 +1,49 @@
+//! GPU context management and resource creation.
+//!
+//! This module provides [`GraphicsContext`], the core GPU abstraction that manages
+//! the WGPU device, queue, and adapter. It uses `Arc<GraphicsContext>` for cheap
+//! cloning and shared ownership across windows and rendering subsystems.
+//!
+//! # Lifecycle
+//!
+//! 1. Create with [`GraphicsContext::new_owned_sync()`] (blocking) or [`GraphicsContext::new_owned()`] (async)
+//! 2. Clone the `Arc<GraphicsContext>` to share with windows, renderers, etc.
+//! 3. Use helper methods to create GPU resources (shaders, buffers, pipelines)
+//! 4. Drop when all Arc references are released
+//!
+//! # Example
+//!
+//! ```rust,no_run
+//! use astrelis_render::GraphicsContext;
+//!
+//! let graphics = GraphicsContext::new_owned_sync()
+//!     .expect("Failed to create GPU context");
+//!
+//! // Clone for sharing (cheap Arc clone)
+//! let graphics_clone = graphics.clone();
+//!
+//! // Use for resource creation
+//! let shader = graphics.create_shader_module(/* ... */);
+//! ```
+//!
+//! # Thread Safety
+//!
+//! `GraphicsContext` is `Send + Sync` and can be safely shared across threads
+//! via `Arc<GraphicsContext>`.
+
+use astrelis_core::profiling::{profile_function, profile_scope};
+
+use crate::capability::{clamp_limits_to_adapter, RenderCapability};
 use crate::features::GpuFeatures;
+use astrelis_test_utils::{
+    GpuBindGroup, GpuBindGroupLayout, GpuBuffer, GpuComputePipeline, GpuRenderPipeline,
+    GpuSampler, GpuShaderModule, GpuTexture, RenderContext,
+};
 use std::sync::Arc;
+use wgpu::{
+    BindGroupDescriptor, BindGroupLayoutDescriptor, BufferDescriptor, ComputePipelineDescriptor,
+    RenderPipelineDescriptor, SamplerDescriptor, ShaderModuleDescriptor, TextureDescriptor,
+};
 
 /// Errors that can occur during graphics context creation.
 #[derive(Debug, Clone)]
@@ -95,7 +139,8 @@ impl std::error::Error for GraphicsError {}
 /// use std::sync::Arc;
 ///
 /// // Synchronous creation (blocks on async internally)
-/// let ctx = GraphicsContext::new_owned_sync_or_panic(); // Returns Arc<Self>
+/// let ctx = GraphicsContext::new_owned_sync()
+///     .expect("Failed to create graphics context"); // Returns Arc<Self>
 /// let ctx2 = ctx.clone(); // Cheap clone (Arc)
 ///
 /// // Asynchronous creation (for async contexts)
@@ -110,10 +155,10 @@ impl std::error::Error for GraphicsError {}
 /// - Better for testing (can create/destroy contexts)
 /// - Arc internally makes cloning cheap
 pub struct GraphicsContext {
-    pub instance: wgpu::Instance,
-    pub adapter: wgpu::Adapter,
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
+    pub(crate) instance: wgpu::Instance,
+    pub(crate) adapter: wgpu::Adapter,
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
     /// The GPU features that were enabled on this context.
     enabled_features: GpuFeatures,
 }
@@ -134,12 +179,14 @@ impl GraphicsContext {
     /// # }
     /// ```
     pub async fn new_owned() -> Result<Arc<Self>, GraphicsError> {
+        profile_function!();
         Self::new_owned_with_descriptor(GraphicsContextDescriptor::default()).await
     }
 
     /// Creates a new graphics context synchronously with owned ownership (recommended).
     ///
-    /// This blocks the current thread until the context is created.
+    /// **Warning:** This blocks the current thread until the context is created.
+    /// For async contexts, use [`new_owned()`](Self::new_owned) instead.
     ///
     /// # Errors
     ///
@@ -147,21 +194,28 @@ impl GraphicsContext {
     /// - No suitable GPU adapter is found
     /// - Required GPU features are not supported
     /// - Device creation fails
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use astrelis_render::GraphicsContext;
+    ///
+    /// // For examples/tests: use .expect() for simplicity
+    /// let ctx = GraphicsContext::new_owned_sync()
+    ///     .expect("Failed to create graphics context");
+    ///
+    /// // For production: handle the error properly
+    /// let ctx = match GraphicsContext::new_owned_sync() {
+    ///     Ok(ctx) => ctx,
+    ///     Err(e) => {
+    ///         eprintln!("GPU initialization failed: {:?}", e);
+    ///         return;
+    ///     }
+    /// };
+    /// ```
     pub fn new_owned_sync() -> Result<Arc<Self>, GraphicsError> {
+        profile_function!();
         pollster::block_on(Self::new_owned())
-    }
-
-    /// Creates a new graphics context synchronously, panicking on error.
-    ///
-    /// This is a convenience method for tests and examples where error handling
-    /// is not needed. For production code, prefer `new_owned_sync()` which returns
-    /// a `Result`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if graphics context creation fails.
-    pub fn new_owned_sync_or_panic() -> Arc<Self> {
-        Self::new_owned_sync().expect("Failed to create graphics context")
     }
 
     /// Creates a new graphics context with custom descriptor (owned).
@@ -172,19 +226,24 @@ impl GraphicsContext {
 
     /// Internal method to create context without deciding on ownership pattern.
     async fn create_context_internal(descriptor: GraphicsContextDescriptor) -> Result<Self, GraphicsError> {
+        profile_function!();
+
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: descriptor.backends,
             ..Default::default()
         });
 
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: descriptor.power_preference,
-                compatible_surface: None,
-                force_fallback_adapter: descriptor.force_fallback_adapter,
-            })
-            .await
-            .map_err(|_| GraphicsError::NoAdapter)?;
+        let adapter = {
+            profile_scope!("request_adapter");
+            instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: descriptor.power_preference,
+                    compatible_surface: None,
+                    force_fallback_adapter: descriptor.force_fallback_adapter,
+                })
+                .await
+                .map_err(|_| GraphicsError::NoAdapter)?
+        };
 
         // Check required features
         let required_result = descriptor.required_gpu_features.check_support(&adapter);
@@ -214,15 +273,22 @@ impl GraphicsContext {
         let enabled_features = descriptor.required_gpu_features | available_requested;
         let wgpu_features = enabled_features.to_wgpu() | descriptor.additional_wgpu_features;
 
-        let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor {
-                required_features: wgpu_features,
-                required_limits: descriptor.limits.clone(),
-                label: descriptor.label,
-                ..Default::default()
-            })
-            .await
-            .map_err(|e| GraphicsError::DeviceCreationFailed(e.to_string()))?;
+        // Clamp requested limits to adapter capabilities to prevent device creation failure
+        let adapter_limits = adapter.limits();
+        let clamped_limits = clamp_limits_to_adapter(&descriptor.limits, &adapter_limits);
+
+        let (device, queue) = {
+            profile_scope!("request_device");
+            adapter
+                .request_device(&wgpu::DeviceDescriptor {
+                    required_features: wgpu_features,
+                    required_limits: clamped_limits,
+                    label: descriptor.label,
+                    ..Default::default()
+                })
+                .await
+                .map_err(|e| GraphicsError::DeviceCreationFailed(e.to_string()))?
+        };
 
         tracing::info!(
             "Created graphics context with features: {:?}",
@@ -236,6 +302,26 @@ impl GraphicsContext {
             queue,
             enabled_features,
         })
+    }
+
+    /// Get a reference to the wgpu device.
+    pub fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// Get a reference to the wgpu queue.
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Get a reference to the wgpu adapter.
+    pub fn adapter(&self) -> &wgpu::Adapter {
+        &self.adapter
+    }
+
+    /// Get a reference to the wgpu instance.
+    pub fn instance(&self) -> &wgpu::Instance {
+        &self.instance
     }
 
     /// Get device info
@@ -301,46 +387,10 @@ impl GraphicsContext {
         format: wgpu::TextureFormat,
         usages: wgpu::TextureUsages,
     ) -> bool {
-        let capabilities = self.adapter.get_texture_format_features(format);
-
-        // Check if all requested usages are supported
-        if usages.contains(wgpu::TextureUsages::TEXTURE_BINDING)
-            && !capabilities
-                .allowed_usages
-                .contains(wgpu::TextureUsages::TEXTURE_BINDING)
-        {
-            return false;
-        }
-        if usages.contains(wgpu::TextureUsages::STORAGE_BINDING)
-            && !capabilities
-                .allowed_usages
-                .contains(wgpu::TextureUsages::STORAGE_BINDING)
-        {
-            return false;
-        }
-        if usages.contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
-            && !capabilities
-                .allowed_usages
-                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
-        {
-            return false;
-        }
-        if usages.contains(wgpu::TextureUsages::COPY_SRC)
-            && !capabilities
-                .allowed_usages
-                .contains(wgpu::TextureUsages::COPY_SRC)
-        {
-            return false;
-        }
-        if usages.contains(wgpu::TextureUsages::COPY_DST)
-            && !capabilities
-                .allowed_usages
-                .contains(wgpu::TextureUsages::COPY_DST)
-        {
-            return false;
-        }
-
-        true
+        self.adapter
+            .get_texture_format_features(format)
+            .allowed_usages
+            .contains(usages)
     }
 
     /// Get texture format capabilities.
@@ -352,193 +402,6 @@ impl GraphicsContext {
         format: wgpu::TextureFormat,
     ) -> wgpu::TextureFormatFeatures {
         self.adapter.get_texture_format_features(format)
-    }
-
-    // =========================================================================
-    // Limit Queries (Convenience Methods)
-    // =========================================================================
-
-    /// Get the maximum 2D texture dimension.
-    ///
-    /// This is the maximum width and height for 2D textures.
-    #[inline]
-    pub fn max_texture_dimension_2d(&self) -> u32 {
-        self.device.limits().max_texture_dimension_2d
-    }
-
-    /// Get the maximum buffer size in bytes.
-    ///
-    /// This is the maximum size for any buffer.
-    #[inline]
-    pub fn max_buffer_size(&self) -> u64 {
-        self.device.limits().max_buffer_size
-    }
-
-    /// Get the minimum uniform buffer offset alignment.
-    ///
-    /// When using dynamic uniform buffers, offsets must be aligned to this value.
-    #[inline]
-    pub fn min_uniform_buffer_offset_alignment(&self) -> u32 {
-        self.device.limits().min_uniform_buffer_offset_alignment
-    }
-
-    /// Get the minimum storage buffer offset alignment.
-    ///
-    /// When using dynamic storage buffers, offsets must be aligned to this value.
-    #[inline]
-    pub fn min_storage_buffer_offset_alignment(&self) -> u32 {
-        self.device.limits().min_storage_buffer_offset_alignment
-    }
-
-    /// Get the maximum push constant size in bytes.
-    ///
-    /// Push constants require the `PUSH_CONSTANTS` feature.
-    /// Returns 0 if push constants are not supported.
-    #[inline]
-    pub fn max_push_constant_size(&self) -> u32 {
-        self.device.limits().max_push_constant_size
-    }
-
-    /// Get the maximum 1D texture dimension.
-    #[inline]
-    pub fn max_texture_dimension_1d(&self) -> u32 {
-        self.device.limits().max_texture_dimension_1d
-    }
-
-    /// Get the maximum 3D texture dimension.
-    #[inline]
-    pub fn max_texture_dimension_3d(&self) -> u32 {
-        self.device.limits().max_texture_dimension_3d
-    }
-
-    /// Get the maximum texture array layers.
-    #[inline]
-    pub fn max_texture_array_layers(&self) -> u32 {
-        self.device.limits().max_texture_array_layers
-    }
-
-    /// Get the maximum bind groups.
-    #[inline]
-    pub fn max_bind_groups(&self) -> u32 {
-        self.device.limits().max_bind_groups
-    }
-
-    /// Get the maximum bindings per bind group.
-    #[inline]
-    pub fn max_bindings_per_bind_group(&self) -> u32 {
-        self.device.limits().max_bindings_per_bind_group
-    }
-
-    /// Get the maximum dynamic uniform buffers per pipeline layout.
-    #[inline]
-    pub fn max_dynamic_uniform_buffers_per_pipeline_layout(&self) -> u32 {
-        self.device
-            .limits()
-            .max_dynamic_uniform_buffers_per_pipeline_layout
-    }
-
-    /// Get the maximum dynamic storage buffers per pipeline layout.
-    #[inline]
-    pub fn max_dynamic_storage_buffers_per_pipeline_layout(&self) -> u32 {
-        self.device
-            .limits()
-            .max_dynamic_storage_buffers_per_pipeline_layout
-    }
-
-    /// Get the maximum sampled textures per shader stage.
-    #[inline]
-    pub fn max_sampled_textures_per_shader_stage(&self) -> u32 {
-        self.device.limits().max_sampled_textures_per_shader_stage
-    }
-
-    /// Get the maximum samplers per shader stage.
-    #[inline]
-    pub fn max_samplers_per_shader_stage(&self) -> u32 {
-        self.device.limits().max_samplers_per_shader_stage
-    }
-
-    /// Get the maximum storage buffers per shader stage.
-    #[inline]
-    pub fn max_storage_buffers_per_shader_stage(&self) -> u32 {
-        self.device.limits().max_storage_buffers_per_shader_stage
-    }
-
-    /// Get the maximum storage textures per shader stage.
-    #[inline]
-    pub fn max_storage_textures_per_shader_stage(&self) -> u32 {
-        self.device.limits().max_storage_textures_per_shader_stage
-    }
-
-    /// Get the maximum uniform buffers per shader stage.
-    #[inline]
-    pub fn max_uniform_buffers_per_shader_stage(&self) -> u32 {
-        self.device.limits().max_uniform_buffers_per_shader_stage
-    }
-
-    /// Get the maximum uniform buffer binding size.
-    #[inline]
-    pub fn max_uniform_buffer_binding_size(&self) -> u32 {
-        self.device.limits().max_uniform_buffer_binding_size
-    }
-
-    /// Get the maximum storage buffer binding size.
-    #[inline]
-    pub fn max_storage_buffer_binding_size(&self) -> u32 {
-        self.device.limits().max_storage_buffer_binding_size
-    }
-
-    /// Get the maximum vertex buffers.
-    #[inline]
-    pub fn max_vertex_buffers(&self) -> u32 {
-        self.device.limits().max_vertex_buffers
-    }
-
-    /// Get the maximum vertex attributes.
-    #[inline]
-    pub fn max_vertex_attributes(&self) -> u32 {
-        self.device.limits().max_vertex_attributes
-    }
-
-    /// Get the maximum vertex buffer array stride.
-    #[inline]
-    pub fn max_vertex_buffer_array_stride(&self) -> u32 {
-        self.device.limits().max_vertex_buffer_array_stride
-    }
-
-    /// Get the maximum compute workgroup storage size.
-    #[inline]
-    pub fn max_compute_workgroup_storage_size(&self) -> u32 {
-        self.device.limits().max_compute_workgroup_storage_size
-    }
-
-    /// Get the maximum compute invocations per workgroup.
-    #[inline]
-    pub fn max_compute_invocations_per_workgroup(&self) -> u32 {
-        self.device.limits().max_compute_invocations_per_workgroup
-    }
-
-    /// Get the maximum compute workgroup size X.
-    #[inline]
-    pub fn max_compute_workgroup_size_x(&self) -> u32 {
-        self.device.limits().max_compute_workgroup_size_x
-    }
-
-    /// Get the maximum compute workgroup size Y.
-    #[inline]
-    pub fn max_compute_workgroup_size_y(&self) -> u32 {
-        self.device.limits().max_compute_workgroup_size_y
-    }
-
-    /// Get the maximum compute workgroup size Z.
-    #[inline]
-    pub fn max_compute_workgroup_size_z(&self) -> u32 {
-        self.device.limits().max_compute_workgroup_size_z
-    }
-
-    /// Get the maximum compute workgroups per dimension.
-    #[inline]
-    pub fn max_compute_workgroups_per_dimension(&self) -> u32 {
-        self.device.limits().max_compute_workgroups_per_dimension
     }
 }
 
@@ -639,5 +502,140 @@ impl GraphicsContextDescriptor {
     pub fn label(mut self, label: &'static str) -> Self {
         self.label = Some(label);
         self
+    }
+
+    /// Require a capability — its features become required, limits are merged.
+    ///
+    /// If the adapter doesn't support the capability's required features,
+    /// device creation will fail with [`GraphicsError::MissingRequiredFeatures`].
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_render::{GraphicsContextDescriptor, GpuProfiler};
+    ///
+    /// let desc = GraphicsContextDescriptor::new()
+    ///     .require_capability::<GpuProfiler>();
+    /// ```
+    pub fn require_capability<T: RenderCapability>(mut self) -> Self {
+        let reqs = T::requirements();
+        self.required_gpu_features |= reqs.required_features;
+        self.required_gpu_features |= reqs.requested_features;
+        self.additional_wgpu_features |= reqs.additional_wgpu_features;
+        crate::capability::merge_limits_max(&mut self.limits, &reqs.min_limits);
+        tracing::trace!("Required capability: {}", T::name());
+        self
+    }
+
+    /// Request a capability — required features stay required, requested features
+    /// stay optional, limits are merged.
+    ///
+    /// The capability's required features are added as required, and its
+    /// requested features are added as requested (best-effort). Limits are
+    /// merged and clamped to adapter capabilities during device creation.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use astrelis_render::GraphicsContextDescriptor;
+    /// use astrelis_render::batched::BestBatchCapability;
+    ///
+    /// let desc = GraphicsContextDescriptor::new()
+    ///     .request_capability::<BestBatchCapability>();
+    /// ```
+    pub fn request_capability<T: RenderCapability>(mut self) -> Self {
+        let reqs = T::requirements();
+        self.required_gpu_features |= reqs.required_features;
+        self.requested_gpu_features |= reqs.requested_features;
+        self.additional_wgpu_features |= reqs.additional_wgpu_features;
+        crate::capability::merge_limits_max(&mut self.limits, &reqs.min_limits);
+        tracing::trace!("Requested capability: {}", T::name());
+        self
+    }
+}
+
+// ============================================================================
+// RenderContext trait implementation
+// ============================================================================
+
+impl RenderContext for GraphicsContext {
+    fn create_buffer(&self, desc: &BufferDescriptor) -> GpuBuffer {
+        let buffer = self.device().create_buffer(desc);
+        GpuBuffer::from_wgpu(buffer)
+    }
+
+    fn write_buffer(&self, buffer: &GpuBuffer, offset: u64, data: &[u8]) {
+        let wgpu_buffer = buffer.as_wgpu();
+        self.queue().write_buffer(wgpu_buffer, offset, data);
+    }
+
+    fn create_texture(&self, desc: &TextureDescriptor) -> GpuTexture {
+        let texture = self.device().create_texture(desc);
+        GpuTexture::from_wgpu(texture)
+    }
+
+    fn create_shader_module(&self, desc: &ShaderModuleDescriptor) -> GpuShaderModule {
+        let module = self.device().create_shader_module(desc.clone());
+        GpuShaderModule::from_wgpu(module)
+    }
+
+    fn create_render_pipeline(&self, desc: &RenderPipelineDescriptor) -> GpuRenderPipeline {
+        let pipeline = self.device().create_render_pipeline(desc);
+        GpuRenderPipeline::from_wgpu(pipeline)
+    }
+
+    fn create_compute_pipeline(&self, desc: &ComputePipelineDescriptor) -> GpuComputePipeline {
+        let pipeline = self.device().create_compute_pipeline(desc);
+        GpuComputePipeline::from_wgpu(pipeline)
+    }
+
+    fn create_bind_group_layout(&self, desc: &BindGroupLayoutDescriptor) -> GpuBindGroupLayout {
+        let layout = self.device().create_bind_group_layout(desc);
+        GpuBindGroupLayout::from_wgpu(layout)
+    }
+
+    fn create_bind_group(&self, desc: &BindGroupDescriptor) -> GpuBindGroup {
+        let bind_group = self.device().create_bind_group(desc);
+        GpuBindGroup::from_wgpu(bind_group)
+    }
+
+    fn create_sampler(&self, desc: &SamplerDescriptor) -> GpuSampler {
+        let sampler = self.device().create_sampler(desc);
+        GpuSampler::from_wgpu(sampler)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "mock")]
+    use super::*;
+    #[cfg(feature = "mock")]
+    use astrelis_test_utils::MockRenderContext;
+
+    #[test]
+    #[cfg(feature = "mock")]
+    fn test_render_context_trait_object() {
+        // Test that we can use both GraphicsContext and MockRenderContext
+        // polymorphically through the RenderContext trait
+
+        let mock_ctx = MockRenderContext::new();
+
+        fn uses_render_context(ctx: &dyn RenderContext) {
+            let buffer = ctx.create_buffer(&BufferDescriptor {
+                label: Some("Test Buffer"),
+                size: 256,
+                usage: wgpu::BufferUsages::UNIFORM,
+                mapped_at_creation: false,
+            });
+
+            ctx.write_buffer(&buffer, 0, &[0u8; 256]);
+        }
+
+        // Should work with mock context
+        uses_render_context(&mock_ctx);
+
+        // Verify the mock recorded the calls
+        let calls = mock_ctx.calls();
+        assert_eq!(calls.len(), 2); // create_buffer + write_buffer
     }
 }

@@ -273,7 +273,7 @@ impl ApplicationBuilder {
         // Store data in a static and use a helper function
         use std::cell::RefCell;
         thread_local! {
-            static APP_BUILDER_DATA: RefCell<Option<AppBuilderData>> = RefCell::new(None);
+            static APP_BUILDER_DATA: RefCell<Option<AppBuilderData>> = const { RefCell::new(None) };
         }
 
         #[allow(dead_code)] // Fields are used in app_builder_factory below
@@ -304,7 +304,7 @@ impl ApplicationBuilder {
         fn app_builder_factory(ctx: &mut AppCtx) -> Box<dyn App> {
             use std::cell::RefCell;
             thread_local! {
-                static APP_BUILDER_DATA: RefCell<Option<AppBuilderData>> = RefCell::new(None);
+                static APP_BUILDER_DATA: RefCell<Option<AppBuilderData>> = const { RefCell::new(None) };
             }
 
             struct AppBuilderData {
@@ -323,8 +323,8 @@ impl ApplicationBuilder {
             #[cfg(all(feature = "render", feature = "winit"))]
             {
                 // Create initial window if requested
-                if data.create_window {
-                    if let Some(window_manager) = data.engine.get_mut::<WindowManager>() {
+                if data.create_window
+                    && let Some(window_manager) = data.engine.get_mut::<WindowManager>() {
                         // Use WindowManager if available
                         let descriptor = WindowDescriptor {
                             title: data.title.clone(),
@@ -340,7 +340,6 @@ impl ApplicationBuilder {
                             tracing::error!("Failed to create window: {}", e);
                         }
                     }
-                }
             }
 
             #[cfg(not(all(feature = "render", feature = "winit")))]

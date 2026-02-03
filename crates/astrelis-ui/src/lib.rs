@@ -12,7 +12,7 @@
 //! ```rust,no_run
 //! # use astrelis_ui::UiSystem;
 //! # use astrelis_render::{Color, GraphicsContext};
-//! # let graphics_context = GraphicsContext::new_owned_sync_or_panic();
+//! # let graphics_context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 //! let mut ui = UiSystem::new(graphics_context);
 //!
 //! ui.build(|root| {
@@ -36,9 +36,42 @@
 //! // ui.handle_events(&mut event_batch);
 //! // ui.render(&mut render_pass, viewport_size);
 //! ```
+//!
+//! ## API Conventions
+//!
+//! This crate follows consistent method naming conventions:
+//!
+//! ### Mutation Methods
+//! - **`set_*()`** - Full replacement that may trigger complete rebuild/re-layout
+//!   - Example: `set_text()` replaces text and triggers text shaping
+//! - **`update_*()`** - Incremental update optimized with dirty flags
+//!   - Example: `update_text()` only marks TEXT_SHAPING dirty, skipping layout
+//! - **`add_*()`** - Append to a collection
+//!   - Example: `add_widget()` appends to widget tree
+//!
+//! ### Accessor Methods
+//! - **`get_*()`** - Returns `Option<&T>` for possibly-missing values
+//!   - Example: `get_widget(id)` returns `Option<&Widget>`
+//! - **`*()` (no prefix)** - Returns `&T`, panics if unavailable (use when required)
+//!   - Example: `widget(id)` returns `&Widget` or panics
+//! - **`try_*()`** - Fallible operation returning `Result`
+//!   - Example: `try_layout()` returns `Result<(), LayoutError>`
+//! - **`has_*()`** - Boolean check for existence
+//!   - Example: `has_widget(id)` returns `bool`
+//!
+//! ### Computation Methods
+//! - **`compute_*()`** - Expensive computation (results often cached)
+//!   - Example: `compute_layout()` runs Taffy layout solver
+//! - **`calculate_*()`** - Mathematical calculation
+//!   - Example: `calculate_bounds()` computes widget bounds
+//!
+//! ### Builder Methods
+//! - **`with_*(value)`** - Builder method returning `Self` for chaining
+//!   - Example: `with_padding(20.0)` sets padding and returns builder
+//! - **`build()`** - Finalizes builder and consumes it
+//!   - Example: `widget.build()` adds widget to tree
 
 pub mod animation;
-pub mod auto_dirty;
 pub mod builder;
 pub mod clip;
 pub mod constraint;
@@ -47,7 +80,6 @@ pub mod constraint_resolver;
 pub mod culling;
 pub mod debug;
 pub mod dirty;
-pub mod dirty_ranges;
 pub mod draw_list;
 pub mod event;
 pub mod focus;
@@ -63,7 +95,9 @@ pub mod metrics;
 pub mod metrics_collector;
 pub mod middleware;
 pub mod overlay;
+pub mod plugin;
 pub mod renderer;
+pub mod scroll_plugin;
 pub mod style;
 pub use style::Overflow;
 pub mod theme;
@@ -74,60 +108,57 @@ pub mod virtual_scroll;
 pub mod widget_id;
 pub mod widgets;
 
-// NOTE: The capability-based widget system in `widget/` is experimental and not yet integrated
-// with the builder/renderer. It may be removed or significantly changed in future versions.
-// For now, use the `widgets` module which is the stable, actively-used widget system.
-#[doc(hidden)]
-pub mod widget;
-
-use astrelis_core::geometry::Size;
-use std::sync::Arc;
 pub use animation::{
     AnimatableProperty, Animation, AnimationState, AnimationSystem, EasingFunction,
     WidgetAnimations, bounce, fade_in, fade_out, scale, slide_in_left, slide_in_top,
 };
-pub use auto_dirty::{NumericValue, TextValue, Value};
+use astrelis_core::geometry::Size;
 pub use clip::{ClipRect, PhysicalClipRect};
 pub use debug::DebugOverlay;
-pub use dirty::DirtyFlags;
-pub use dirty_ranges::DirtyRanges;
+pub use dirty::{DirtyFlags, DirtyRanges, Versioned};
 pub use draw_list::{DrawCommand, DrawList, ImageCommand, QuadCommand, TextCommand};
 pub use glyph_atlas::{
     GlyphBatch, atlas_entry_uv_coords, create_glyph_batches, glyph_to_instance, glyphs_to_instances,
 };
 pub use gpu_types::{ImageInstance, QuadInstance, QuadVertex, TextInstance};
 pub use instance_buffer::InstanceBuffer;
-pub use length::{Length, LengthAuto, LengthPercentage, auto, length, percent, vw, vh, vmin, vmax};
+pub use length::{Length, LengthAuto, LengthPercentage, auto, length, percent, vh, vmax, vmin, vw};
+use std::sync::Arc;
 // Re-export constraint system for advanced responsive layouts
-pub use constraint::{Constraint, CalcExpr};
-pub use constraint_builder::{px, calc, min2, min_of, max2, max_of, clamp};
+pub use astrelis_render::ImageSampling;
+pub use astrelis_text::{SyncTextShaper, TextPipeline, TextShapeRequest, TextShaper};
+pub use constraint::{CalcExpr, Constraint};
+pub use constraint_builder::{calc, clamp, max_of, max2, min_of, min2, px};
 pub use constraint_resolver::{ConstraintResolver, ResolveContext};
 pub use metrics::UiMetrics;
 pub use viewport_context::ViewportContext;
-pub use astrelis_text::{TextPipeline, TextShapeRequest, TextShaper, SyncTextShaper};
 pub use widget_id::{WidgetId, WidgetIdRegistry};
+pub use widgets::{ScrollAxis, ScrollContainer, ScrollbarVisibility};
+pub use widgets::{HScrollbar, ScrollbarOrientation, ScrollbarTheme, VScrollbar};
 pub use widgets::{Image, ImageFit, ImageTexture, ImageUV};
-pub use astrelis_render::ImageSampling;
-
-// NOTE: The `widget` module contains an experimental capability-based system that is
-// NOT integrated with the builder/renderer. Use `widgets::*` for actual UI development.
 
 // Re-export main types
-pub use builder::{ImageBuilder, UiBuilder, WidgetBuilder};
+pub use builder::{
+    ContainerNodeBuilder, IntoNodeBuilder, LeafNodeBuilder, UiBuilder, WidgetBuilder,
+    // Legacy aliases
+    ImageBuilder,
+};
+#[cfg(feature = "docking")]
+pub use builder::{DockSplitterNodeBuilder, DockTabsNodeBuilder};
 pub use event::{UiEvent, UiEventSystem};
+pub use focus::{FocusDirection, FocusEvent, FocusManager, FocusPolicy, FocusScopeId};
 pub use layout::LayoutCache;
 pub use renderer::UiRenderer;
 pub use style::Style;
 pub use theme::{ColorPalette, ColorRole, Shapes, Spacing, Theme, ThemeBuilder, Typography};
 pub use tree::{NodeId, UiTree};
 pub use widgets::Widget;
-pub use focus::{FocusDirection, FocusEvent, FocusManager, FocusPolicy, FocusScopeId};
 
 // Re-export new architecture modules
-pub use culling::{CullingStats, CullingTree, AABB};
+pub use culling::{AABB, CullingStats, CullingTree};
 pub use inspector::{
-    EditableProperty, InspectorConfig, InspectorGraphs, PropertyEditor, SearchState,
-    TreeViewState, UiInspector, WidgetIdRegistryExt, WidgetKind,
+    EditableProperty, InspectorConfig, InspectorGraphs, PropertyEditor, SearchState, TreeViewState,
+    UiInspector, WidgetIdRegistryExt, WidgetKind,
 };
 pub use layout_engine::{LayoutEngine, LayoutMode, LayoutRequest};
 pub use menu::{ContextMenu, MenuBar, MenuItem, MenuStyle};
@@ -148,6 +179,19 @@ pub use virtual_scroll::{
     VirtualScrollUpdate, VirtualScrollView,
 };
 
+// Docking system re-exports
+#[cfg(feature = "docking")]
+pub use widgets::docking::{
+    DRAG_THRESHOLD, DockSplitter, DockTabs, DockZone, DockingStyle, DragManager, DragState,
+    DragType, PanelConstraints, SplitDirection, TabScrollIndicator, TabScrollbarPosition,
+};
+
+// Plugin system re-exports
+pub use plugin::{
+    CorePlugin, PluginHandle, PluginManager, TraversalBehavior, UiPlugin, WidgetOverflow,
+    WidgetRenderContext, WidgetTypeDescriptor, WidgetTypeRegistry,
+};
+
 // Re-export common types from dependencies
 pub use astrelis_core::math::{Vec2, Vec4};
 pub use astrelis_render::Color;
@@ -155,6 +199,7 @@ pub use taffy::{
     AlignContent, AlignItems, Display, FlexDirection, FlexWrap, JustifyContent, Position,
 };
 
+use astrelis_core::profiling::profile_function;
 use astrelis_render::{GraphicsContext, Viewport};
 use astrelis_winit::event::EventBatch;
 
@@ -165,20 +210,34 @@ use astrelis_winit::event::EventBatch;
 pub struct UiCore {
     tree: UiTree,
     event_system: UiEventSystem,
+    plugin_manager: PluginManager,
     viewport_size: Size<f32>,
     widget_registry: WidgetIdRegistry,
     viewport: Viewport,
+    theme: Theme,
 }
 
 impl UiCore {
     /// Create a new render-agnostic UI core.
+    ///
+    /// Automatically adds [`CorePlugin`] and [`ScrollPlugin`](scroll_plugin::ScrollPlugin)
+    /// to register all built-in widget types.
+    /// When the `docking` feature is enabled, also adds [`DockingPlugin`](widgets::docking::plugin::DockingPlugin).
     pub fn new() -> Self {
+        let mut plugin_manager = PluginManager::new();
+        plugin_manager.add_plugin(CorePlugin);
+        plugin_manager.add_plugin(scroll_plugin::ScrollPlugin::new());
+        #[cfg(feature = "docking")]
+        plugin_manager.add_plugin(widgets::docking::plugin::DockingPlugin::new());
+
         Self {
             tree: UiTree::new(),
             event_system: UiEventSystem::new(),
+            plugin_manager,
             viewport_size: Size::new(800.0, 600.0),
             widget_registry: WidgetIdRegistry::new(),
             viewport: Viewport::default(),
+            theme: Theme::dark(),
         }
     }
 
@@ -218,13 +277,44 @@ impl UiCore {
 
     /// Compute layout without font rendering (uses approximate text sizing).
     pub fn compute_layout(&mut self) {
-        self.tree.compute_layout(self.viewport_size, None);
+        #[cfg(feature = "docking")]
+        {
+            let padding = self
+                .plugin_manager
+                .get::<widgets::docking::plugin::DockingPlugin>()
+                .map(|p| p.docking_context.style().content_padding)
+                .unwrap_or(0.0);
+            self.tree.set_docking_content_padding(padding);
+        }
+        let widget_registry = self.plugin_manager.widget_registry();
+        self.tree
+            .compute_layout(self.viewport_size, None, widget_registry);
+        // Invalidate docking cache so stale layout coordinates are refreshed
+        #[cfg(feature = "docking")]
+        if let Some(dp) = self.plugin_manager.get_mut::<widgets::docking::plugin::DockingPlugin>() {
+            dp.invalidate_cache();
+        }
+    }
+
+    /// Run plugin post-layout hooks.
+    ///
+    /// This dispatches `post_layout` to all registered plugins, allowing them to
+    /// perform custom post-processing (e.g., ScrollPlugin updating content/viewport sizes).
+    pub fn run_post_layout_plugins(&mut self) {
+        self.plugin_manager.post_layout(&mut self.tree);
     }
 
     /// Compute layout with instrumentation for performance metrics.
     pub fn compute_layout_instrumented(&mut self) -> UiMetrics {
-        self.tree
-            .compute_layout_instrumented(self.viewport_size, None)
+        let widget_registry = self.plugin_manager.widget_registry();
+        let metrics = self
+            .tree
+            .compute_layout_instrumented(self.viewport_size, None, widget_registry);
+        #[cfg(feature = "docking")]
+        if let Some(dp) = self.plugin_manager.get_mut::<widgets::docking::plugin::DockingPlugin>() {
+            dp.invalidate_cache();
+        }
+        metrics
     }
 
     /// Get the node ID for a widget ID.
@@ -258,14 +348,15 @@ impl UiCore {
     ) -> bool {
         if let Some(node_id) = self.widget_registry.get_node(widget_id)
             && let Some(node) = self.tree.get_node_mut(node_id)
-                && let Some(button) = node.widget.as_any_mut().downcast_mut::<widgets::Button>() {
-                    let changed = button.set_label(new_label);
-                    if changed {
-                        self.tree
-                            .mark_dirty_flags(node_id, DirtyFlags::TEXT_SHAPING);
-                    }
-                    return changed;
-                }
+            && let Some(button) = node.widget.as_any_mut().downcast_mut::<widgets::Button>()
+        {
+            let changed = button.set_label(new_label);
+            if changed {
+                self.tree
+                    .mark_dirty_flags(node_id, DirtyFlags::TEXT_SHAPING);
+            }
+            return changed;
+        }
         false
     }
 
@@ -275,18 +366,18 @@ impl UiCore {
     pub fn update_text_input(&mut self, widget_id: WidgetId, new_value: impl Into<String>) -> bool {
         if let Some(node_id) = self.widget_registry.get_node(widget_id)
             && let Some(node) = self.tree.get_node_mut(node_id)
-                && let Some(input) = node
-                    .widget
-                    .as_any_mut()
-                    .downcast_mut::<widgets::TextInput>()
-                {
-                    let changed = input.set_value(new_value);
-                    if changed {
-                        self.tree
-                            .mark_dirty_flags(node_id, DirtyFlags::TEXT_SHAPING);
-                    }
-                    return changed;
-                }
+            && let Some(input) = node
+                .widget
+                .as_any_mut()
+                .downcast_mut::<widgets::TextInput>()
+        {
+            let changed = input.set_value(new_value);
+            if changed {
+                self.tree
+                    .mark_dirty_flags(node_id, DirtyFlags::TEXT_SHAPING);
+            }
+            return changed;
+        }
         false
     }
 
@@ -326,9 +417,84 @@ impl UiCore {
         &self.widget_registry
     }
 
+    /// Set the theme, marking all widget colors dirty.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+        self.tree.mark_all_dirty(DirtyFlags::COLOR);
+    }
+
+    /// Get a reference to the current theme.
+    pub fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
+    /// Get a reference to the docking style.
+    #[cfg(feature = "docking")]
+    pub fn docking_style(&self) -> &widgets::docking::DockingStyle {
+        self.plugin_manager
+            .get::<widgets::docking::plugin::DockingPlugin>()
+            .expect("DockingPlugin is auto-added when docking feature is enabled")
+            .docking_context
+            .style()
+    }
+
+    /// Replace the docking style.
+    #[cfg(feature = "docking")]
+    pub fn set_docking_style(&mut self, style: widgets::docking::DockingStyle) {
+        self.plugin_manager
+            .get_mut::<widgets::docking::plugin::DockingPlugin>()
+            .expect("DockingPlugin is auto-added when docking feature is enabled")
+            .docking_context
+            .set_style(style);
+    }
+
+    /// Add a plugin to the UI core and return a handle for typed access.
+    ///
+    /// The plugin's widget types are registered immediately.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a plugin of the same concrete type is already registered.
+    pub fn add_plugin<P: UiPlugin>(&mut self, plugin: P) -> PluginHandle<P> {
+        self.plugin_manager.add_plugin(plugin)
+    }
+
+    /// Get a handle for an already-registered plugin.
+    ///
+    /// Returns `Some(PluginHandle)` if the plugin is registered, `None` otherwise.
+    /// Useful for obtaining handles to auto-registered plugins.
+    pub fn plugin_handle<P: UiPlugin>(&self) -> Option<PluginHandle<P>> {
+        self.plugin_manager.handle::<P>()
+    }
+
+    /// Get a reference to a registered plugin by type, using a handle as proof.
+    pub fn plugin<P: UiPlugin>(&self, _handle: &PluginHandle<P>) -> &P {
+        self.plugin_manager
+            .get::<P>()
+            .expect("plugin handle guarantees registration")
+    }
+
+    /// Get a mutable reference to a registered plugin by type, using a handle as proof.
+    pub fn plugin_mut<P: UiPlugin>(&mut self, _handle: &PluginHandle<P>) -> &mut P {
+        self.plugin_manager
+            .get_mut::<P>()
+            .expect("plugin handle guarantees registration")
+    }
+
+    /// Get a reference to the plugin manager.
+    pub fn plugin_manager(&self) -> &PluginManager {
+        &self.plugin_manager
+    }
+
+    /// Get a mutable reference to the plugin manager.
+    pub fn plugin_manager_mut(&mut self) -> &mut PluginManager {
+        &mut self.plugin_manager
+    }
+
     /// Handle events from the event batch.
     pub fn handle_events(&mut self, events: &mut EventBatch) {
-        self.event_system.handle_events(events, &mut self.tree);
+        self.event_system
+            .handle_events_with_plugins(events, &mut self.tree, &mut self.plugin_manager);
     }
 }
 
@@ -349,6 +515,7 @@ pub struct UiSystem {
 impl UiSystem {
     /// Create a new UI system with rendering support.
     pub fn new(context: Arc<GraphicsContext>) -> Self {
+        profile_function!();
         Self {
             core: UiCore::new(),
             renderer: UiRenderer::new(context),
@@ -362,14 +529,27 @@ impl UiSystem {
     where
         F: FnOnce(&mut UiBuilder),
     {
+        // Clear the draw list since we're rebuilding the tree
+        // This prevents stale draw commands from accumulating
+        self.renderer.clear_draw_list();
         self.core.build(build_fn);
     }
 
     /// Update UI state (animations, hover, etc.).
     ///
     /// Note: This no longer marks the entire tree dirty - only changed widgets are marked.
-    pub fn update(&mut self, _delta_time: f32) {
-        // Animations and other updates would mark specific nodes dirty
+    pub fn update(&mut self, delta_time: f32) {
+        // Update plugin animations (docking ghost tabs, panel transitions, etc.)
+        #[cfg(feature = "docking")]
+        if let Some(dp) = self
+            .core
+            .plugin_manager
+            .get_mut::<widgets::docking::plugin::DockingPlugin>()
+        {
+            dp.update_animations(delta_time);
+        }
+
+        let _ = delta_time;
     }
 
     /// Set the viewport size for layout calculations.
@@ -387,9 +567,29 @@ impl UiSystem {
     pub fn compute_layout(&mut self) {
         let viewport_size = self.core.viewport_size();
         let font_renderer = self.renderer.font_renderer();
+        #[cfg(feature = "docking")]
+        {
+            let padding = self
+                .core
+                .plugin_manager
+                .get::<widgets::docking::plugin::DockingPlugin>()
+                .map(|p| p.docking_context.style().content_padding)
+                .unwrap_or(0.0);
+            self.core.tree.set_docking_content_padding(padding);
+        }
+        let widget_registry = self.core.plugin_manager.widget_registry();
         self.core
-            .tree_mut()
-            .compute_layout(viewport_size, Some(font_renderer));
+            .tree
+            .compute_layout(viewport_size, Some(font_renderer), widget_registry);
+        // Invalidate docking cache so stale layout coordinates are refreshed
+        #[cfg(feature = "docking")]
+        if let Some(dp) = self
+            .core
+            .plugin_manager
+            .get_mut::<widgets::docking::plugin::DockingPlugin>()
+        {
+            dp.invalidate_cache();
+        }
     }
 
     /// Get the node ID for a widget ID.
@@ -411,7 +611,7 @@ impl UiSystem {
     /// ```no_run
     /// # use astrelis_ui::{UiSystem, WidgetId};
     /// # use astrelis_render::GraphicsContext;
-    /// # let context = GraphicsContext::new_owned_sync_or_panic();
+    /// # let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
     /// # let mut ui = UiSystem::new(context);
     /// let counter_id = WidgetId::new("counter");
     /// ui.update_text(counter_id, "Count: 42");
@@ -468,20 +668,86 @@ impl UiSystem {
     /// Note: This automatically computes layout. If you need to control
     /// layout computation separately (e.g., for middleware freeze functionality),
     /// use `compute_layout()` + `render_without_layout()` instead.
-    pub fn render(
-        &mut self,
-        render_pass: &mut astrelis_render::wgpu::RenderPass,
-    ) {
+    pub fn render(&mut self, render_pass: &mut astrelis_render::wgpu::RenderPass) {
+        profile_function!();
         let logical_size = self.core.viewport_size();
+        // Sync docking content padding before layout
+        #[cfg(feature = "docking")]
+        {
+            let padding = self
+                .core
+                .plugin_manager
+                .get::<widgets::docking::plugin::DockingPlugin>()
+                .map(|p| p.docking_context.style().content_padding)
+                .unwrap_or(0.0);
+            self.core.tree.set_docking_content_padding(padding);
+        }
         // Compute layout if dirty (clears layout-related dirty flags)
         let font_renderer = self.renderer.font_renderer();
+        let widget_registry = self.core.plugin_manager.widget_registry();
         self.core
-            .tree_mut()
-            .compute_layout(logical_size, Some(font_renderer));
+            .tree
+            .compute_layout(logical_size, Some(font_renderer), widget_registry);
+
+        // Invalidate docking cache so stale layout coordinates are refreshed
+        #[cfg(feature = "docking")]
+        if let Some(dp) = self
+            .core
+            .plugin_manager
+            .get_mut::<widgets::docking::plugin::DockingPlugin>()
+        {
+            dp.invalidate_cache();
+        }
+
+        // Compute accurate tab widths using text shaping (docking only)
+        #[cfg(feature = "docking")]
+        {
+            let font_renderer = self.renderer.font_renderer();
+            crate::widgets::docking::compute_all_tab_widths(self.core.tree_mut(), font_renderer);
+        }
+
+        // Run plugin post-layout hooks (ScrollPlugin updates content/viewport sizes)
+        self.core.run_post_layout_plugins();
+
+        // Clean up draw commands for nodes removed since last frame
+        let removed = self.core.tree_mut().drain_removed_nodes();
+        if !removed.is_empty() {
+            self.renderer.remove_stale_nodes(&removed);
+        }
 
         // Render using retained mode (processes paint-only dirty flags)
-        self.renderer
-            .render_instanced(self.core.tree(), render_pass, self.core.viewport);
+        #[cfg(feature = "docking")]
+        {
+            // Get cross-container preview and animations from DockingPlugin
+            let (preview, animations) = self
+                .core
+                .plugin_manager
+                .get::<widgets::docking::plugin::DockingPlugin>()
+                .map(|dp| {
+                    (
+                        dp.cross_container_preview,
+                        &dp.dock_animations,
+                    )
+                })
+                .unzip();
+            let widget_registry = self.core.plugin_manager.widget_registry();
+
+            self.renderer.render_instanced_with_preview(
+                self.core.tree(),
+                render_pass,
+                self.core.viewport,
+                preview.flatten().as_ref(),
+                animations,
+                widget_registry,
+            );
+        }
+
+        #[cfg(not(feature = "docking"))]
+        {
+            let widget_registry = self.core.plugin_manager.widget_registry();
+            self.renderer
+                .render_instanced(self.core.tree(), render_pass, self.core.viewport, widget_registry);
+        }
 
         // Clear all dirty flags after rendering
         // (layout computation no longer clears flags - renderer owns this)
@@ -513,9 +779,20 @@ impl UiSystem {
         render_pass: &mut astrelis_render::wgpu::RenderPass,
         clear_dirty_flags: bool,
     ) {
+        profile_function!();
+        // Run plugin post-layout hooks (ScrollPlugin updates content/viewport sizes)
+        self.core.run_post_layout_plugins();
+
+        // Clean up draw commands for nodes removed since last frame
+        let removed = self.core.tree_mut().drain_removed_nodes();
+        if !removed.is_empty() {
+            self.renderer.remove_stale_nodes(&removed);
+        }
+
         // Render using retained mode (processes paint-only dirty flags)
+        let widget_registry = self.core.plugin_manager.widget_registry();
         self.renderer
-            .render_instanced(self.core.tree(), render_pass, self.core.viewport);
+            .render_instanced(self.core.tree(), render_pass, self.core.viewport, widget_registry);
 
         // Clear dirty flags unless we're in a frozen state
         if clear_dirty_flags {
@@ -551,5 +828,62 @@ impl UiSystem {
     /// Get reference to the font renderer.
     pub fn font_renderer(&self) -> &astrelis_text::FontRenderer {
         self.renderer.font_renderer()
+    }
+
+    /// Set the theme, marking all widget colors dirty.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.renderer.set_theme_colors(theme.colors.clone());
+        self.core.set_theme(theme);
+    }
+
+    /// Get a reference to the current theme.
+    pub fn theme(&self) -> &Theme {
+        self.core.theme()
+    }
+
+    /// Get a reference to the docking style.
+    #[cfg(feature = "docking")]
+    pub fn docking_style(&self) -> &widgets::docking::DockingStyle {
+        self.core.docking_style()
+    }
+
+    /// Replace the docking style.
+    #[cfg(feature = "docking")]
+    pub fn set_docking_style(&mut self, style: widgets::docking::DockingStyle) {
+        self.core.set_docking_style(style);
+    }
+
+    /// Add a plugin to the UI system and return a handle for typed access.
+    ///
+    /// The plugin's widget types are registered immediately.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a plugin of the same concrete type is already registered.
+    pub fn add_plugin<P: UiPlugin>(&mut self, plugin: P) -> PluginHandle<P> {
+        self.core.add_plugin(plugin)
+    }
+
+    /// Get a handle for an already-registered plugin.
+    ///
+    /// Returns `Some(PluginHandle)` if the plugin is registered, `None` otherwise.
+    /// Useful for obtaining handles to auto-registered plugins.
+    pub fn plugin_handle<P: UiPlugin>(&self) -> Option<PluginHandle<P>> {
+        self.core.plugin_handle::<P>()
+    }
+
+    /// Get a reference to a registered plugin by type, using a handle as proof.
+    pub fn plugin<P: UiPlugin>(&self, handle: &PluginHandle<P>) -> &P {
+        self.core.plugin(handle)
+    }
+
+    /// Get a mutable reference to a registered plugin by type, using a handle as proof.
+    pub fn plugin_mut<P: UiPlugin>(&mut self, handle: &PluginHandle<P>) -> &mut P {
+        self.core.plugin_mut(handle)
+    }
+
+    /// Get a reference to the plugin manager.
+    pub fn plugin_manager(&self) -> &PluginManager {
+        self.core.plugin_manager()
     }
 }

@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use astrelis_render::{GpuProfiler, GraphicsContext, GraphicsContextExt};
+//! use astrelis_render::{GpuProfiler, GraphicsContext};
 //!
 //! // Create profiler (requires TIMESTAMP_QUERY feature)
 //! let mut profiler = GpuProfiler::new(context.clone(), 256);
@@ -34,8 +34,9 @@
 
 use std::sync::Arc;
 
+use crate::capability::{GpuRequirements, RenderCapability};
 use crate::context::GraphicsContext;
-use crate::extension::GraphicsContextExt;
+use crate::features::GpuFeatures;
 
 // =============================================================================
 // Query Types
@@ -276,6 +277,16 @@ pub struct ProfileRegion {
 ///     println!("{}: {:.2}ms", label, duration_ms);
 /// }
 /// ```
+impl RenderCapability for GpuProfiler {
+    fn requirements() -> GpuRequirements {
+        GpuRequirements::new().require_features(GpuFeatures::TIMESTAMP_QUERY)
+    }
+
+    fn name() -> &'static str {
+        "GpuProfiler"
+    }
+}
+
 pub struct GpuProfiler {
     context: Arc<GraphicsContext>,
     query_set: QuerySet,

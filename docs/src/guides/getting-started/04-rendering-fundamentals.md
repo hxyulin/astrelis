@@ -139,7 +139,7 @@ frame.clear_and_render(
     Color::rgb(0.1, 0.1, 0.1),  // Clear color
     |pass| {
         // pass is a &mut RenderPass
-        let render_pass = pass.descriptor();  // Get wgpu::RenderPass
+        let render_pass = pass.wgpu_pass();  // Get wgpu::RenderPass
 
         // Record draw commands
         render_pass.set_pipeline(&pipeline);
@@ -168,7 +168,7 @@ use astrelis_render::RenderPassBuilder;
         .clear_color(Color::BLACK)
         .build(&mut frame);
 
-    let render_pass = pass.descriptor();
+    let render_pass = pass.wgpu_pass();
     render_pass.set_pipeline(&pipeline);
     render_pass.draw(0..3, 0..1);
 } // MUST drop pass before finish()
@@ -244,7 +244,7 @@ fn render(&mut self, _ctx: &mut AppCtx, window_id: WindowId, _events: &mut Event
         RenderTarget::Framebuffer(&self.scene_fb),
         Color::rgb(0.0, 0.0, 0.0),
         |pass| {
-            self.render_scene(pass.descriptor());
+            self.render_scene(pass.wgpu_pass());
         },
     );
 
@@ -253,7 +253,7 @@ fn render(&mut self, _ctx: &mut AppCtx, window_id: WindowId, _events: &mut Event
         RenderTarget::Framebuffer(&self.post_fb),
         Color::BLACK,
         |pass| {
-            self.render_post_process(pass.descriptor(), &self.scene_fb);
+            self.render_post_process(pass.wgpu_pass(), &self.scene_fb);
         },
     );
 
@@ -263,9 +263,9 @@ fn render(&mut self, _ctx: &mut AppCtx, window_id: WindowId, _events: &mut Event
         Color::BLACK,
         |pass| {
             // Draw final result
-            self.render_final(pass.descriptor(), &self.post_fb);
+            self.render_final(pass.wgpu_pass(), &self.post_fb);
             // Draw UI on top
-            self.ui.render(pass.descriptor());
+            self.ui.render(pass.wgpu_pass());
         },
     );
 
@@ -470,16 +470,16 @@ Each render pass has overhead. Combine when possible:
 ```rust
 // Bad: Too many passes
 frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
-    self.render_background(pass.descriptor());
+    self.render_background(pass.wgpu_pass());
 });
 frame.clear_and_render(RenderTarget::Surface, Color::TRANSPARENT, |pass| {
-    self.render_sprites(pass.descriptor());  // Clears again!
+    self.render_sprites(pass.wgpu_pass());  // Clears again!
 });
 
 // Good: One pass
 frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
-    self.render_background(pass.descriptor());
-    self.render_sprites(pass.descriptor());
+    self.render_background(pass.wgpu_pass());
+    self.render_sprites(pass.wgpu_pass());
 });
 ```
 
@@ -543,10 +543,10 @@ frame.clear_and_render(
     Color::BLACK,
     |pass| {
         // 3D scene first
-        self.render_3d_scene(pass.descriptor());
+        self.render_3d_scene(pass.wgpu_pass());
 
         // UI on top (drawn after, appears on top)
-        self.ui.render(pass.descriptor());
+        self.ui.render(pass.wgpu_pass());
     },
 );
 ```

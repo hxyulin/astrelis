@@ -240,12 +240,7 @@ impl ImageInstance {
     }
 
     /// Create an image instance with specific UV coordinates (for sprites).
-    pub fn with_uv(
-        position: Vec2,
-        size: Vec2,
-        uv_min: [f32; 2],
-        uv_max: [f32; 2],
-    ) -> Self {
+    pub fn with_uv(position: Vec2, size: Vec2, uv_min: [f32; 2], uv_max: [f32; 2]) -> Self {
         Self {
             position: position.into(),
             size: size.into(),

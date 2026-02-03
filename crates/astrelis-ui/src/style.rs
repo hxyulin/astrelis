@@ -64,6 +64,86 @@ pub enum Overflow {
     Auto,
 }
 
+/// Consolidated constraint storage for viewport-relative units.
+///
+/// Boxed and optional in Style to reduce memory overhead for the common case
+/// where no viewport constraints (vw, vh, vmin, vmax, calc, min, max, clamp) are used.
+/// This reduces Style size from ~80+ bytes to 8 bytes for the no-constraint case.
+#[derive(Debug, Clone, Default)]
+pub struct ConstraintSet {
+    /// Width constraint
+    pub width: Option<Constraint>,
+    /// Height constraint
+    pub height: Option<Constraint>,
+    /// Min width constraint
+    pub min_width: Option<Constraint>,
+    /// Min height constraint
+    pub min_height: Option<Constraint>,
+    /// Max width constraint
+    pub max_width: Option<Constraint>,
+    /// Max height constraint
+    pub max_height: Option<Constraint>,
+    /// Padding constraints [left, top, right, bottom]
+    pub padding: Option<[Constraint; 4]>,
+    /// Margin constraints [left, top, right, bottom]
+    pub margin: Option<[Constraint; 4]>,
+    /// Gap constraint
+    pub gap: Option<Constraint>,
+    /// Flex basis constraint
+    pub flex_basis: Option<Constraint>,
+}
+
+impl ConstraintSet {
+    /// Check if any constraint needs viewport resolution.
+    pub fn needs_resolution(&self) -> bool {
+        self.width.as_ref().is_some_and(|c| c.needs_resolution())
+            || self.height.as_ref().is_some_and(|c| c.needs_resolution())
+            || self
+                .min_width
+                .as_ref()
+                .is_some_and(|c| c.needs_resolution())
+            || self
+                .min_height
+                .as_ref()
+                .is_some_and(|c| c.needs_resolution())
+            || self
+                .max_width
+                .as_ref()
+                .is_some_and(|c| c.needs_resolution())
+            || self
+                .max_height
+                .as_ref()
+                .is_some_and(|c| c.needs_resolution())
+            || self
+                .padding
+                .as_ref()
+                .is_some_and(|cs| cs.iter().any(|c| c.needs_resolution()))
+            || self
+                .margin
+                .as_ref()
+                .is_some_and(|cs| cs.iter().any(|c| c.needs_resolution()))
+            || self.gap.as_ref().is_some_and(|c| c.needs_resolution())
+            || self
+                .flex_basis
+                .as_ref()
+                .is_some_and(|c| c.needs_resolution())
+    }
+
+    /// Check if any constraints are set.
+    pub fn is_empty(&self) -> bool {
+        self.width.is_none()
+            && self.height.is_none()
+            && self.min_width.is_none()
+            && self.min_height.is_none()
+            && self.max_width.is_none()
+            && self.max_height.is_none()
+            && self.padding.is_none()
+            && self.margin.is_none()
+            && self.gap.is_none()
+            && self.flex_basis.is_none()
+    }
+}
+
 /// UI style for widgets.
 #[derive(Debug, Clone)]
 pub struct Style {
@@ -88,27 +168,9 @@ pub struct Style {
     /// Vertical overflow behavior
     pub overflow_y: Overflow,
 
-    // Constraint storage for re-resolution on viewport changes
-    /// Width constraint (stored for viewport re-resolution)
-    pub width_constraint: Option<Constraint>,
-    /// Height constraint (stored for viewport re-resolution)
-    pub height_constraint: Option<Constraint>,
-    /// Min width constraint (stored for viewport re-resolution)
-    pub min_width_constraint: Option<Constraint>,
-    /// Min height constraint (stored for viewport re-resolution)
-    pub min_height_constraint: Option<Constraint>,
-    /// Max width constraint (stored for viewport re-resolution)
-    pub max_width_constraint: Option<Constraint>,
-    /// Max height constraint (stored for viewport re-resolution)
-    pub max_height_constraint: Option<Constraint>,
-    /// Padding constraints [left, top, right, bottom] (stored for viewport re-resolution)
-    pub padding_constraints: Option<[Constraint; 4]>,
-    /// Margin constraints [left, top, right, bottom] (stored for viewport re-resolution)
-    pub margin_constraints: Option<[Constraint; 4]>,
-    /// Gap constraint (stored for viewport re-resolution)
-    pub gap_constraint: Option<Constraint>,
-    /// Flex basis constraint (stored for viewport re-resolution)
-    pub flex_basis_constraint: Option<Constraint>,
+    /// Consolidated constraint storage for viewport-relative units.
+    /// Boxed and optional to reduce memory overhead (~8 bytes vs ~80+ bytes).
+    pub constraints: Option<Box<ConstraintSet>>,
 }
 
 impl Default for Style {
@@ -121,17 +183,72 @@ impl Default for Style {
             border_radius: 0.0,
             overflow_x: Overflow::default(),
             overflow_y: Overflow::default(),
-            width_constraint: None,
-            height_constraint: None,
-            min_width_constraint: None,
-            min_height_constraint: None,
-            max_width_constraint: None,
-            max_height_constraint: None,
-            padding_constraints: None,
-            margin_constraints: None,
-            gap_constraint: None,
-            flex_basis_constraint: None,
+            constraints: None,
         }
+    }
+}
+
+impl Style {
+    /// Get mutable access to constraints, creating the box if needed.
+    fn constraints_mut(&mut self) -> &mut ConstraintSet {
+        self.constraints
+            .get_or_insert_with(|| Box::new(ConstraintSet::default()))
+    }
+
+    /// Get the width constraint if set.
+    pub fn width_constraint(&self) -> Option<&Constraint> {
+        self.constraints.as_ref().and_then(|c| c.width.as_ref())
+    }
+
+    /// Get the height constraint if set.
+    pub fn height_constraint(&self) -> Option<&Constraint> {
+        self.constraints.as_ref().and_then(|c| c.height.as_ref())
+    }
+
+    /// Get the min width constraint if set.
+    pub fn min_width_constraint(&self) -> Option<&Constraint> {
+        self.constraints.as_ref().and_then(|c| c.min_width.as_ref())
+    }
+
+    /// Get the min height constraint if set.
+    pub fn min_height_constraint(&self) -> Option<&Constraint> {
+        self.constraints
+            .as_ref()
+            .and_then(|c| c.min_height.as_ref())
+    }
+
+    /// Get the max width constraint if set.
+    pub fn max_width_constraint(&self) -> Option<&Constraint> {
+        self.constraints.as_ref().and_then(|c| c.max_width.as_ref())
+    }
+
+    /// Get the max height constraint if set.
+    pub fn max_height_constraint(&self) -> Option<&Constraint> {
+        self.constraints
+            .as_ref()
+            .and_then(|c| c.max_height.as_ref())
+    }
+
+    /// Get the padding constraints if set.
+    pub fn padding_constraints(&self) -> Option<&[Constraint; 4]> {
+        self.constraints.as_ref().and_then(|c| c.padding.as_ref())
+    }
+
+    /// Get the margin constraints if set.
+    pub fn margin_constraints(&self) -> Option<&[Constraint; 4]> {
+        self.constraints.as_ref().and_then(|c| c.margin.as_ref())
+    }
+
+    /// Get the gap constraint if set.
+    pub fn gap_constraint(&self) -> Option<&Constraint> {
+        self.constraints.as_ref().and_then(|c| c.gap.as_ref())
+    }
+
+    /// Get the flex basis constraint if set.
+    pub fn flex_basis_constraint(&self) -> Option<&Constraint> {
+        self.constraints
+            .as_ref()
+            .and_then(|c| c.flex_basis.as_ref())
     }
 }
 
@@ -160,7 +277,7 @@ impl Style {
     /// ```
     pub fn width(mut self, width: impl Into<Constraint>) -> Self {
         let constraint = width.into();
-        self.width_constraint = Some(constraint.clone());
+        self.constraints_mut().width = Some(constraint.clone());
         // Only resolve simple constraints immediately; others resolved at layout time
         if let Some(dim) = constraint.try_to_dimension() {
             self.layout.size.width = dim;
@@ -171,7 +288,7 @@ impl Style {
     /// Set height. Accepts f32 (pixels), Length, or Constraint.
     pub fn height(mut self, height: impl Into<Constraint>) -> Self {
         let constraint = height.into();
-        self.height_constraint = Some(constraint.clone());
+        self.constraints_mut().height = Some(constraint.clone());
         if let Some(dim) = constraint.try_to_dimension() {
             self.layout.size.height = dim;
         }
@@ -181,7 +298,7 @@ impl Style {
     /// Set minimum width. Accepts f32 (pixels), Length, or Constraint.
     pub fn min_width(mut self, width: impl Into<Constraint>) -> Self {
         let constraint = width.into();
-        self.min_width_constraint = Some(constraint.clone());
+        self.constraints_mut().min_width = Some(constraint.clone());
         if let Some(dim) = constraint.try_to_dimension() {
             self.layout.min_size.width = dim;
         }
@@ -191,7 +308,7 @@ impl Style {
     /// Set minimum height. Accepts f32 (pixels), Length, or Constraint.
     pub fn min_height(mut self, height: impl Into<Constraint>) -> Self {
         let constraint = height.into();
-        self.min_height_constraint = Some(constraint.clone());
+        self.constraints_mut().min_height = Some(constraint.clone());
         if let Some(dim) = constraint.try_to_dimension() {
             self.layout.min_size.height = dim;
         }
@@ -201,7 +318,7 @@ impl Style {
     /// Set maximum width. Accepts f32 (pixels), Length, or Constraint.
     pub fn max_width(mut self, width: impl Into<Constraint>) -> Self {
         let constraint = width.into();
-        self.max_width_constraint = Some(constraint.clone());
+        self.constraints_mut().max_width = Some(constraint.clone());
         if let Some(dim) = constraint.try_to_dimension() {
             self.layout.max_size.width = dim;
         }
@@ -211,7 +328,7 @@ impl Style {
     /// Set maximum height. Accepts f32 (pixels), Length, or Constraint.
     pub fn max_height(mut self, height: impl Into<Constraint>) -> Self {
         let constraint = height.into();
-        self.max_height_constraint = Some(constraint.clone());
+        self.constraints_mut().max_height = Some(constraint.clone());
         if let Some(dim) = constraint.try_to_dimension() {
             self.layout.max_size.height = dim;
         }
@@ -223,7 +340,12 @@ impl Style {
     /// Note: Padding does not support Auto. Use Px or Percent constraints.
     pub fn padding(mut self, padding: impl Into<Constraint> + Copy) -> Self {
         let constraint = padding.into();
-        self.padding_constraints = Some([constraint.clone(), constraint.clone(), constraint.clone(), constraint.clone()]);
+        self.constraints_mut().padding = Some([
+            constraint.clone(),
+            constraint.clone(),
+            constraint.clone(),
+            constraint.clone(),
+        ]);
         if let Some(p) = constraint.try_to_length_percentage() {
             self.layout.padding = Rect {
                 left: p,
@@ -247,7 +369,12 @@ impl Style {
         let top_c = top.into();
         let right_c = right.into();
         let bottom_c = bottom.into();
-        self.padding_constraints = Some([left_c.clone(), top_c.clone(), right_c.clone(), bottom_c.clone()]);
+        self.constraints_mut().padding = Some([
+            left_c.clone(),
+            top_c.clone(),
+            right_c.clone(),
+            bottom_c.clone(),
+        ]);
         // Set simple constraints immediately
         if let Some(l) = left_c.try_to_length_percentage() {
             self.layout.padding.left = l;
@@ -267,7 +394,12 @@ impl Style {
     /// Set margin for all sides. Accepts f32 (pixels) or Constraint.
     pub fn margin(mut self, margin: impl Into<Constraint> + Copy) -> Self {
         let constraint = margin.into();
-        self.margin_constraints = Some([constraint.clone(), constraint.clone(), constraint.clone(), constraint.clone()]);
+        self.constraints_mut().margin = Some([
+            constraint.clone(),
+            constraint.clone(),
+            constraint.clone(),
+            constraint.clone(),
+        ]);
         if let Some(m) = constraint.try_to_length_percentage_auto() {
             self.layout.margin = Rect {
                 left: m,
@@ -291,7 +423,12 @@ impl Style {
         let top_c = top.into();
         let right_c = right.into();
         let bottom_c = bottom.into();
-        self.margin_constraints = Some([left_c.clone(), top_c.clone(), right_c.clone(), bottom_c.clone()]);
+        self.constraints_mut().margin = Some([
+            left_c.clone(),
+            top_c.clone(),
+            right_c.clone(),
+            bottom_c.clone(),
+        ]);
         // Set simple constraints immediately
         if let Some(l) = left_c.try_to_length_percentage_auto() {
             self.layout.margin.left = l;
@@ -335,7 +472,7 @@ impl Style {
     /// Set flex basis. Accepts f32 (pixels) or Constraint.
     pub fn flex_basis(mut self, basis: impl Into<Constraint>) -> Self {
         let constraint = basis.into();
-        self.flex_basis_constraint = Some(constraint.clone());
+        self.constraints_mut().flex_basis = Some(constraint.clone());
         if let Some(dim) = constraint.try_to_dimension() {
             self.layout.flex_basis = dim;
         }
@@ -363,7 +500,7 @@ impl Style {
     /// Set gap between items. Accepts f32 (pixels) or Constraint.
     pub fn gap(mut self, gap: impl Into<Constraint> + Copy) -> Self {
         let constraint = gap.into();
-        self.gap_constraint = Some(constraint.clone());
+        self.constraints_mut().gap = Some(constraint.clone());
         if let Some(g) = constraint.try_to_length_percentage() {
             self.layout.gap = Size {
                 width: g,
@@ -532,16 +669,291 @@ impl Style {
     /// Returns true if any dimension constraints use viewport units (vw, vh, vmin, vmax)
     /// or complex expressions (calc, min, max, clamp).
     pub fn has_unresolved_constraints(&self) -> bool {
-        self.width_constraint.as_ref().is_some_and(|c| c.needs_resolution())
-            || self.height_constraint.as_ref().is_some_and(|c| c.needs_resolution())
-            || self.min_width_constraint.as_ref().is_some_and(|c| c.needs_resolution())
-            || self.min_height_constraint.as_ref().is_some_and(|c| c.needs_resolution())
-            || self.max_width_constraint.as_ref().is_some_and(|c| c.needs_resolution())
-            || self.max_height_constraint.as_ref().is_some_and(|c| c.needs_resolution())
-            || self.padding_constraints.as_ref().is_some_and(|cs| cs.iter().any(|c| c.needs_resolution()))
-            || self.margin_constraints.as_ref().is_some_and(|cs| cs.iter().any(|c| c.needs_resolution()))
-            || self.gap_constraint.as_ref().is_some_and(|c| c.needs_resolution())
-            || self.flex_basis_constraint.as_ref().is_some_and(|c| c.needs_resolution())
+        self.constraints
+            .as_ref()
+            .is_some_and(|c| c.needs_resolution())
+    }
+}
+
+// In-place setter methods (`&mut self`) for use by node builders.
+impl Style {
+    /// Set display mode in place.
+    pub fn set_display(&mut self, display: Display) {
+        self.layout.display = display;
+    }
+
+    /// Set width in place.
+    pub fn set_width(&mut self, width: impl Into<Constraint>) {
+        let constraint = width.into();
+        self.constraints_mut().width = Some(constraint.clone());
+        if let Some(dim) = constraint.try_to_dimension() {
+            self.layout.size.width = dim;
+        }
+    }
+
+    /// Set height in place.
+    pub fn set_height(&mut self, height: impl Into<Constraint>) {
+        let constraint = height.into();
+        self.constraints_mut().height = Some(constraint.clone());
+        if let Some(dim) = constraint.try_to_dimension() {
+            self.layout.size.height = dim;
+        }
+    }
+
+    /// Set minimum width in place.
+    pub fn set_min_width(&mut self, width: impl Into<Constraint>) {
+        let constraint = width.into();
+        self.constraints_mut().min_width = Some(constraint.clone());
+        if let Some(dim) = constraint.try_to_dimension() {
+            self.layout.min_size.width = dim;
+        }
+    }
+
+    /// Set minimum height in place.
+    pub fn set_min_height(&mut self, height: impl Into<Constraint>) {
+        let constraint = height.into();
+        self.constraints_mut().min_height = Some(constraint.clone());
+        if let Some(dim) = constraint.try_to_dimension() {
+            self.layout.min_size.height = dim;
+        }
+    }
+
+    /// Set maximum width in place.
+    pub fn set_max_width(&mut self, width: impl Into<Constraint>) {
+        let constraint = width.into();
+        self.constraints_mut().max_width = Some(constraint.clone());
+        if let Some(dim) = constraint.try_to_dimension() {
+            self.layout.max_size.width = dim;
+        }
+    }
+
+    /// Set maximum height in place.
+    pub fn set_max_height(&mut self, height: impl Into<Constraint>) {
+        let constraint = height.into();
+        self.constraints_mut().max_height = Some(constraint.clone());
+        if let Some(dim) = constraint.try_to_dimension() {
+            self.layout.max_size.height = dim;
+        }
+    }
+
+    /// Set padding for all sides in place.
+    pub fn set_padding(&mut self, padding: impl Into<Constraint> + Copy) {
+        let constraint = padding.into();
+        self.constraints_mut().padding = Some([
+            constraint.clone(),
+            constraint.clone(),
+            constraint.clone(),
+            constraint.clone(),
+        ]);
+        if let Some(p) = constraint.try_to_length_percentage() {
+            self.layout.padding = Rect {
+                left: p,
+                top: p,
+                right: p,
+                bottom: p,
+            };
+        }
+    }
+
+    /// Set padding individually in place.
+    pub fn set_padding_ltrb(
+        &mut self,
+        left: impl Into<Constraint>,
+        top: impl Into<Constraint>,
+        right: impl Into<Constraint>,
+        bottom: impl Into<Constraint>,
+    ) {
+        let left_c = left.into();
+        let top_c = top.into();
+        let right_c = right.into();
+        let bottom_c = bottom.into();
+        self.constraints_mut().padding = Some([
+            left_c.clone(),
+            top_c.clone(),
+            right_c.clone(),
+            bottom_c.clone(),
+        ]);
+        if let Some(l) = left_c.try_to_length_percentage() {
+            self.layout.padding.left = l;
+        }
+        if let Some(t) = top_c.try_to_length_percentage() {
+            self.layout.padding.top = t;
+        }
+        if let Some(r) = right_c.try_to_length_percentage() {
+            self.layout.padding.right = r;
+        }
+        if let Some(b) = bottom_c.try_to_length_percentage() {
+            self.layout.padding.bottom = b;
+        }
+    }
+
+    /// Set margin for all sides in place.
+    pub fn set_margin(&mut self, margin: impl Into<Constraint> + Copy) {
+        let constraint = margin.into();
+        self.constraints_mut().margin = Some([
+            constraint.clone(),
+            constraint.clone(),
+            constraint.clone(),
+            constraint.clone(),
+        ]);
+        if let Some(m) = constraint.try_to_length_percentage_auto() {
+            self.layout.margin = Rect {
+                left: m,
+                top: m,
+                right: m,
+                bottom: m,
+            };
+        }
+    }
+
+    /// Set margin individually in place.
+    pub fn set_margin_ltrb(
+        &mut self,
+        left: impl Into<Constraint>,
+        top: impl Into<Constraint>,
+        right: impl Into<Constraint>,
+        bottom: impl Into<Constraint>,
+    ) {
+        let left_c = left.into();
+        let top_c = top.into();
+        let right_c = right.into();
+        let bottom_c = bottom.into();
+        self.constraints_mut().margin = Some([
+            left_c.clone(),
+            top_c.clone(),
+            right_c.clone(),
+            bottom_c.clone(),
+        ]);
+        if let Some(l) = left_c.try_to_length_percentage_auto() {
+            self.layout.margin.left = l;
+        }
+        if let Some(t) = top_c.try_to_length_percentage_auto() {
+            self.layout.margin.top = t;
+        }
+        if let Some(r) = right_c.try_to_length_percentage_auto() {
+            self.layout.margin.right = r;
+        }
+        if let Some(b) = bottom_c.try_to_length_percentage_auto() {
+            self.layout.margin.bottom = b;
+        }
+    }
+
+    /// Set flex direction in place.
+    pub fn set_flex_direction(&mut self, direction: FlexDirection) {
+        self.layout.flex_direction = direction;
+    }
+
+    /// Set flex wrap in place.
+    pub fn set_flex_wrap(&mut self, wrap: FlexWrap) {
+        self.layout.flex_wrap = wrap;
+    }
+
+    /// Set flex grow factor in place.
+    pub fn set_flex_grow(&mut self, grow: f32) {
+        self.layout.flex_grow = grow;
+    }
+
+    /// Set flex shrink factor in place.
+    pub fn set_flex_shrink(&mut self, shrink: f32) {
+        self.layout.flex_shrink = shrink;
+    }
+
+    /// Set flex basis in place.
+    pub fn set_flex_basis(&mut self, basis: impl Into<Constraint>) {
+        let constraint = basis.into();
+        self.constraints_mut().flex_basis = Some(constraint.clone());
+        if let Some(dim) = constraint.try_to_dimension() {
+            self.layout.flex_basis = dim;
+        }
+    }
+
+    /// Set justify content in place.
+    pub fn set_justify_content(&mut self, justify: JustifyContent) {
+        self.layout.justify_content = Some(justify);
+    }
+
+    /// Set align items in place.
+    pub fn set_align_items(&mut self, align: AlignItems) {
+        self.layout.align_items = Some(align);
+    }
+
+    /// Set align content in place.
+    pub fn set_align_content(&mut self, align: AlignContent) {
+        self.layout.align_content = Some(align);
+    }
+
+    /// Set gap between items in place.
+    pub fn set_gap(&mut self, gap: impl Into<Constraint> + Copy) {
+        let constraint = gap.into();
+        self.constraints_mut().gap = Some(constraint.clone());
+        if let Some(g) = constraint.try_to_length_percentage() {
+            self.layout.gap = Size {
+                width: g,
+                height: g,
+            };
+        }
+    }
+
+    /// Set background color in place.
+    pub fn set_background_color(&mut self, color: Color) {
+        self.background_color = Some(color);
+    }
+
+    /// Set border color in place.
+    pub fn set_border_color(&mut self, color: Color) {
+        self.border_color = Some(color);
+    }
+
+    /// Set border width in place.
+    pub fn set_border_width(&mut self, width: f32) {
+        self.border_width = width;
+    }
+
+    /// Set border radius in place.
+    pub fn set_border_radius(&mut self, radius: f32) {
+        self.border_radius = radius;
+    }
+
+    /// Set overflow behavior for both axes in place.
+    pub fn set_overflow(&mut self, overflow: Overflow) {
+        self.overflow_x = overflow;
+        self.overflow_y = overflow;
+    }
+
+    /// Set horizontal overflow behavior in place.
+    pub fn set_overflow_x(&mut self, overflow: Overflow) {
+        self.overflow_x = overflow;
+    }
+
+    /// Set vertical overflow behavior in place.
+    pub fn set_overflow_y(&mut self, overflow: Overflow) {
+        self.overflow_y = overflow;
+    }
+
+    /// Set position type in place.
+    pub fn set_position(&mut self, position: Position) {
+        self.layout.position = position;
+    }
+
+    /// Set absolute position in place.
+    pub fn set_absolute_position(&mut self, left: f32, top: f32) {
+        self.layout.position = Position::Absolute;
+        self.layout.inset = Rect {
+            left: TaffyLengthPercentageAuto::Length(left),
+            top: TaffyLengthPercentageAuto::Length(top),
+            right: TaffyLengthPercentageAuto::Auto,
+            bottom: TaffyLengthPercentageAuto::Auto,
+        };
+    }
+
+    /// Set aspect ratio in place.
+    pub fn set_aspect_ratio(&mut self, ratio: f32) {
+        self.layout.aspect_ratio = Some(ratio);
+    }
+
+    /// Clear aspect ratio in place.
+    pub fn clear_aspect_ratio_mut(&mut self) {
+        self.layout.aspect_ratio = None;
     }
 }
 

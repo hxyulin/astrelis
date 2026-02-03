@@ -17,6 +17,8 @@
 
 - [Custom Widgets](./guides/ui/custom-widgets.md)
 - [Layout Deep Dive](./guides/ui/layout-deep-dive.md)
+- [Constraint System](./guides/ui/constraint-system.md)
+- [Docking System](./guides/ui/docking-system.md)
 - [Styling and Theming](./guides/ui/styling-and-theming.md)
 - [Event Handling](./guides/ui/event-handling.md)
 - [Performance Optimization](./guides/ui/performance-optimization.md)
@@ -26,9 +28,11 @@
 - [Render Passes](./guides/rendering/render-passes.md)
 - [Render Targets](./guides/rendering/render-targets.md)
 - [Custom Shaders](./guides/rendering/custom-shaders.md)
+- [Batched Rendering](./guides/rendering/batched-rendering.md)
 - [Materials and Textures](./guides/rendering/materials-and-textures.md)
 - [Compute Shaders](./guides/rendering/compute-shaders.md)
 - [GPU Instancing](./guides/rendering/gpu-instancing.md)
+- [GPU Profiling](./guides/rendering/gpu-profiling.md)
 
 # Asset System Guides
 

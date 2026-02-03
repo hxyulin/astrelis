@@ -35,7 +35,7 @@ impl Egui {
         let state = State::new(context.clone(), id, None, None);
 
         let renderer = egui_wgpu::Renderer::new(
-            &graphics_ctx.device,
+            graphics_ctx.device(),
             window.context().surface_config().format,
             egui_wgpu::RendererOptions {
                 msaa_samples: 1,
@@ -55,6 +55,7 @@ impl Egui {
 
     /// Begin UI frame and run the GUI closure.
     pub fn ui(&mut self, window: &RenderableWindow, gui: impl FnMut(&egui::Context)) {
+        profile_function!();
         let raw_input = self.state.take_input(window);
         self.full_output.replace(self.context.run(raw_input, gui));
     }
@@ -72,9 +73,9 @@ impl Egui {
             .handle_platform_output(window, full_output.platform_output);
 
         // Clone the Arc to avoid borrowing issues
-        let graphics_ctx = frame.context.clone();
-        let device = &graphics_ctx.device;
-        let queue = &graphics_ctx.queue;
+        let graphics_ctx = frame.graphics_context_arc().clone();
+        let device = graphics_ctx.device();
+        let queue = graphics_ctx.queue();
 
         let tris = self
             .context
@@ -126,6 +127,7 @@ impl Egui {
 
     /// Process events from the event batch.
     pub fn handle_events(&mut self, window: &RenderableWindow, events: &mut EventBatch) -> bool {
+        profile_function!();
         let mut any_consumed = false;
 
         events.dispatch(|event| {

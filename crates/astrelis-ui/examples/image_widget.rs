@@ -5,16 +5,13 @@
 
 use astrelis_core::logging;
 use astrelis_render::{
-    GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
-    wgpu,
+    GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
-use astrelis_ui::{
-    Color, FlexDirection, ImageFit, ImageTexture, ImageUV, UiSystem,
-};
+use astrelis_ui::{Color, FlexDirection, ImageFit, ImageTexture, ImageUV, UiSystem};
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    window::{WindowBackend, WindowDescriptor, Window, WinitPhysicalSize},
+    window::{Window, WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,7 +27,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut windows = HashMap::new();
 
         let scale = Window::platform_dpi() as f32;
@@ -49,7 +46,8 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = renderable_window.id();
         windows.insert(window_id, renderable_window);
@@ -89,21 +87,21 @@ fn create_checkerboard_texture(
 
             let idx = ((y * width + x) * 4) as usize;
             if is_white {
-                pixels[idx] = 240;     // R
+                pixels[idx] = 240; // R
                 pixels[idx + 1] = 240; // G
                 pixels[idx + 2] = 240; // B
                 pixels[idx + 3] = 255; // A
             } else {
-                pixels[idx] = 60;      // R
-                pixels[idx + 1] = 60;  // G
-                pixels[idx + 2] = 80;  // B
+                pixels[idx] = 60; // R
+                pixels[idx + 1] = 60; // G
+                pixels[idx + 2] = 80; // B
                 pixels[idx + 3] = 255; // A
             }
         }
     }
 
     // Create WGPU texture
-    let texture = context.device.create_texture(&wgpu::TextureDescriptor {
+    let texture = context.device().create_texture(&wgpu::TextureDescriptor {
         label: Some("Checkerboard Texture"),
         size: wgpu::Extent3d {
             width,
@@ -119,7 +117,7 @@ fn create_checkerboard_texture(
     });
 
     // Upload pixel data
-    context.queue.write_texture(
+    context.queue().write_texture(
         wgpu::TexelCopyTextureInfo {
             texture: &texture,
             mip_level: 0,
@@ -146,18 +144,21 @@ fn create_checkerboard_texture(
 }
 
 fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
+    let theme = ui.theme().clone();
+    let colors = &theme.colors;
+
     ui.build(|root| {
         root.container()
             .width(900.0)
             .height(700.0)
             .padding(20.0)
-            .background_color(Color::from_rgb_u8(30, 30, 40))
+            .background_color(colors.background)
             .flex_direction(FlexDirection::Column)
             .gap(20.0)
             .child(|ui| {
                 ui.text("Image Widget Examples")
                     .size(28.0)
-                    .color(Color::WHITE)
+                    .color(colors.text_primary)
                     .build()
             })
             .child(|ui| {
@@ -168,7 +169,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                         ui.container()
                             .width(200.0)
                             .height(200.0)
-                            .background_color(Color::from_rgb_u8(50, 50, 60))
+                            .background_color(colors.surface)
                             .border_radius(8.0)
                             .flex_direction(FlexDirection::Column)
                             .padding(10.0)
@@ -176,7 +177,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                             .child(|ui| {
                                 ui.text("ImageFit::Fill")
                                     .size(12.0)
-                                    .color(Color::from_rgb_u8(180, 180, 180))
+                                    .color(colors.text_secondary)
                                     .build()
                             })
                             .child(|ui| {
@@ -192,7 +193,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                         ui.container()
                             .width(200.0)
                             .height(200.0)
-                            .background_color(Color::from_rgb_u8(50, 50, 60))
+                            .background_color(colors.surface)
                             .border_radius(8.0)
                             .flex_direction(FlexDirection::Column)
                             .padding(10.0)
@@ -200,7 +201,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                             .child(|ui| {
                                 ui.text("ImageFit::Contain")
                                     .size(12.0)
-                                    .color(Color::from_rgb_u8(180, 180, 180))
+                                    .color(colors.text_secondary)
                                     .build()
                             })
                             .child(|ui| {
@@ -216,7 +217,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                         ui.container()
                             .width(200.0)
                             .height(200.0)
-                            .background_color(Color::from_rgb_u8(50, 50, 60))
+                            .background_color(colors.surface)
                             .border_radius(8.0)
                             .flex_direction(FlexDirection::Column)
                             .padding(10.0)
@@ -224,10 +225,11 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                             .child(|ui| {
                                 ui.text("With Red Tint")
                                     .size(12.0)
-                                    .color(Color::from_rgb_u8(180, 180, 180))
+                                    .color(colors.text_secondary)
                                     .build()
                             })
                             .child(|ui| {
+                                // KEEP: Image tint color is content-specific
                                 ui.image(texture.clone())
                                     .tint(Color::from_rgb_u8(255, 128, 128))
                                     .width(180.0)
@@ -240,7 +242,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                         ui.container()
                             .width(200.0)
                             .height(200.0)
-                            .background_color(Color::from_rgb_u8(50, 50, 60))
+                            .background_color(colors.surface)
                             .border_radius(8.0)
                             .flex_direction(FlexDirection::Column)
                             .padding(10.0)
@@ -248,10 +250,11 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                             .child(|ui| {
                                 ui.text("With Green Tint")
                                     .size(12.0)
-                                    .color(Color::from_rgb_u8(180, 180, 180))
+                                    .color(colors.text_secondary)
                                     .build()
                             })
                             .child(|ui| {
+                                // KEEP: Image tint color is content-specific
                                 ui.image(texture.clone())
                                     .tint(Color::from_rgb_u8(128, 255, 128))
                                     .width(180.0)
@@ -270,7 +273,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                         ui.container()
                             .width(200.0)
                             .height(200.0)
-                            .background_color(Color::from_rgb_u8(50, 50, 60))
+                            .background_color(colors.surface)
                             .border_radius(8.0)
                             .flex_direction(FlexDirection::Column)
                             .padding(10.0)
@@ -278,7 +281,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                             .child(|ui| {
                                 ui.text("UV: Top-Left Quarter")
                                     .size(12.0)
-                                    .color(Color::from_rgb_u8(180, 180, 180))
+                                    .color(colors.text_secondary)
                                     .build()
                             })
                             .child(|ui| {
@@ -294,7 +297,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                         ui.container()
                             .width(200.0)
                             .height(200.0)
-                            .background_color(Color::from_rgb_u8(50, 50, 60))
+                            .background_color(colors.surface)
                             .border_radius(8.0)
                             .flex_direction(FlexDirection::Column)
                             .padding(10.0)
@@ -302,7 +305,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                             .child(|ui| {
                                 ui.text("UV: Bottom-Right")
                                     .size(12.0)
-                                    .color(Color::from_rgb_u8(180, 180, 180))
+                                    .color(colors.text_secondary)
                                     .build()
                             })
                             .child(|ui| {
@@ -318,7 +321,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                         ui.container()
                             .width(200.0)
                             .height(200.0)
-                            .background_color(Color::from_rgb_u8(50, 50, 60))
+                            .background_color(colors.surface)
                             .border_radius(8.0)
                             .flex_direction(FlexDirection::Column)
                             .padding(10.0)
@@ -326,7 +329,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                             .child(|ui| {
                                 ui.text("Rounded Corners")
                                     .size(12.0)
-                                    .color(Color::from_rgb_u8(180, 180, 180))
+                                    .color(colors.text_secondary)
                                     .build()
                             })
                             .child(|ui| {
@@ -342,7 +345,7 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                         ui.container()
                             .width(200.0)
                             .height(200.0)
-                            .background_color(Color::from_rgb_u8(50, 50, 60))
+                            .background_color(colors.surface)
                             .border_radius(8.0)
                             .flex_direction(FlexDirection::Column)
                             .padding(10.0)
@@ -350,10 +353,11 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
                             .child(|ui| {
                                 ui.text("Rounded + Tint")
                                     .size(12.0)
-                                    .color(Color::from_rgb_u8(180, 180, 180))
+                                    .color(colors.text_secondary)
                                     .build()
                             })
                             .child(|ui| {
+                                // KEEP: Image tint color is content-specific
                                 ui.image(texture.clone())
                                     .border_radius(30.0)
                                     .tint(Color::from_rgb_u8(128, 200, 255))
@@ -368,13 +372,13 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
             .child(|ui| {
                 ui.text("The Image widget supports textures, UV coordinates (for sprite sheets),")
                     .size(14.0)
-                    .color(Color::from_rgb_u8(180, 180, 180))
+                    .color(colors.text_secondary)
                     .build()
             })
             .child(|ui| {
                 ui.text("tint colors (multiplied with texture), and rounded corners via SDF.")
                     .size(14.0)
-                    .color(Color::from_rgb_u8(180, 180, 180))
+                    .color(colors.text_secondary)
                     .build()
             })
             .build();
@@ -382,7 +386,11 @@ fn build_image_demo(ui: &mut UiSystem, texture: ImageTexture) {
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::FrameTime) {
+    fn update(
+        &mut self,
+        _ctx: &mut astrelis_winit::app::AppCtx,
+        _time: &astrelis_winit::FrameTime,
+    ) {
         // No updates needed for this static demo
     }
 
@@ -407,16 +415,13 @@ impl astrelis_winit::app::App for App {
             }
         });
 
+        let bg = self.ui.theme().colors.background;
         let mut frame = window.begin_drawing();
 
         // Render UI with automatic scoping (no manual {} block needed)
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::rgb(0.1, 0.1, 0.15),
-            |pass| {
-                self.ui.render(pass.descriptor());
-            },
-        );
+        frame.clear_and_render(RenderTarget::Surface, bg, |pass| {
+            self.ui.render(pass.wgpu_pass());
+        });
 
         frame.finish();
     }

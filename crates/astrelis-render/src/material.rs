@@ -22,6 +22,8 @@
 //! material.bind(&mut pass);
 //! ```
 
+use astrelis_core::profiling::profile_function;
+
 use crate::{Color, GraphicsContext};
 use ahash::HashMap;
 use glam::{Mat4, Vec2, Vec3, Vec4};
@@ -188,8 +190,9 @@ impl Material {
         label: Option<&str>,
         context: Arc<GraphicsContext>,
     ) -> Self {
+        profile_function!();
         let shader = context
-            .device
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label,
                 source: wgpu::ShaderSource::Wgsl(source.into()),
@@ -236,6 +239,7 @@ impl Material {
 
     /// Update GPU resources if dirty.
     fn update_resources(&mut self) {
+        profile_function!();
         if !self.dirty {
             return;
         }
@@ -245,7 +249,7 @@ impl Material {
         for param in self.parameters.values() {
             uniform_size += param.size();
             // Add padding for alignment
-            if uniform_size % 16 != 0 {
+            if !uniform_size.is_multiple_of(16) {
                 uniform_size += 16 - (uniform_size % 16);
             }
         }
@@ -257,7 +261,7 @@ impl Material {
                 uniform_data.extend_from_slice(&param.as_bytes());
                 // Add padding for alignment
                 let current_size = uniform_data.len() as u64;
-                if current_size % 16 != 0 {
+                if !current_size.is_multiple_of(16) {
                     let padding = 16 - (current_size % 16);
                     uniform_data.extend(vec![0u8; padding as usize]);
                 }
@@ -265,19 +269,19 @@ impl Material {
 
             if let Some(buffer) = &self.uniform_buffer {
                 // Update existing buffer
-                self.context.queue.write_buffer(buffer, 0, &uniform_data);
+                self.context.queue().write_buffer(buffer, 0, &uniform_data);
             } else {
                 // Create new buffer
                 let buffer = self
                     .context
-                    .device
+                    .device()
                     .create_buffer(&wgpu::BufferDescriptor {
                         label: Some("Material Uniform Buffer"),
                         size: uniform_size,
                         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                         mapped_at_creation: false,
                     });
-                self.context.queue.write_buffer(&buffer, 0, &uniform_data);
+                self.context.queue().write_buffer(&buffer, 0, &uniform_data);
                 self.uniform_buffer = Some(buffer);
             }
         }
@@ -365,7 +369,7 @@ impl Material {
         // Create bind group layout
         let layout = self
             .context
-            .device
+            .device()
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some("Material Bind Group Layout"),
                 entries: &layout_entries,
@@ -374,7 +378,7 @@ impl Material {
         // Create bind group
         let bind_group = self
             .context
-            .device
+            .device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Material Bind Group"),
                 layout: &layout,
@@ -394,6 +398,7 @@ impl Material {
     /// * `pass` - The render pass to bind to
     /// * `bind_group_index` - The bind group index (default is usually 0)
     pub fn bind<'a>(&'a mut self, pass: &mut wgpu::RenderPass<'a>, bind_group_index: u32) {
+        profile_function!();
         self.update_resources();
 
         if let Some(ref bind_group) = self.bind_group {
@@ -445,7 +450,7 @@ impl MaterialBuilder {
     pub fn shader_source(mut self, source: &str, label: Option<&str>) -> Self {
         let shader = self
             .context
-            .device
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label,
                 source: wgpu::ShaderSource::Wgsl(source.into()),

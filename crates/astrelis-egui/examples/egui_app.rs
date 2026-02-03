@@ -1,3 +1,30 @@
+//! egui Integration Example - Immediate Mode UI with Astrelis
+//!
+//! Demonstrates the egui integration for building immediate-mode UIs:
+//! - Counter with increment/decrement buttons
+//! - Sliders for value input
+//! - Text input fields
+//! - Checkboxes and windows
+//! - Collapsing headers and layouts
+//! - Rich text formatting
+//!
+//! ## Features Showcased
+//! - egui rendering integration with Astrelis
+//! - Event handling (mouse, keyboard)
+//! - Window management
+//! - Various egui widgets
+//!
+//! ## Usage
+//! ```bash
+//! cargo run -p astrelis-egui --example egui_app
+//! ```
+//!
+//! ## Controls
+//! - Click buttons to interact with UI
+//! - Type in text fields
+//! - Toggle checkboxes
+//! - Drag sliders
+
 use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_egui::{Color32, Egui, RichText, Slider};
@@ -27,7 +54,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {

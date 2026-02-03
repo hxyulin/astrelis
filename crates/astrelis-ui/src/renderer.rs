@@ -1,13 +1,18 @@
 //! UI renderer for drawing widgets with WGPU.
 
 use crate::clip::{ClipRect, should_clip};
+#[cfg(feature = "docking")]
+use crate::widgets::docking::plugin::CrossContainerPreview;
+#[cfg(feature = "docking")]
+use crate::widgets::docking::{DEFAULT_TAB_PADDING, DockAnimationState};
 use crate::draw_list::{DrawCommand, DrawList};
-use crate::glyph_atlas::glyphs_to_instances;
+use crate::glyph_atlas::glyphs_to_instances_into;
 use crate::gpu_types::{ImageInstance, QuadInstance, QuadVertex, TextInstance};
 use crate::instance_buffer::InstanceBuffer;
-use crate::style::Overflow;
+use crate::plugin::registry::{TraversalBehavior, WidgetTypeRegistry, WidgetRenderContext};
+use crate::theme::ColorPalette;
 use crate::tree::{NodeId, UiTree};
-use crate::widgets::{Button, Container, Image, ImageTexture, Text};
+use crate::widgets::{Button, ImageTexture, Text};
 use astrelis_core::alloc::HashMap;
 use astrelis_core::math::Vec2;
 use astrelis_core::profiling::{profile_function, profile_scope};
@@ -81,7 +86,7 @@ pub struct UiRenderer {
     projection_buffer: wgpu::Buffer,
     text_atlas_bind_group: wgpu::BindGroup,
     text_projection_bind_group: wgpu::BindGroup,
-    
+
     /// Bind group layout for image textures (reused for each texture)
     image_texture_bind_group_layout: wgpu::BindGroupLayout,
     /// Sampler cache for different sampling modes
@@ -101,6 +106,19 @@ pub struct UiRenderer {
     /// Whether any non-infinite clip rects exist (enables scissor rendering)
     has_clipping: bool,
     scale_factor: f64,
+
+    // Persistent allocations for encode_instances() - reused each frame
+    /// Reusable quad instance buffer
+    frame_quad_instances: Vec<QuadInstance>,
+    /// Reusable text instance buffer
+    frame_text_instances: Vec<TextInstance>,
+    /// Reusable image instance buffer
+    frame_image_instances: Vec<ImageInstance>,
+    /// Reusable image groups map
+    frame_image_groups: HashMap<ImageBindGroupKey, (ImageTexture, Vec<ImageInstance>)>,
+
+    /// Current theme colors for resolving widget defaults
+    theme_colors: ColorPalette,
 }
 
 impl UiRenderer {
@@ -115,7 +133,7 @@ impl UiRenderer {
         // 1. Create unit quad VBO for instanced rendering
         let unit_quad_vertices = QuadVertex::unit_quad();
         let unit_quad_vbo = context
-            .device
+            .device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Unit Quad VBO"),
                 contents: bytemuck::cast_slice(&unit_quad_vertices),
@@ -137,7 +155,7 @@ impl UiRenderer {
         );
 
         // 3. Create projection uniform buffer
-        let projection_buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
+        let projection_buffer = context.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Projection Uniform"),
             size: 64, // mat4x4<f32>
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -411,9 +429,9 @@ impl UiRenderer {
         // 7. Initialize retained components
         let text_pipeline = TextPipeline::new();
         let draw_list = DrawList::new();
-        let quad_instances = InstanceBuffer::new(&context.device, Some("Quad Instances"), 1024);
-        let text_instances = InstanceBuffer::new(&context.device, Some("Text Instances"), 4096);
-        let image_instances = InstanceBuffer::new(&context.device, Some("Image Instances"), 256);
+        let quad_instances = InstanceBuffer::new(context.device(), Some("Quad Instances"), 1024);
+        let text_instances = InstanceBuffer::new(context.device(), Some("Text Instances"), 4096);
+        let image_instances = InstanceBuffer::new(context.device(), Some("Image Instances"), 256);
 
         Self {
             renderer,
@@ -439,7 +457,18 @@ impl UiRenderer {
             clip_batches: Vec::new(),
             has_clipping: false,
             scale_factor: 1.0,
+            // Pre-allocate persistent frame buffers
+            frame_quad_instances: Vec::with_capacity(1024),
+            frame_text_instances: Vec::with_capacity(4096),
+            frame_image_instances: Vec::with_capacity(256),
+            frame_image_groups: HashMap::new(),
+            theme_colors: ColorPalette::dark(),
         }
+    }
+
+    /// Update the theme colors used for resolving widget defaults.
+    pub fn set_theme_colors(&mut self, colors: ColorPalette) {
+        self.theme_colors = colors;
     }
 
     pub fn set_viewport(&mut self, viewport: Viewport) {
@@ -458,23 +487,79 @@ impl UiRenderer {
         &self.font_renderer
     }
 
+    /// Clear the draw list.
+    ///
+    /// This should be called when the UI tree is rebuilt to ensure
+    /// stale draw commands are removed.
+    pub fn clear_draw_list(&mut self) {
+        self.draw_list.clear();
+    }
+
+    /// Remove draw commands for nodes that have been removed from the tree.
+    ///
+    /// Called with the list of removed node IDs so the renderer stops
+    /// drawing stale content (ghost tabs, collapsed containers, etc.).
+    pub fn remove_stale_nodes(&mut self, removed_nodes: &[NodeId]) {
+        for &node_id in removed_nodes {
+            self.draw_list.remove_node(node_id);
+        }
+    }
+
     /// Update retained rendering state from the UI tree.
     ///
     /// This processes text shaping, updates the draw list from dirty nodes,
     /// encodes instances, and uploads to GPU buffers.
-    pub fn update(&mut self, tree: &UiTree) {
+    pub fn update(&mut self, tree: &UiTree, widget_registry: &WidgetTypeRegistry) {
         profile_function!();
 
         // 1. Process text shaping
         self.process_text_shaping();
 
         // 2. Update DrawList from dirty nodes
-        self.update_draw_list(tree);
+        self.update_draw_list(tree, widget_registry);
 
-        // 3. Encode to instances
+        // 3. Update cross-container drop preview overlay (docking only)
+        #[cfg(feature = "docking")]
+        self.update_preview_overlay(None);
+
+        // 4. Encode to instances
         self.encode_instances();
 
-        // 4. Upload to GPU
+        // 5. Upload to GPU
+        self.upload_instances();
+    }
+
+    /// Update retained rendering state with optional cross-container preview and animations.
+    ///
+    /// When a tab is being dragged over another container, the preview shows
+    /// a semi-transparent overlay indicating where the tab will be dropped.
+    /// Ghost overlays from the animation state follow the cursor during drag.
+    #[cfg(feature = "docking")]
+    pub fn update_with_preview(
+        &mut self,
+        tree: &UiTree,
+        preview: Option<&CrossContainerPreview>,
+        animations: Option<&DockAnimationState>,
+        widget_registry: &WidgetTypeRegistry,
+    ) {
+        profile_function!();
+
+        // 1. Process text shaping
+        self.process_text_shaping();
+
+        // 2. Update DrawList from dirty nodes
+        self.update_draw_list(tree, widget_registry);
+
+        // 3. Update cross-container drop preview overlay
+        self.update_preview_overlay(preview);
+
+        // 3b. Update ghost overlays from animation state
+        self.update_ghost_overlays(animations);
+
+        // 4. Encode to instances
+        self.encode_instances();
+
+        // 5. Upload to GPU
         self.upload_instances();
     }
 
@@ -485,71 +570,123 @@ impl UiRenderer {
 
         let shape_fn = |text: &str, font_size: f32, wrap_width: Option<f32>| {
             let mut font_sys = font_system.write().unwrap();
-            astrelis_text::shape_text(&mut font_sys, text, font_size, wrap_width, self.scale_factor as f32)
+            astrelis_text::shape_text(
+                &mut font_sys,
+                text,
+                font_size,
+                wrap_width,
+                self.scale_factor as f32,
+            )
         };
 
         self.text_pipeline.process_pending(shape_fn);
     }
 
     /// Update draw list from dirty nodes in the tree.
-    fn update_draw_list(&mut self, tree: &UiTree) {
+    ///
+    /// Two paths:
+    /// 1. Full rebuild: When draw list is empty, rebuild all nodes from tree root
+    /// 2. Incremental update: When draw list has content, only update dirty nodes
+    fn update_draw_list(&mut self, tree: &UiTree, widget_registry: &WidgetTypeRegistry) {
         profile_function!();
 
-        // Collect dirty nodes (nodes with non-empty dirty flags)
-        let mut dirty_nodes = Vec::new();
-        if let Some(root) = tree.root() {
-            profile_scope!("collect_dirty_nodes");
-            self.collect_dirty_nodes_recursive(tree, root, &mut dirty_nodes);
-        }
-
-        // If no dirty nodes but draw list is empty, this is initial render
-        // Build everything
-        if dirty_nodes.is_empty() {
-            if self.draw_list.is_empty() {
-                profile_scope!("initial_render_build");
-                // Initial render - request shaping for all text first
-                if let Some(root) = tree.root() {
-                    self.request_text_shaping_recursive(tree, root);
-                }
-
-                // Process all pending text shaping
-                self.process_text_shaping();
-
-                // Now build all nodes with shaped text available
-                if let Some(root) = tree.root() {
-                    self.build_all_nodes_recursive(tree, root);
-                }
-            }
-            // Otherwise nothing to update
-        } else {
-            profile_scope!("update_dirty_nodes");
-
-            // For dirty nodes: request shaping first
-            for &node_id in &dirty_nodes {
-                self.request_text_for_node(tree, node_id);
+        // If draw list is empty, do a full rebuild from tree root
+        // This handles both initial render AND full rebuilds (after ui.build())
+        if self.draw_list.is_empty() {
+            profile_scope!("full_rebuild");
+            // Request shaping for all text first
+            if let Some(root) = tree.root() {
+                self.request_text_shaping_recursive(tree, root, widget_registry);
             }
 
-            // Process pending shaping
+            // Process all pending text shaping
             self.process_text_shaping();
 
-            // Now rebuild with shaped text available (using proper inherited clips)
-            for &node_id in &dirty_nodes {
-                let clip = self.compute_inherited_clip(tree, node_id);
-                self.update_single_node_with_clip(tree, node_id, clip);
+            // Build all nodes with shaped text available
+            if let Some(root) = tree.root() {
+                self.build_all_nodes_recursive(tree, root, widget_registry);
             }
+
+            self.draw_list.sort_if_needed();
+            return;
+        }
+
+        // Incremental update path - only process dirty nodes
+        let dirty_roots = tree.dirty_roots();
+        let has_dirty = !dirty_roots.is_empty() || !tree.dirty_nodes().is_empty();
+
+        if !has_dirty {
+            // Nothing to update
+            self.draw_list.sort_if_needed();
+            return;
+        }
+
+        profile_scope!("update_dirty_nodes");
+
+        // Use dirty_roots if available, otherwise fall back to root
+        let roots_to_process: Vec<NodeId> = if dirty_roots.is_empty() {
+            tree.root().into_iter().collect()
+        } else {
+            dirty_roots.iter().copied().collect()
+        };
+
+        // Collect dirty nodes starting from dirty roots only (skip clean subtrees)
+        let mut dirty_nodes_with_clips: Vec<(NodeId, ClipRect)> = Vec::new();
+
+        for &root_id in &roots_to_process {
+            // Compute inherited clip once per dirty root
+            let root_clip = self.compute_inherited_clip(tree, root_id, widget_registry);
+
+            // Collect dirty nodes from this subtree with their inherited clips
+            self.collect_dirty_nodes_with_clips(
+                tree,
+                root_id,
+                root_clip,
+                &mut dirty_nodes_with_clips,
+                widget_registry,
+            );
+        }
+
+        // Request text shaping for all dirty nodes
+        for &(node_id, _) in &dirty_nodes_with_clips {
+            self.request_text_for_node(tree, node_id);
+        }
+
+        // Process pending shaping
+        self.process_text_shaping();
+
+        // Rebuild dirty nodes with pre-computed clips
+        for (node_id, clip) in dirty_nodes_with_clips {
+            self.update_single_node_with_clip(tree, node_id, clip, widget_registry);
         }
 
         self.draw_list.sort_if_needed();
     }
 
     /// Request text shaping for all nodes recursively (first pass).
-    fn request_text_shaping_recursive(&mut self, tree: &UiTree, node_id: NodeId) {
+    fn request_text_shaping_recursive(&mut self, tree: &UiTree, node_id: NodeId, widget_registry: &WidgetTypeRegistry) {
         self.request_text_for_node(tree, node_id);
 
-        // Recurse to children
+        // Recurse to children using registry traversal behavior
         if let Some(widget) = tree.get_widget(node_id) {
-            for &child_id in widget.children() {
-                self.request_text_shaping_recursive(tree, child_id);
+            let traversal = widget_registry
+                .get(widget.as_any().type_id())
+                .and_then(|desc| desc.traversal)
+                .map(|f| f(widget.as_any()))
+                .unwrap_or(TraversalBehavior::Normal);
+
+            match traversal {
+                TraversalBehavior::Normal => {
+                    for &child_id in widget.children() {
+                        self.request_text_shaping_recursive(tree, child_id, widget_registry);
+                    }
+                }
+                TraversalBehavior::OnlyChild(index) => {
+                    if let Some(&child_id) = widget.children().get(index) {
+                        self.request_text_shaping_recursive(tree, child_id, widget_registry);
+                    }
+                }
+                TraversalBehavior::Skip => {}
             }
         }
     }
@@ -565,26 +702,18 @@ impl UiRenderer {
         // Request shaping for text widgets
         if let Some(text) = widget.as_any().downcast_ref::<Text>() {
             let font_id = text.font_id;
-            self.text_pipeline.request_shape(
-                text.content.clone(),
-                font_id,
-                text.font_size,
-                None,
-            );
+            self.text_pipeline
+                .request_shape(text.content.clone(), font_id, text.font_size, None);
         } else if let Some(button) = widget.as_any().downcast_ref::<Button>() {
             let font_id = button.font_id;
-            self.text_pipeline.request_shape(
-                button.label.clone(),
-                font_id,
-                button.font_size,
-                None,
-            );
+            self.text_pipeline
+                .request_shape(button.label.clone(), font_id, button.font_size, None);
         }
     }
 
     /// Build all nodes recursively (for initial render).
-    fn build_all_nodes_recursive(&mut self, tree: &UiTree, node_id: NodeId) {
-        self.build_all_nodes_recursive_with_clip(tree, node_id, ClipRect::infinite());
+    fn build_all_nodes_recursive(&mut self, tree: &UiTree, node_id: NodeId, widget_registry: &WidgetTypeRegistry) {
+        self.build_all_nodes_recursive_with_clip(tree, node_id, ClipRect::infinite(), widget_registry);
     }
 
     /// Build all nodes recursively with inherited clip rect.
@@ -593,17 +722,41 @@ impl UiRenderer {
         tree: &UiTree,
         node_id: NodeId,
         inherited_clip: ClipRect,
+        widget_registry: &WidgetTypeRegistry,
     ) {
         // Compute this node's clip rect (may modify inherited_clip for children)
-        let (node_clip, child_clip) = self.compute_node_clip(tree, node_id, inherited_clip);
+        let (node_clip, child_clip) = self.compute_node_clip(tree, node_id, inherited_clip, widget_registry);
 
         // Build this node with its clip rect
-        self.update_single_node_with_clip(tree, node_id, node_clip);
+        self.update_single_node_with_clip(tree, node_id, node_clip, widget_registry);
 
-        // Recurse to children with potentially modified clip
+        // Recurse to children using registry traversal behavior
         if let Some(widget) = tree.get_widget(node_id) {
-            for &child_id in widget.children() {
-                self.build_all_nodes_recursive_with_clip(tree, child_id, child_clip);
+            let traversal = widget_registry
+                .get(widget.as_any().type_id())
+                .and_then(|desc| desc.traversal)
+                .map(|f| f(widget.as_any()))
+                .unwrap_or(TraversalBehavior::Normal);
+
+            match traversal {
+                TraversalBehavior::Normal => {
+                    for &child_id in widget.children() {
+                        self.build_all_nodes_recursive_with_clip(tree, child_id, child_clip, widget_registry);
+                    }
+                }
+                TraversalBehavior::OnlyChild(index) => {
+                    // Clear draw commands for inactive children
+                    for (i, &child_id) in widget.children().iter().enumerate() {
+                        if i != index {
+                            self.clear_node_recursive(tree, child_id);
+                        }
+                    }
+                    // Only recurse into the active child
+                    if let Some(&child_id) = widget.children().get(index) {
+                        self.build_all_nodes_recursive_with_clip(tree, child_id, child_clip, widget_registry);
+                    }
+                }
+                TraversalBehavior::Skip => {}
             }
         }
     }
@@ -616,6 +769,7 @@ impl UiRenderer {
         tree: &UiTree,
         node_id: NodeId,
         inherited_clip: ClipRect,
+        widget_registry: &WidgetTypeRegistry,
     ) -> (ClipRect, ClipRect) {
         let Some(widget) = tree.get_widget(node_id) else {
             return (inherited_clip, inherited_clip);
@@ -625,11 +779,18 @@ impl UiRenderer {
             return (inherited_clip, inherited_clip);
         };
 
-        // Check if this node has overflow clipping
-        let (overflow_x, overflow_y) = if let Some(container) = widget.as_any().downcast_ref::<Container>() {
-            (container.style.overflow_x, container.style.overflow_y)
+        // Check if this node has overflow clipping via registry dispatch
+        let type_id = widget.as_any().type_id();
+        let (overflow_x, overflow_y) = if let Some(desc) = widget_registry.get(type_id) {
+            if let Some(overflow_fn) = desc.overflow {
+                let o = overflow_fn(widget.as_any());
+                (o.overflow_x, o.overflow_y)
+            } else {
+                // Default: check style directly for containers, visible for others
+                (widget.style().overflow_x, widget.style().overflow_y)
+            }
         } else {
-            (Overflow::Visible, Overflow::Visible)
+            (widget.style().overflow_x, widget.style().overflow_y)
         };
 
         // If this node clips its children, compute the new clip rect
@@ -643,6 +804,16 @@ impl UiRenderer {
                 if let Some(parent_layout) = tree.get_layout(parent_id) {
                     abs_x += parent_layout.x;
                     abs_y += parent_layout.y;
+                }
+                // Subtract scroll offset if parent has a scroll_offset handler
+                if let Some(parent_widget) = tree.get_widget(parent_id) {
+                    let parent_type_id = parent_widget.as_any().type_id();
+                    if let Some(desc) = widget_registry.get(parent_type_id)
+                        && let Some(scroll_offset_fn) = desc.scroll_offset {
+                            let offset = scroll_offset_fn(parent_widget.as_any());
+                            abs_x -= offset.x;
+                            abs_y -= offset.y;
+                        }
                 }
                 current_parent = tree.get_node(parent_id).and_then(|n| n.parent);
             }
@@ -665,7 +836,7 @@ impl UiRenderer {
     ///
     /// This is used by the dirty update path to determine the correct clip rect
     /// for a node without rebuilding the entire tree.
-    fn compute_inherited_clip(&self, tree: &UiTree, node_id: NodeId) -> ClipRect {
+    fn compute_inherited_clip(&self, tree: &UiTree, node_id: NodeId, widget_registry: &WidgetTypeRegistry) -> ClipRect {
         let mut clip = ClipRect::infinite();
 
         // Walk up the tree collecting ancestors
@@ -679,30 +850,59 @@ impl UiRenderer {
 
         // Process from root down to build proper nested clips
         for &ancestor_id in ancestors.iter().rev() {
-            let (_, child_clip) = self.compute_node_clip(tree, ancestor_id, clip);
+            let (_, child_clip) = self.compute_node_clip(tree, ancestor_id, clip, widget_registry);
             clip = child_clip;
         }
 
         clip
     }
 
-    /// Recursively collect dirty nodes from the tree.
-    fn collect_dirty_nodes_recursive(
+    /// Collect dirty nodes from a subtree with pre-computed inherited clips.
+    ///
+    /// This optimized version:
+    /// - Starts from a dirty root instead of tree root
+    /// - Computes child clips incrementally as it traverses down
+    /// - Avoids redundant walks up the tree for each dirty node
+    fn collect_dirty_nodes_with_clips(
         &self,
         tree: &UiTree,
         node_id: NodeId,
-        dirty_nodes: &mut Vec<NodeId>,
+        inherited_clip: ClipRect,
+        dirty_nodes: &mut Vec<(NodeId, ClipRect)>,
+        widget_registry: &WidgetTypeRegistry,
     ) {
-        if let Some(node) = tree.get_node(node_id) {
-            if !node.dirty_flags.is_empty() {
-                dirty_nodes.push(node_id);
-            }
+        let Some(_node) = tree.get_node(node_id) else {
+            return;
+        };
 
-            // Recurse to children
-            if let Some(widget) = tree.get_widget(node_id) {
-                for &child_id in widget.children() {
-                    self.collect_dirty_nodes_recursive(tree, child_id, dirty_nodes);
+        // Collect ALL nodes in dirty subtrees, not just dirty ones.
+        // When a subtree root is dirty, all descendants need draw command updates
+        // because their absolute positions depend on ancestor layouts.
+        dirty_nodes.push((node_id, inherited_clip));
+
+        // Compute clip for children (this node may affect child clips)
+        let (_, child_clip) = self.compute_node_clip(tree, node_id, inherited_clip, widget_registry);
+
+        // Recurse to children using registry traversal behavior
+        if let Some(widget) = tree.get_widget(node_id) {
+            let traversal = widget_registry
+                .get(widget.as_any().type_id())
+                .and_then(|desc| desc.traversal)
+                .map(|f| f(widget.as_any()))
+                .unwrap_or(TraversalBehavior::Normal);
+
+            match traversal {
+                TraversalBehavior::Normal => {
+                    for &child_id in widget.children() {
+                        self.collect_dirty_nodes_with_clips(tree, child_id, child_clip, dirty_nodes, widget_registry);
+                    }
                 }
+                TraversalBehavior::OnlyChild(index) => {
+                    if let Some(&child_id) = widget.children().get(index) {
+                        self.collect_dirty_nodes_with_clips(tree, child_id, child_clip, dirty_nodes, widget_registry);
+                    }
+                }
+                TraversalBehavior::Skip => {}
             }
         }
     }
@@ -713,6 +913,7 @@ impl UiRenderer {
         tree: &UiTree,
         node_id: NodeId,
         clip_rect: ClipRect,
+        widget_registry: &WidgetTypeRegistry,
     ) {
         profile_function!();
 
@@ -733,190 +934,300 @@ impl UiRenderer {
                 abs_offset.x += parent_layout.x;
                 abs_offset.y += parent_layout.y;
             }
+            // Subtract scroll offset if parent has a scroll_offset handler
+            if let Some(parent_widget) = tree.get_widget(parent_id) {
+                let parent_type_id = parent_widget.as_any().type_id();
+                if let Some(desc) = widget_registry.get(parent_type_id)
+                    && let Some(scroll_offset_fn) = desc.scroll_offset {
+                        abs_offset -= scroll_offset_fn(parent_widget.as_any());
+                    }
+            }
             current_parent = tree.get_node(parent_id).and_then(|n| n.parent);
         }
 
         let abs_x = abs_offset.x;
         let abs_y = abs_offset.y;
 
-        // Generate commands based on widget type
+        // Generate commands via registry-based dispatch
         let mut commands = Vec::new();
 
-        if let Some(container) = widget.as_any().downcast_ref::<Container>() {
-            // Background quad
-            if let Some(bg_color) = container.style.background_color {
-                commands.push(DrawCommand::Quad(
-                    crate::draw_list::QuadCommand::rounded(
-                        Vec2::new(abs_x, abs_y),
-                        Vec2::new(layout.width, layout.height),
-                        bg_color,
-                        container.style.border_radius,
-                        0,
-                    )
-                    .with_clip(clip_rect),
-                ));
-            }
-
-            // Border quad
-            if container.style.border_width > 0.0
-                && let Some(border_color) = container.style.border_color
-            {
-                commands.push(DrawCommand::Quad(
-                    crate::draw_list::QuadCommand::bordered(
-                        Vec2::new(abs_x, abs_y),
-                        Vec2::new(layout.width, layout.height),
-                        border_color,
-                        container.style.border_width,
-                        container.style.border_radius,
-                        0,
-                    )
-                    .with_clip(clip_rect),
-                ));
-            }
-        } else if let Some(text) = widget.as_any().downcast_ref::<Text>() {
-            // Request text shaping using widget's font_id
-            let font_id = text.font_id;
-            let request_id = self.text_pipeline.request_shape(
-                text.content.clone(),
-                font_id,
-                text.font_size,
-                None,
-            );
-
-            // If shaping is complete, add text command
-            if let Some(shaped) = self.text_pipeline.get_completed(request_id) {
-                // Apply vertical alignment
-                use astrelis_text::VerticalAlign;
-                let text_height = shaped.bounds().1;
-                let text_y = match text.vertical_align {
-                    VerticalAlign::Top => abs_y,
-                    VerticalAlign::Center => abs_y + (layout.height - text_height) * 0.5,
-                    VerticalAlign::Bottom => abs_y + (layout.height - text_height),
-                };
-
-                commands.push(DrawCommand::Text(
-                    crate::draw_list::TextCommand::new(
-                        Vec2::new(abs_x, text_y),
-                        shaped,
-                        text.color,
-                        0,
-                    )
-                    .with_clip(clip_rect),
-                ));
-            }
-        } else if let Some(button) = widget.as_any().downcast_ref::<Button>() {
-            // Use current background color based on state
-            let bg_color = button.current_bg_color();
-
-            // Background
-            commands.push(DrawCommand::Quad(
-                crate::draw_list::QuadCommand::rounded(
-                    Vec2::new(abs_x, abs_y),
-                    Vec2::new(layout.width, layout.height),
-                    bg_color,
-                    4.0,
-                    0,
-                )
-                .with_clip(clip_rect),
-            ));
-
-            // Text label using widget's font_id
-            let font_id = button.font_id;
-            let request_id = self.text_pipeline.request_shape(
-                button.label.clone(),
-                font_id,
-                button.font_size,
-                None,
-            );
-
-            if let Some(shaped) = self.text_pipeline.get_completed(request_id) {
-                let text_x = abs_x + (layout.width - shaped.bounds().0) * 0.5;
-
-                // Visual centering: For text like "+", "-", "Reset" without descenders,
-                // we want the visual center (roughly cap height) at the container center.
-                // baseline_offset is the Y position of the baseline from the text top.
-                // To center visually: place the text so the baseline is slightly below center.
-                let text_height = shaped.bounds().1;
-
-                // Simple centering: center the text box, then offset slightly down
-                // to account for visual weight being above center
-                let text_y = abs_y + (layout.height - text_height) * 0.5;
-
-                commands.push(DrawCommand::Text(
-                    crate::draw_list::TextCommand::new(
-                        Vec2::new(text_x, text_y),
-                        shaped,
-                        Color::WHITE,
-                        1,
-                    )
-                    .with_clip(clip_rect),
-                ));
-            }
-        } else if let Some(image) = widget.as_any().downcast_ref::<Image>() {
-            // Image widget - render textured quad
-            if let Some(texture) = &image.texture {
-                commands.push(DrawCommand::Image(
-                    crate::draw_list::ImageCommand::new(
-                        Vec2::new(abs_x, abs_y),
-                        Vec2::new(layout.width, layout.height),
-                        texture.clone(),
-                        image.uv,
-                        image.tint,
-                        image.border_radius,
-                        image.sampling,
-                        0,
-                    )
-                    .with_clip(clip_rect),
-                ));
-            }
+        {
+            let type_id = widget.as_any().type_id();
+            if let Some(descriptor) = widget_registry.get(type_id)
+                && let Some(render_fn) = descriptor.render {
+                    let mut render_ctx = WidgetRenderContext {
+                        abs_position: Vec2::new(abs_x, abs_y),
+                        layout_size: Vec2::new(layout.width, layout.height),
+                        clip_rect,
+                        theme_colors: &self.theme_colors,
+                        text_pipeline: &mut self.text_pipeline,
+                    };
+                    commands = render_fn(widget.as_any(), &mut render_ctx);
+                }
         }
 
         // Update commands for this node in the draw list
         self.draw_list.update_node(node_id, commands);
     }
 
-    /// Encode draw list commands into GPU instance buffers.
-    fn encode_instances(&mut self) {
-        profile_function!();
+    /// Sentinel node ID for the cross-container drop preview overlay.
+    /// Uses a high ID unlikely to conflict with real tree nodes.
+    #[cfg(feature = "docking")]
+    const PREVIEW_OVERLAY_NODE: NodeId = NodeId(usize::MAX - 1);
 
-        // First pass: check if any clipping is needed and collect unique clip rects
-        self.has_clipping = false;
-        let mut clip_rect_set: Vec<ClipRect> = Vec::new();
+    /// Sentinel node ID for the ghost tab overlay (single tab drag).
+    #[cfg(feature = "docking")]
+    const GHOST_TAB_OVERLAY_NODE: NodeId = NodeId(usize::MAX - 2);
 
-        for cmd in self.draw_list.commands() {
-            let clip = cmd.clip_rect();
-            if !clip.is_infinite() {
-                self.has_clipping = true;
-                // Add to set if not already present
-                if !clip_rect_set.iter().any(|c| c == clip) {
-                    clip_rect_set.push(*clip);
+    /// Sentinel node ID for the ghost group overlay (tab group drag).
+    #[cfg(feature = "docking")]
+    const GHOST_GROUP_OVERLAY_NODE: NodeId = NodeId(usize::MAX - 3);
+
+    /// Update the cross-container drop preview overlay.
+    ///
+    /// Renders a semi-transparent rectangle showing where a tab will be dropped
+    /// when dragging between different DockTabs containers.
+    #[cfg(feature = "docking")]
+    fn update_preview_overlay(&mut self, preview: Option<&CrossContainerPreview>) {
+        match preview {
+            Some(preview) => {
+                let bounds = preview.preview_bounds;
+                let fill_color = Color::from_rgba_u8(100, 150, 255, 60);
+                let border_color = Color::from_rgba_u8(100, 150, 255, 180);
+
+                let commands = vec![
+                    // Semi-transparent fill
+                    DrawCommand::Quad(
+                        crate::draw_list::QuadCommand::rounded(
+                            Vec2::new(bounds.x, bounds.y),
+                            Vec2::new(bounds.width, bounds.height),
+                            fill_color,
+                            4.0,
+                            10, // High Z to render on top of everything
+                        )
+                        .with_clip(ClipRect::infinite()),
+                    ),
+                    // Border outline
+                    DrawCommand::Quad(
+                        crate::draw_list::QuadCommand::bordered(
+                            Vec2::new(bounds.x, bounds.y),
+                            Vec2::new(bounds.width, bounds.height),
+                            border_color,
+                            2.0,
+                            4.0,
+                            11, // Even higher Z for border
+                        )
+                        .with_clip(ClipRect::infinite()),
+                    ),
+                ];
+
+                self.draw_list
+                    .update_node(Self::PREVIEW_OVERLAY_NODE, commands);
+            }
+            None => {
+                // Remove preview if not active
+                self.draw_list.remove_node(Self::PREVIEW_OVERLAY_NODE);
+            }
+        }
+    }
+
+    /// Update ghost overlay draw commands from the dock animation state.
+    ///
+    /// Renders semi-transparent floating ghost elements that follow the cursor
+    /// during tab or tab-group drag operations.
+    #[cfg(feature = "docking")]
+    fn update_ghost_overlays(&mut self, animations: Option<&DockAnimationState>) {
+        // Ghost group animation (entire tab group drag)
+        match animations.and_then(|a| a.ghost_group.as_ref()) {
+            Some(ghost) if !ghost.is_done() => {
+                let mut commands = Vec::new();
+                let alpha = (ghost.opacity * 255.0) as u8;
+
+                // Background quad for the ghost group
+                commands.push(DrawCommand::Quad(
+                    crate::draw_list::QuadCommand::rounded(
+                        ghost.position,
+                        ghost.size,
+                        Color::from_rgba_u8(60, 80, 120, alpha),
+                        4.0,
+                        12, // High Z-index above everything
+                    )
+                    .with_clip(ClipRect::infinite()),
+                ));
+
+                // Render each tab label in the ghost group
+                let tab_height = ghost.size.y;
+                let tab_font_size = 13.0_f32;
+                let tab_padding = DEFAULT_TAB_PADDING;
+                let mut x_offset = 0.0_f32;
+
+                for label in &ghost.labels {
+                    let request_id =
+                        self.text_pipeline
+                            .request_shape(label.clone(), 0, tab_font_size, None);
+
+                    if let Some(shaped) = self.text_pipeline.get_completed(request_id) {
+                        let text_height = shaped.bounds().1;
+                        let text_x = ghost.position.x + x_offset + tab_padding;
+                        let text_y = ghost.position.y + (tab_height - text_height) * 0.5;
+
+                        let text_alpha = (ghost.opacity * 200.0) as u8;
+                        commands.push(DrawCommand::Text(
+                            crate::draw_list::TextCommand::new(
+                                Vec2::new(text_x, text_y),
+                                shaped.clone(),
+                                Color::from_rgba_u8(220, 220, 220, text_alpha),
+                                13,
+                            )
+                            .with_clip(ClipRect::infinite()),
+                        ));
+
+                        // Advance x for next tab label (text width + padding + separator gap)
+                        let text_width = shaped.bounds().0;
+                        x_offset += text_width + tab_padding * 2.0 + 2.0;
+                    }
                 }
+
+                self.draw_list
+                    .update_node(Self::GHOST_GROUP_OVERLAY_NODE, commands);
+            }
+            _ => {
+                self.draw_list.remove_node(Self::GHOST_GROUP_OVERLAY_NODE);
             }
         }
 
-        // Always include infinite clip rect (for unclipped content)
-        if !clip_rect_set.iter().any(|c| c.is_infinite()) {
-            clip_rect_set.insert(0, ClipRect::infinite());
+        // Ghost tab animation (single tab cross-container drag)
+        match animations.and_then(|a| a.ghost_tab.as_ref()) {
+            Some(ghost) if !ghost.is_done() => {
+                let mut commands = Vec::new();
+                let alpha = (ghost.opacity * 255.0) as u8;
+
+                // Background quad for the ghost tab
+                commands.push(DrawCommand::Quad(
+                    crate::draw_list::QuadCommand::rounded(
+                        ghost.position,
+                        ghost.size,
+                        Color::from_rgba_u8(60, 80, 120, alpha),
+                        4.0,
+                        12,
+                    )
+                    .with_clip(ClipRect::infinite()),
+                ));
+
+                // Tab label text
+                let request_id =
+                    self.text_pipeline
+                        .request_shape(ghost.label.clone(), 0, 13.0, None);
+
+                if let Some(shaped) = self.text_pipeline.get_completed(request_id) {
+                    let text_height = shaped.bounds().1;
+                    let text_x = ghost.position.x + DEFAULT_TAB_PADDING;
+                    let text_y = ghost.position.y + (ghost.size.y - text_height) * 0.5;
+
+                    let text_alpha = (ghost.opacity * 200.0) as u8;
+                    commands.push(DrawCommand::Text(
+                        crate::draw_list::TextCommand::new(
+                            Vec2::new(text_x, text_y),
+                            shaped,
+                            Color::from_rgba_u8(220, 220, 220, text_alpha),
+                            13,
+                        )
+                        .with_clip(ClipRect::infinite()),
+                    ));
+                }
+
+                self.draw_list
+                    .update_node(Self::GHOST_TAB_OVERLAY_NODE, commands);
+            }
+            _ => {
+                self.draw_list.remove_node(Self::GHOST_TAB_OVERLAY_NODE);
+            }
+        }
+    }
+
+    /// Recursively clear draw commands for a node and all its children.
+    fn clear_node_recursive(&mut self, tree: &UiTree, node_id: NodeId) {
+        // Remove this node's draw commands
+        self.draw_list.remove_node(node_id);
+
+        // Recursively clear children
+        if let Some(widget) = tree.get_widget(node_id) {
+            for &child_id in widget.children() {
+                self.clear_node_recursive(tree, child_id);
+            }
+        }
+    }
+
+    /// Encode draw list commands into GPU instance buffers.
+    ///
+    /// Groups instances by clip rect to ensure contiguous ranges for scissor batching.
+    /// Uses a two-phase approach:
+    /// 1. Collect unique clip rects
+    /// 2. Process commands grouped by clip rect (ensures contiguous instance ranges)
+    fn encode_instances(&mut self) {
+        profile_function!();
+
+        // Clear and reuse persistent allocations
+        self.frame_quad_instances.clear();
+        self.frame_text_instances.clear();
+        self.frame_image_instances.clear();
+        // Clear values but keep keys/capacity for image groups
+        for (_, (_, instances)) in self.frame_image_groups.iter_mut() {
+            instances.clear();
         }
 
-        // Group by clip rect
+        self.has_clipping = false;
         self.clip_batches.clear();
-        let mut quad_instances = Vec::new();
-        let mut text_instances = Vec::new();
-        let mut image_groups: HashMap<ImageBindGroupKey, (ImageTexture, Vec<ImageInstance>)> = HashMap::new();
 
-        for clip_rect in &clip_rect_set {
-            let quad_start = quad_instances.len() as u32;
-            let text_start = text_instances.len() as u32;
+        // Phase 1: Collect unique clip rects in order of first appearance
+        let mut clip_rects: Vec<ClipRect> = Vec::new();
+        for cmd in self.draw_list.commands() {
+            let clip = *cmd.clip_rect();
+            if !clip.is_infinite() {
+                self.has_clipping = true;
+            }
+            if !clip_rects.contains(&clip) {
+                clip_rects.push(clip);
+            }
+        }
+
+        // Ensure infinite clip is processed first (for proper draw order)
+        if let Some(pos) = clip_rects.iter().position(|c| c.is_infinite()) {
+            if pos != 0 {
+                clip_rects.swap(0, pos);
+            }
+        } else if !clip_rects.is_empty() {
+            // No infinite clip rect exists, insert at beginning
+            clip_rects.insert(0, ClipRect::infinite());
+        }
+
+        // Phase 2: Process commands grouped by clip rect
+        // This ensures instances for each clip rect are contiguous in the buffers
+        for clip_rect in &clip_rects {
+            let quad_start = self.frame_quad_instances.len() as u32;
+            let text_start = self.frame_text_instances.len() as u32;
 
             for cmd in self.draw_list.commands() {
                 if cmd.clip_rect() != clip_rect {
                     continue;
                 }
 
+                // Skip overlay sentinel commands — they are rendered in a final
+                // pass after all clip batches so they always appear on top.
+                #[cfg(feature = "docking")]
+                {
+                    let node_id = cmd.node_id();
+                    if node_id == Self::PREVIEW_OVERLAY_NODE
+                        || node_id == Self::GHOST_TAB_OVERLAY_NODE
+                        || node_id == Self::GHOST_GROUP_OVERLAY_NODE
+                    {
+                        continue;
+                    }
+                }
+
                 match cmd {
                     DrawCommand::Quad(q) => {
-                        quad_instances.push(QuadInstance {
+                        self.frame_quad_instances.push(QuadInstance {
                             position: [q.position.x, q.position.y],
                             size: [q.size.x, q.size.y],
                             color: [q.color.r, q.color.g, q.color.b, q.color.a],
@@ -926,13 +1237,13 @@ impl UiRenderer {
                         });
                     }
                     DrawCommand::Text(t) => {
-                        let instances = glyphs_to_instances(
+                        glyphs_to_instances_into(
                             &mut self.font_renderer,
                             &t.shaped_text.inner.glyphs,
                             t.position,
                             t.color,
+                            &mut self.frame_text_instances,
                         );
-                        text_instances.extend(instances);
                     }
                     DrawCommand::Image(i) => {
                         // Use texture pointer + sampling mode as composite key for grouping
@@ -952,7 +1263,7 @@ impl UiRenderer {
                             _padding: [0.0; 2],
                         };
 
-                        image_groups
+                        self.frame_image_groups
                             .entry(bind_group_key)
                             .or_insert_with(|| (i.texture.clone(), Vec::new()))
                             .1
@@ -961,8 +1272,8 @@ impl UiRenderer {
                 }
             }
 
-            let quad_count = quad_instances.len() as u32 - quad_start;
-            let text_count = text_instances.len() as u32 - text_start;
+            let quad_count = self.frame_quad_instances.len() as u32 - quad_start;
+            let text_count = self.frame_text_instances.len() as u32 - text_start;
 
             if quad_count > 0 || text_count > 0 {
                 self.clip_batches.push(ClipBatch {
@@ -973,12 +1284,72 @@ impl UiRenderer {
             }
         }
 
-        // Build image batches with bind groups (images don't support clipping yet)
-        self.image_batches.clear();
-        let mut all_image_instances = Vec::new();
+        // Encode overlay commands as a final clip batch so they render on top
+        // of all regular content, regardless of which clip batch the content belongs to.
+        #[cfg(feature = "docking")]
+        {
+            let overlay_quad_start = self.frame_quad_instances.len() as u32;
+            let overlay_text_start = self.frame_text_instances.len() as u32;
 
-        for (bind_group_key, (texture, instances)) in image_groups {
-            let start_index = all_image_instances.len() as u32;
+            for cmd in self.draw_list.commands() {
+                let node_id = cmd.node_id();
+                if node_id != Self::PREVIEW_OVERLAY_NODE
+                    && node_id != Self::GHOST_TAB_OVERLAY_NODE
+                    && node_id != Self::GHOST_GROUP_OVERLAY_NODE
+                {
+                    continue;
+                }
+
+                match cmd {
+                    DrawCommand::Quad(q) => {
+                        self.frame_quad_instances.push(QuadInstance {
+                            position: [q.position.x, q.position.y],
+                            size: [q.size.x, q.size.y],
+                            color: [q.color.r, q.color.g, q.color.b, q.color.a],
+                            border_radius: q.border_radius,
+                            border_thickness: q.border_thickness,
+                            _padding: [0.0; 2],
+                        });
+                    }
+                    DrawCommand::Text(t) => {
+                        glyphs_to_instances_into(
+                            &mut self.font_renderer,
+                            &t.shaped_text.inner.glyphs,
+                            t.position,
+                            t.color,
+                            &mut self.frame_text_instances,
+                        );
+                    }
+                    DrawCommand::Image(_) => {} // Overlays don't use images
+                }
+            }
+
+            let overlay_quad_count = self.frame_quad_instances.len() as u32 - overlay_quad_start;
+            let overlay_text_count = self.frame_text_instances.len() as u32 - overlay_text_start;
+
+            if overlay_quad_count > 0 || overlay_text_count > 0 {
+                self.clip_batches.push(ClipBatch {
+                    clip_rect: ClipRect::infinite(),
+                    quad_range: (overlay_quad_start, overlay_quad_count),
+                    text_range: (overlay_text_start, overlay_text_count),
+                });
+            }
+        }
+
+        // Build image batches with bind groups (images don't support clipping yet)
+        // First, collect the data we need to avoid borrow conflicts
+        let image_group_data: Vec<(ImageBindGroupKey, ImageTexture, Vec<ImageInstance>)> = self
+            .frame_image_groups
+            .iter()
+            .filter(|(_, (_, instances))| !instances.is_empty())
+            .map(|(key, (texture, instances))| (*key, texture.clone(), instances.clone()))
+            .collect();
+
+        self.image_batches.clear();
+        self.frame_image_instances.clear();
+
+        for (bind_group_key, texture, instances) in image_group_data {
+            let start_index = self.frame_image_instances.len() as u32;
             let count = instances.len() as u32;
 
             // Get or create bind group for this texture + sampling mode combination
@@ -991,17 +1362,24 @@ impl UiRenderer {
                 count,
             });
 
-            all_image_instances.extend(instances);
+            self.frame_image_instances.extend(instances);
         }
 
-        self.quad_instances
-            .set_instances(self.renderer.device(), quad_instances);
-        self.text_instances
-            .set_instances(self.renderer.device(), text_instances);
-        self.image_instances
-            .set_instances(self.renderer.device(), all_image_instances);
+        // Upload to GPU instance buffers
+        self.quad_instances.set_instances(
+            self.renderer.device(),
+            std::mem::take(&mut self.frame_quad_instances),
+        );
+        self.text_instances.set_instances(
+            self.renderer.device(),
+            std::mem::take(&mut self.frame_text_instances),
+        );
+        self.image_instances.set_instances(
+            self.renderer.device(),
+            std::mem::take(&mut self.frame_image_instances),
+        );
     }
-    
+
     /// Get or create a bind group for an image texture with a specific sampling mode.
     fn get_or_create_image_bind_group(
         &mut self,
@@ -1013,22 +1391,27 @@ impl UiRenderer {
         }
 
         // Get the appropriate sampler for this sampling mode
-        let sampler = self.sampler_cache.from_sampling(&self.context.device, key.sampling);
+        let sampler = self
+            .sampler_cache
+            .from_sampling(self.context.device(), key.sampling);
 
-        let bind_group = self.context.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Image Texture Bind Group"),
-            layout: &self.image_texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(texture),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
+        let bind_group = self
+            .context
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Image Texture Bind Group"),
+                layout: &self.image_texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(texture),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&sampler),
+                    },
+                ],
+            });
 
         self.image_bind_group_cache.insert(key, bind_group.clone());
         bind_group
@@ -1051,11 +1434,12 @@ impl UiRenderer {
         tree: &UiTree,
         render_pass: &mut wgpu::RenderPass,
         viewport: Viewport,
+        widget_registry: &WidgetTypeRegistry,
     ) {
         profile_function!();
 
         // Update state
-        self.update(tree);
+        self.update(tree, widget_registry);
 
         // physical size -> logical size -> NDC
         let logical_size = viewport.to_logical();
@@ -1070,7 +1454,92 @@ impl UiRenderer {
         let viewport_height = viewport.size.height as u32;
 
         // Render with clip batches (handles scissor rects)
-        for batch in &self.clip_batches.clone() {
+        for batch in &self.clip_batches {
+            // Set scissor rect for this batch
+            if batch.clip_rect.is_infinite() {
+                render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+            } else {
+                let physical = batch.clip_rect.to_physical(viewport.scale_factor.0);
+                let clamped = physical.clamp_to_viewport(viewport_width, viewport_height);
+                if clamped.width == 0 || clamped.height == 0 {
+                    continue; // Skip empty clip rects
+                }
+                render_pass.set_scissor_rect(clamped.x, clamped.y, clamped.width, clamped.height);
+            }
+
+            // Render quads for this clip batch
+            if batch.quad_range.1 > 0 {
+                render_pass.set_pipeline(&self.quad_instanced_pipeline);
+                render_pass.set_bind_group(0, &self.projection_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
+                render_pass.set_vertex_buffer(1, self.quad_instances.buffer().slice(..));
+                render_pass.draw(
+                    0..6,
+                    batch.quad_range.0..(batch.quad_range.0 + batch.quad_range.1),
+                );
+            }
+
+            // Render text for this clip batch
+            if batch.text_range.1 > 0 {
+                render_pass.set_pipeline(&self.text_instanced_pipeline);
+                render_pass.set_bind_group(0, &self.text_atlas_bind_group, &[]);
+                render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
+                render_pass.set_vertex_buffer(1, self.text_instances.buffer().slice(..));
+                render_pass.draw(
+                    0..6,
+                    batch.text_range.0..(batch.text_range.0 + batch.text_range.1),
+                );
+            }
+        }
+
+        // Reset scissor rect for images (they don't support clipping yet)
+        render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+
+        // Render images (batched by texture)
+        if !self.image_batches.is_empty() {
+            render_pass.set_pipeline(&self.image_instanced_pipeline);
+            render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]); // Reuse projection
+            render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
+            render_pass.set_vertex_buffer(1, self.image_instances.buffer().slice(..));
+
+            for batch in &self.image_batches {
+                render_pass.set_bind_group(0, &batch.bind_group, &[]);
+                render_pass.draw(0..6, batch.start_index..(batch.start_index + batch.count));
+            }
+        }
+    }
+
+    /// Render using retained mode instanced rendering with optional cross-container preview.
+    #[cfg(feature = "docking")]
+    pub fn render_instanced_with_preview(
+        &mut self,
+        tree: &UiTree,
+        render_pass: &mut wgpu::RenderPass,
+        viewport: Viewport,
+        preview: Option<&CrossContainerPreview>,
+        animations: Option<&DockAnimationState>,
+        widget_registry: &WidgetTypeRegistry,
+    ) {
+        profile_function!();
+
+        // Update state
+        self.update_with_preview(tree, preview, animations, widget_registry);
+
+        // physical size -> logical size -> NDC
+        let logical_size = viewport.to_logical();
+        let projection = orthographic_projection(logical_size.width, logical_size.height);
+        self.renderer.queue().write_buffer(
+            &self.projection_buffer,
+            0,
+            bytemuck::cast_slice(&projection),
+        );
+
+        let viewport_width = viewport.size.width as u32;
+        let viewport_height = viewport.size.height as u32;
+
+        // Render with clip batches (handles scissor rects)
+        for batch in &self.clip_batches {
             // Set scissor rect for this batch
             if batch.clip_rect.is_infinite() {
                 render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
@@ -1133,7 +1602,11 @@ impl UiRenderer {
     /// Phase 5 (retained rendering).
     pub fn text_cache_stats(&self) -> String {
         // self.text_cache.stats_string()
-        format!("Text Cache Stats: {} entries, {:.1}% hit rate", self.text_pipeline.cache_stats().2, self.text_pipeline.cache_hit_rate())
+        format!(
+            "Text Cache Stats: {} entries, {:.1}% hit rate",
+            self.text_pipeline.cache_stats().2,
+            self.text_pipeline.cache_hit_rate()
+        )
     }
 
     /// Get text cache hit rate (0.0 to 1.0).

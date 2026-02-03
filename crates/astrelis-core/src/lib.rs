@@ -53,8 +53,9 @@
 //!
 //! # Feature Flags
 //!
-//! Currently, `astrelis-core` does not expose any feature flags. All functionality is
-//! enabled by default.
+//! - `profiling` (default): Enables puffin-based profiling. When disabled, all profiling
+//!   macros and functions become zero-cost no-ops.
+//! - `winit` (default): Enables winit window type re-exports.
 //!
 //! # See Also
 //!

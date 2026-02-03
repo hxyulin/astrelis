@@ -3,10 +3,10 @@
 //! These tests verify that the draw list system correctly manages draw commands,
 //! tracks node-to-command mappings, and handles incremental updates.
 
-use astrelis_ui::{DrawCommand, DrawList, QuadCommand};
 use astrelis_core::math::Vec2;
 use astrelis_render::Color;
 use astrelis_ui::tree::NodeId;
+use astrelis_ui::{DrawCommand, DrawList, QuadCommand};
 
 #[test]
 fn test_draw_list_creation() {
@@ -74,12 +74,7 @@ fn test_update_node_replaces_commands() {
     let node_id = NodeId(1);
 
     // Add initial command
-    let quad1 = QuadCommand::filled(
-        Vec2::new(0.0, 0.0),
-        Vec2::new(100.0, 100.0),
-        Color::RED,
-        0,
-    );
+    let quad1 = QuadCommand::filled(Vec2::new(0.0, 0.0), Vec2::new(100.0, 100.0), Color::RED, 0);
     draw_list.update_node(node_id, vec![DrawCommand::Quad(quad1)]);
 
     assert_eq!(draw_list.len(), 1);
@@ -174,12 +169,7 @@ fn test_remove_node() {
 
 #[test]
 fn test_quad_command_creation() {
-    let quad = QuadCommand::filled(
-        Vec2::new(10.0, 20.0),
-        Vec2::new(100.0, 50.0),
-        Color::RED,
-        5,
-    );
+    let quad = QuadCommand::filled(Vec2::new(10.0, 20.0), Vec2::new(100.0, 50.0), Color::RED, 5);
 
     assert_eq!(quad.position, Vec2::new(10.0, 20.0));
     assert_eq!(quad.size, Vec2::new(100.0, 50.0));
@@ -191,12 +181,7 @@ fn test_quad_command_creation() {
 
 #[test]
 fn test_quad_command_rounded() {
-    let mut quad = QuadCommand::filled(
-        Vec2::ZERO,
-        Vec2::new(100.0, 100.0),
-        Color::BLUE,
-        0,
-    );
+    let mut quad = QuadCommand::filled(Vec2::ZERO, Vec2::new(100.0, 100.0), Color::BLUE, 0);
 
     quad.border_radius = 10.0;
 

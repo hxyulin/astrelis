@@ -603,23 +603,23 @@ impl MeshBuilder {
         }
 
         // Create vertex buffer
-        let vertex_buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        let vertex_buffer = ctx.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Mesh Vertex Buffer"),
             size: vertex_data.len() as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        ctx.queue.write_buffer(&vertex_buffer, 0, &vertex_data);
+        ctx.queue().write_buffer(&vertex_buffer, 0, &vertex_data);
 
         // Create index buffer if present
         let (index_buffer, index_format, index_count) = if let Some(ref indices) = self.indices {
-            let buffer = ctx.device.create_buffer(&wgpu::BufferDescriptor {
+            let buffer = ctx.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Mesh Index Buffer"),
                 size: (indices.len() * std::mem::size_of::<u32>()) as u64,
                 usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
-            ctx.queue
+            ctx.queue()
                 .write_buffer(&buffer, 0, bytemuck::cast_slice(indices));
             (
                 Some(buffer),

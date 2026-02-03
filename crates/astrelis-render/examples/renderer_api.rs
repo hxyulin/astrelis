@@ -1,3 +1,11 @@
+//! Renderer helper API and two-pass offscreen rendering example.
+//!
+//! Demonstrates:
+//! - Using the `Renderer` helper for resource creation (shaders, buffers, textures)
+//! - Rendering to an offscreen `Framebuffer` (pass 1) and blitting it to the surface (pass 2)
+//! - `BlendMode::Alpha` (standard source-over blending for scene geometry)
+//!   vs `BlendMode::PremultipliedAlpha` (for compositing a pre-rendered framebuffer)
+
 use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_render::{
@@ -30,7 +38,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let renderer = Renderer::new(graphics_ctx.clone());
 
         let window = ctx
@@ -121,6 +129,7 @@ fn main() {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 buffers: &[wgpu::VertexBufferLayout {
+                    // 4 floats × 4 bytes = 16 bytes per vertex (2×f32 pos + 2×f32 UV)
                     array_stride: 4 * 4,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2],
@@ -296,7 +305,7 @@ impl App for RendererApp {
             RenderTarget::Framebuffer(&self.offscreen_fb),
             Color::rgb(0.2, 0.1, 0.3),
             |pass| {
-                let pass = pass.descriptor();
+                let pass = pass.wgpu_pass();
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -309,7 +318,7 @@ impl App for RendererApp {
             RenderTarget::Surface,
             Color::rgb(0.1, 0.2, 0.3),
             |pass| {
-                let pass = pass.descriptor();
+                let pass = pass.wgpu_pass();
                 pass.set_pipeline(&self.blit_pipeline);
                 pass.set_bind_group(0, &self.blit_bind_group, &[]);
                 // Draw fullscreen triangle

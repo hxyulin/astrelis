@@ -61,7 +61,7 @@ impl App for MyGame {
                     RenderTarget::Surface,
                     Color::BLACK,
                     |pass| {
-                        self.ui.render(pass.descriptor());
+                        self.ui.render(pass.wgpu_pass());
                     },
                 );
                 frame.finish();

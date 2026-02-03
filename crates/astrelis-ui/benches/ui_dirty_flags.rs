@@ -50,7 +50,7 @@ fn bench_color_only_update(c: &mut Criterion) {
                 b.iter(|| {
                     // Color-only update should skip layout and text shaping
                     ui.tree_mut()
-                        .mark_dirty_flags(NodeId(1), DirtyFlags::COLOR_ONLY);
+                        .mark_dirty_flags(NodeId(1), DirtyFlags::COLOR);
 
                     ui.compute_layout();
                 });
@@ -128,7 +128,7 @@ fn bench_mixed_updates(c: &mut Criterion) {
         b.iter(|| {
             // Mix of paint-only and layout updates
             ui.tree_mut()
-                .mark_dirty_flags(NodeId(1), DirtyFlags::COLOR_ONLY);
+                .mark_dirty_flags(NodeId(1), DirtyFlags::COLOR);
             ui.tree_mut()
                 .mark_dirty_flags(NodeId(5), DirtyFlags::LAYOUT);
             ui.tree_mut()
@@ -211,7 +211,7 @@ fn bench_selective_compute(c: &mut Criterion) {
         b.iter(|| {
             // Mark only one node dirty
             ui.tree_mut()
-                .mark_dirty_flags(NodeId(50), DirtyFlags::COLOR_ONLY);
+                .mark_dirty_flags(NodeId(50), DirtyFlags::COLOR);
 
             // Should skip most nodes
             ui.compute_layout();

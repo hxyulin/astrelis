@@ -387,7 +387,7 @@ impl SdfBackend {
     /// Update SDF params uniform buffer.
     pub fn update_params(&self, shared: &SharedContext, params: &SdfParams) {
         self.params_buffer
-            .write_uniform(&shared.renderer.queue(), params);
+            .write_uniform(shared.renderer.queue(), params);
     }
 }
 
@@ -578,7 +578,7 @@ impl SdfTextRenderer {
                 };
 
                 // Calculate scale factor from base size to target size
-                let target_size = f32::from_bits(cache_key.font_size_bits as u32);
+                let target_size = f32::from_bits(cache_key.font_size_bits);
                 let size_scale = target_size / sdf_entry.base_size;
 
                 // Scale placement based on size ratio

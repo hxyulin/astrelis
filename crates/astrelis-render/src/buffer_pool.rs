@@ -40,6 +40,8 @@
 //! pool.recycle(staging);
 //! ```
 
+use astrelis_core::profiling::profile_function;
+
 use crate::GraphicsContext;
 use std::sync::Arc;
 
@@ -88,7 +90,7 @@ impl RingBufferAllocation {
     }
 
     /// Get a binding resource for this allocation.
-    pub fn as_binding(&self) -> wgpu::BindingResource {
+    pub fn as_binding(&self) -> wgpu::BindingResource<'_> {
         wgpu::BindingResource::Buffer(wgpu::BufferBinding {
             buffer: &self.buffer,
             offset: self.offset,
@@ -110,8 +112,6 @@ pub struct RingBuffer {
     offset: u64,
     /// Current frame number
     frame: u64,
-    /// Graphics context reference
-    context: Arc<GraphicsContext>,
 }
 
 impl RingBuffer {
@@ -129,7 +129,7 @@ impl RingBuffer {
     ) -> Self {
         let total_size = size * RING_BUFFER_FRAMES as u64;
 
-        let buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = context.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Ring Buffer"),
             size: total_size,
             usage: usage | wgpu::BufferUsages::COPY_DST,
@@ -141,7 +141,6 @@ impl RingBuffer {
             size: total_size,
             offset: 0,
             frame: 0,
-            context,
         }
     }
 
@@ -156,8 +155,9 @@ impl RingBuffer {
     ///
     /// Returns `Some(allocation)` if space is available, `None` if the buffer is full.
     pub fn allocate(&mut self, size: u64, alignment: u64) -> Option<RingBufferAllocation> {
+        profile_function!();
         // Align offset
-        let aligned_offset = if self.offset % alignment != 0 {
+        let aligned_offset = if !self.offset.is_multiple_of(alignment) {
             self.offset + (alignment - (self.offset % alignment))
         } else {
             self.offset
@@ -233,7 +233,7 @@ pub struct StagingBuffer {
 impl StagingBuffer {
     /// Create a new staging buffer.
     fn new(context: &GraphicsContext, size: u64) -> Self {
-        let buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = context.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Staging Buffer"),
             size,
             usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::COPY_SRC,
@@ -306,6 +306,7 @@ impl StagingBufferPool {
     /// If a suitable buffer is available, it will be reused. Otherwise, a new
     /// buffer will be created.
     pub fn allocate(&mut self, context: &GraphicsContext, size: u64) -> StagingBuffer {
+        profile_function!();
         // Try to find a buffer of suitable size
         // We look for a buffer that's >= size but not too much bigger
         let mut best_idx = None;
@@ -361,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_ring_buffer_allocation() {
-        let ctx = GraphicsContext::new_owned_sync_or_panic();
+        let ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut ring = RingBuffer::new(ctx, 1024, wgpu::BufferUsages::UNIFORM);
 
         // Allocate some space
@@ -381,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_ring_buffer_frame_advance() {
-        let ctx = GraphicsContext::new_owned_sync_or_panic();
+        let ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut ring = RingBuffer::new(ctx, 1024, wgpu::BufferUsages::UNIFORM);
 
         // Fill first frame
@@ -401,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_staging_pool() {
-        let ctx = GraphicsContext::new_owned_sync_or_panic();
+        let ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut pool = StagingBufferPool::new();
 
         // Allocate a buffer
@@ -423,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_staging_pool_size_matching() {
-        let ctx = GraphicsContext::new_owned_sync_or_panic();
+        let ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut pool = StagingBufferPool::new();
 
         // Add buffers of different sizes

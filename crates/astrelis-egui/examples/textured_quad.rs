@@ -1,3 +1,23 @@
+//! Textured Quad Example - Custom Rendering with egui Overlay
+//!
+//! Demonstrates combining custom WGPU rendering with egui UI:
+//! - Custom render pipeline for textured quads
+//! - Vertex/fragment shaders with texture sampling
+//! - egui overlay for controls
+//! - Integration of custom rendering with egui
+//!
+//! ## Features Showcased
+//! - Custom WGPU render pipelines
+//! - Texture creation and binding
+//! - Vertex buffer management
+//! - Shader integration
+//! - egui overlay rendering
+//!
+//! ## Usage
+//! ```bash
+//! cargo run -p astrelis-egui --example textured_quad
+//! ```
+
 use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_egui::Egui;
@@ -34,7 +54,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -50,7 +70,7 @@ fn main() {
 
         // Create shader
         let shader = graphics_ctx
-            .device
+            .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Quad Shader"),
                 source: wgpu::ShaderSource::Wgsl(SHADER_SOURCE.into()),
@@ -64,7 +84,7 @@ fn main() {
         };
 
         let texture = graphics_ctx
-            .device
+            .device()
             .create_texture(&wgpu::TextureDescriptor {
                 label: Some("Procedural Texture"),
                 size: texture_size,
@@ -92,7 +112,7 @@ fn main() {
             }
         }
 
-        graphics_ctx.queue.write_texture(
+        graphics_ctx.queue().write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
@@ -110,7 +130,7 @@ fn main() {
 
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = graphics_ctx
-            .device
+            .device()
             .create_sampler(&wgpu::SamplerDescriptor {
                 address_mode_u: wgpu::AddressMode::Repeat,
                 address_mode_v: wgpu::AddressMode::Repeat,
@@ -123,7 +143,7 @@ fn main() {
 
         let bind_group_layout =
             graphics_ctx
-                .device
+                .device()
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("Texture Bind Group Layout"),
                     entries: &[
@@ -147,7 +167,7 @@ fn main() {
                 });
 
         let bind_group = graphics_ctx
-            .device
+            .device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("Texture Bind Group"),
                 layout: &bind_group_layout,
@@ -165,7 +185,7 @@ fn main() {
 
         let pipeline_layout =
             graphics_ctx
-                .device
+                .device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Render Pipeline Layout"),
                     bind_group_layouts: &[&bind_group_layout],
@@ -174,7 +194,7 @@ fn main() {
 
         let pipeline =
             graphics_ctx
-                .device
+                .device()
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("Render Pipeline"),
                     layout: Some(&pipeline_layout),
@@ -227,7 +247,7 @@ fn main() {
             -0.8,  0.8,  0.0, 0.0,
         ];
 
-        let vertex_buffer = graphics_ctx.device.create_buffer(&wgpu::BufferDescriptor {
+        let vertex_buffer = graphics_ctx.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Vertex Buffer"),
             size: (vertices.len() * std::mem::size_of::<f32>()) as u64,
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
@@ -235,7 +255,7 @@ fn main() {
         });
 
         graphics_ctx
-            .queue
+            .queue()
             .write_buffer(&vertex_buffer, 0, bytemuck::cast_slice(vertices));
 
         // Create render target for our custom rendering
@@ -246,7 +266,7 @@ fn main() {
         };
 
         let render_texture = graphics_ctx
-            .device
+            .device()
             .create_texture(&wgpu::TextureDescriptor {
                 label: Some("Render Target"),
                 size: render_texture_size,
@@ -305,7 +325,7 @@ impl App for TexturedQuadApp {
         // Register the texture with egui once (on first frame)
         if self.render_texture_id.is_none() {
             let texture_id = self.egui.register_wgpu_texture(
-                &self._context.device,
+                self._context.device(),
                 &self.render_texture_view,
                 wgpu::FilterMode::Linear,
             );
@@ -355,7 +375,7 @@ impl App for TexturedQuadApp {
             let graphics_ctx = &self._context;
             let mut encoder =
                 graphics_ctx
-                    .device
+                    .device()
                     .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: Some("Render to Texture Encoder"),
                     });
@@ -388,7 +408,7 @@ impl App for TexturedQuadApp {
                 render_pass.draw(0..6, 0..1);
             }
 
-            graphics_ctx.queue.submit(std::iter::once(encoder.finish()));
+            graphics_ctx.queue().submit(std::iter::once(encoder.finish()));
         }
 
         // Main window rendering

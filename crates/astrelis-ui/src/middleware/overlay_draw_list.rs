@@ -211,7 +211,12 @@ mod tests {
     #[test]
     fn test_add_text() {
         let mut list = OverlayDrawList::new();
-        list.add_text(Vec2::new(10.0, 10.0), "Hello".to_string(), Color::WHITE, 16.0);
+        list.add_text(
+            Vec2::new(10.0, 10.0),
+            "Hello".to_string(),
+            Color::WHITE,
+            16.0,
+        );
 
         assert_eq!(list.len(), 1);
         assert_eq!(list.texts().count(), 1);
@@ -237,7 +242,14 @@ mod tests {
     #[test]
     fn test_clear() {
         let mut list = OverlayDrawList::new();
-        list.add_quad(Vec2::ZERO, Vec2::new(10.0, 10.0), Color::RED, None, 0.0, 0.0);
+        list.add_quad(
+            Vec2::ZERO,
+            Vec2::new(10.0, 10.0),
+            Color::RED,
+            None,
+            0.0,
+            0.0,
+        );
         list.add_text(Vec2::ZERO, "Test".to_string(), Color::WHITE, 12.0);
 
         assert_eq!(list.len(), 2);
@@ -249,7 +261,14 @@ mod tests {
     #[test]
     fn test_take_commands() {
         let mut list = OverlayDrawList::new();
-        list.add_quad(Vec2::ZERO, Vec2::new(10.0, 10.0), Color::RED, None, 0.0, 0.0);
+        list.add_quad(
+            Vec2::ZERO,
+            Vec2::new(10.0, 10.0),
+            Color::RED,
+            None,
+            0.0,
+            0.0,
+        );
 
         let commands = list.take_commands();
         assert_eq!(commands.len(), 1);
@@ -259,7 +278,14 @@ mod tests {
     #[test]
     fn test_extend() {
         let mut list1 = OverlayDrawList::new();
-        list1.add_quad(Vec2::ZERO, Vec2::new(10.0, 10.0), Color::RED, None, 0.0, 0.0);
+        list1.add_quad(
+            Vec2::ZERO,
+            Vec2::new(10.0, 10.0),
+            Color::RED,
+            None,
+            0.0,
+            0.0,
+        );
 
         let mut list2 = OverlayDrawList::new();
         list2.add_text(Vec2::ZERO, "Test".to_string(), Color::WHITE, 12.0);
@@ -271,10 +297,24 @@ mod tests {
     #[test]
     fn test_mixed_commands() {
         let mut list = OverlayDrawList::new();
-        list.add_quad(Vec2::ZERO, Vec2::new(10.0, 10.0), Color::RED, None, 0.0, 0.0);
+        list.add_quad(
+            Vec2::ZERO,
+            Vec2::new(10.0, 10.0),
+            Color::RED,
+            None,
+            0.0,
+            0.0,
+        );
         list.add_text(Vec2::new(5.0, 5.0), "Label".to_string(), Color::WHITE, 14.0);
         list.add_line(Vec2::ZERO, Vec2::new(100.0, 0.0), Color::BLUE, 1.0);
-        list.add_quad(Vec2::new(50.0, 50.0), Vec2::new(20.0, 20.0), Color::GREEN, None, 0.0, 0.0);
+        list.add_quad(
+            Vec2::new(50.0, 50.0),
+            Vec2::new(20.0, 20.0),
+            Color::GREEN,
+            None,
+            0.0,
+            0.0,
+        );
 
         assert_eq!(list.len(), 4);
         assert_eq!(list.quads().count(), 2);

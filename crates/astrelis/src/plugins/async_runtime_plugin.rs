@@ -34,17 +34,13 @@ use crate::task_pool::TaskPool;
 ///     42
 /// });
 /// ```
+#[derive(Default)]
 pub struct AsyncRuntimePlugin {
     /// Number of threads for the task pool.
     /// If None, uses default (num_cpus - 1).
     pub num_threads: Option<usize>,
 }
 
-impl Default for AsyncRuntimePlugin {
-    fn default() -> Self {
-        Self { num_threads: None }
-    }
-}
 
 impl AsyncRuntimePlugin {
     /// Create a new async runtime plugin with default thread count.

@@ -349,7 +349,7 @@ impl App for MyGame {
             |pass| {
                 // Manually render sprites, UI, etc.
                 self.renderer.draw_sprite(&pass, texture, transform);
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

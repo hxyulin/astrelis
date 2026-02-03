@@ -126,7 +126,7 @@ impl TooltipBuilder {
 #[derive(Debug, Clone)]
 struct TooltipRegistration {
     /// Widget that has the tooltip.
-    widget_node: NodeId,
+    _widget_node: NodeId,
     /// Content to show.
     content: TooltipContent,
     /// Per-widget configuration overrides.
@@ -173,9 +173,9 @@ struct ActiveTooltip {
     /// Overlay ID for the tooltip.
     overlay_id: OverlayId,
     /// Node ID of the tooltip content in the tree.
-    content_node: NodeId,
+    _content_node: NodeId,
     /// When the tooltip was shown.
-    shown_at: Instant,
+    _shown_at: Instant,
 }
 
 /// Hover state tracking.
@@ -261,7 +261,7 @@ impl TooltipManager {
         self.registrations.insert(
             widget,
             TooltipRegistration {
-                widget_node: widget,
+                _widget_node: widget,
                 content,
                 config_override: None,
             },
@@ -278,7 +278,7 @@ impl TooltipManager {
         self.registrations.insert(
             widget,
             TooltipRegistration {
-                widget_node: widget,
+                _widget_node: widget,
                 content,
                 config_override: Some(config),
             },
@@ -340,29 +340,29 @@ impl TooltipManager {
             }
 
             // Handle enter to new widget
-            if let Some(hovered) = hovered {
-                if self.registrations.contains_key(&hovered) {
-                    self.hover_state = Some(HoverState {
-                        widget: hovered,
-                        started_at: now,
-                        ready_to_show: false,
-                    });
-                }
+            if let Some(hovered) = hovered
+                && self.registrations.contains_key(&hovered)
+            {
+                self.hover_state = Some(HoverState {
+                    widget: hovered,
+                    started_at: now,
+                    ready_to_show: false,
+                });
             }
         }
 
         // Check show delay
-        if let Some(state) = &mut self.hover_state {
-            if !state.ready_to_show {
-                let reg = self.registrations.get(&state.widget);
-                let show_delay = reg
-                    .and_then(|r| r.config_override.as_ref())
-                    .and_then(|c| c.show_delay)
-                    .unwrap_or(self.config.show_delay);
+        if let Some(state) = &mut self.hover_state
+            && !state.ready_to_show
+        {
+            let reg = self.registrations.get(&state.widget);
+            let show_delay = reg
+                .and_then(|r| r.config_override.as_ref())
+                .and_then(|c| c.show_delay)
+                .unwrap_or(self.config.show_delay);
 
-                if now.duration_since(state.started_at) >= show_delay {
-                    state.ready_to_show = true;
-                }
+            if now.duration_since(state.started_at) >= show_delay {
+                state.ready_to_show = true;
             }
         }
 
@@ -371,22 +371,23 @@ impl TooltipManager {
             let hide_delay = self.config.hide_delay;
             if now.duration_since(leave.left_at) >= hide_delay {
                 // Time to hide
-                if let Some(active) = &self.active {
-                    if active.widget_node == leave.widget {
-                        // Hide the tooltip
-                        overlays.hide(tree, active.overlay_id);
-                        self.active = None;
-                    }
+                if let Some(active) = &self.active
+                    && active.widget_node == leave.widget
+                {
+                    // Hide the tooltip
+                    overlays.hide(tree, active.overlay_id);
+                    self.active = None;
                 }
                 self.leave_state = None;
             }
         }
 
         // Show tooltip if ready
-        if let Some(state) = &self.hover_state {
-            if state.ready_to_show && self.active.is_none() {
-                self.show_tooltip(overlays, tree, state.widget);
-            }
+        if let Some(state) = &self.hover_state
+            && state.ready_to_show
+            && self.active.is_none()
+        {
+            self.show_tooltip(overlays, tree, state.widget);
         }
 
         // Hide tooltip if no longer hovering the same widget
@@ -405,7 +406,7 @@ impl TooltipManager {
 
         // Update tooltip position if following cursor
         if self.config.follow_cursor
-            && let Some(active) = &self.active
+            && let Some(_active) = &self.active
         {
             // Update overlay position
             overlays.set_mouse_position(self.mouse_position);
@@ -448,8 +449,8 @@ impl TooltipManager {
         self.active = Some(ActiveTooltip {
             widget_node: widget,
             overlay_id,
-            content_node,
-            shown_at: Instant::now(),
+            _content_node: content_node,
+            _shown_at: Instant::now(),
         });
     }
 
@@ -540,9 +541,7 @@ impl TooltipManager {
             .and_then(|c| c.position.clone());
 
         match tooltip_pos {
-            Some(TooltipPosition::FollowCursor { offset }) => {
-                OverlayPosition::AtCursor { offset }
-            }
+            Some(TooltipPosition::FollowCursor { offset }) => OverlayPosition::AtCursor { offset },
             Some(TooltipPosition::BelowWidget { offset }) => OverlayPosition::AnchorTo {
                 anchor_node: widget,
                 alignment: crate::overlay::AnchorAlignment::BelowLeft,

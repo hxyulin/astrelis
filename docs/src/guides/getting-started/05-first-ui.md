@@ -87,7 +87,7 @@ impl App for CounterApp {
             RenderTarget::Surface,
             Color::from_rgb(0.1, 0.1, 0.15),
             |pass| {
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 
@@ -391,7 +391,7 @@ frame.clear_and_render(
     RenderTarget::Surface,
     Color::from_rgb(0.1, 0.1, 0.15),
     |pass| {
-        self.ui.render(pass.descriptor());
+        self.ui.render(pass.wgpu_pass());
     },
 );
 ```
@@ -640,7 +640,7 @@ let text_id = build_ui(&mut self.ui, &self.state);
 **Problem**: Window is blank.
 
 **Causes**:
-1. Forgot to call `self.ui.render(pass.descriptor())`
+1. Forgot to call `self.ui.render(pass.wgpu_pass())`
 2. Viewport not set: `ui.set_viewport(window.viewport())`
 3. Widget sizes are zero (no width/height set)
 

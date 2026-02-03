@@ -20,10 +20,12 @@
 //! to top-left positioning via the `-placement.top` operation. See the positioning
 //! comments in [`glyphs_to_instances`] for details.
 
-use crate::gpu_types::TextInstance;
 use astrelis_core::math::Vec2;
+use astrelis_core::profiling::profile_function;
 use astrelis_render::Color;
 use astrelis_text::{AtlasEntry, FontRenderer, ShapedGlyph};
+
+use crate::gpu_types::TextInstance;
 
 /// Convert shaped glyphs to TextInstances with atlas coordinates.
 ///
@@ -36,6 +38,22 @@ pub fn glyphs_to_instances(
     color: Color,
 ) -> Vec<TextInstance> {
     let mut instances = Vec::with_capacity(glyphs.len());
+    glyphs_to_instances_into(font_renderer, glyphs, base_position, color, &mut instances);
+    instances
+}
+
+/// Convert shaped glyphs to TextInstances, appending to an existing Vec.
+///
+/// This is an optimized version that avoids allocating a new Vec each call.
+/// Use this when processing multiple text commands to reuse allocations.
+pub fn glyphs_to_instances_into(
+    font_renderer: &mut FontRenderer,
+    glyphs: &[ShapedGlyph],
+    base_position: Vec2,
+    color: Color,
+    out: &mut Vec<TextInstance>,
+) {
+    profile_function!();
     let atlas_size = font_renderer.atlas_size() as f32;
 
     for glyph in glyphs {
@@ -55,9 +73,8 @@ pub fn glyphs_to_instances(
             // Since placement.top is the distance FROM baseline TO top (positive = down),
             // we negate it to move FROM baseline UP to the top edge of the glyph.
             // This converts baseline-relative positioning to top-left positioning.
-            let screen_pos = base_position
-                + glyph.position
-                + Vec2::new(placement.left, -placement.top);
+            let screen_pos =
+                base_position + glyph.position + Vec2::new(placement.left, -placement.top);
 
             // Convert atlas pixel coordinates to UV coordinates
             let atlas_uv_min = [
@@ -72,7 +89,7 @@ pub fn glyphs_to_instances(
             // Use placement dimensions for accurate glyph size
             let size = Vec2::new(placement.width, placement.height);
 
-            instances.push(TextInstance::new(
+            out.push(TextInstance::new(
                 screen_pos,
                 size,
                 atlas_uv_min,
@@ -82,8 +99,6 @@ pub fn glyphs_to_instances(
         }
         // Skip glyphs that fail to rasterize (whitespace, missing glyphs, etc.)
     }
-
-    instances
 }
 
 /// Convert a single glyph to a TextInstance.
@@ -100,8 +115,7 @@ pub fn glyph_to_instance(
 
     // Calculate screen position with placement offsets for correct baseline alignment.
     // The -placement.top converts from baseline-relative to top-left positioning.
-    let screen_pos =
-        base_position + glyph.position + Vec2::new(placement.left, -placement.top);
+    let screen_pos = base_position + glyph.position + Vec2::new(placement.left, -placement.top);
 
     let atlas_uv_min = [
         atlas_entry.x as f32 / atlas_size,

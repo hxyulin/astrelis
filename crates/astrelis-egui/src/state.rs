@@ -58,6 +58,7 @@ impl State {
     }
 
     pub fn take_input(&mut self, window: &RenderableWindow) -> egui::RawInput {
+        profile_function!();
         let screen_size_in_pixels = screen_size_in_pixels(window);
         let screen_size_in_points = screen_size_in_pixels / pixels_per_point(&self.context, window);
 

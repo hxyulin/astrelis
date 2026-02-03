@@ -1,16 +1,18 @@
 //! UI tree structure with Taffy layout integration.
 
-use crate::auto_dirty::StyleGuard;
+use crate::dirty::{DirtyCounters, DirtyFlags, StyleGuard};
 use crate::constraint_resolver::{ConstraintResolver, ResolveContext};
-use crate::dirty::DirtyFlags;
+#[cfg(feature = "docking")]
+use crate::widgets::docking::{DockSplitter, DockTabs};
 use crate::metrics::{DirtyStats, MetricsTimer, UiMetrics};
 use crate::style::Style;
-use astrelis_text::ShapedTextData;
+use crate::plugin::registry::WidgetTypeRegistry;
 use crate::widgets::Widget;
 use astrelis_core::alloc::HashSet;
 use astrelis_core::math::Vec2;
 use astrelis_core::profiling::{profile_function, profile_scope};
 use astrelis_text::FontRenderer;
+use astrelis_text::ShapedTextData;
 use indexmap::IndexMap;
 use std::sync::Arc;
 use taffy::{TaffyTree, prelude::*};
@@ -45,6 +47,25 @@ impl LayoutRect {
     }
 }
 
+#[cfg(feature = "docking")]
+/// Internal enum for collecting docking layout info before processing.
+enum DockingLayoutInfo {
+    Splitter {
+        children: Vec<NodeId>,
+        direction: crate::widgets::docking::SplitDirection,
+        split_ratio: f32,
+        separator_size: f32,
+        parent_layout: LayoutRect,
+    },
+    Tabs {
+        children: Vec<NodeId>,
+        active_tab: usize,
+        tab_bar_height: f32,
+        content_padding: f32,
+        parent_layout: LayoutRect,
+    },
+}
+
 /// A node in the UI tree.
 pub struct UiNode {
     pub widget: Box<dyn Widget>,
@@ -77,7 +98,7 @@ impl UiNode {
             // Invalidate text cache when text changes
             self.text_cache = None;
         }
-        if flags.intersects(DirtyFlags::COLOR_ONLY | DirtyFlags::OPACITY_ONLY) {
+        if flags.intersects(DirtyFlags::COLOR | DirtyFlags::OPACITY) {
             self.paint_version = self.paint_version.wrapping_add(1);
         }
     }
@@ -97,6 +118,13 @@ pub struct UiTree {
     last_metrics: Option<UiMetrics>,
     /// Nodes with viewport-dependent constraints (vw, vh, vmin, vmax, calc, min, max, clamp)
     viewport_constraint_nodes: HashSet<NodeId>,
+    /// Nodes removed since the last drain (for renderer cleanup).
+    removed_nodes: Vec<NodeId>,
+    /// O(1) dirty state counters.
+    dirty_counters: DirtyCounters,
+    /// Global content padding for docking tab panels (set from DockingStyle before layout).
+    #[cfg(feature = "docking")]
+    docking_content_padding: f32,
 }
 
 impl UiTree {
@@ -111,7 +139,17 @@ impl UiTree {
             dirty_roots: HashSet::new(),
             last_metrics: None,
             viewport_constraint_nodes: HashSet::new(),
+            removed_nodes: Vec::new(),
+            dirty_counters: DirtyCounters::new(),
+            #[cfg(feature = "docking")]
+            docking_content_padding: 4.0,
         }
+    }
+
+    /// Set the global docking content padding (called before layout from DockingStyle).
+    #[cfg(feature = "docking")]
+    pub fn set_docking_content_padding(&mut self, padding: f32) {
+        self.docking_content_padding = padding;
     }
 
     /// Add a widget to the tree and return its NodeId.
@@ -140,7 +178,7 @@ impl UiTree {
                 width: 0.0,
                 height: 0.0,
             },
-            dirty_flags: DirtyFlags::LAYOUT | DirtyFlags::STYLE,
+            dirty_flags: DirtyFlags::NONE,
             parent: None,
             children: Vec::new(),
             text_measurement: None,
@@ -151,7 +189,7 @@ impl UiTree {
         };
 
         self.nodes.insert(node_id, ui_node);
-        self.mark_dirty_flags(node_id, DirtyFlags::LAYOUT | DirtyFlags::STYLE);
+        self.mark_dirty_flags(node_id, DirtyFlags::LAYOUT);
 
         node_id
     }
@@ -212,8 +250,8 @@ impl UiTree {
     /// Check if a node is a layout boundary (fixed size).
     fn is_layout_boundary(node: &UiNode) -> bool {
         let style = &node.widget.style().layout;
-        matches!(style.size.width, Dimension::Length(_)) && 
-        matches!(style.size.height, Dimension::Length(_))
+        matches!(style.size.width, Dimension::Length(_))
+            && matches!(style.size.height, Dimension::Length(_))
     }
 
     /// Mark a node with specific dirty flags and propagate to ancestors if needed.
@@ -224,87 +262,216 @@ impl UiTree {
             return;
         }
 
+        let needs_propagation = self.mark_node_dirty_inner(node_id, flags);
+
+        // Propagate to ancestors if needed
+        if needs_propagation {
+            self.propagate_dirty_to_ancestors(node_id, flags);
+        }
+    }
+
+    /// Inner dirty marking: sets flags, bumps versions, notifies Taffy.
+    /// Returns `true` if ancestor propagation is needed.
+    fn mark_node_dirty_inner(&mut self, node_id: NodeId, flags: DirtyFlags) -> bool {
         self.dirty_nodes.insert(node_id);
 
-        // Mark node with flags and bump versions
-        if let Some(node) = self.nodes.get_mut(&node_id) {
-            node.dirty_flags |= flags;
+        let Some(node) = self.nodes.get_mut(&node_id) else {
+            return false;
+        };
 
-            // Notify Taffy of changes
-            if flags.intersects(DirtyFlags::LAYOUT | DirtyFlags::CHILDREN_ORDER | DirtyFlags::TEXT_SHAPING) {
-                 self.taffy.mark_dirty(node.taffy_node).ok();
+        let old_flags = node.dirty_flags;
+        node.dirty_flags |= flags;
+        self.dirty_counters.on_mark(old_flags, flags);
+
+        // Notify Taffy of changes
+        if flags.intersects(
+            DirtyFlags::LAYOUT | DirtyFlags::CHILDREN_ORDER | DirtyFlags::TEXT_SHAPING,
+        ) {
+            self.taffy.mark_dirty(node.taffy_node).ok();
+        }
+
+        // Bump version counters
+        if flags.intersects(DirtyFlags::LAYOUT | DirtyFlags::CHILDREN_ORDER) {
+            node.layout_version = node.layout_version.wrapping_add(1);
+            // Layout changes can affect text wrapping width, invalidate measurement
+            node.text_measurement = None;
+        }
+        if flags.contains(DirtyFlags::TEXT_SHAPING) {
+            node.text_version = node.text_version.wrapping_add(1);
+            node.text_measurement = None; // Invalidate measurement cache
+            node.text_cache = None; // Invalidate shaped text cache
+        }
+        if flags.intersects(
+            DirtyFlags::COLOR
+                | DirtyFlags::OPACITY
+                | DirtyFlags::GEOMETRY
+                | DirtyFlags::IMAGE
+                | DirtyFlags::FOCUS
+                | DirtyFlags::SCROLL,
+        ) {
+            node.paint_version = node.paint_version.wrapping_add(1);
+        }
+        if flags.contains(DirtyFlags::VISIBILITY) {
+            node.layout_version = node.layout_version.wrapping_add(1);
+        }
+
+        flags.should_propagate_to_parent()
+    }
+
+    /// Propagate dirty flags from a node up to its ancestors.
+    fn propagate_dirty_to_ancestors(&mut self, node_id: NodeId, flags: DirtyFlags) {
+        let propagation_flags = flags.propagation_flags();
+
+        let Some(node) = self.nodes.get(&node_id) else {
+            return;
+        };
+
+        // Check if this node is a layout boundary
+        if Self::is_layout_boundary(node) {
+            self.dirty_roots.insert(node_id);
+            return;
+        }
+
+        let mut current_parent = node.parent;
+
+        while let Some(parent_id) = current_parent {
+            if !self.dirty_nodes.insert(parent_id) {
+                // Already marked, check if we need to add more flags
+                if let Some(parent_node) = self.nodes.get(&parent_id)
+                    && parent_node.dirty_flags.contains(propagation_flags)
+                {
+                    // Already has these flags, stop propagation
+                    break;
+                }
             }
 
-            // Bump version counters
-            if flags.intersects(DirtyFlags::LAYOUT | DirtyFlags::CHILDREN_ORDER | DirtyFlags::STYLE)
-            {
-                node.layout_version = node.layout_version.wrapping_add(1);
-            }
-            if flags.contains(DirtyFlags::TEXT_SHAPING) {
-                node.text_version = node.text_version.wrapping_add(1);
-                node.text_measurement = None; // Invalidate measurement cache
-                node.text_cache = None; // Invalidate shaped text cache
-            }
-            if flags.intersects(
-                DirtyFlags::COLOR_ONLY | DirtyFlags::OPACITY_ONLY | DirtyFlags::GEOMETRY,
-            ) {
-                node.paint_version = node.paint_version.wrapping_add(1);
-            }
+            if let Some(parent_node) = self.nodes.get_mut(&parent_id) {
+                parent_node.dirty_flags |= propagation_flags;
+                if propagation_flags.contains(DirtyFlags::LAYOUT) {
+                    parent_node.layout_version = parent_node.layout_version.wrapping_add(1);
+                }
 
-            // Propagate to ancestors if needed
-            if flags.should_propagate_to_parent() {
-                let propagation_flags = flags.propagation_flags();
-                
-                // Check if this node is a layout boundary
-                let is_boundary = Self::is_layout_boundary(node);
-
-                if is_boundary {
-                    self.dirty_roots.insert(node_id);
+                if Self::is_layout_boundary(parent_node) {
+                    self.dirty_roots.insert(parent_id);
                     return;
                 }
 
-                let mut current_parent = node.parent;
-
-                while let Some(parent_id) = current_parent {
-                    if !self.dirty_nodes.insert(parent_id) {
-                        // Already marked, check if we need to add more flags
-                        if let Some(parent_node) = self.nodes.get(&parent_id)
-                            && parent_node.dirty_flags.contains(propagation_flags) {
-                                // Already has these flags, stop propagation
-                                break;
-                            }
-                    }
-
-                    if let Some(parent_node) = self.nodes.get_mut(&parent_id) {
-                        parent_node.dirty_flags |= propagation_flags;
-                        if propagation_flags.contains(DirtyFlags::LAYOUT) {
-                            parent_node.layout_version = parent_node.layout_version.wrapping_add(1);
-                        }
-                        
-                        if Self::is_layout_boundary(parent_node) {
-                            self.dirty_roots.insert(parent_id);
-                            return;
-                        }
-
-                        current_parent = parent_node.parent;
-                    } else {
-                        break;
-                    }
-                }
-                
-                // If we reached here, we hit the top without a boundary.
-                if let Some(root) = self.root
-                    && self.dirty_nodes.contains(&root) {
-                        self.dirty_roots.insert(root);
-                    }
+                current_parent = parent_node.parent;
+            } else {
+                break;
             }
+        }
+
+        // If we reached here, we hit the top without a boundary.
+        if let Some(root) = self.root
+            && self.dirty_nodes.contains(&root)
+        {
+            self.dirty_roots.insert(root);
+        }
+    }
+
+    /// Mark multiple nodes dirty in a batch with deduplicated ancestor propagation.
+    ///
+    /// This is more efficient than calling `mark_dirty_flags` in a loop when
+    /// multiple sibling nodes need marking, since ancestor walks are deduplicated.
+    pub fn mark_dirty_batch(&mut self, updates: &[(NodeId, DirtyFlags)]) {
+        profile_function!();
+
+        if updates.is_empty() {
+            return;
+        }
+
+        // Phase 1: Mark all flags, counters, versions (no propagation)
+        // Collect nodes that need ancestor propagation
+        let mut needs_propagation: Vec<(NodeId, DirtyFlags)> = Vec::new();
+        for &(node_id, flags) in updates {
+            if flags.is_empty() {
+                continue;
+            }
+            let needs_prop = self.mark_node_dirty_inner(node_id, flags);
+            if needs_prop {
+                needs_propagation.push((node_id, flags));
+            }
+        }
+
+        // Phase 2: Deduplicated ancestor propagation
+        // Nodes already in dirty_nodes with the right propagation flags will short-circuit
+        // the walk, so siblings sharing ancestors naturally deduplicate.
+        for (node_id, flags) in needs_propagation {
+            self.propagate_dirty_to_ancestors(node_id, flags);
+        }
+    }
+
+    /// Mark all nodes with the same dirty flags efficiently.
+    ///
+    /// This is a fast path for operations like theme changes where every node
+    /// gets the same flags. For non-propagating flags (COLOR, OPACITY, etc.),
+    /// this skips all ancestor logic and does a simple O(N) pass.
+    pub fn mark_all_dirty_uniform(&mut self, flags: DirtyFlags) {
+        profile_function!();
+
+        if flags.is_empty() {
+            return;
+        }
+
+        let needs_propagation = flags.should_propagate_to_parent();
+
+        // Fast path: iterate all nodes directly, mark flags and bump versions
+        for (&node_id, node) in self.nodes.iter_mut() {
+            let old_flags = node.dirty_flags;
+            node.dirty_flags |= flags;
+            self.dirty_counters.on_mark(old_flags, flags);
+            self.dirty_nodes.insert(node_id);
+
+            // Notify Taffy if needed
+            if flags.intersects(
+                DirtyFlags::LAYOUT | DirtyFlags::CHILDREN_ORDER | DirtyFlags::TEXT_SHAPING,
+            ) {
+                self.taffy.mark_dirty(node.taffy_node).ok();
+            }
+
+            // Bump version counters
+            if flags.intersects(DirtyFlags::LAYOUT | DirtyFlags::CHILDREN_ORDER) {
+                node.layout_version = node.layout_version.wrapping_add(1);
+                node.text_measurement = None;
+            }
+            if flags.contains(DirtyFlags::TEXT_SHAPING) {
+                node.text_version = node.text_version.wrapping_add(1);
+                node.text_measurement = None;
+                node.text_cache = None;
+            }
+            if flags.intersects(
+                DirtyFlags::COLOR
+                    | DirtyFlags::OPACITY
+                    | DirtyFlags::GEOMETRY
+                    | DirtyFlags::IMAGE
+                    | DirtyFlags::FOCUS
+                    | DirtyFlags::SCROLL,
+            ) {
+                node.paint_version = node.paint_version.wrapping_add(1);
+            }
+            if flags.contains(DirtyFlags::VISIBILITY) {
+                node.layout_version = node.layout_version.wrapping_add(1);
+            }
+        }
+
+        // For propagating flags, mark the root as dirty root since all nodes are dirty
+        if needs_propagation
+            && let Some(root) = self.root
+        {
+            self.dirty_roots.insert(root);
         }
     }
 
     /// Clear all dirty flags after rendering (called by renderer).
+    ///
+    /// Only iterates the dirty nodes set rather than all nodes for O(dirty) complexity.
     pub fn clear_dirty_flags(&mut self) {
-        for node in self.nodes.values_mut() {
-            node.dirty_flags = DirtyFlags::NONE;
+        for &node_id in &self.dirty_nodes {
+            if let Some(node) = self.nodes.get_mut(&node_id) {
+                self.dirty_counters.on_clear(node.dirty_flags);
+                node.dirty_flags = DirtyFlags::NONE;
+            }
         }
         self.dirty_nodes.clear();
         self.dirty_roots.clear();
@@ -335,16 +502,32 @@ impl UiTree {
         !self.dirty_nodes.is_empty()
     }
 
-    /// Check if any node needs layout recomputation.
+    /// O(1) check: any node needs layout recomputation?
     pub fn has_layout_dirty(&self) -> bool {
-        self.nodes.values().any(|n| n.dirty_flags.needs_layout())
+        self.dirty_counters.has_layout_dirty()
     }
 
-    /// Check if any node needs text shaping.
+    /// O(1) check: any node needs text shaping?
     pub fn has_text_dirty(&self) -> bool {
-        self.nodes
-            .values()
-            .any(|n| n.dirty_flags.needs_text_shaping())
+        self.dirty_counters.has_text_dirty()
+    }
+
+    /// Get a snapshot of current dirty counter state (for metrics).
+    pub fn dirty_summary(&self) -> crate::dirty::DirtySummary {
+        self.dirty_counters.summary()
+    }
+
+    /// Get the dirty roots for selective tree traversal.
+    ///
+    /// Dirty roots are the topmost nodes in dirty subtrees. Starting traversal
+    /// from these nodes allows skipping clean subtrees entirely.
+    pub fn dirty_roots(&self) -> &HashSet<NodeId> {
+        &self.dirty_roots
+    }
+
+    /// Get the set of all dirty nodes.
+    pub fn dirty_nodes(&self) -> &HashSet<NodeId> {
+        &self.dirty_nodes
     }
 
     /// Get the last computed metrics.
@@ -410,14 +593,14 @@ impl UiTree {
 
     /// Update color with automatic dirty marking.
     ///
-    /// Marks COLOR_ONLY flag (doesn't require layout recomputation).
+    /// Marks COLOR flag (doesn't require layout recomputation).
     pub fn update_color(&mut self, node_id: NodeId, new_color: astrelis_render::Color) -> bool {
         if let Some(node) = self.nodes.get_mut(&node_id) {
             let old_color = node.widget.style().background_color;
             node.widget.style_mut().background_color = Some(new_color);
 
             if old_color != Some(new_color) {
-                self.mark_dirty_flags(node_id, DirtyFlags::COLOR_ONLY);
+                self.mark_dirty_flags(node_id, DirtyFlags::COLOR);
                 return true;
             }
         }
@@ -426,11 +609,11 @@ impl UiTree {
 
     /// Update opacity with automatic dirty marking.
     ///
-    /// Marks OPACITY_ONLY flag (doesn't require layout recomputation).
+    /// Marks OPACITY flag (doesn't require layout recomputation).
     pub fn update_opacity(&mut self, node_id: NodeId, _opacity: f32) -> bool {
         // Store opacity in a future opacity field or as part of color alpha
         // For now, mark the flag to demonstrate the pattern
-        self.mark_dirty_flags(node_id, DirtyFlags::OPACITY_ONLY);
+        self.mark_dirty_flags(node_id, DirtyFlags::OPACITY);
         true
     }
 
@@ -440,6 +623,7 @@ impl UiTree {
         &mut self,
         viewport_size: astrelis_core::geometry::Size<f32>,
         font_renderer: Option<&FontRenderer>,
+        widget_registry: &WidgetTypeRegistry,
     ) -> UiMetrics {
         profile_function!();
 
@@ -473,7 +657,7 @@ impl UiTree {
         }
 
         let layout_timer = MetricsTimer::start();
-        self.compute_layout_internal(viewport_size, font_renderer);
+        self.compute_layout_internal(viewport_size, font_renderer, widget_registry);
         metrics.layout_time = layout_timer.stop();
 
         metrics.total_time = total_timer.stop();
@@ -482,7 +666,12 @@ impl UiTree {
     }
 
     /// Compute layout (standard API without metrics).
-    pub fn compute_layout(&mut self, size: astrelis_core::geometry::Size<f32>, font_renderer: Option<&FontRenderer>) {
+    pub fn compute_layout(
+        &mut self,
+        size: astrelis_core::geometry::Size<f32>,
+        font_renderer: Option<&FontRenderer>,
+        widget_registry: &WidgetTypeRegistry,
+    ) {
         profile_function!();
 
         // Skip if nothing to do
@@ -496,161 +685,292 @@ impl UiTree {
             return;
         }
 
-        self.compute_layout_internal(size, font_renderer);
+        self.compute_layout_internal(size, font_renderer, widget_registry);
         // Don't clear flags here - renderer will clear them after processing
     }
 
     /// Internal layout computation implementation.
+    ///
+    /// Always computes layout from the tree root to ensure correct absolute positioning.
+    /// The subtree optimization was removed because it caused positioning bugs when
+    /// layout boundaries (fixed-size nodes) stopped dirty propagation but Taffy computed
+    /// positions relative to subtree roots instead of the tree root.
     fn compute_layout_internal(
         &mut self,
         viewport_size: astrelis_core::geometry::Size<f32>,
         font_renderer: Option<&FontRenderer>,
+        widget_registry: &WidgetTypeRegistry,
     ) {
         profile_scope!("compute_layout_internal");
 
         // Resolve viewport-relative units before layout computation
         self.resolve_viewport_units(viewport_size);
 
-        // If no dirty roots but dirty nodes exist, default to root
-        if self.dirty_roots.is_empty() && !self.dirty_nodes.is_empty()
-             && let Some(root) = self.root {
-                 self.dirty_roots.insert(root);
-             }
+        // Always compute layout from tree root for correct positioning
+        let Some(root_id) = self.root else { return };
+        let Some(root_node) = self.nodes.get(&root_id) else {
+            return;
+        };
+        let root_taffy_node = root_node.taffy_node;
 
-        // Filter redundant roots (keep only top-most)
-        let mut roots_to_process: Vec<NodeId> = Vec::new();
-        let dirty_roots_vec: Vec<NodeId> = self.dirty_roots.iter().copied().collect();
-        
-        for &root_id in &dirty_roots_vec {
-            let mut is_redundant = false;
-            if let Some(node) = self.nodes.get(&root_id) {
-                let mut current = node.parent;
-                while let Some(parent_id) = current {
-                    if self.dirty_roots.contains(&parent_id) {
-                        is_redundant = true;
-                        break;
-                    }
-                    if let Some(parent) = self.nodes.get(&parent_id) {
-                        current = parent.parent;
-                    } else {
-                        break;
-                    }
-                }
-            }
-            if !is_redundant {
-                roots_to_process.push(root_id);
-            }
-        }
-
-        // Store previous positions for subtree roots to prevent them from jumping to (0,0)
-        // when Taffy computes layout relative to the subtree root.
-        let mut restored_positions: Vec<(NodeId, f32, f32)> = Vec::new();
-        for &root_id in &roots_to_process {
-             if Some(root_id) != self.root
-                 && let Some(node) = self.nodes.get(&root_id) {
-                     restored_positions.push((root_id, node.layout.x, node.layout.y));
-                 }
-        }
+        let available_space = Size {
+            width: AvailableSpace::Definite(viewport_size.width),
+            height: AvailableSpace::Definite(viewport_size.height),
+        };
 
         let nodes_ptr = &mut self.nodes as *mut IndexMap<NodeId, UiNode>;
 
-        for root_id in roots_to_process {
-            let Some(root_node) = self.nodes.get(&root_id) else { continue };
-            let root_taffy_node = root_node.taffy_node;
-            
-            let available_space = if Some(root_id) == self.root {
+        let measure_func = |known_dimensions: Size<Option<f32>>,
+                            available_space: Size<AvailableSpace>,
+                            node_id: taffy::NodeId,
+                            _node_context: Option<&mut ()>,
+                            _style: &taffy::Style|
+         -> Size<f32> {
+            // SAFETY: nodes_ptr is valid during layout computation
+            let nodes = unsafe { &mut *nodes_ptr };
+
+            let (widget, cached_measurement) = nodes
+                .values_mut()
+                .find(|node| node.taffy_node == node_id)
+                .map(|node| (&node.widget, &mut node.text_measurement))
+                .unzip();
+
+            if let (Some(widget), Some(cached_measurement)) = (widget, cached_measurement) {
+                if let Some((cached_w, cached_h)) = *cached_measurement {
+                    return Size {
+                        width: known_dimensions.width.unwrap_or(cached_w),
+                        height: known_dimensions.height.unwrap_or(cached_h),
+                    };
+                }
+
+                let available = Vec2::new(
+                    match available_space.width {
+                        AvailableSpace::Definite(w) => w,
+                        AvailableSpace::MinContent => 0.0,
+                        AvailableSpace::MaxContent => f32::MAX,
+                    },
+                    match available_space.height {
+                        AvailableSpace::Definite(h) => h,
+                        AvailableSpace::MinContent => 0.0,
+                        AvailableSpace::MaxContent => f32::MAX,
+                    },
+                );
+
+                let measured = widget.measure(available, font_renderer);
+
+                // Cache measurement for widget types that opt in (e.g. Text)
+                if widget_registry.caches_measurement(widget.as_any().type_id()) {
+                    *cached_measurement = Some((measured.x, measured.y));
+                }
+
                 Size {
-                    width: AvailableSpace::Definite(viewport_size.width),
-                    height: AvailableSpace::Definite(viewport_size.height),
+                    width: known_dimensions.width.unwrap_or(measured.x),
+                    height: known_dimensions.height.unwrap_or(measured.y),
                 }
             } else {
-                let style = &root_node.widget.style().layout;
-                let width = match style.size.width {
-                    Dimension::Length(l) => l,
-                    _ => 0.0,
-                };
-                let height = match style.size.height {
-                    Dimension::Length(l) => l,
-                    _ => 0.0,
-                };
-                
                 Size {
-                    width: AvailableSpace::Definite(width),
-                    height: AvailableSpace::Definite(height),
+                    width: known_dimensions.width.unwrap_or(0.0),
+                    height: known_dimensions.height.unwrap_or(0.0),
                 }
+            }
+        };
+
+        self.taffy
+            .compute_layout_with_measure(root_taffy_node, available_space, measure_func)
+            .ok();
+
+        // Update ALL nodes from tree root
+        self.update_subtree_layout(root_id);
+
+        // Post-process docking widgets to override child layouts
+        #[cfg(feature = "docking")]
+        self.post_process_docking_layouts(root_id);
+    }
+
+    /// Post-process layouts for DockSplitter and DockTabs widgets.
+    ///
+    /// These widgets have custom layout logic that can't be expressed in Taffy:
+    /// - DockSplitter: positions children based on split ratio
+    /// - DockTabs: children fill the content area below the tab bar
+    ///
+    /// This function recursively processes the tree from root to ensure
+    /// parent layouts are computed before children (important for nested docking).
+    #[cfg(feature = "docking")]
+    fn post_process_docking_layouts(&mut self, node_id: NodeId) {
+        profile_scope!("post_process_docking_layouts");
+
+        // Get info for this node first
+        let info = {
+            let Some(node) = self.nodes.get(&node_id) else {
+                return;
             };
 
-            let measure_func = |known_dimensions: Size<Option<f32>>,
-                                available_space: Size<AvailableSpace>,
-                                node_id: taffy::NodeId,
-                                _node_context: Option<&mut ()>,
-                                _style: &taffy::Style|
-             -> Size<f32> {
-                // SAFETY: nodes_ptr is valid during layout computation
-                let nodes = unsafe { &mut *nodes_ptr };
+            node.widget
+                .as_any()
+                .downcast_ref::<DockSplitter>()
+                .map(|splitter| DockingLayoutInfo::Splitter {
+                    children: splitter.children.clone(),
+                    direction: splitter.direction,
+                    split_ratio: splitter.split_ratio,
+                    separator_size: splitter.separator_size,
+                    parent_layout: node.layout,
+                })
+                .or_else(|| {
+                    node.widget.as_any().downcast_ref::<DockTabs>().map(|tabs| {
+                        let content_padding = tabs
+                            .content_padding
+                            .unwrap_or(self.docking_content_padding);
+                        DockingLayoutInfo::Tabs {
+                            children: tabs.children.clone(),
+                            active_tab: tabs.active_tab,
+                            tab_bar_height: tabs.theme.tab_bar_height,
+                            content_padding,
+                            parent_layout: node.layout,
+                        }
+                    })
+                })
+        };
 
-                let (widget, cached_measurement) = nodes
-                    .values_mut()
-                    .find(|node| node.taffy_node == node_id)
-                    .map(|node| (&node.widget, &mut node.text_measurement))
-                    .unzip();
+        // Apply layout if this is a docking widget
+        let children_to_recurse = match info {
+            Some(DockingLayoutInfo::Splitter {
+                children,
+                direction,
+                split_ratio,
+                separator_size,
+                parent_layout,
+            }) => {
+                self.apply_splitter_layout(
+                    children.clone(),
+                    direction,
+                    split_ratio,
+                    separator_size,
+                    parent_layout,
+                );
+                children
+            }
+            Some(DockingLayoutInfo::Tabs {
+                children,
+                active_tab,
+                tab_bar_height,
+                content_padding,
+                parent_layout,
+            }) => {
+                self.apply_tabs_layout(
+                    children.clone(),
+                    active_tab,
+                    tab_bar_height,
+                    content_padding,
+                    parent_layout,
+                );
+                children
+            }
+            None => {
+                // Not a docking widget, get regular children
+                let Some(node) = self.nodes.get(&node_id) else {
+                    return;
+                };
+                node.children.clone()
+            }
+        };
 
-                if let (Some(widget), Some(cached_measurement)) = (widget, cached_measurement) {
-                    if let Some((cached_w, cached_h)) = *cached_measurement {
-                        return Size {
-                            width: known_dimensions.width.unwrap_or(cached_w),
-                            height: known_dimensions.height.unwrap_or(cached_h),
-                        };
-                    }
+        // Recursively process children
+        for child_id in children_to_recurse {
+            self.post_process_docking_layouts(child_id);
+        }
+    }
 
-                    let available = Vec2::new(
-                        match available_space.width {
-                            AvailableSpace::Definite(w) => w,
-                            AvailableSpace::MinContent => 0.0,
-                            AvailableSpace::MaxContent => f32::MAX,
-                        },
-                        match available_space.height {
-                            AvailableSpace::Definite(h) => h,
-                            AvailableSpace::MinContent => 0.0,
-                            AvailableSpace::MaxContent => f32::MAX,
-                        },
-                    );
-
-                    let measured = widget.measure(available, font_renderer);
-
-                    if widget
-                        .as_any()
-                        .downcast_ref::<crate::widgets::Text>()
-                        .is_some()
-                    {
-                        *cached_measurement = Some((measured.x, measured.y));
-                    }
-
-                    Size {
-                        width: known_dimensions.width.unwrap_or(measured.x),
-                        height: known_dimensions.height.unwrap_or(measured.y),
-                    }
-                } else {
-                    Size {
-                        width: known_dimensions.width.unwrap_or(0.0),
-                        height: known_dimensions.height.unwrap_or(0.0),
-                    }
-                }
-            };
-
-            self.taffy
-                .compute_layout_with_measure(root_taffy_node, available_space, measure_func)
-                .ok();
-            
-            // Update layout for this subtree immediately
-            self.update_subtree_layout(root_id);
+    /// Apply layout to DockSplitter children.
+    #[cfg(feature = "docking")]
+    fn apply_splitter_layout(
+        &mut self,
+        children: Vec<NodeId>,
+        direction: crate::widgets::docking::SplitDirection,
+        split_ratio: f32,
+        separator_size: f32,
+        parent_layout: LayoutRect,
+    ) {
+        if children.len() < 2 {
+            return;
         }
 
-        // Restore positions for subtree roots
-        for (id, x, y) in restored_positions {
-            if let Some(node) = self.nodes.get_mut(&id) {
-                node.layout.x = x;
-                node.layout.y = y;
+        let half_sep = separator_size / 2.0;
+
+        match direction {
+            crate::widgets::docking::SplitDirection::Horizontal => {
+                // Left/Right split
+                let split_x = parent_layout.width * split_ratio;
+
+                // First child (left)
+                if let Some(node) = self.nodes.get_mut(&children[0]) {
+                    node.layout = LayoutRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: (split_x - half_sep).max(0.0),
+                        height: parent_layout.height,
+                    };
+                }
+
+                // Second child (right)
+                if let Some(node) = self.nodes.get_mut(&children[1]) {
+                    node.layout = LayoutRect {
+                        x: split_x + half_sep,
+                        y: 0.0,
+                        width: (parent_layout.width - split_x - half_sep).max(0.0),
+                        height: parent_layout.height,
+                    };
+                }
+            }
+            crate::widgets::docking::SplitDirection::Vertical => {
+                // Top/Bottom split
+                let split_y = parent_layout.height * split_ratio;
+
+                // First child (top)
+                if let Some(node) = self.nodes.get_mut(&children[0]) {
+                    node.layout = LayoutRect {
+                        x: 0.0,
+                        y: 0.0,
+                        width: parent_layout.width,
+                        height: (split_y - half_sep).max(0.0),
+                    };
+                }
+
+                // Second child (bottom)
+                if let Some(node) = self.nodes.get_mut(&children[1]) {
+                    node.layout = LayoutRect {
+                        x: 0.0,
+                        y: split_y + half_sep,
+                        width: parent_layout.width,
+                        height: (parent_layout.height - split_y - half_sep).max(0.0),
+                    };
+                }
+            }
+        }
+    }
+
+    /// Apply layout to DockTabs children.
+    #[cfg(feature = "docking")]
+    fn apply_tabs_layout(
+        &mut self,
+        children: Vec<NodeId>,
+        _active_tab: usize,
+        tab_bar_height: f32,
+        content_padding: f32,
+        parent_layout: LayoutRect,
+    ) {
+        // Content area is below the tab bar, inset by content_padding on all sides
+        let content_layout = LayoutRect {
+            x: content_padding,
+            y: tab_bar_height + content_padding,
+            width: (parent_layout.width - content_padding * 2.0).max(0.0),
+            height: (parent_layout.height - tab_bar_height - content_padding * 2.0).max(0.0),
+        };
+
+        // All tab content children get the same layout (content area)
+        // The renderer will only show the active one
+        for child_id in &children {
+            if let Some(node) = self.nodes.get_mut(child_id) {
+                node.layout = content_layout;
             }
         }
     }
@@ -670,135 +990,131 @@ impl UiTree {
         let ctx = ResolveContext::viewport_only(viewport);
 
         // Collect nodes to avoid borrowing issues
-        let constraint_nodes: Vec<NodeId> = self.viewport_constraint_nodes.iter().copied().collect();
+        let constraint_nodes: Vec<NodeId> =
+            self.viewport_constraint_nodes.iter().copied().collect();
 
         for node_id in constraint_nodes {
             if let Some(node) = self.nodes.get_mut(&node_id) {
                 let style = node.widget.style_mut();
                 let mut changed = false;
 
-                // Resolve width
-                if let Some(ref constraint) = style.width_constraint {
-                    if constraint.needs_resolution() {
-                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
-                            style.layout.size.width = taffy::Dimension::Length(px);
-                            changed = true;
-                        }
+                // Get the constraints box if present
+                if let Some(ref constraints) = style.constraints {
+                    // Resolve width
+                    if let Some(ref constraint) = constraints.width
+                        && constraint.needs_resolution()
+                        && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
+                    {
+                        style.layout.size.width = taffy::Dimension::Length(px);
+                        changed = true;
                     }
-                }
 
-                // Resolve height
-                if let Some(ref constraint) = style.height_constraint {
-                    if constraint.needs_resolution() {
-                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
-                            style.layout.size.height = taffy::Dimension::Length(px);
-                            changed = true;
-                        }
+                    // Resolve height
+                    if let Some(ref constraint) = constraints.height
+                        && constraint.needs_resolution()
+                        && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
+                    {
+                        style.layout.size.height = taffy::Dimension::Length(px);
+                        changed = true;
                     }
-                }
 
-                // Resolve min_width
-                if let Some(ref constraint) = style.min_width_constraint {
-                    if constraint.needs_resolution() {
-                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
-                            style.layout.min_size.width = taffy::Dimension::Length(px);
-                            changed = true;
-                        }
+                    // Resolve min_width
+                    if let Some(ref constraint) = constraints.min_width
+                        && constraint.needs_resolution()
+                        && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
+                    {
+                        style.layout.min_size.width = taffy::Dimension::Length(px);
+                        changed = true;
                     }
-                }
 
-                // Resolve min_height
-                if let Some(ref constraint) = style.min_height_constraint {
-                    if constraint.needs_resolution() {
-                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
-                            style.layout.min_size.height = taffy::Dimension::Length(px);
-                            changed = true;
-                        }
+                    // Resolve min_height
+                    if let Some(ref constraint) = constraints.min_height
+                        && constraint.needs_resolution()
+                        && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
+                    {
+                        style.layout.min_size.height = taffy::Dimension::Length(px);
+                        changed = true;
                     }
-                }
 
-                // Resolve max_width
-                if let Some(ref constraint) = style.max_width_constraint {
-                    if constraint.needs_resolution() {
-                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
-                            style.layout.max_size.width = taffy::Dimension::Length(px);
-                            changed = true;
-                        }
+                    // Resolve max_width
+                    if let Some(ref constraint) = constraints.max_width
+                        && constraint.needs_resolution()
+                        && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
+                    {
+                        style.layout.max_size.width = taffy::Dimension::Length(px);
+                        changed = true;
                     }
-                }
 
-                // Resolve max_height
-                if let Some(ref constraint) = style.max_height_constraint {
-                    if constraint.needs_resolution() {
-                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
-                            style.layout.max_size.height = taffy::Dimension::Length(px);
-                            changed = true;
-                        }
+                    // Resolve max_height
+                    if let Some(ref constraint) = constraints.max_height
+                        && constraint.needs_resolution()
+                        && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
+                    {
+                        style.layout.max_size.height = taffy::Dimension::Length(px);
+                        changed = true;
                     }
-                }
 
-                // Resolve padding
-                if let Some(ref constraints) = style.padding_constraints {
-                    if constraints.iter().any(|c| c.needs_resolution()) {
-                        if let Some(px) = ConstraintResolver::resolve(&constraints[0], &ctx) {
+                    // Resolve padding
+                    if let Some(ref padding) = constraints.padding
+                        && padding.iter().any(|c| c.needs_resolution())
+                    {
+                        if let Some(px) = ConstraintResolver::resolve(&padding[0], &ctx) {
                             style.layout.padding.left = taffy::LengthPercentage::Length(px);
                             changed = true;
                         }
-                        if let Some(px) = ConstraintResolver::resolve(&constraints[1], &ctx) {
+                        if let Some(px) = ConstraintResolver::resolve(&padding[1], &ctx) {
                             style.layout.padding.top = taffy::LengthPercentage::Length(px);
                             changed = true;
                         }
-                        if let Some(px) = ConstraintResolver::resolve(&constraints[2], &ctx) {
+                        if let Some(px) = ConstraintResolver::resolve(&padding[2], &ctx) {
                             style.layout.padding.right = taffy::LengthPercentage::Length(px);
                             changed = true;
                         }
-                        if let Some(px) = ConstraintResolver::resolve(&constraints[3], &ctx) {
+                        if let Some(px) = ConstraintResolver::resolve(&padding[3], &ctx) {
                             style.layout.padding.bottom = taffy::LengthPercentage::Length(px);
                             changed = true;
                         }
                     }
-                }
 
-                // Resolve margin
-                if let Some(ref constraints) = style.margin_constraints {
-                    if constraints.iter().any(|c| c.needs_resolution()) {
-                        if let Some(px) = ConstraintResolver::resolve(&constraints[0], &ctx) {
+                    // Resolve margin
+                    if let Some(ref margin) = constraints.margin
+                        && margin.iter().any(|c| c.needs_resolution())
+                    {
+                        if let Some(px) = ConstraintResolver::resolve(&margin[0], &ctx) {
                             style.layout.margin.left = taffy::LengthPercentageAuto::Length(px);
                             changed = true;
                         }
-                        if let Some(px) = ConstraintResolver::resolve(&constraints[1], &ctx) {
+                        if let Some(px) = ConstraintResolver::resolve(&margin[1], &ctx) {
                             style.layout.margin.top = taffy::LengthPercentageAuto::Length(px);
                             changed = true;
                         }
-                        if let Some(px) = ConstraintResolver::resolve(&constraints[2], &ctx) {
+                        if let Some(px) = ConstraintResolver::resolve(&margin[2], &ctx) {
                             style.layout.margin.right = taffy::LengthPercentageAuto::Length(px);
                             changed = true;
                         }
-                        if let Some(px) = ConstraintResolver::resolve(&constraints[3], &ctx) {
+                        if let Some(px) = ConstraintResolver::resolve(&margin[3], &ctx) {
                             style.layout.margin.bottom = taffy::LengthPercentageAuto::Length(px);
                             changed = true;
                         }
                     }
-                }
 
-                // Resolve gap
-                if let Some(ref constraint) = style.gap_constraint {
-                    if constraint.needs_resolution() {
-                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
-                            style.layout.gap.width = taffy::LengthPercentage::Length(px);
-                            style.layout.gap.height = taffy::LengthPercentage::Length(px);
-                            changed = true;
-                        }
+                    // Resolve gap
+                    if let Some(ref constraint) = constraints.gap
+                        && constraint.needs_resolution()
+                        && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
+                    {
+                        style.layout.gap.width = taffy::LengthPercentage::Length(px);
+                        style.layout.gap.height = taffy::LengthPercentage::Length(px);
+                        changed = true;
                     }
-                }
 
-                // Resolve flex_basis
-                if let Some(ref constraint) = style.flex_basis_constraint {
-                    if constraint.needs_resolution() {
-                        if let Some(px) = ConstraintResolver::resolve(constraint, &ctx) {
-                            style.layout.flex_basis = taffy::Dimension::Length(px);
-                            changed = true;
-                        }
+                    // Resolve flex_basis
+                    if let Some(ref constraint) = constraints.flex_basis
+                        && constraint.needs_resolution()
+                        && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
+                    {
+                        style.layout.flex_basis = taffy::Dimension::Length(px);
+                        changed = true;
                     }
                 }
 
@@ -817,11 +1133,17 @@ impl UiTree {
     ///
     /// Called when viewport size changes to trigger re-resolution of viewport units.
     pub fn mark_viewport_dirty(&mut self) {
-        // Collect IDs to avoid borrowing issues
-        let node_ids: Vec<NodeId> = self.viewport_constraint_nodes.iter().copied().collect();
-        for node_id in node_ids {
-            self.mark_dirty_flags(node_id, DirtyFlags::LAYOUT);
-        }
+        let updates: Vec<(NodeId, DirtyFlags)> = self
+            .viewport_constraint_nodes
+            .iter()
+            .map(|&id| (id, DirtyFlags::LAYOUT))
+            .collect();
+        self.mark_dirty_batch(&updates);
+    }
+
+    /// Mark all nodes with the given dirty flags.
+    pub fn mark_all_dirty(&mut self, flags: DirtyFlags) {
+        self.mark_all_dirty_uniform(flags);
     }
 
     /// Cache layout results from Taffy into our nodes.
@@ -831,18 +1153,19 @@ impl UiTree {
 
         for node_id in node_ids {
             if let Some(node) = self.nodes.get(&node_id)
-                && let Ok(layout) = self.taffy.layout(node.taffy_node) {
-                    let layout_rect = LayoutRect {
-                        x: layout.location.x,
-                        y: layout.location.y,
-                        width: layout.size.width,
-                        height: layout.size.height,
-                    };
+                && let Ok(layout) = self.taffy.layout(node.taffy_node)
+            {
+                let layout_rect = LayoutRect {
+                    x: layout.location.x,
+                    y: layout.location.y,
+                    width: layout.size.width,
+                    height: layout.size.height,
+                };
 
-                    if let Some(node) = self.nodes.get_mut(&node_id) {
-                        node.layout = layout_rect;
-                    }
+                if let Some(node) = self.nodes.get_mut(&node_id) {
+                    node.layout = layout_rect;
                 }
+            }
         }
     }
 
@@ -856,17 +1179,18 @@ impl UiTree {
             } else {
                 Vec::new()
             };
-            
+
             // Update this node
             if let Some(node) = self.nodes.get_mut(&node_id)
-                 && let Ok(layout) = self.taffy.layout(node.taffy_node) {
-                    node.layout = LayoutRect {
-                        x: layout.location.x,
-                        y: layout.location.y,
-                        width: layout.size.width,
-                        height: layout.size.height,
-                    };
-                }
+                && let Ok(layout) = self.taffy.layout(node.taffy_node)
+            {
+                node.layout = LayoutRect {
+                    x: layout.location.x,
+                    y: layout.location.y,
+                    width: layout.size.width,
+                    height: layout.size.height,
+                };
+            }
 
             stack.extend(children);
         }
@@ -880,7 +1204,82 @@ impl UiTree {
         self.next_id = 0;
         self.dirty_nodes.clear();
         self.dirty_roots.clear();
+        self.dirty_counters.reset();
         self.viewport_constraint_nodes.clear();
+        self.removed_nodes.clear();
+    }
+
+    /// Drain the list of removed node IDs (returns and clears the list).
+    ///
+    /// The renderer calls this to learn which nodes were removed since
+    /// the last drain, allowing it to clean up stale draw commands.
+    pub fn drain_removed_nodes(&mut self) -> Vec<NodeId> {
+        std::mem::take(&mut self.removed_nodes)
+    }
+
+    /// Check whether a node still exists in the tree.
+    pub fn node_exists(&self, node_id: NodeId) -> bool {
+        self.nodes.contains_key(&node_id)
+    }
+
+    /// Sync a node's widget style to its Taffy layout node.
+    ///
+    /// Call after externally modifying a widget's style to ensure Taffy
+    /// picks up the changes on next layout computation.
+    pub(crate) fn sync_taffy_style(&mut self, node_id: NodeId) {
+        if let Some(node) = self.nodes.get(&node_id) {
+            let taffy_node = node.taffy_node;
+            let layout_style = node.widget.style().layout.clone();
+            self.taffy.set_style(taffy_node, layout_style).ok();
+            self.taffy.mark_dirty(taffy_node).ok();
+        }
+    }
+
+    /// Find all nodes whose widget downcasts to the given type.
+    ///
+    /// Returns a vector of (NodeId, absolute layout rect) pairs for each matching widget.
+    /// Useful for finding all DockTabs containers during cross-container drag operations.
+    pub fn find_widgets_with_layout<T: 'static>(&self) -> Vec<(NodeId, LayoutRect)> {
+        let mut results = Vec::new();
+        if let Some(root) = self.root {
+            self.find_widgets_recursive::<T>(root, Vec2::ZERO, &mut results);
+        }
+        results
+    }
+
+    /// Recursively search for widgets of a given type.
+    fn find_widgets_recursive<T: 'static>(
+        &self,
+        node_id: NodeId,
+        parent_offset: Vec2,
+        results: &mut Vec<(NodeId, LayoutRect)>,
+    ) {
+        let Some(node) = self.nodes.get(&node_id) else {
+            return;
+        };
+
+        let abs_x = parent_offset.x + node.layout.x;
+        let abs_y = parent_offset.y + node.layout.y;
+
+        // Check if this widget matches the type
+        if node.widget.as_any().downcast_ref::<T>().is_some() {
+            results.push((
+                node_id,
+                LayoutRect {
+                    x: abs_x,
+                    y: abs_y,
+                    width: node.layout.width,
+                    height: node.layout.height,
+                },
+            ));
+        }
+
+        // Recurse into children
+        let children = node.children.clone();
+        let offset = Vec2::new(abs_x, abs_y);
+        for child_id in children {
+            self.find_widgets_recursive::<T>(child_id, offset, results);
+        }
     }
 
     /// Iterate over all nodes.
@@ -903,7 +1302,7 @@ impl UiTree {
         if let Some(node) = self.nodes.get_mut(&node_id) {
             *node.widget.style_mut() = style.clone();
             self.taffy.set_style(node.taffy_node, style.layout).ok();
-            self.mark_dirty_flags(node_id, DirtyFlags::STYLE | DirtyFlags::LAYOUT);
+            self.mark_dirty_flags(node_id, DirtyFlags::LAYOUT);
         }
     }
 
@@ -946,14 +1345,13 @@ impl UiTree {
         }
 
         // Remove from parent's children list
-        if let Some(node) = self.nodes.get(&node_id) {
-            if let Some(parent_id) = node.parent {
-                if let Some(parent_node) = self.nodes.get_mut(&parent_id) {
-                    parent_node.children.retain(|&child| child != node_id);
-                    // Mark parent dirty since children changed
-                    self.mark_dirty_flags(parent_id, DirtyFlags::CHILDREN_ORDER);
-                }
-            }
+        if let Some(node) = self.nodes.get(&node_id)
+            && let Some(parent_id) = node.parent
+            && let Some(parent_node) = self.nodes.get_mut(&parent_id)
+        {
+            parent_node.children.retain(|&child| child != node_id);
+            // Mark parent dirty since children changed
+            self.mark_dirty_flags(parent_id, DirtyFlags::CHILDREN_ORDER);
         }
 
         // Remove all nodes (children first, then parent)
@@ -961,11 +1359,17 @@ impl UiTree {
             if let Some(node) = self.nodes.shift_remove(id) {
                 // Remove from Taffy
                 self.taffy.remove(node.taffy_node).ok();
+                // Update dirty counters before removing from dirty tracking
+                if !node.dirty_flags.is_empty() {
+                    self.dirty_counters.on_clear(node.dirty_flags);
+                }
                 // Remove from dirty tracking
                 self.dirty_nodes.remove(id);
                 self.dirty_roots.remove(id);
                 // Remove from viewport constraint tracking
                 self.viewport_constraint_nodes.remove(id);
+                // Track removal for renderer cleanup
+                self.removed_nodes.push(*id);
             }
         }
 

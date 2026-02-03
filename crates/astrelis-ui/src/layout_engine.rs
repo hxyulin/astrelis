@@ -39,14 +39,24 @@ use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 use astrelis_core::geometry::Size;
+use astrelis_core::profiling::profile_function;
 
+use crate::plugin::registry::WidgetTypeRegistry;
 use crate::tree::{LayoutRect, NodeId, UiTree};
 
+/// Return type for `spawn_worker`: (request sender, result receiver, thread handle).
+type WorkerChannels = (
+    Option<std::sync::mpsc::Sender<WorkerMessage>>,
+    Option<std::sync::mpsc::Receiver<LayoutResult>>,
+    Option<JoinHandle<()>>,
+);
+
 /// Layout computation mode.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum LayoutMode {
     /// Compute layout synchronously on the main thread.
     /// This is the default and simplest mode.
+    #[default]
     Synchronous,
 
     /// Compute layout asynchronously on a background thread.
@@ -66,12 +76,6 @@ pub enum LayoutMode {
     },
 }
 
-impl Default for LayoutMode {
-    fn default() -> Self {
-        Self::Synchronous
-    }
-}
-
 /// Snapshot of node data for async layout computation.
 #[derive(Debug, Clone)]
 pub struct NodeSnapshot {
@@ -83,8 +87,8 @@ pub struct NodeSnapshot {
     pub parent: Option<usize>,
     /// Child node indices.
     pub children: Vec<usize>,
-    /// Whether this node has text content that needs measurement.
-    pub has_text: bool,
+    /// Whether measurement results should be cached for this widget type.
+    pub caches_measurement: bool,
     /// Cached text measurement (width, height) if available.
     pub text_measurement: Option<(f32, f32)>,
 }
@@ -104,7 +108,7 @@ pub struct TreeSnapshot {
 
 impl TreeSnapshot {
     /// Create a snapshot from a UiTree.
-    pub fn from_tree(tree: &UiTree) -> Self {
+    pub fn from_tree(tree: &UiTree, widget_registry: &WidgetTypeRegistry) -> Self {
         let mut nodes = Vec::new();
         let mut id_to_index = HashMap::new();
         let mut dirty_nodes = Vec::new();
@@ -118,19 +122,16 @@ impl TreeSnapshot {
                 dirty_nodes.push(index);
             }
 
-            // Check if this is a text widget
-            let has_text = node
-                .widget
-                .as_any()
-                .downcast_ref::<crate::widgets::Text>()
-                .is_some();
+            // Check if this widget type caches measurements (via registry)
+            let caches_measurement =
+                widget_registry.caches_measurement(node.widget.as_any().type_id());
 
             nodes.push(NodeSnapshot {
                 node_id,
                 style: node.widget.style().layout.clone(),
-                parent: None,   // Will be set in second pass
+                parent: None,         // Will be set in second pass
                 children: Vec::new(), // Will be set in second pass
-                has_text,
+                caches_measurement,
                 text_measurement: node.text_measurement,
             });
         }
@@ -139,10 +140,10 @@ impl TreeSnapshot {
         for (node_id, node) in tree.iter() {
             if let Some(&index) = id_to_index.get(&node_id) {
                 // Set parent
-                if let Some(parent_id) = node.parent {
-                    if let Some(&parent_index) = id_to_index.get(&parent_id) {
-                        nodes[index].parent = Some(parent_index);
-                    }
+                if let Some(parent_id) = node.parent
+                    && let Some(&parent_index) = id_to_index.get(&parent_id)
+                {
+                    nodes[index].parent = Some(parent_index);
                 }
 
                 // Set children
@@ -181,7 +182,7 @@ pub struct LayoutRequest {
     /// Frame ID for this request.
     frame_id: u64,
     /// Timestamp when request was made.
-    timestamp: Instant,
+    _timestamp: Instant,
 }
 
 /// Result of layout computation.
@@ -313,14 +314,7 @@ impl LayoutEngine {
     }
 
     /// Spawn the layout worker thread.
-    fn spawn_worker(
-        cache: Arc<LayoutCache>,
-        in_progress: Arc<AtomicBool>,
-    ) -> (
-        Option<std::sync::mpsc::Sender<WorkerMessage>>,
-        Option<std::sync::mpsc::Receiver<LayoutResult>>,
-        Option<JoinHandle<()>>,
-    ) {
+    fn spawn_worker(cache: Arc<LayoutCache>, in_progress: Arc<AtomicBool>) -> WorkerChannels {
         let (request_tx, request_rx) = std::sync::mpsc::channel::<WorkerMessage>();
         let (result_tx, result_rx) = std::sync::mpsc::channel::<LayoutResult>();
 
@@ -348,7 +342,8 @@ impl LayoutEngine {
                     let start = Instant::now();
 
                     // Perform layout computation
-                    let layouts = Self::compute_layout_sync(&request.tree_snapshot, request.viewport_size);
+                    let layouts =
+                        Self::compute_layout_sync(&request.tree_snapshot, request.viewport_size);
 
                     // Write results to back buffer
                     for (node_id, layout) in &layouts {
@@ -408,57 +403,56 @@ impl LayoutEngine {
         }
 
         // Compute layout
-        if let Some(root_idx) = snapshot.root {
-            if let Some(&root_taffy) = taffy_nodes.get(&root_idx) {
-                let available = taffy::Size {
-                    width: taffy::AvailableSpace::Definite(viewport_size.width),
-                    height: taffy::AvailableSpace::Definite(viewport_size.height),
-                };
+        if let Some(root_idx) = snapshot.root
+            && let Some(&root_taffy) = taffy_nodes.get(&root_idx)
+        {
+            let available = taffy::Size {
+                width: taffy::AvailableSpace::Definite(viewport_size.width),
+                height: taffy::AvailableSpace::Definite(viewport_size.height),
+            };
 
-                // Simple measure function using cached measurements
-                let measure_fn = |known_dimensions: taffy::Size<Option<f32>>,
-                                  _available_space: taffy::Size<taffy::AvailableSpace>,
-                                  node_id: taffy::NodeId,
-                                  _node_context: Option<&mut ()>,
-                                  _style: &taffy::Style|
-                 -> taffy::Size<f32> {
-                    // Find the snapshot node for this taffy node
-                    for (idx, &tn) in &taffy_nodes {
-                        if tn == node_id {
-                            if let Some(node) = snapshot.nodes.get(*idx) {
-                                if let Some((w, h)) = node.text_measurement {
-                                    return taffy::Size {
-                                        width: known_dimensions.width.unwrap_or(w),
-                                        height: known_dimensions.height.unwrap_or(h),
-                                    };
-                                }
-                            }
-                        }
+            // Simple measure function using cached measurements
+            let measure_fn = |known_dimensions: taffy::Size<Option<f32>>,
+                              _available_space: taffy::Size<taffy::AvailableSpace>,
+                              node_id: taffy::NodeId,
+                              _node_context: Option<&mut ()>,
+                              _style: &taffy::Style|
+             -> taffy::Size<f32> {
+                // Find the snapshot node for this taffy node
+                for (idx, &tn) in &taffy_nodes {
+                    if tn == node_id
+                        && let Some(node) = snapshot.nodes.get(*idx)
+                        && let Some((w, h)) = node.text_measurement
+                    {
+                        return taffy::Size {
+                            width: known_dimensions.width.unwrap_or(w),
+                            height: known_dimensions.height.unwrap_or(h),
+                        };
                     }
-                    taffy::Size {
-                        width: known_dimensions.width.unwrap_or(0.0),
-                        height: known_dimensions.height.unwrap_or(0.0),
-                    }
-                };
+                }
+                taffy::Size {
+                    width: known_dimensions.width.unwrap_or(0.0),
+                    height: known_dimensions.height.unwrap_or(0.0),
+                }
+            };
 
-                let _ = taffy.compute_layout_with_measure(root_taffy, available, measure_fn);
-            }
+            let _ = taffy.compute_layout_with_measure(root_taffy, available, measure_fn);
         }
 
         // Extract layouts
         for (index, node) in snapshot.nodes.iter().enumerate() {
-            if let Some(&taffy_node) = taffy_nodes.get(&index) {
-                if let Ok(layout) = taffy.layout(taffy_node) {
-                    results.insert(
-                        node.node_id,
-                        LayoutRect {
-                            x: layout.location.x,
-                            y: layout.location.y,
-                            width: layout.size.width,
-                            height: layout.size.height,
-                        },
-                    );
-                }
+            if let Some(&taffy_node) = taffy_nodes.get(&index)
+                && let Ok(layout) = taffy.layout(taffy_node)
+            {
+                results.insert(
+                    node.node_id,
+                    LayoutRect {
+                        x: layout.location.x,
+                        y: layout.location.y,
+                        width: layout.size.width,
+                        height: layout.size.height,
+                    },
+                );
             }
         }
 
@@ -499,20 +493,26 @@ impl LayoutEngine {
     ///
     /// In synchronous mode, this blocks until layout is complete.
     /// In async mode, this queues a layout request and returns immediately.
-    pub fn compute_layout(&mut self, tree: &UiTree, viewport_size: Size<f32>) {
+    pub fn compute_layout(
+        &mut self,
+        tree: &UiTree,
+        viewport_size: Size<f32>,
+        widget_registry: &WidgetTypeRegistry,
+    ) {
+        profile_function!();
         self.frame_id += 1;
 
         match &self.mode {
             LayoutMode::Synchronous => {
-                self.compute_layout_synchronous(tree, viewport_size);
+                self.compute_layout_synchronous(tree, viewport_size, widget_registry);
             }
             LayoutMode::Asynchronous { max_stale_frames } => {
                 let frames_stale = self.frame_id.saturating_sub(self.last_completed_frame);
                 if frames_stale > *max_stale_frames as u64 {
                     // Too stale, fall back to sync
-                    self.compute_layout_synchronous(tree, viewport_size);
+                    self.compute_layout_synchronous(tree, viewport_size, widget_registry);
                 } else {
-                    self.compute_layout_async(tree, viewport_size);
+                    self.compute_layout_async(tree, viewport_size, widget_registry);
                 }
             }
             LayoutMode::Hybrid {
@@ -521,13 +521,13 @@ impl LayoutEngine {
             } => {
                 let node_count = tree.iter().count();
                 if node_count < *async_threshold {
-                    self.compute_layout_synchronous(tree, viewport_size);
+                    self.compute_layout_synchronous(tree, viewport_size, widget_registry);
                 } else {
                     let frames_stale = self.frame_id.saturating_sub(self.last_completed_frame);
                     if frames_stale > *max_stale_frames as u64 {
-                        self.compute_layout_synchronous(tree, viewport_size);
+                        self.compute_layout_synchronous(tree, viewport_size, widget_registry);
                     } else {
-                        self.compute_layout_async(tree, viewport_size);
+                        self.compute_layout_async(tree, viewport_size, widget_registry);
                     }
                 }
             }
@@ -535,8 +535,13 @@ impl LayoutEngine {
     }
 
     /// Compute layout synchronously.
-    fn compute_layout_synchronous(&mut self, tree: &UiTree, viewport_size: Size<f32>) {
-        let snapshot = TreeSnapshot::from_tree(tree);
+    fn compute_layout_synchronous(
+        &mut self,
+        tree: &UiTree,
+        viewport_size: Size<f32>,
+        widget_registry: &WidgetTypeRegistry,
+    ) {
+        let snapshot = TreeSnapshot::from_tree(tree, widget_registry);
         let layouts = Self::compute_layout_sync(&snapshot, viewport_size);
 
         // Write directly to front buffer
@@ -552,19 +557,24 @@ impl LayoutEngine {
     }
 
     /// Queue async layout computation.
-    fn compute_layout_async(&mut self, tree: &UiTree, viewport_size: Size<f32>) {
+    fn compute_layout_async(
+        &mut self,
+        tree: &UiTree,
+        viewport_size: Size<f32>,
+        widget_registry: &WidgetTypeRegistry,
+    ) {
         // Don't queue if already in progress
         if self.layout_in_progress.load(Ordering::SeqCst) {
             return;
         }
 
         if let Some(sender) = &self.request_sender {
-            let snapshot = TreeSnapshot::from_tree(tree);
+            let snapshot = TreeSnapshot::from_tree(tree, widget_registry);
             let request = LayoutRequest {
                 tree_snapshot: snapshot,
                 viewport_size,
                 frame_id: self.frame_id,
-                timestamp: Instant::now(),
+                _timestamp: Instant::now(),
             };
             let _ = sender.send(WorkerMessage::Compute(request));
         }
@@ -654,26 +664,28 @@ mod tests {
 
     #[test]
     fn test_tree_snapshot() {
+        let registry = WidgetTypeRegistry::new();
         let mut tree = UiTree::new();
         let root = tree.add_widget(Box::new(crate::widgets::Container::new()));
         let child = tree.add_widget(Box::new(crate::widgets::Container::new()));
         tree.add_child(root, child);
         tree.set_root(root);
 
-        let snapshot = TreeSnapshot::from_tree(&tree);
+        let snapshot = TreeSnapshot::from_tree(&tree, &registry);
         assert_eq!(snapshot.node_count(), 2);
         assert!(snapshot.root.is_some());
     }
 
     #[test]
     fn test_layout_engine_sync() {
+        let registry = WidgetTypeRegistry::new();
         let mut engine = LayoutEngine::new(LayoutMode::Synchronous);
 
         let mut tree = UiTree::new();
         let root = tree.add_widget(Box::new(crate::widgets::Container::new()));
         tree.set_root(root);
 
-        engine.compute_layout(&tree, Size::new(800.0, 600.0));
+        engine.compute_layout(&tree, Size::new(800.0, 600.0), &registry);
 
         assert!(engine.is_layout_current());
         assert!(!engine.is_layout_in_progress());
@@ -684,7 +696,9 @@ mod tests {
         let mut engine = LayoutEngine::new(LayoutMode::Synchronous);
         assert!(matches!(engine.mode(), LayoutMode::Synchronous));
 
-        engine.set_mode(LayoutMode::Asynchronous { max_stale_frames: 2 });
+        engine.set_mode(LayoutMode::Asynchronous {
+            max_stale_frames: 2,
+        });
         assert!(matches!(engine.mode(), LayoutMode::Asynchronous { .. }));
 
         engine.set_mode(LayoutMode::Synchronous);
@@ -720,13 +734,14 @@ mod tests {
 
     #[test]
     fn test_frames_stale() {
+        let registry = WidgetTypeRegistry::new();
         let mut engine = LayoutEngine::new(LayoutMode::Synchronous);
 
         let mut tree = UiTree::new();
         let root = tree.add_widget(Box::new(crate::widgets::Container::new()));
         tree.set_root(root);
 
-        engine.compute_layout(&tree, Size::new(800.0, 600.0));
+        engine.compute_layout(&tree, Size::new(800.0, 600.0), &registry);
         assert_eq!(engine.frames_stale(), 0);
     }
 }

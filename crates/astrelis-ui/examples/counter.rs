@@ -19,75 +19,16 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::UiSystem;
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
-    event::{Event, EventBatch, HandleStatus, Key, NamedKey},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    event::{Event, EventBatch, HandleStatus, Key, SystemTheme},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 use std::sync::{Arc, RwLock};
-
-// Theme definition
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Theme {
-    Dark,
-    Light,
-}
-
-impl Theme {
-    fn toggle(&self) -> Self {
-        match self {
-            Theme::Dark => Theme::Light,
-            Theme::Light => Theme::Dark,
-        }
-    }
-
-    fn background_color(&self) -> Color {
-        match self {
-            Theme::Dark => Color::from_rgb_u8(25, 25, 35),
-            Theme::Light => Color::from_rgb_u8(240, 240, 245),
-        }
-    }
-
-    fn surface_color(&self) -> Color {
-        match self {
-            Theme::Dark => Color::from_rgb_u8(40, 40, 55),
-            Theme::Light => Color::from_rgb_u8(255, 255, 255),
-        }
-    }
-
-    fn border_color(&self) -> Color {
-        match self {
-            Theme::Dark => Color::from_rgb_u8(80, 80, 120),
-            Theme::Light => Color::from_rgb_u8(200, 200, 210),
-        }
-    }
-
-    fn text_color(&self) -> Color {
-        match self {
-            Theme::Dark => Color::WHITE,
-            Theme::Light => Color::from_rgb_u8(20, 20, 30),
-        }
-    }
-
-    fn accent_color(&self) -> Color {
-        match self {
-            Theme::Dark => Color::from_rgb_u8(100, 200, 255),
-            Theme::Light => Color::from_rgb_u8(60, 120, 200),
-        }
-    }
-
-    fn secondary_text_color(&self) -> Color {
-        match self {
-            Theme::Dark => Color::from_rgb_u8(150, 150, 150),
-            Theme::Light => Color::from_rgb_u8(100, 100, 110),
-        }
-    }
-}
 
 /// Shared application state
 #[derive(Clone)]
@@ -128,7 +69,7 @@ struct CounterApp {
     ui: UiSystem,
     state: CounterState,
     counter_text_id: astrelis_ui::WidgetId,
-    theme: Theme,
+    is_dark: bool,
 }
 
 fn main() {
@@ -138,7 +79,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -155,14 +96,13 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = window.id();
 
-        // Get actual window size
-        let size = window.physical_size();
-        let viewport_width = size.width as f32;
-        let viewport_height = size.height as f32;
+        // Get actual window size (use logical size to match viewport)
+        let size = window.logical_size_f32();
 
         // Create UI system
         let mut ui = UiSystem::new(graphics_ctx.clone());
@@ -170,11 +110,14 @@ fn main() {
 
         // Create shared state
         let state = CounterState::new();
-        let theme = Theme::Dark;
+        let is_dark = true;
+
+        // Set initial theme
+        ui.set_theme(astrelis_ui::Theme::dark());
 
         // Build initial UI with callbacks
         let counter_text_id =
-            build_counter_ui_with_callbacks(&mut ui, &state, theme, viewport_width, viewport_height);
+            build_counter_ui_with_callbacks(&mut ui, &state, size.width, size.height);
 
         tracing::info!("Counter example initialized - using auto-dirty incremental updates");
         tracing::info!("Press T to toggle theme");
@@ -185,7 +128,7 @@ fn main() {
             ui,
             state,
             counter_text_id,
-            theme,
+            is_dark,
         })
     });
 }
@@ -193,7 +136,6 @@ fn main() {
 fn build_counter_ui_with_callbacks(
     ui: &mut UiSystem,
     state: &CounterState,
-    theme: Theme,
     width: f32,
     height: f32,
 ) -> astrelis_ui::WidgetId {
@@ -205,13 +147,31 @@ fn build_counter_ui_with_callbacks(
     let state_dec = state.clone();
     let state_reset = state.clone();
 
+    let theme = ui.theme().clone();
+    let bg = theme.colors.background;
+    let text = theme.colors.text_primary;
+    let surface = theme.colors.surface;
+    let border = theme.colors.border;
+    let accent = theme.colors.primary;
+    let secondary = theme.colors.text_secondary;
+
+    let error = theme.colors.error;
+    let success = theme.colors.success;
+
+    // Determine theme name for display
+    let theme_name = if bg == astrelis_ui::Theme::dark().colors.background {
+        "Dark"
+    } else {
+        "Light"
+    };
+
     ui.build(|root| {
         // Main container
         root.container()
             .width(width)
             .height(height)
             .padding(10.0)
-            .background_color(theme.background_color())
+            .background_color(bg)
             .child(|root| {
                 // Center content vertically and horizontally
                 root.column()
@@ -222,15 +182,15 @@ fn build_counter_ui_with_callbacks(
                         // Title
                         root.text("Counter Example")
                             .size(18.0)
-                            .color(theme.text_color())
+                            .color(text)
                             .bold()
                             .build()
                     })
                     .child(|root| {
                         // Counter display container
                         root.container()
-                            .background_color(theme.surface_color())
-                            .border_color(theme.border_color())
+                            .background_color(surface)
+                            .border_color(border)
                             .border_width(2.0)
                             .border_radius(8.0)
                             .padding(4.0)
@@ -238,7 +198,7 @@ fn build_counter_ui_with_callbacks(
                                 root.text(format!("Count: {}", count))
                                     .id(counter_text_id)
                                     .size(24.0)
-                                    .color(theme.accent_color())
+                                    .color(accent)
                                     .bold()
                                     .build()
                             })
@@ -251,7 +211,7 @@ fn build_counter_ui_with_callbacks(
                             .child(|root| {
                                 let state = state_dec.clone();
                                 root.button("-")
-                                    .background_color(Color::from_rgb_u8(200, 60, 60))
+                                    .background_color(error)
                                     .hover_color(Color::from_rgb_u8(220, 80, 80))
                                     .padding(8.0)
                                     .min_width(30.0)
@@ -265,7 +225,7 @@ fn build_counter_ui_with_callbacks(
                             .child(|root| {
                                 let state = state_reset.clone();
                                 root.button("Reset")
-                                    .background_color(Color::from_rgb_u8(80, 80, 100))
+                                    .background_color(surface)
                                     .hover_color(Color::from_rgb_u8(100, 100, 120))
                                     .padding(15.0)
                                     .min_width(30.0)
@@ -279,7 +239,7 @@ fn build_counter_ui_with_callbacks(
                             .child(|root| {
                                 let state = state_inc.clone();
                                 root.button("+")
-                                    .background_color(Color::from_rgb_u8(60, 180, 60))
+                                    .background_color(success)
                                     .hover_color(Color::from_rgb_u8(80, 200, 80))
                                     .padding(15.0)
                                     .min_width(30.0)
@@ -296,15 +256,15 @@ fn build_counter_ui_with_callbacks(
                         // Info text
                         root.text("Click buttons to change the counter")
                             .size(14.0)
-                            .color(theme.secondary_text_color())
+                            .color(secondary)
                             .margin(10.0)
                             .build()
                     })
                     .child(|root| {
                         // Theme indicator
-                        root.text(format!("Theme: {:?} (Press T to toggle)", theme))
+                        root.text(format!("Theme: {} (Press T to toggle)", theme_name))
                             .size(12.0)
-                            .color(theme.secondary_text_color())
+                            .color(secondary)
                             .margin(10.0)
                             .build()
                     })
@@ -345,7 +305,6 @@ impl App for CounterApp {
                 self.counter_text_id = build_counter_ui_with_callbacks(
                     &mut self.ui,
                     &self.state,
-                    self.theme,
                     size.width as f32,
                     size.height as f32,
                 );
@@ -361,17 +320,25 @@ impl App for CounterApp {
                 if key.state == astrelis_winit::event::ElementState::Pressed {
                     match &key.logical_key {
                         Key::Character(c) if c == "t" || c == "T" => {
-                            self.theme = self.theme.toggle();
-                            tracing::info!("Theme toggled to: {:?}", self.theme);
+                            self.is_dark = !self.is_dark;
+                            let new_theme = if self.is_dark {
+                                astrelis_ui::Theme::dark()
+                            } else {
+                                astrelis_ui::Theme::light()
+                            };
+                            tracing::info!(
+                                "Theme toggled to: {}",
+                                if self.is_dark { "Dark" } else { "Light" }
+                            );
+                            self.ui.set_theme(new_theme);
 
-                            // Rebuild UI with new theme
-                            let size = self.window.physical_size();
+                            // Rebuild UI with new theme using logical size (matches viewport)
+                            let size = self.window.logical_size_f32();
                             self.counter_text_id = build_counter_ui_with_callbacks(
                                 &mut self.ui,
                                 &self.state,
-                                self.theme,
-                                size.width as f32,
-                                size.height as f32,
+                                size.width,
+                                size.height,
                             );
 
                             return HandleStatus::consumed();
@@ -379,6 +346,34 @@ impl App for CounterApp {
                         _ => {}
                     }
                 }
+            }
+            HandleStatus::ignored()
+        });
+
+        // Handle OS theme change events
+        events.dispatch(|event| {
+            if let Event::ThemeChanged(system_theme) = event {
+                self.is_dark = *system_theme == SystemTheme::Dark;
+                let theme = match system_theme {
+                    SystemTheme::Dark => astrelis_ui::Theme::dark(),
+                    SystemTheme::Light => astrelis_ui::Theme::light(),
+                };
+                tracing::info!(
+                    "System theme changed to: {}",
+                    if self.is_dark { "Dark" } else { "Light" }
+                );
+                self.ui.set_theme(theme);
+
+                // Rebuild UI with new theme
+                let size = self.window.logical_size_f32();
+                self.counter_text_id = build_counter_ui_with_callbacks(
+                    &mut self.ui,
+                    &self.state,
+                    size.width,
+                    size.height,
+                );
+
+                return HandleStatus::consumed();
             }
             HandleStatus::ignored()
         });
@@ -395,12 +390,15 @@ impl App for CounterApp {
         // Begin frame and render
         let mut frame = self.window.begin_drawing();
 
+        // Use the theme background color for the clear color
+        let clear_color = self.ui.theme().colors.background;
+
         // Render UI with automatic scoping (no manual {} block needed)
         frame.clear_and_render(
             RenderTarget::Surface,
-            Color::from_rgb_u8(20, 20, 30),
+            clear_color,
             |pass| {
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

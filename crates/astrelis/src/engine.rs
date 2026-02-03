@@ -2,6 +2,8 @@
 
 use std::collections::HashSet;
 
+use astrelis_core::profiling::{profile_function, profile_scope};
+
 use crate::plugin::{Plugin, PluginDyn, PluginGroup, PluginGroupAdapter};
 use crate::resource::Resources;
 
@@ -131,6 +133,7 @@ impl Engine {
     /// engine.shutdown(); // Cleanup all plugins
     /// ```
     pub fn shutdown(&mut self) {
+        profile_function!();
         tracing::info!("Shutting down engine with {} plugins", self.plugins.len());
 
         // Call cleanup() in reverse order (reverse of build order)
@@ -217,6 +220,7 @@ impl EngineBuilder {
     /// - A plugin dependency is not found
     /// - A plugin with the same name is added twice
     pub fn try_build(mut self) -> Result<Engine, EngineError> {
+        profile_function!();
         // Sort plugins by dependencies and collect indices
         let sorted_indices = self.try_sort_plugins_by_dependency_indices()?;
 
@@ -224,6 +228,7 @@ impl EngineBuilder {
         let mut plugin_names = HashSet::new();
 
         // Build phase - call build() on each plugin
+        profile_scope!("plugin_build_phase");
         for &idx in &sorted_indices {
             let plugin = &self.plugins[idx];
             tracing::debug!("Building plugin: {}", plugin.name());
@@ -232,6 +237,7 @@ impl EngineBuilder {
         }
 
         // Finish phase - call finish() on each plugin
+        profile_scope!("plugin_finish_phase");
         for &idx in &sorted_indices {
             self.plugins[idx].finish(&mut self.resources);
         }
@@ -266,6 +272,7 @@ impl EngineBuilder {
     /// - A plugin dependency is not found
     /// - A plugin with the same name is added twice
     pub fn build(self) -> Engine {
+        profile_function!();
         self.try_build().expect("Failed to build engine")
     }
 
@@ -273,7 +280,7 @@ impl EngineBuilder {
     fn reorder_plugins(plugins: Vec<Box<dyn PluginDyn>>, sorted_indices: &[usize]) -> Vec<Box<dyn PluginDyn>> {
         // Wrap in Option to allow taking elements
         let mut plugins_opt: Vec<Option<Box<dyn PluginDyn>>> =
-            plugins.into_iter().map(|p| Some(p)).collect();
+            plugins.into_iter().map(Some).collect();
 
         // Extract in sorted order
         sorted_indices
@@ -291,6 +298,7 @@ impl EngineBuilder {
     /// - A plugin dependency is not found among registered plugins
     /// - Duplicate plugin names are detected
     fn try_sort_plugins_by_dependency_indices(&self) -> Result<Vec<usize>, EngineError> {
+        profile_function!();
         // Check for duplicate plugin names
         let mut seen_names = HashSet::new();
         for plugin in &self.plugins {

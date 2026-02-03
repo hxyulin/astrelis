@@ -35,7 +35,7 @@ impl App for MyApp {
         // 2. Render UI
         let mut frame = self.window.begin_drawing();
         frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
-            self.ui.render(pass.descriptor());
+            self.ui.render(pass.wgpu_pass());
         });
         frame.finish();
     }

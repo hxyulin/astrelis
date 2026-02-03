@@ -26,6 +26,10 @@ bitflags.workspace = true
 ahash.workspace = true
 fxhash = "0.2.1"
 
+[features]
+default = ["docking"]
+docking = []
+
 [dev-dependencies]
 pollster.workspace = true
 criterion.workspace = true

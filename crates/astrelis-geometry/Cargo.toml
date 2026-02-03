@@ -1,0 +1,76 @@
+[package]
+name = "astrelis-geometry"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+description = "Customizable 2D geometry rendering for Astrelis Game Engine"
+
+[dependencies]
+astrelis-core.workspace = true
+astrelis-render.workspace = true
+
+# Tessellation
+lyon = "1.0"
+
+# Utilities
+tracing.workspace = true
+bytemuck.workspace = true
+glam.workspace = true
+ahash.workspace = true
+bitflags.workspace = true
+
+# Optional text for chart labels/legends
+astrelis-text = { workspace = true, optional = true }
+
+# Optional egui integration
+egui = { workspace = true, optional = true }
+
+# Optional astrelis-ui integration
+astrelis-ui = { workspace = true, optional = true }
+astrelis-winit = { workspace = true, optional = true }
+
+[features]
+default = ["chart"]
+chart = []
+chart-text = ["chart", "astrelis-text"]
+
+# egui integration - provides ChartWidget for egui
+egui-integration = ["dep:egui", "chart"]
+
+# astrelis-ui integration - provides ChartWidget for astrelis-ui
+ui-integration = ["dep:astrelis-ui", "dep:astrelis-winit", "chart"]
+
+[dev-dependencies]
+pollster.workspace = true
+astrelis-winit.workspace = true
+astrelis-egui.workspace = true
+egui.workspace = true
+
+# Examples with feature requirements
+[[example]]
+name = "chart_with_text"
+required-features = ["chart-text"]
+
+[[example]]
+name = "egui_chart"
+required-features = ["egui-integration"]
+
+[[example]]
+name = "interactive_chart"
+required-features = ["ui-integration"]
+
+[[example]]
+name = "live_chart"
+required-features = ["ui-integration"]
+
+[[example]]
+name = "multi_axis_chart"
+required-features = ["ui-integration"]
+
+[[example]]
+name = "streaming_chart"
+required-features = ["ui-integration"]

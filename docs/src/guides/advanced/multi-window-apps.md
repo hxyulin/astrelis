@@ -540,7 +540,7 @@ impl App for MultiWindowDemo {
             RenderTarget::Surface,
             bg_color,
             |pass| {
-                state.ui.render(pass.descriptor());
+                state.ui.render(pass.wgpu_pass());
             },
         );
 

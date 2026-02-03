@@ -15,7 +15,7 @@ use std::fmt;
 /// ```no_run
 /// # use astrelis_ui::{UiSystem, WidgetId};
 /// # use astrelis_render::GraphicsContext;
-/// # let context = GraphicsContext::new_owned_sync_or_panic();
+/// # let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 /// # let mut ui = UiSystem::new(context);
 /// let counter_text_id = WidgetId::new("counter_text");
 ///

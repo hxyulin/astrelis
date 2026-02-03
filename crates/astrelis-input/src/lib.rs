@@ -31,6 +31,7 @@
 
 use astrelis_core::alloc::HashSet;
 use astrelis_core::math::Vec2;
+use astrelis_core::profiling::profile_function;
 use astrelis_winit::event::{
     ElementState, Event, EventBatch, HandleStatus, KeyCode, MouseButton as WinitMouseButton,
     MouseScrollDelta, PhysicalKey,
@@ -143,6 +144,7 @@ impl InputState {
     ///
     /// This should be called each frame before querying input state.
     pub fn handle_events(&mut self, events: &mut EventBatch) {
+        profile_function!();
         events.dispatch(|event| {
             match event {
                 Event::KeyInput(key_event) => {
@@ -213,6 +215,7 @@ impl InputState {
 
     /// Clear per-frame state. Call this at the end of each frame.
     pub fn end_frame(&mut self) {
+        profile_function!();
         self.keys_just_pressed.clear();
         self.keys_just_released.clear();
         self.mouse_buttons_just_pressed.clear();
@@ -443,6 +446,7 @@ impl InputSystem {
 
     /// Process events from the event batch.
     pub fn handle_events(&mut self, events: &mut EventBatch) {
+        profile_function!();
         self.state.handle_events(events);
     }
 

@@ -233,17 +233,32 @@ fn format_flags(flags: DirtyFlags) -> String {
     if flags.contains(DirtyFlags::TEXT_SHAPING) {
         parts.push("T");
     }
-    if flags.contains(DirtyFlags::COLOR_ONLY) {
+    if flags.contains(DirtyFlags::COLOR) {
         parts.push("C");
     }
-    if flags.contains(DirtyFlags::OPACITY_ONLY) {
+    if flags.contains(DirtyFlags::OPACITY) {
         parts.push("O");
     }
     if flags.contains(DirtyFlags::GEOMETRY) {
         parts.push("G");
     }
+    if flags.contains(DirtyFlags::IMAGE) {
+        parts.push("I");
+    }
+    if flags.contains(DirtyFlags::FOCUS) {
+        parts.push("F");
+    }
     if flags.contains(DirtyFlags::TRANSFORM) {
         parts.push("X");
+    }
+    if flags.contains(DirtyFlags::CLIP) {
+        parts.push("CL");
+    }
+    if flags.contains(DirtyFlags::VISIBILITY) {
+        parts.push("V");
+    }
+    if flags.contains(DirtyFlags::SCROLL) {
+        parts.push("S");
     }
     if flags.contains(DirtyFlags::CHILDREN_ORDER) {
         parts.push("CH");
@@ -330,7 +345,7 @@ mod tests {
             ..Default::default()
         };
         assert!(should_highlight(DirtyFlags::LAYOUT, &overlay));
-        assert!(!should_highlight(DirtyFlags::COLOR_ONLY, &overlay));
+        assert!(!should_highlight(DirtyFlags::COLOR, &overlay));
     }
 
     #[test]

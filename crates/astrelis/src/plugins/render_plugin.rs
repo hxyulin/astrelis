@@ -61,9 +61,9 @@ impl RenderContexts {
     ) -> Result<&mut WindowContext, astrelis_render::GraphicsError> {
         let window_id = window.id();
 
-        if !self.contexts.contains_key(&window_id) {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.contexts.entry(window_id) {
             let context = WindowContext::new(window, graphics, descriptor)?;
-            self.contexts.insert(window_id, context);
+            e.insert(context);
         }
 
         Ok(self.contexts.get_mut(&window_id).unwrap())
@@ -167,7 +167,7 @@ impl Plugin for RenderPlugin {
 
     fn build(&self, resources: &mut Resources) {
         // Create graphics context with Arc (no memory leak)
-        let graphics = GraphicsContext::new_owned_sync_or_panic();
+        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         tracing::info!(
             "RenderPlugin: GraphicsContext created (backend: {:?})",

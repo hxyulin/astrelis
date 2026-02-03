@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 #[cfg(feature = "hot-reload")]
 use std::sync::mpsc::{channel, Receiver};
 #[cfg(feature = "hot-reload")]
-use std::time::Duration;
+use std::sync::Mutex;
 
 #[cfg(feature = "hot-reload")]
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -24,7 +24,7 @@ use crate::handle::UntypedHandle;
 #[cfg(feature = "hot-reload")]
 pub struct AssetWatcher {
     watcher: RecommendedWatcher,
-    receiver: Receiver<notify::Result<Event>>,
+    receiver: Mutex<Receiver<notify::Result<Event>>>,
     /// Maps file paths to asset handles
     path_to_handle: HashMap<PathBuf, Vec<UntypedHandle>>,
     /// Watched directories
@@ -43,7 +43,7 @@ impl AssetWatcher {
 
         Ok(Self {
             watcher,
-            receiver,
+            receiver: Mutex::new(receiver),
             path_to_handle: HashMap::new(),
             watched_dirs: Vec::new(),
         })
@@ -90,7 +90,8 @@ impl AssetWatcher {
         let mut changed_handles = Vec::new();
 
         // Process all pending events
-        while let Ok(event) = self.receiver.try_recv() {
+        let receiver = self.receiver.lock().unwrap();
+        while let Ok(event) = receiver.try_recv() {
             match event {
                 Ok(event) => {
                     // We only care about modify events

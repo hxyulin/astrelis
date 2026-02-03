@@ -161,7 +161,7 @@ frame.clear_and_render(
     RenderTarget::Surface,
     Color::BLACK,
     |pass| {
-        ui.render(pass.descriptor());
+        ui.render(pass.wgpu_pass());
     }, // Pass drops here
 );
 frame.finish(); // OK
@@ -169,7 +169,7 @@ frame.finish(); // OK
 // GOOD: Manual drop with explicit scope
 {
     let pass = RenderPassBuilder::new().build(&mut frame);
-    ui.render(pass.descriptor());
+    ui.render(pass.wgpu_pass());
 } // Pass drops here
 frame.finish(); // OK
 ```

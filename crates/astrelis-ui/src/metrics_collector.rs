@@ -180,7 +180,8 @@ impl FrameTimingMetrics {
         if self.total_nodes == 0 {
             0.0
         } else {
-            let total_dirty = self.nodes_layout_dirty + self.nodes_text_dirty + self.nodes_paint_dirty;
+            let total_dirty =
+                self.nodes_layout_dirty + self.nodes_text_dirty + self.nodes_paint_dirty;
             (total_dirty as f32 / self.total_nodes as f32) * 100.0
         }
     }
@@ -220,11 +221,16 @@ impl WidgetMetrics {
 pub struct DirtyFlagCounts {
     pub layout: u64,
     pub text_shaping: u64,
-    pub color_only: u64,
-    pub geometry: u64,
-    pub opacity: u64,
-    pub transform: u64,
     pub children_order: u64,
+    pub color: u64,
+    pub opacity: u64,
+    pub geometry: u64,
+    pub image: u64,
+    pub focus: u64,
+    pub transform: u64,
+    pub clip: u64,
+    pub visibility: u64,
+    pub scroll: u64,
 }
 
 impl DirtyFlagCounts {
@@ -236,20 +242,35 @@ impl DirtyFlagCounts {
         if flags.contains(DirtyFlags::TEXT_SHAPING) {
             self.text_shaping += 1;
         }
-        if flags.contains(DirtyFlags::COLOR_ONLY) {
-            self.color_only += 1;
+        if flags.contains(DirtyFlags::CHILDREN_ORDER) {
+            self.children_order += 1;
+        }
+        if flags.contains(DirtyFlags::COLOR) {
+            self.color += 1;
+        }
+        if flags.contains(DirtyFlags::OPACITY) {
+            self.opacity += 1;
         }
         if flags.contains(DirtyFlags::GEOMETRY) {
             self.geometry += 1;
         }
-        if flags.contains(DirtyFlags::OPACITY_ONLY) {
-            self.opacity += 1;
+        if flags.contains(DirtyFlags::IMAGE) {
+            self.image += 1;
+        }
+        if flags.contains(DirtyFlags::FOCUS) {
+            self.focus += 1;
         }
         if flags.contains(DirtyFlags::TRANSFORM) {
             self.transform += 1;
         }
-        if flags.contains(DirtyFlags::CHILDREN_ORDER) {
-            self.children_order += 1;
+        if flags.contains(DirtyFlags::CLIP) {
+            self.clip += 1;
+        }
+        if flags.contains(DirtyFlags::VISIBILITY) {
+            self.visibility += 1;
+        }
+        if flags.contains(DirtyFlags::SCROLL) {
+            self.scroll += 1;
         }
     }
 
@@ -257,11 +278,16 @@ impl DirtyFlagCounts {
     pub fn total(&self) -> u64 {
         self.layout
             + self.text_shaping
-            + self.color_only
-            + self.geometry
-            + self.opacity
-            + self.transform
             + self.children_order
+            + self.color
+            + self.opacity
+            + self.geometry
+            + self.image
+            + self.focus
+            + self.transform
+            + self.clip
+            + self.visibility
+            + self.scroll
     }
 }
 
@@ -309,25 +335,13 @@ impl MemoryMetrics {
 #[derive(Debug, Clone)]
 pub enum PerformanceWarning {
     /// Too many nodes were rebuilt this frame.
-    ExcessiveRebuilds {
-        dirty_percent: f32,
-        threshold: f32,
-    },
+    ExcessiveRebuilds { dirty_percent: f32, threshold: f32 },
     /// Layout changes cascaded too deep.
-    LayoutCascade {
-        depth: usize,
-        affected_nodes: usize,
-    },
+    LayoutCascade { depth: usize, affected_nodes: usize },
     /// Text cache is thrashing.
-    TextCacheThrashing {
-        hit_rate: f32,
-        min_rate: f32,
-    },
+    TextCacheThrashing { hit_rate: f32, min_rate: f32 },
     /// Frame took longer than target.
-    FrameTimeExceeded {
-        actual: Duration,
-        target: Duration,
-    },
+    FrameTimeExceeded { actual: Duration, target: Duration },
     /// Single phase took too long.
     PhaseTimeExceeded {
         phase: MetricsPhase,
@@ -335,10 +349,7 @@ pub enum PerformanceWarning {
         threshold: Duration,
     },
     /// Memory usage is high.
-    HighMemoryUsage {
-        bytes: usize,
-        threshold: usize,
-    },
+    HighMemoryUsage { bytes: usize, threshold: usize },
 }
 
 impl PerformanceWarning {
@@ -373,7 +384,9 @@ impl PerformanceWarning {
                     1
                 }
             }
-            PerformanceWarning::PhaseTimeExceeded { time, threshold, .. } => {
+            PerformanceWarning::PhaseTimeExceeded {
+                time, threshold, ..
+            } => {
                 if *time > *threshold * 2 {
                     2
                 } else {
@@ -393,14 +406,20 @@ impl PerformanceWarning {
     /// Format as human-readable string.
     pub fn format(&self) -> String {
         match self {
-            PerformanceWarning::ExcessiveRebuilds { dirty_percent, threshold } => {
+            PerformanceWarning::ExcessiveRebuilds {
+                dirty_percent,
+                threshold,
+            } => {
                 format!(
                     "Excessive rebuilds: {:.1}% dirty (threshold: {:.1}%)",
                     dirty_percent * 100.0,
                     threshold * 100.0
                 )
             }
-            PerformanceWarning::LayoutCascade { depth, affected_nodes } => {
+            PerformanceWarning::LayoutCascade {
+                depth,
+                affected_nodes,
+            } => {
                 format!(
                     "Layout cascade: depth {} affecting {} nodes",
                     depth, affected_nodes
@@ -420,7 +439,11 @@ impl PerformanceWarning {
                     target.as_secs_f64() * 1000.0
                 )
             }
-            PerformanceWarning::PhaseTimeExceeded { phase, time, threshold } => {
+            PerformanceWarning::PhaseTimeExceeded {
+                phase,
+                time,
+                threshold,
+            } => {
                 format!(
                     "{:?} phase exceeded: {:.2}ms (threshold: {:.2}ms)",
                     phase,
@@ -521,9 +544,8 @@ impl MetricsCollector {
 
         if let Some(mut frame) = self.current_frame.take() {
             // Calculate total layout time
-            frame.total_layout_time = frame.dirty_detection_time
-                + frame.taffy_compute_time
-                + frame.layout_cache_time;
+            frame.total_layout_time =
+                frame.dirty_detection_time + frame.taffy_compute_time + frame.layout_cache_time;
 
             // Check for warnings
             self.analyze_frame(&frame);
@@ -663,8 +685,8 @@ impl MetricsCollector {
     fn analyze_frame(&mut self, frame: &FrameTimingMetrics) {
         // Check for excessive rebuilds
         if frame.total_nodes > 0 {
-            let dirty_percent =
-                (frame.nodes_layout_dirty + frame.nodes_text_dirty) as f32 / frame.total_nodes as f32;
+            let dirty_percent = (frame.nodes_layout_dirty + frame.nodes_text_dirty) as f32
+                / frame.total_nodes as f32;
             if dirty_percent > self.config.excessive_rebuild_threshold {
                 self.warnings.push(PerformanceWarning::ExcessiveRebuilds {
                     dirty_percent,
@@ -790,7 +812,12 @@ impl MetricsCollector {
 
         let latest = self.current_metrics();
         let (layout_dirty, text_dirty, paint_dirty, total_nodes) = if let Some(f) = latest {
-            (f.nodes_layout_dirty, f.nodes_text_dirty, f.nodes_paint_dirty, f.total_nodes)
+            (
+                f.nodes_layout_dirty,
+                f.nodes_text_dirty,
+                f.nodes_paint_dirty,
+                f.total_nodes,
+            )
         } else {
             (0, 0, 0, 0)
         };
@@ -938,11 +965,11 @@ mod tests {
         let mut counts = DirtyFlagCounts::default();
         counts.add(DirtyFlags::LAYOUT);
         counts.add(DirtyFlags::TEXT_SHAPING);
-        counts.add(DirtyFlags::COLOR_ONLY);
+        counts.add(DirtyFlags::COLOR);
 
         assert_eq!(counts.layout, 1);
         assert_eq!(counts.text_shaping, 1);
-        assert_eq!(counts.color_only, 1);
+        assert_eq!(counts.color, 1);
         assert_eq!(counts.total(), 3);
     }
 

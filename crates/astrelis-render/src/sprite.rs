@@ -185,7 +185,7 @@ impl SpriteSheet {
             depth_or_array_layers: 1,
         };
 
-        let texture = context.device.create_texture(&wgpu::TextureDescriptor {
+        let texture = context.device().create_texture(&wgpu::TextureDescriptor {
             label: Some("Sprite Sheet Texture"),
             size,
             mip_level_count: 1,
@@ -196,7 +196,7 @@ impl SpriteSheet {
             view_formats: &[],
         });
 
-        context.queue.write_texture(
+        context.queue().write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,

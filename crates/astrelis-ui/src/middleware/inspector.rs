@@ -10,9 +10,9 @@ use astrelis_winit::event::KeyCode;
 use crate::inspector::{InspectorConfig, UiInspector};
 use crate::tree::UiTree;
 
+use super::UiMiddleware;
 use super::context::{MiddlewareContext, OverlayContext};
 use super::keybind::{Keybind, Modifiers};
-use super::UiMiddleware;
 
 /// Inspector middleware for UI debugging and visualization.
 ///

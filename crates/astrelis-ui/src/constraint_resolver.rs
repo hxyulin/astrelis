@@ -22,8 +22,8 @@
 //! assert_eq!(vw_width, Some(1024.0)); // 80% of 1280px
 //! ```
 
-use astrelis_core::math::Vec2;
 use crate::constraint::{CalcExpr, Constraint};
+use astrelis_core::math::Vec2;
 
 /// Context for resolving constraints.
 ///
@@ -105,9 +105,7 @@ impl ConstraintResolver {
         match constraint {
             Constraint::Px(v) => Some(*v),
 
-            Constraint::Percent(p) => {
-                ctx.parent_size.map(|parent| parent * p / 100.0)
-            }
+            Constraint::Percent(p) => ctx.parent_size.map(|parent| parent * p / 100.0),
 
             Constraint::Auto => None, // Auto requires layout algorithm
 
@@ -264,7 +262,10 @@ mod tests {
     #[test]
     fn test_resolve_px() {
         let ctx = test_ctx();
-        assert_eq!(ConstraintResolver::resolve(&Constraint::Px(100.0), &ctx), Some(100.0));
+        assert_eq!(
+            ConstraintResolver::resolve(&Constraint::Px(100.0), &ctx),
+            Some(100.0)
+        );
     }
 
     #[test]
@@ -374,10 +375,7 @@ mod tests {
             max: Box::new(Constraint::Px(200.0)),
         };
 
-        assert_eq!(
-            ConstraintResolver::resolve(&constraint, &ctx),
-            Some(200.0)
-        );
+        assert_eq!(ConstraintResolver::resolve(&constraint, &ctx), Some(200.0));
 
         // clamp(100px, 10%, 400px) with parent 640px
         // 10% = 64px, clamped to [100, 400] = 100px
@@ -387,10 +385,7 @@ mod tests {
             max: Box::new(Constraint::Px(400.0)),
         };
 
-        assert_eq!(
-            ConstraintResolver::resolve(&constraint, &ctx),
-            Some(100.0)
-        );
+        assert_eq!(ConstraintResolver::resolve(&constraint, &ctx), Some(100.0));
     }
 
     #[test]
@@ -398,10 +393,19 @@ mod tests {
         let ctx = test_ctx();
         let ctx_no_parent = ResolveContext::viewport_only(Vec2::new(1280.0, 720.0));
 
-        assert!(ConstraintResolver::can_resolve(&Constraint::Px(100.0), &ctx));
+        assert!(ConstraintResolver::can_resolve(
+            &Constraint::Px(100.0),
+            &ctx
+        ));
         assert!(ConstraintResolver::can_resolve(&Constraint::Vw(50.0), &ctx));
-        assert!(ConstraintResolver::can_resolve(&Constraint::Percent(50.0), &ctx));
-        assert!(!ConstraintResolver::can_resolve(&Constraint::Percent(50.0), &ctx_no_parent));
+        assert!(ConstraintResolver::can_resolve(
+            &Constraint::Percent(50.0),
+            &ctx
+        ));
+        assert!(!ConstraintResolver::can_resolve(
+            &Constraint::Percent(50.0),
+            &ctx_no_parent
+        ));
         assert!(!ConstraintResolver::can_resolve(&Constraint::Auto, &ctx));
     }
 }

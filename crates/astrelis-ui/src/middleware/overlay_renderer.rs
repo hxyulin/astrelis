@@ -53,7 +53,7 @@ impl OverlayRenderer {
         // Create unit quad VBO
         let unit_quad_vertices = QuadVertex::unit_quad();
         let unit_quad_vbo = context
-            .device
+            .device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Overlay Unit Quad VBO"),
                 contents: bytemuck::cast_slice(&unit_quad_vertices),
@@ -71,7 +71,7 @@ impl OverlayRenderer {
         );
 
         // Create projection buffer
-        let projection_buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
+        let projection_buffer = context.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("Overlay Projection Buffer"),
             size: 64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -131,7 +131,9 @@ impl OverlayRenderer {
             &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(font_renderer.atlas_texture_view()),
+                    resource: wgpu::BindingResource::TextureView(
+                        font_renderer.atlas_texture_view(),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -239,8 +241,10 @@ impl OverlayRenderer {
         });
 
         // Create instance buffers
-        let quad_instances = InstanceBuffer::new(&context.device, Some("Overlay Quad Instances"), 256);
-        let text_instances = InstanceBuffer::new(&context.device, Some("Overlay Text Instances"), 1024);
+        let quad_instances =
+            InstanceBuffer::new(context.device(), Some("Overlay Quad Instances"), 256);
+        let text_instances =
+            InstanceBuffer::new(context.device(), Some("Overlay Text Instances"), 1024);
 
         Self {
             context,
@@ -283,9 +287,11 @@ impl OverlayRenderer {
         // Update projection matrix
         let logical = viewport.to_logical();
         let projection = orthographic_projection(logical.width, logical.height);
-        self.renderer
-            .queue()
-            .write_buffer(&self.projection_buffer, 0, bytemuck::cast_slice(&projection));
+        self.renderer.queue().write_buffer(
+            &self.projection_buffer,
+            0,
+            bytemuck::cast_slice(&projection),
+        );
 
         // Build instance data
         let mut quad_instances = Vec::new();
@@ -298,7 +304,12 @@ impl OverlayRenderer {
                     quad_instances.push(QuadInstance {
                         position: [q.position.x, q.position.y],
                         size: [q.size.x, q.size.y],
-                        color: [q.fill_color.r, q.fill_color.g, q.fill_color.b, q.fill_color.a],
+                        color: [
+                            q.fill_color.r,
+                            q.fill_color.g,
+                            q.fill_color.b,
+                            q.fill_color.a,
+                        ],
                         border_radius: q.border_radius,
                         border_thickness: 0.0,
                         _padding: [0.0; 2],
@@ -311,7 +322,12 @@ impl OverlayRenderer {
                         quad_instances.push(QuadInstance {
                             position: [q.position.x, q.position.y],
                             size: [q.size.x, q.size.y],
-                            color: [border_color.r, border_color.g, border_color.b, border_color.a],
+                            color: [
+                                border_color.r,
+                                border_color.g,
+                                border_color.b,
+                                border_color.a,
+                            ],
                             border_radius: q.border_radius,
                             border_thickness: q.border_width,
                             _padding: [0.0; 2],
@@ -323,7 +339,13 @@ impl OverlayRenderer {
                     let shaped = {
                         let font_system = self.font_renderer.font_system();
                         let mut font_sys = font_system.write().unwrap();
-                        shape_text(&mut font_sys, &t.text, t.size, None, self.scale_factor as f32)
+                        shape_text(
+                            &mut font_sys,
+                            &t.text,
+                            t.size,
+                            None,
+                            self.scale_factor as f32,
+                        )
                     };
 
                     let instances = glyphs_to_instances(
@@ -369,8 +391,10 @@ impl OverlayRenderer {
         }
 
         // Upload instance data
-        self.quad_instances.set_instances(self.renderer.device(), quad_instances);
-        self.text_instances.set_instances(self.renderer.device(), text_instances);
+        self.quad_instances
+            .set_instances(self.renderer.device(), quad_instances);
+        self.text_instances
+            .set_instances(self.renderer.device(), text_instances);
         self.quad_instances.upload_dirty(self.renderer.queue());
         self.text_instances.upload_dirty(self.renderer.queue());
         self.font_renderer.upload_atlas_if_dirty();

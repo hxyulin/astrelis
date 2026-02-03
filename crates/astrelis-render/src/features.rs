@@ -16,9 +16,11 @@ bitflags! {
         /// Required for GPU-driven rendering with indirect buffers.
         const INDIRECT_FIRST_INSTANCE = 1 << 0;
 
-        /// Allows multiple indirect draw calls in a single command.
-        /// Enables efficient batched rendering with `multi_draw_indirect`.
-        const MULTI_DRAW_INDIRECT = 1 << 1;
+        /// Allows `multi_draw_indirect_count` for GPU-driven draw count.
+        /// In wgpu 27+, `multi_draw_indirect()` requires no feature flag
+        /// (only `DownlevelFlags::INDIRECT_EXECUTION`), but the count variant
+        /// (`multi_draw_indirect_count`) requires this feature.
+        const MULTI_DRAW_INDIRECT_COUNT = 1 << 1;
 
         /// Allows push constants in shaders for small, frequently updated data.
         /// More efficient than uniform buffers for small amounts of per-draw data.
@@ -74,7 +76,24 @@ bitflags! {
 
         /// Timestamp queries for GPU profiling.
         /// Allows measuring GPU execution time with high precision.
+        /// Alone, this only allows timestamp writes on pass definition
+        /// (via `timestamp_writes` in render/compute pass descriptors).
         const TIMESTAMP_QUERY = 1 << 17;
+
+        /// Allows timestamp write commands at arbitrary points within command encoders.
+        /// Implies `TIMESTAMP_QUERY` is supported.
+        /// Required by `wgpu-profiler` for scopes on command encoders.
+        const TIMESTAMP_QUERY_INSIDE_ENCODERS = 1 << 19;
+
+        /// Allows timestamp write commands at arbitrary points within render/compute passes.
+        /// Implies `TIMESTAMP_QUERY` and `TIMESTAMP_QUERY_INSIDE_ENCODERS` are supported.
+        /// Required by `wgpu-profiler` for scopes on render/compute passes.
+        const TIMESTAMP_QUERY_INSIDE_PASSES = 1 << 20;
+
+        /// Non-uniform indexing of sampled texture and storage buffer binding arrays.
+        /// Required for dynamic indexing into `binding_array<texture_2d<f32>>` with
+        /// values that are not uniform across a draw call (e.g., per-instance texture index).
+        const SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING = 1 << 18;
     }
 }
 
@@ -86,7 +105,7 @@ impl GpuFeatures {
         if self.contains(GpuFeatures::INDIRECT_FIRST_INSTANCE) {
             features |= wgpu::Features::INDIRECT_FIRST_INSTANCE;
         }
-        if self.contains(GpuFeatures::MULTI_DRAW_INDIRECT) {
+        if self.contains(GpuFeatures::MULTI_DRAW_INDIRECT_COUNT) {
             features |= wgpu::Features::MULTI_DRAW_INDIRECT_COUNT;
         }
         if self.contains(GpuFeatures::PUSH_CONSTANTS) {
@@ -134,6 +153,15 @@ impl GpuFeatures {
         if self.contains(GpuFeatures::TIMESTAMP_QUERY) {
             features |= wgpu::Features::TIMESTAMP_QUERY;
         }
+        if self.contains(GpuFeatures::TIMESTAMP_QUERY_INSIDE_ENCODERS) {
+            features |= wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        }
+        if self.contains(GpuFeatures::TIMESTAMP_QUERY_INSIDE_PASSES) {
+            features |= wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
+        }
+        if self.contains(GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING) {
+            features |= wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+        }
 
         features
     }
@@ -148,7 +176,7 @@ impl GpuFeatures {
             gpu_features |= GpuFeatures::INDIRECT_FIRST_INSTANCE;
         }
         if features.contains(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT) {
-            gpu_features |= GpuFeatures::MULTI_DRAW_INDIRECT;
+            gpu_features |= GpuFeatures::MULTI_DRAW_INDIRECT_COUNT;
         }
         if features.contains(wgpu::Features::PUSH_CONSTANTS) {
             gpu_features |= GpuFeatures::PUSH_CONSTANTS;
@@ -194,6 +222,15 @@ impl GpuFeatures {
         }
         if features.contains(wgpu::Features::TIMESTAMP_QUERY) {
             gpu_features |= GpuFeatures::TIMESTAMP_QUERY;
+        }
+        if features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS) {
+            gpu_features |= GpuFeatures::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+        }
+        if features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES) {
+            gpu_features |= GpuFeatures::TIMESTAMP_QUERY_INSIDE_PASSES;
+        }
+        if features.contains(wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING) {
+            gpu_features |= GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
         }
 
         gpu_features
@@ -256,7 +293,7 @@ mod tests {
     #[test]
     fn test_gpu_features_roundtrip() {
         let features = GpuFeatures::INDIRECT_FIRST_INSTANCE
-            | GpuFeatures::MULTI_DRAW_INDIRECT
+            | GpuFeatures::MULTI_DRAW_INDIRECT_COUNT
             | GpuFeatures::PUSH_CONSTANTS
             | GpuFeatures::TIMESTAMP_QUERY;
 
@@ -272,6 +309,6 @@ mod tests {
 
         assert!(features.contains(GpuFeatures::INDIRECT_FIRST_INSTANCE));
         assert!(features.contains(GpuFeatures::PUSH_CONSTANTS));
-        assert!(!features.contains(GpuFeatures::MULTI_DRAW_INDIRECT));
+        assert!(!features.contains(GpuFeatures::MULTI_DRAW_INDIRECT_COUNT));
     }
 }

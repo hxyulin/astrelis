@@ -67,20 +67,15 @@ pub enum FocusEvent {
 }
 
 /// Focus policy determining how a widget can receive focus.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FocusPolicy {
     /// Widget can receive focus via Tab/Shift+Tab and mouse clicks
     Focusable,
     /// Widget can only receive focus via mouse clicks, not keyboard
     ClickFocusable,
     /// Widget cannot receive focus
+    #[default]
     NotFocusable,
-}
-
-impl Default for FocusPolicy {
-    fn default() -> Self {
-        Self::NotFocusable
-    }
 }
 
 /// Focus scope for focus trapping (e.g., in modals).
@@ -197,7 +192,9 @@ impl FocusManager {
     /// Set focus to a specific widget.
     pub fn set_focus(&mut self, widget_id: WidgetId) -> bool {
         if let Some(index) = self.entries.iter().position(|e| e.widget_id == widget_id) {
-            let old_focus = self.focused.and_then(|idx| self.entries.get(idx).map(|e| e.widget_id));
+            let old_focus = self
+                .focused
+                .and_then(|idx| self.entries.get(idx).map(|e| e.widget_id));
 
             if old_focus == Some(widget_id) {
                 return true; // Already focused
@@ -317,12 +314,11 @@ impl FocusManager {
         self.active_scope = scope;
 
         // Clear focus if currently focused widget is not in this scope
-        if let Some(idx) = self.focused {
-            if let Some(entry) = self.entries.get(idx) {
-                if entry.scope != scope {
-                    self.clear_focus();
-                }
-            }
+        if let Some(idx) = self.focused
+            && let Some(entry) = self.entries.get(idx)
+            && entry.scope != scope
+        {
+            self.clear_focus();
         }
     }
 

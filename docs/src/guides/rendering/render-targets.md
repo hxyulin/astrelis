@@ -40,7 +40,7 @@ frame.clear_and_render(
     RenderTarget::Surface,  // Render to screen
     Color::BLACK,
     |pass| {
-        scene_renderer.render(pass.descriptor());
+        scene_renderer.render(pass.wgpu_pass());
     },
 );
 
@@ -64,7 +64,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(framebuffer_id),  // Render to texture
     Color::BLACK,
     |pass| {
-        scene_renderer.render(pass.descriptor());
+        scene_renderer.render(pass.wgpu_pass());
     },
 );
 
@@ -233,7 +233,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(scene_fb),
     Color::BLACK,
     |pass| {
-        scene_renderer.render(pass.descriptor());
+        scene_renderer.render(pass.wgpu_pass());
     },
 );
 
@@ -250,7 +250,7 @@ frame.clear_and_render(
     RenderTarget::Surface,
     Color::DARK_GRAY,
     |pass| {
-        ui.render(pass.descriptor());
+        ui.render(pass.wgpu_pass());
     },
 );
 ```
@@ -271,7 +271,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(scene_fb),
     Color::BLACK,
     |pass| {
-        scene_renderer.render(pass.descriptor());
+        scene_renderer.render(pass.wgpu_pass());
     },
 );
 
@@ -281,7 +281,7 @@ frame.clear_and_render(
     Color::BLACK,
     |pass| {
         post_process.render(
-            pass.descriptor(),
+            pass.wgpu_pass(),
             framebuffer.color_texture(),
         );
     },
@@ -304,7 +304,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(scene_fb),
     Color::BLACK,
     |pass| {
-        scene_renderer.render(pass.descriptor());
+        scene_renderer.render(pass.wgpu_pass());
     },
 );
 
@@ -313,7 +313,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(blur_h_fb),
     Color::BLACK,
     |pass| {
-        blur.render_horizontal(pass.descriptor(), scene_fb.color_texture());
+        blur.render_horizontal(pass.wgpu_pass(), scene_fb.color_texture());
     },
 );
 
@@ -322,7 +322,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(blur_v_fb),
     Color::BLACK,
     |pass| {
-        blur.render_vertical(pass.descriptor(), blur_h_fb.color_texture());
+        blur.render_vertical(pass.wgpu_pass(), blur_h_fb.color_texture());
     },
 );
 
@@ -332,7 +332,7 @@ frame.clear_and_render(
     Color::BLACK,
     |pass| {
         composite.render(
-            pass.descriptor(),
+            pass.wgpu_pass(),
             scene_fb.color_texture(),
             blur_v_fb.color_texture(),
         );
@@ -357,7 +357,7 @@ for _ in 0..iterations {
         RenderTarget::Framebuffer(dest_fb),
         Color::BLACK,
         |pass| {
-            effect.render(pass.descriptor(), source_fb.color_texture());
+            effect.render(pass.wgpu_pass(), source_fb.color_texture());
         },
     );
 
@@ -370,7 +370,7 @@ frame.clear_and_render(
     RenderTarget::Surface,
     Color::BLACK,
     |pass| {
-        blit.render(pass.descriptor(), source_fb.color_texture());
+        blit.render(pass.wgpu_pass(), source_fb.color_texture());
     },
 );
 ```
@@ -402,7 +402,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(shadow_fb),
     Color::WHITE, // Far plane
     |pass| {
-        scene_renderer.render_from_light(pass.descriptor(), light_view_proj);
+        scene_renderer.render_from_light(pass.wgpu_pass(), light_view_proj);
     },
 );
 
@@ -412,7 +412,7 @@ frame.clear_and_render(
     Color::BLACK,
     |pass| {
         scene_renderer.render_with_shadows(
-            pass.descriptor(),
+            pass.wgpu_pass(),
             shadow_fb.color_texture(),
         );
     },
@@ -454,7 +454,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(gbuffer),
     Color::BLACK,
     |pass| {
-        scene_renderer.render_geometry(pass.descriptor());
+        scene_renderer.render_geometry(pass.wgpu_pass());
     },
 );
 
@@ -464,7 +464,7 @@ frame.clear_and_render(
     Color::BLACK,
     |pass| {
         lighting_renderer.render(
-            pass.descriptor(),
+            pass.wgpu_pass(),
             gbuffer.attachment_texture(0), // Albedo
             gbuffer.attachment_texture(1), // Normal
             gbuffer.attachment_texture(2), // Material
@@ -499,7 +499,7 @@ for face in 0..6 {
         RenderTarget::Framebuffer(probe_fb[face]),
         Color::BLACK,
         |pass| {
-            scene_renderer.render_from_position(pass.descriptor(), view_proj);
+            scene_renderer.render_from_position(pass.wgpu_pass(), view_proj);
         },
     );
 }
@@ -518,7 +518,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(scene_fb),
     Color::BLACK,
     |pass| {
-        scene_renderer.render(pass.descriptor());
+        scene_renderer.render(pass.wgpu_pass());
     },
 );
 
@@ -528,7 +528,7 @@ frame.clear_and_render(
     Color::WHITE,
     |pass| {
         ssao_renderer.render(
-            pass.descriptor(),
+            pass.wgpu_pass(),
             scene_fb.depth_texture().unwrap(),
         );
     },
@@ -540,7 +540,7 @@ frame.clear_and_render(
     Color::BLACK,
     |pass| {
         composite.render(
-            pass.descriptor(),
+            pass.wgpu_pass(),
             scene_fb.color_texture(),
             ssao_fb.color_texture(),
         );

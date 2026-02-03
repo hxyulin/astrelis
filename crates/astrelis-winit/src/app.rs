@@ -3,6 +3,8 @@ pub use winit::error::OsError;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::WindowId;
 
+use astrelis_core::profiling::{profile_function, profile_scope};
+
 use crate::{
     event::{Event, EventBatch, EventQueue, HandleStatus},
     time::{FrameTime, TimeTracker},
@@ -103,6 +105,7 @@ struct AppProxy {
 
 impl winit::application::ApplicationHandler for AppProxy {
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {
+        profile_function!();
         if self.app.is_none() {
             let mut ctx = AppCtx {
                 event_loop: _event_loop,
@@ -119,6 +122,7 @@ impl winit::application::ApplicationHandler for AppProxy {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        profile_function!();
         // Call end_frame after all events have been processed
         if let (Some(app), Some(frame_time)) = (&mut self.app, &self.current_frame_time) {
             let mut ctx = AppCtx {
@@ -139,6 +143,7 @@ impl winit::application::ApplicationHandler for AppProxy {
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
+        profile_function!();
         use winit::event::WindowEvent;
 
         let _app = match &mut self.app {
@@ -161,8 +166,11 @@ impl winit::application::ApplicationHandler for AppProxy {
                     let frame_time = self.time_tracker.tick();
 
                     // Call lifecycle hooks in order
-                    app.begin_frame(&mut ctx, &frame_time);
-                    app.update(&mut ctx, &frame_time);
+                    {
+                        profile_scope!("update");
+                        app.begin_frame(&mut ctx, &frame_time);
+                        app.update(&mut ctx, &frame_time);
+                    }
                     // Note: fixed_update is called by the app itself if needed
 
                     // Save frame time for end_frame call in about_to_wait
@@ -174,7 +182,10 @@ impl winit::application::ApplicationHandler for AppProxy {
                 let window = ctx.windows.get_mut(&window_id).unwrap();
                 let mut events = window.events.drain();
 
-                app.render(&mut ctx, window_id, &mut events);
+                {
+                    profile_scope!("render");
+                    app.render(&mut ctx, window_id, &mut events);
+                }
 
                 // Default event handling
                 events.dispatch(|event| match event {

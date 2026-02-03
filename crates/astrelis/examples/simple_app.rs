@@ -1,25 +1,25 @@
-///! Minimal application example using ApplicationBuilder.
-///!
-///! This example demonstrates the ApplicationBuilder API that eliminates
-///! 35-50 lines of boilerplate code. Compare this to the traditional approach
-///! in the render examples.
-///!
-///! # Boilerplate Reduction
-///!
-///! Traditional approach requires (~50 lines):
-///! - Manual GraphicsContext creation
-///! - Manual window creation with descriptors
-///! - Manual Engine building
-///! - Manual HashMap management for windows
-///! - Manual resize event handling
-///!
-///! ApplicationBuilder approach (~15 lines):
-///! - Declarative builder pattern
-///! - Automatic window creation
-///! - Automatic plugin initialization
-///! - Automatic WindowManager setup
-///!
-///! Run with: cargo run --example simple_app
+//! Minimal Application Example - Using ApplicationBuilder
+//!
+//! This example demonstrates the ApplicationBuilder API that eliminates
+//! 35-50 lines of boilerplate code. Compare this to the traditional approach
+//! in the render examples.
+//!
+//! # Boilerplate Reduction
+//!
+//! Traditional approach requires (~50 lines):
+//! - Manual GraphicsContext creation
+//! - Manual window creation with descriptors
+//! - Manual Engine building
+//! - Manual HashMap management for windows
+//! - Manual resize event handling
+//!
+//! ApplicationBuilder approach (~15 lines):
+//! - Declarative builder pattern
+//! - Automatic window creation
+//! - Automatic plugin initialization
+//! - Automatic WindowManager setup
+//!
+//! Run with: cargo run --example simple_app
 
 use astrelis::prelude::*;
 

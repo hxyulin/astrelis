@@ -76,13 +76,25 @@ pub struct ComputePass<'a> {
 
 impl<'a> ComputePass<'a> {
     /// Get the underlying wgpu compute pass.
-    pub fn pass(&mut self) -> &mut wgpu::ComputePass<'static> {
+    pub fn wgpu_pass(&mut self) -> &mut wgpu::ComputePass<'static> {
         self.pass.as_mut().unwrap()
+    }
+
+    /// Get raw access to the underlying wgpu compute pass.
+    ///
+    /// This is an alias for [`wgpu_pass()`](Self::wgpu_pass) for consistency with `RenderPass::raw_pass()`.
+    pub fn raw_pass(&mut self) -> &mut wgpu::ComputePass<'static> {
+        self.pass.as_mut().unwrap()
+    }
+
+    /// Get the graphics context.
+    pub fn graphics_context(&self) -> &crate::context::GraphicsContext {
+        &self.context.context
     }
 
     /// Set the compute pipeline to use.
     pub fn set_pipeline(&mut self, pipeline: &'a wgpu::ComputePipeline) {
-        self.pass().set_pipeline(pipeline);
+        self.wgpu_pass().set_pipeline(pipeline);
     }
 
     /// Set a bind group.
@@ -92,7 +104,7 @@ impl<'a> ComputePass<'a> {
         bind_group: &'a wgpu::BindGroup,
         offsets: &[u32],
     ) {
-        self.pass().set_bind_group(index, bind_group, offsets);
+        self.wgpu_pass().set_bind_group(index, bind_group, offsets);
     }
 
     /// Dispatch workgroups.
@@ -103,7 +115,7 @@ impl<'a> ComputePass<'a> {
     /// * `y` - Number of workgroups in the Y dimension
     /// * `z` - Number of workgroups in the Z dimension
     pub fn dispatch_workgroups(&mut self, x: u32, y: u32, z: u32) {
-        self.pass().dispatch_workgroups(x, y, z);
+        self.wgpu_pass().dispatch_workgroups(x, y, z);
     }
 
     /// Dispatch workgroups with a 1D configuration.
@@ -132,22 +144,22 @@ impl<'a> ComputePass<'a> {
     /// }
     /// ```
     pub fn dispatch_workgroups_indirect(&mut self, buffer: &'a wgpu::Buffer, offset: u64) {
-        self.pass().dispatch_workgroups_indirect(buffer, offset);
+        self.wgpu_pass().dispatch_workgroups_indirect(buffer, offset);
     }
 
     /// Insert a debug marker.
     pub fn insert_debug_marker(&mut self, label: &str) {
-        self.pass().insert_debug_marker(label);
+        self.wgpu_pass().insert_debug_marker(label);
     }
 
     /// Push a debug group.
     pub fn push_debug_group(&mut self, label: &str) {
-        self.pass().push_debug_group(label);
+        self.wgpu_pass().push_debug_group(label);
     }
 
     /// Pop a debug group.
     pub fn pop_debug_group(&mut self) {
-        self.pass().pop_debug_group();
+        self.wgpu_pass().pop_debug_group();
     }
 
     /// Set push constants for the compute shader.
@@ -179,7 +191,7 @@ impl<'a> ComputePass<'a> {
     /// pass.set_push_constants(0, &constants);
     /// ```
     pub fn set_push_constants<T: bytemuck::Pod>(&mut self, offset: u32, data: &T) {
-        self.pass()
+        self.wgpu_pass()
             .set_push_constants(offset, bytemuck::bytes_of(data));
     }
 
@@ -187,7 +199,7 @@ impl<'a> ComputePass<'a> {
     ///
     /// Use this when you need more control over the data layout.
     pub fn set_push_constants_raw(&mut self, offset: u32, data: &[u8]) {
-        self.pass().set_push_constants(offset, data);
+        self.wgpu_pass().set_push_constants(offset, data);
     }
 
     /// Finish the compute pass, returning the encoder to the frame context.
@@ -248,21 +260,14 @@ impl DispatchIndirect {
     }
 }
 
-/// Helper trait for creating compute passes from FrameContext.
-pub trait ComputePassExt {
+impl FrameContext {
     /// Create a compute pass with a label.
-    fn compute_pass<'a>(&'a mut self, label: &'a str) -> ComputePass<'a>;
-
-    /// Create a compute pass without a label.
-    fn compute_pass_unlabeled(&mut self) -> ComputePass<'_>;
-}
-
-impl ComputePassExt for FrameContext {
-    fn compute_pass<'a>(&'a mut self, label: &'a str) -> ComputePass<'a> {
+    pub fn compute_pass<'a>(&'a mut self, label: &'a str) -> ComputePass<'a> {
         ComputePassBuilder::new().label(label).build(self)
     }
 
-    fn compute_pass_unlabeled(&mut self) -> ComputePass<'_> {
+    /// Create a compute pass without a label.
+    pub fn compute_pass_unlabeled(&mut self) -> ComputePass<'_> {
         ComputePassBuilder::new().build(self)
     }
 }

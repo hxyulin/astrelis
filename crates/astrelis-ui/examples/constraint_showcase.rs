@@ -12,17 +12,16 @@ use astrelis_core::logging;
 use astrelis_core::math::Vec2;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
-use astrelis_ui::{UiSystem, UiBuilder, NodeId};
 use astrelis_ui::constraint_builder::*;
 use astrelis_ui::constraint_resolver::{ConstraintResolver, ResolveContext};
+use astrelis_ui::{NodeId, UiBuilder, UiSystem};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::{Event, EventBatch, HandleStatus},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 
 struct ConstraintShowcaseApp {
@@ -36,7 +35,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -53,7 +52,8 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = window.id();
 
@@ -84,13 +84,16 @@ fn build_showcase_ui(ui: &mut UiSystem, window: &RenderableWindow) {
     let viewport = Vec2::new(width, height);
     let ctx = ResolveContext::new(viewport, Some(width * 0.8)); // 80% parent width
 
+    let theme = ui.theme().clone();
+    let colors = &theme.colors;
+
     ui.build(|root| {
         // Main container - full viewport
         root.container()
             .width(width)
             .height(height)
             .padding(20.0)
-            .background_color(Color::from_rgb_u8(25, 25, 35))
+            .background_color(colors.background)
             .child(|root| {
                 root.column()
                     .gap(15.0)
@@ -98,7 +101,7 @@ fn build_showcase_ui(ui: &mut UiSystem, window: &RenderableWindow) {
                         // Title
                         root.text("Constraint System Showcase")
                             .size(24.0)
-                            .color(Color::WHITE)
+                            .color(colors.text_primary)
                             .bold()
                             .build()
                     })
@@ -106,21 +109,21 @@ fn build_showcase_ui(ui: &mut UiSystem, window: &RenderableWindow) {
                         // Viewport info
                         root.text(format!("Viewport: {}x{} px", width as i32, height as i32))
                             .size(12.0)
-                            .color(Color::from_rgb_u8(150, 150, 160))
+                            .color(colors.text_secondary)
                             .build()
                     })
                     .child(|root| {
                         // Row of demonstration panels
                         root.row()
                             .gap(15.0)
-                            .child(|root| build_aspect_ratio_panel(root))
-                            .child(|root| build_constraint_expressions_panel(root, &ctx))
+                            .child(|root| build_aspect_ratio_panel(root, &theme))
+                            .child(|root| build_constraint_expressions_panel(root, &theme, &ctx))
                             .build()
                     })
                     .child(|root| {
                         root.row()
                             .gap(15.0)
-                            .child(|root| build_viewport_units_info(root, viewport))
+                            .child(|root| build_viewport_units_info(root, &theme, viewport))
                             .build()
                     })
                     .build()
@@ -129,11 +132,12 @@ fn build_showcase_ui(ui: &mut UiSystem, window: &RenderableWindow) {
     });
 }
 
-fn build_aspect_ratio_panel(root: &mut UiBuilder) -> NodeId {
+fn build_aspect_ratio_panel(root: &mut UiBuilder, theme: &astrelis_ui::Theme) -> NodeId {
+    let colors = &theme.colors;
     root.container()
         .width(250.0)
-        .background_color(Color::from_rgb_u8(40, 45, 55))
-        .border_color(Color::from_rgb_u8(70, 80, 100))
+        .background_color(colors.surface)
+        .border_color(colors.border)
         .border_width(2.0)
         .border_radius(8.0)
         .padding(12.0)
@@ -141,6 +145,7 @@ fn build_aspect_ratio_panel(root: &mut UiBuilder) -> NodeId {
             root.column()
                 .gap(10.0)
                 .child(|root| {
+                    // Section title accent color - keep as content-specific
                     root.text("Aspect Ratios")
                         .size(16.0)
                         .color(Color::from_rgb_u8(100, 180, 255))
@@ -150,11 +155,11 @@ fn build_aspect_ratio_panel(root: &mut UiBuilder) -> NodeId {
                 .child(|root| {
                     root.text("16:9 Video Container")
                         .size(11.0)
-                        .color(Color::from_rgb_u8(180, 180, 190))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
-                    // 16:9 aspect ratio box
+                    // 16:9 aspect ratio box - content-specific demo colors
                     root.container()
                         .width(200.0)
                         .aspect_ratio(16.0 / 9.0)
@@ -174,11 +179,11 @@ fn build_aspect_ratio_panel(root: &mut UiBuilder) -> NodeId {
                 .child(|root| {
                     root.text("1:1 Square Avatar")
                         .size(11.0)
-                        .color(Color::from_rgb_u8(180, 180, 190))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
-                    // 1:1 square box
+                    // 1:1 square box - content-specific demo colors
                     root.container()
                         .width(80.0)
                         .aspect_ratio(1.0)
@@ -198,11 +203,11 @@ fn build_aspect_ratio_panel(root: &mut UiBuilder) -> NodeId {
                 .child(|root| {
                     root.text("4:3 Photo Frame")
                         .size(11.0)
-                        .color(Color::from_rgb_u8(180, 180, 190))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
-                    // 4:3 aspect ratio box
+                    // 4:3 aspect ratio box - content-specific demo colors
                     root.container()
                         .width(120.0)
                         .aspect_ratio(4.0 / 3.0)
@@ -224,29 +229,23 @@ fn build_aspect_ratio_panel(root: &mut UiBuilder) -> NodeId {
         .build()
 }
 
-fn build_constraint_expressions_panel(root: &mut UiBuilder, ctx: &ResolveContext) -> NodeId {
+fn build_constraint_expressions_panel(
+    root: &mut UiBuilder,
+    theme: &astrelis_ui::Theme,
+    ctx: &ResolveContext,
+) -> NodeId {
+    let colors = &theme.colors;
     // Demonstrate constraint resolution
-    let calc_result = ConstraintResolver::resolve(
-        &calc(percent(100.0) - px(40.0)),
-        ctx,
-    );
-    let min_result = ConstraintResolver::resolve(
-        &min2(percent(50.0), px(400.0)),
-        ctx,
-    );
-    let max_result = ConstraintResolver::resolve(
-        &max2(px(200.0), percent(30.0)),
-        ctx,
-    );
-    let clamp_result = ConstraintResolver::resolve(
-        &clamp(px(100.0), percent(50.0), px(300.0)),
-        ctx,
-    );
+    let calc_result = ConstraintResolver::resolve(&calc(percent(100.0) - px(40.0)), ctx);
+    let min_result = ConstraintResolver::resolve(&min2(percent(50.0), px(400.0)), ctx);
+    let max_result = ConstraintResolver::resolve(&max2(px(200.0), percent(30.0)), ctx);
+    let clamp_result =
+        ConstraintResolver::resolve(&clamp(px(100.0), percent(50.0), px(300.0)), ctx);
 
     root.container()
         .width(350.0)
-        .background_color(Color::from_rgb_u8(45, 40, 55))
-        .border_color(Color::from_rgb_u8(80, 70, 100))
+        .background_color(colors.surface)
+        .border_color(colors.border)
         .border_width(2.0)
         .border_radius(8.0)
         .padding(12.0)
@@ -254,6 +253,7 @@ fn build_constraint_expressions_panel(root: &mut UiBuilder, ctx: &ResolveContext
             root.column()
                 .gap(8.0)
                 .child(|root| {
+                    // Section title accent color - keep as content-specific
                     root.text("Constraint Expressions")
                         .size(16.0)
                         .color(Color::from_rgb_u8(180, 100, 255))
@@ -261,51 +261,54 @@ fn build_constraint_expressions_panel(root: &mut UiBuilder, ctx: &ResolveContext
                         .build()
                 })
                 .child(|root| {
-                    root.text(format!("Parent width: {:.0}px", ctx.parent_size.unwrap_or(0.0)))
-                        .size(11.0)
-                        .color(Color::from_rgb_u8(150, 150, 160))
-                        .build()
+                    root.text(format!(
+                        "Parent width: {:.0}px",
+                        ctx.parent_size.unwrap_or(0.0)
+                    ))
+                    .size(11.0)
+                    .color(colors.text_secondary)
+                    .build()
                 })
                 .child(|root| {
                     root.text(format!(
                         "calc(100% - 40px) = {:.0}px",
                         calc_result.unwrap_or(0.0)
                     ))
-                        .size(12.0)
-                        .color(Color::from_rgb_u8(200, 180, 220))
-                        .build()
+                    .size(12.0)
+                    .color(Color::from_rgb_u8(200, 180, 220))
+                    .build()
                 })
                 .child(|root| {
                     root.text(format!(
                         "min(50%, 400px) = {:.0}px",
                         min_result.unwrap_or(0.0)
                     ))
-                        .size(12.0)
-                        .color(Color::from_rgb_u8(200, 180, 220))
-                        .build()
+                    .size(12.0)
+                    .color(Color::from_rgb_u8(200, 180, 220))
+                    .build()
                 })
                 .child(|root| {
                     root.text(format!(
                         "max(200px, 30%) = {:.0}px",
                         max_result.unwrap_or(0.0)
                     ))
-                        .size(12.0)
-                        .color(Color::from_rgb_u8(200, 180, 220))
-                        .build()
+                    .size(12.0)
+                    .color(Color::from_rgb_u8(200, 180, 220))
+                    .build()
                 })
                 .child(|root| {
                     root.text(format!(
                         "clamp(100px, 50%, 300px) = {:.0}px",
                         clamp_result.unwrap_or(0.0)
                     ))
-                        .size(12.0)
-                        .color(Color::from_rgb_u8(200, 180, 220))
-                        .build()
+                    .size(12.0)
+                    .color(Color::from_rgb_u8(200, 180, 220))
+                    .build()
                 })
                 .child(|root| {
                     root.text("Resize window to see values change!")
                         .size(11.0)
-                        .color(Color::from_rgb_u8(255, 200, 100))
+                        .color(colors.warning)
                         .margin(5.0)
                         .build()
                 })
@@ -314,7 +317,12 @@ fn build_constraint_expressions_panel(root: &mut UiBuilder, ctx: &ResolveContext
         .build()
 }
 
-fn build_viewport_units_info(root: &mut UiBuilder, viewport: Vec2) -> NodeId {
+fn build_viewport_units_info(
+    root: &mut UiBuilder,
+    theme: &astrelis_ui::Theme,
+    viewport: Vec2,
+) -> NodeId {
+    let colors = &theme.colors;
     // Calculate viewport unit values
     let vw_10 = viewport.x * 0.1;
     let vh_10 = viewport.y * 0.1;
@@ -323,8 +331,8 @@ fn build_viewport_units_info(root: &mut UiBuilder, viewport: Vec2) -> NodeId {
 
     root.container()
         .width(400.0)
-        .background_color(Color::from_rgb_u8(40, 55, 45))
-        .border_color(Color::from_rgb_u8(70, 100, 80))
+        .background_color(colors.surface)
+        .border_color(colors.border)
         .border_width(2.0)
         .border_radius(8.0)
         .padding(12.0)
@@ -332,6 +340,7 @@ fn build_viewport_units_info(root: &mut UiBuilder, viewport: Vec2) -> NodeId {
             root.column()
                 .gap(6.0)
                 .child(|root| {
+                    // Section title accent color - keep as content-specific
                     root.text("Viewport Units")
                         .size(16.0)
                         .color(Color::from_rgb_u8(100, 255, 140))
@@ -355,18 +364,18 @@ fn build_viewport_units_info(root: &mut UiBuilder, viewport: Vec2) -> NodeId {
                         "10vmin = {:.0}px (10% of min({:.0}, {:.0}))",
                         vmin_10, viewport.x, viewport.y
                     ))
-                        .size(12.0)
-                        .color(Color::from_rgb_u8(180, 220, 190))
-                        .build()
+                    .size(12.0)
+                    .color(Color::from_rgb_u8(180, 220, 190))
+                    .build()
                 })
                 .child(|root| {
                     root.text(format!(
                         "10vmax = {:.0}px (10% of max({:.0}, {:.0}))",
                         vmax_10, viewport.x, viewport.y
                     ))
-                        .size(12.0)
-                        .color(Color::from_rgb_u8(180, 220, 190))
-                        .build()
+                    .size(12.0)
+                    .color(Color::from_rgb_u8(180, 220, 190))
+                    .build()
                 })
                 .build()
         })
@@ -408,13 +417,14 @@ impl App for ConstraintShowcaseApp {
         self.ui.handle_events(events);
 
         // Begin frame and render
+        let bg = self.ui.theme().colors.background;
         let mut frame = self.window.begin_drawing();
 
         frame.clear_and_render(
             RenderTarget::Surface,
-            Color::from_rgb_u8(20, 20, 28),
+            bg,
             |pass| {
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

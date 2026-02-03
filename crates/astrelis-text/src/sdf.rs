@@ -34,8 +34,10 @@ use cosmic_text::SwashImage;
 
 /// Text rendering mode.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Default)]
 pub enum TextRenderMode {
     /// Standard grayscale bitmap rendering.
+    #[default]
     Bitmap,
     /// Signed Distance Field rendering.
     SDF {
@@ -46,11 +48,6 @@ pub enum TextRenderMode {
     },
 }
 
-impl Default for TextRenderMode {
-    fn default() -> Self {
-        Self::Bitmap
-    }
-}
 
 impl TextRenderMode {
     /// Check if this is SDF mode.

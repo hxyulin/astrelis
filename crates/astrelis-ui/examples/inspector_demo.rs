@@ -23,21 +23,19 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::{
-    InspectorMiddleware, MiddlewareContext, MiddlewareManager, OverlayRenderer,
-    UiSystem, WidgetId,
+    InspectorMiddleware, MiddlewareContext, MiddlewareManager, OverlayRenderer, UiSystem, WidgetId,
 };
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
-    event::{ElementState, EventBatch, Event, HandleStatus, PhysicalKey},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    event::{ElementState, Event, EventBatch, HandleStatus, PhysicalKey},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
-use std::time::Instant;
 use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 struct InspectorDemoApp {
     #[allow(dead_code)]
@@ -60,7 +58,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -77,7 +75,8 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = window.id();
         let size = window.physical_size();
@@ -105,7 +104,12 @@ fn main() {
         let counter = Arc::new(RwLock::new(0));
 
         // Build demo UI with various widgets
-        let counter_text_id = build_demo_ui(&mut ui, size.width as f32, size.height as f32, counter.clone());
+        let counter_text_id = build_demo_ui(
+            &mut ui,
+            size.width as f32,
+            size.height as f32,
+            counter.clone(),
+        );
 
         println!("\n════════════════════════════════════════════════════════════");
         println!("  UI INSPECTOR DEMO - Middleware-Based Developer Tools");
@@ -154,21 +158,24 @@ fn build_demo_ui(
     let counter_value = *counter.read().unwrap();
     let counter_text_id = WidgetId::new("counter_text");
 
+    let theme = ui.theme().clone();
+    let colors = &theme.colors;
+
     ui.build(|root| {
         // Main container
         root.container()
             .width(width)
             .height(height)
             .padding(20.0)
-            .background_color(Color::from_rgb_u8(20, 20, 30))
+            .background_color(colors.background)
             .child(|root| {
                 // Header section
                 root.column()
                     .gap(20.0)
                     .child(|root| {
                         root.container()
-                            .background_color(Color::from_rgb_u8(40, 40, 55))
-                            .border_color(Color::from_rgb_u8(80, 80, 120))
+                            .background_color(colors.surface)
+                            .border_color(colors.border)
                             .border_width(2.0)
                             .border_radius(12.0)
                             .padding(20.0)
@@ -178,14 +185,14 @@ fn build_demo_ui(
                                     .child(|root| {
                                         root.text("UI Inspector Demo (Middleware API)")
                                             .size(32.0)
-                                            .color(Color::WHITE)
+                                            .color(colors.text_primary)
                                             .bold()
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text("Press F12 to toggle inspector | F5 to freeze layout")
                                             .size(16.0)
-                                            .color(Color::from_rgb_u8(150, 150, 150))
+                                            .color(colors.text_secondary)
                                             .build()
                                     })
                                     .build()
@@ -199,7 +206,7 @@ fn build_demo_ui(
                             .child(|root| {
                                 // Left panel - Interactive widgets
                                 root.container()
-                                    .background_color(Color::from_rgb_u8(30, 30, 45))
+                                    .background_color(colors.surface)
                                     .border_radius(8.0)
                                     .padding(15.0)
                                     .child(|root| {
@@ -208,15 +215,15 @@ fn build_demo_ui(
                                             .child(|root| {
                                                 root.text("Interactive Widgets")
                                                     .size(20.0)
-                                                    .color(Color::from_rgb_u8(100, 200, 255))
+                                                    .color(colors.info)
                                                     .bold()
                                                     .build()
                                             })
                                             .child(|root| {
                                                 // Counter display
                                                 root.container()
-                                                    .background_color(Color::from_rgb_u8(40, 40, 55))
-                                                    .border_color(Color::from_rgb_u8(80, 120, 180))
+                                                    .background_color(colors.background)
+                                                    .border_color(colors.border)
                                                     .border_width(2.0)
                                                     .border_radius(8.0)
                                                     .padding(15.0)
@@ -226,7 +233,7 @@ fn build_demo_ui(
                                                         root.text(format!("Counter: {}", counter_value))
                                                             .id(counter_text_id)
                                                             .size(24.0)
-                                                            .color(Color::from_rgb_u8(100, 255, 150))
+                                                            .color(colors.success)
                                                             .bold()
                                                             .build()
                                                     })
@@ -240,7 +247,7 @@ fn build_demo_ui(
                                                     .gap(10.0)
                                                     .child(|root| {
                                                         root.button("Increment")
-                                                            .background_color(Color::from_rgb_u8(60, 180, 60))
+                                                            .background_color(colors.success)
                                                             .hover_color(Color::from_rgb_u8(80, 200, 80))
                                                             .padding(12.0)
                                                             .font_size(14.0)
@@ -251,7 +258,7 @@ fn build_demo_ui(
                                                     })
                                                     .child(|root| {
                                                         root.button("Reset")
-                                                            .background_color(Color::from_rgb_u8(180, 60, 60))
+                                                            .background_color(colors.error)
                                                             .hover_color(Color::from_rgb_u8(200, 80, 80))
                                                             .padding(12.0)
                                                             .font_size(14.0)
@@ -265,7 +272,7 @@ fn build_demo_ui(
                                             .child(|root| {
                                                 // More widgets to inspect
                                                 root.container()
-                                                    .background_color(Color::from_rgb_u8(50, 50, 70))
+                                                    .background_color(colors.background)
                                                     .border_radius(6.0)
                                                     .padding(12.0)
                                                     .child(|root| {
@@ -274,13 +281,13 @@ fn build_demo_ui(
                                                             .child(|root| {
                                                                 root.text("Nested Container 1")
                                                                     .size(14.0)
-                                                                    .color(Color::from_rgb_u8(200, 200, 200))
+                                                                    .color(colors.text_primary)
                                                                     .build()
                                                             })
                                                             .child(|root| {
                                                                 root.text("Click widgets to select them in the inspector")
                                                                     .size(12.0)
-                                                                    .color(Color::from_rgb_u8(150, 150, 150))
+                                                                    .color(colors.text_secondary)
                                                                     .build()
                                                             })
                                                             .build()
@@ -294,7 +301,7 @@ fn build_demo_ui(
                             .child(|root| {
                                 // Right panel - Inspector info
                                 root.container()
-                                    .background_color(Color::from_rgb_u8(30, 30, 45))
+                                    .background_color(colors.surface)
                                     .border_radius(8.0)
                                     .padding(15.0)
                                     .child(|root| {
@@ -303,7 +310,7 @@ fn build_demo_ui(
                                             .child(|root| {
                                                 root.text("Middleware Keybinds")
                                                     .size(20.0)
-                                                    .color(Color::from_rgb_u8(255, 180, 100))
+                                                    .color(colors.warning)
                                                     .bold()
                                                     .build()
                                             })
@@ -313,38 +320,38 @@ fn build_demo_ui(
                                                     .child(|root| {
                                                         root.text("F12 - Toggle inspector")
                                                             .size(14.0)
-                                                            .color(Color::from_rgb_u8(200, 200, 200))
+                                                            .color(colors.text_primary)
                                                             .build()
                                                     })
                                                     .child(|root| {
                                                         root.text("F5 - Toggle layout freeze")
                                                             .size(14.0)
-                                                            .color(Color::from_rgb_u8(200, 200, 200))
+                                                            .color(colors.text_primary)
                                                             .build()
                                                     })
                                                     .child(|root| {
                                                         root.text("F6 - Toggle dirty flags")
                                                             .size(14.0)
-                                                            .color(Color::from_rgb_u8(200, 200, 200))
+                                                            .color(colors.text_primary)
                                                             .build()
                                                     })
                                                     .child(|root| {
                                                         root.text("F7 - Toggle bounds")
                                                             .size(14.0)
-                                                            .color(Color::from_rgb_u8(200, 200, 200))
+                                                            .color(colors.text_primary)
                                                             .build()
                                                     })
                                                     .child(|root| {
                                                         root.text("Escape - Deselect widget")
                                                             .size(14.0)
-                                                            .color(Color::from_rgb_u8(200, 200, 200))
+                                                            .color(colors.text_primary)
                                                             .build()
                                                     })
                                                     .build()
                                             })
                                             .child(|root| {
                                                 root.container()
-                                                    .background_color(Color::from_rgb_u8(50, 50, 70))
+                                                    .background_color(colors.background)
                                                     .border_radius(6.0)
                                                     .padding(12.0)
                                                     .child(|root| {
@@ -353,10 +360,11 @@ fn build_demo_ui(
                                                             .child(|root| {
                                                                 root.text("Dirty Flag Colors:")
                                                                     .size(14.0)
-                                                                    .color(Color::from_rgb_u8(220, 220, 220))
+                                                                    .color(colors.text_primary)
                                                                     .bold()
                                                                     .build()
                                                             })
+                                                            // KEEP: Dirty flag indicator colors are diagnostic
                                                             .child(|root| {
                                                                 root.text("Red = Layout dirty")
                                                                     .size(12.0)
@@ -465,7 +473,10 @@ impl App for InspectorDemoApp {
 
                         // Let middlewares handle the key event
                         let modifiers = astrelis_ui::Modifiers::NONE;
-                        if self.middlewares.handle_key_event(code, modifiers, true, &ctx) {
+                        if self
+                            .middlewares
+                            .handle_key_event(code, modifiers, true, &ctx)
+                        {
                             return HandleStatus::consumed();
                         }
                     }
@@ -479,7 +490,8 @@ impl App for InspectorDemoApp {
 
         // Update counter text every frame
         let counter_value = *self.counter.read().unwrap();
-        self.ui.update_text(self.counter_text_id, format!("Counter: {}", counter_value));
+        self.ui
+            .update_text(self.counter_text_id, format!("Counter: {}", counter_value));
 
         // Pre-layout hook (can pause layout)
         let skip_layout = {
@@ -513,16 +525,18 @@ impl App for InspectorDemoApp {
         }
 
         // Begin frame and render
+        let bg = self.ui.theme().colors.background;
         let mut frame = self.window.begin_drawing();
 
         // Render main UI and overlays in a single render pass
         frame.clear_and_render(
             RenderTarget::Surface,
-            Color::from_rgb_u8(20, 20, 30),
+            bg,
             |pass| {
                 // Render main UI without computing layout (we already did that above)
                 // When frozen, don't clear dirty flags so inspector can keep showing them
-                self.ui.render_without_layout(pass.descriptor(), !skip_layout);
+                self.ui
+                    .render_without_layout(pass.wgpu_pass(), !skip_layout);
 
                 // Collect overlay commands AFTER UI render but in same pass
                 // Note: dirty flags are cleared by ui.render(), but inspector
@@ -548,7 +562,14 @@ impl App for InspectorDemoApp {
                         for cmd in commands {
                             match cmd {
                                 astrelis_ui::middleware::OverlayCommand::Quad(q) => {
-                                    render_list.add_quad(q.position, q.size, q.fill_color, q.border_color, q.border_width, q.border_radius);
+                                    render_list.add_quad(
+                                        q.position,
+                                        q.size,
+                                        q.fill_color,
+                                        q.border_color,
+                                        q.border_width,
+                                        q.border_radius,
+                                    );
                                 }
                                 astrelis_ui::middleware::OverlayCommand::Text(t) => {
                                     render_list.add_text(t.position, t.text, t.color, t.size);
@@ -560,11 +581,8 @@ impl App for InspectorDemoApp {
                         }
 
                         let viewport = self.window.viewport();
-                        self.overlay_renderer.render(
-                            &render_list,
-                            pass.descriptor(),
-                            viewport,
-                        );
+                        self.overlay_renderer
+                            .render(&render_list, pass.wgpu_pass(), viewport);
                     }
                 }
             },

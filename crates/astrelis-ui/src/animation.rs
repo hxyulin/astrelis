@@ -444,7 +444,7 @@ impl AnimationSystem {
     pub fn animate(&mut self, widget_id: WidgetId, animation: Animation) {
         self.widget_animations
             .entry(widget_id)
-            .or_insert_with(WidgetAnimations::new)
+            .or_default()
             .add(animation);
     }
 

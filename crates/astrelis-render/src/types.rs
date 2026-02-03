@@ -12,9 +12,9 @@
 //! # Example
 //!
 //! ```ignore
-//! use astrelis_render::{GraphicsContext, TypedBuffer, GraphicsContextExt};
+//! use astrelis_render::{GraphicsContext, TypedBuffer};
 //!
-//! let ctx = GraphicsContext::new_owned_sync_or_panic();
+//! let ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 //!
 //! // Create a typed buffer of f32 values
 //! let data = [1.0f32, 2.0, 3.0, 4.0];

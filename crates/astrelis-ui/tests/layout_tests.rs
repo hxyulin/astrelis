@@ -3,9 +3,9 @@
 //! These tests verify that the layout system correctly computes widget
 //! positions and sizes using the Taffy layout engine without requiring GPU.
 
-use astrelis_ui::{UiCore, WidgetId};
-use astrelis_core::geometry::{Size, PhysicalPosition, PhysicalSize, ScaleFactor};
+use astrelis_core::geometry::{PhysicalPosition, PhysicalSize, ScaleFactor, Size};
 use astrelis_render::Viewport;
+use astrelis_ui::{UiCore, WidgetId};
 
 fn default_viewport() -> Viewport {
     Viewport {
@@ -20,10 +20,7 @@ fn test_layout_basic_container() {
     let mut ui = UiCore::new();
 
     ui.build(|root| {
-        root.container()
-            .width(800.0)
-            .height(600.0)
-            .build();
+        root.container().width(800.0).height(600.0).build();
     });
 
     ui.set_viewport(default_viewport());
@@ -42,14 +39,8 @@ fn test_layout_nested_containers() {
             .height(600.0)
             .children(|parent| {
                 vec![
-                    parent.container()
-                        .width(400.0)
-                        .height(300.0)
-                        .build(),
-                    parent.container()
-                        .width(400.0)
-                        .height(300.0)
-                        .build(),
+                    parent.container().width(400.0).height(300.0).build(),
+                    parent.container().width(400.0).height(300.0).build(),
                 ]
             })
             .build();
@@ -104,9 +95,7 @@ fn test_layout_text_widget_without_font() {
     let mut ui = UiCore::new();
 
     ui.build(|root| {
-        root.text("Hello, World!")
-            .size(24.0)
-            .build();
+        root.text("Hello, World!").size(24.0).build();
     });
 
     ui.compute_layout();
@@ -119,8 +108,7 @@ fn test_layout_button_widget() {
     let mut ui = UiCore::new();
 
     ui.build(|root| {
-        root.button("Click Me")
-            .build();
+        root.button("Click Me").build();
     });
 
     ui.compute_layout();
@@ -137,7 +125,8 @@ fn test_layout_with_padding() {
             .height(600.0)
             .padding(20.0)
             .child(|container| {
-                container.container()
+                container
+                    .container()
                     .width(760.0) // 800 - 2*20
                     .height(560.0) // 600 - 2*20
                     .build()
@@ -160,17 +149,20 @@ fn test_layout_complex_hierarchy() {
             .children(|container| {
                 vec![
                     // Header
-                    container.row()
+                    container
+                        .row()
                         .height(60.0)
                         .child(|header| header.text("App Title").size(24.0).build())
                         .child(|header| header.button("Menu").build())
                         .build(),
                     // Main content
-                    container.container()
+                    container
+                        .container()
                         .child(|main| main.text("Main content area").build())
                         .build(),
                     // Footer
-                    container.row()
+                    container
+                        .row()
                         .height(40.0)
                         .child(|footer| footer.text("Footer text").size(12.0).build())
                         .build(),
@@ -189,10 +181,7 @@ fn test_layout_viewport_change() {
     let mut ui = UiCore::new();
 
     ui.build(|root| {
-        root.container()
-            .width(800.0)
-            .height(600.0)
-            .build();
+        root.container().width(800.0).height(600.0).build();
     });
 
     // Initial viewport
@@ -237,10 +226,7 @@ fn test_layout_incremental_updates() {
     let text_id = WidgetId::new("counter");
 
     ui.build(|root| {
-        root.text("Count: 0")
-            .id(text_id)
-            .size(24.0)
-            .build();
+        root.text("Count: 0").id(text_id).size(24.0).build();
     });
 
     ui.compute_layout();
@@ -277,8 +263,7 @@ fn test_ui_core_is_render_agnostic() {
     let mut ui = UiCore::new();
 
     ui.build(|root| {
-        root.container()
-            .build();
+        root.container().build();
     });
 
     // All these operations work without any GPU/render context

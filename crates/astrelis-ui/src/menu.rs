@@ -79,10 +79,7 @@ pub enum MenuItem {
         on_select: MenuCallback,
     },
     /// Custom content widget.
-    Custom {
-        node_id: NodeId,
-        height: f32,
-    },
+    Custom { node_id: NodeId, height: f32 },
 }
 
 impl MenuItem {
@@ -206,42 +203,57 @@ impl MenuItem {
 impl std::fmt::Debug for MenuItem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            MenuItem::Action { label, shortcut, enabled, .. } => {
-                f.debug_struct("Action")
-                    .field("label", label)
-                    .field("shortcut", shortcut)
-                    .field("enabled", enabled)
-                    .finish()
-            }
-            MenuItem::Submenu { label, enabled, items } => {
-                f.debug_struct("Submenu")
-                    .field("label", label)
-                    .field("enabled", enabled)
-                    .field("items", &items.len())
-                    .finish()
-            }
+            MenuItem::Action {
+                label,
+                shortcut,
+                enabled,
+                ..
+            } => f
+                .debug_struct("Action")
+                .field("label", label)
+                .field("shortcut", shortcut)
+                .field("enabled", enabled)
+                .finish(),
+            MenuItem::Submenu {
+                label,
+                enabled,
+                items,
+            } => f
+                .debug_struct("Submenu")
+                .field("label", label)
+                .field("enabled", enabled)
+                .field("items", &items.len())
+                .finish(),
             MenuItem::Separator => write!(f, "Separator"),
-            MenuItem::Checkbox { label, checked, enabled, .. } => {
-                f.debug_struct("Checkbox")
-                    .field("label", label)
-                    .field("checked", checked)
-                    .field("enabled", enabled)
-                    .finish()
-            }
-            MenuItem::Radio { label, group, selected, enabled, .. } => {
-                f.debug_struct("Radio")
-                    .field("label", label)
-                    .field("group", group)
-                    .field("selected", selected)
-                    .field("enabled", enabled)
-                    .finish()
-            }
-            MenuItem::Custom { node_id, height } => {
-                f.debug_struct("Custom")
-                    .field("node_id", node_id)
-                    .field("height", height)
-                    .finish()
-            }
+            MenuItem::Checkbox {
+                label,
+                checked,
+                enabled,
+                ..
+            } => f
+                .debug_struct("Checkbox")
+                .field("label", label)
+                .field("checked", checked)
+                .field("enabled", enabled)
+                .finish(),
+            MenuItem::Radio {
+                label,
+                group,
+                selected,
+                enabled,
+                ..
+            } => f
+                .debug_struct("Radio")
+                .field("label", label)
+                .field("group", group)
+                .field("selected", selected)
+                .field("enabled", enabled)
+                .finish(),
+            MenuItem::Custom { node_id, height } => f
+                .debug_struct("Custom")
+                .field("node_id", node_id)
+                .field("height", height)
+                .finish(),
         }
     }
 }
@@ -321,11 +333,11 @@ struct ActiveMenu {
     /// Overlay ID for this menu.
     overlay_id: OverlayId,
     /// Root node of the menu in the tree.
-    root_node: NodeId,
+    _root_node: NodeId,
     /// Item nodes for hit testing.
-    item_nodes: Vec<(NodeId, usize)>,
+    _item_nodes: Vec<(NodeId, usize)>,
     /// Parent menu (if this is a submenu).
-    parent_menu: Option<OverlayId>,
+    _parent_menu: Option<OverlayId>,
     /// Currently active submenu.
     active_submenu: Option<OverlayId>,
     /// Currently hovered item index.
@@ -438,9 +450,9 @@ impl ContextMenu {
         self.root_overlay = Some(overlay_id);
         self.active_menus.push(ActiveMenu {
             overlay_id,
-            root_node,
-            item_nodes,
-            parent_menu: None,
+            _root_node: root_node,
+            _item_nodes: item_nodes,
+            _parent_menu: None,
             active_submenu: None,
             hovered_item: None,
             items: self.items.clone(),
@@ -459,18 +471,14 @@ impl ContextMenu {
 
         let (root_node, item_nodes) = self.build_menu_tree(tree, &self.items);
 
-        let overlay_id = overlays.show(
-            tree,
-            root_node,
-            OverlayConfig::context_menu(),
-        );
+        let overlay_id = overlays.show(tree, root_node, OverlayConfig::context_menu());
 
         self.root_overlay = Some(overlay_id);
         self.active_menus.push(ActiveMenu {
             overlay_id,
-            root_node,
-            item_nodes,
-            parent_menu: None,
+            _root_node: root_node,
+            _item_nodes: item_nodes,
+            _parent_menu: None,
             active_submenu: None,
             hovered_item: None,
             items: self.items.clone(),
@@ -508,48 +516,47 @@ impl ContextMenu {
         // Find which menu and item the mouse is over
         for (menu_idx, menu) in self.active_menus.iter_mut().enumerate() {
             // Check if mouse is over this menu
-            if let Some(overlay) = overlays.get(menu.overlay_id) {
-                if overlay.contains_point(position) {
-                    // Check which item
-                    let local_y = position.y - overlay.computed_position.y;
-                    let item_index = (local_y / item_height) as usize;
+            if let Some(overlay) = overlays.get(menu.overlay_id)
+                && overlay.contains_point(position)
+            {
+                // Check which item
+                let local_y = position.y - overlay.computed_position.y;
+                let item_index = (local_y / item_height) as usize;
 
-                    if item_index < menu.items.len() {
-                        let old_hovered = menu.hovered_item;
-                        menu.hovered_item = Some(item_index);
+                if item_index < menu.items.len() {
+                    let old_hovered = menu.hovered_item;
+                    menu.hovered_item = Some(item_index);
 
-                        // If hovered item changed, determine what action to take
-                        if old_hovered != menu.hovered_item {
-                            let close_sub = menu.active_submenu.take();
+                    // If hovered item changed, determine what action to take
+                    if old_hovered != menu.hovered_item {
+                        let close_sub = menu.active_submenu.take();
 
-                            if let Some(MenuItem::Submenu { items, enabled, .. }) =
-                                menu.items.get(item_index)
-                            {
-                                if *enabled {
-                                    let sub_pos = Vec2::new(
-                                        overlay.computed_position.x + overlay.computed_size.x,
-                                        overlay.computed_position.y
-                                            + (item_index as f32 * item_height),
-                                    );
+                        if let Some(MenuItem::Submenu { items, enabled, .. }) =
+                            menu.items.get(item_index)
+                        {
+                            if *enabled {
+                                let sub_pos = Vec2::new(
+                                    overlay.computed_position.x + overlay.computed_size.x,
+                                    overlay.computed_position.y + (item_index as f32 * item_height),
+                                );
 
-                                    action = Some(MenuAction::OpenSubmenu {
-                                        menu_idx,
-                                        items: items.clone(),
-                                        position: sub_pos,
-                                        parent_overlay: menu.overlay_id,
-                                        close_first: close_sub,
-                                    });
-                                } else if let Some(sub_id) = close_sub {
-                                    action = Some(MenuAction::CloseSubmenu { sub_id });
-                                }
+                                action = Some(MenuAction::OpenSubmenu {
+                                    menu_idx,
+                                    items: items.clone(),
+                                    position: sub_pos,
+                                    parent_overlay: menu.overlay_id,
+                                    close_first: close_sub,
+                                });
                             } else if let Some(sub_id) = close_sub {
-                                // Not a submenu, close any open submenu
                                 action = Some(MenuAction::CloseSubmenu { sub_id });
                             }
+                        } else if let Some(sub_id) = close_sub {
+                            // Not a submenu, close any open submenu
+                            action = Some(MenuAction::CloseSubmenu { sub_id });
                         }
                     }
-                    break;
                 }
+                break;
             }
         }
 
@@ -586,41 +593,41 @@ impl ContextMenu {
     ) -> bool {
         // Find which menu and item was clicked
         for menu in &self.active_menus {
-            if let Some(overlay) = overlays.get(menu.overlay_id) {
-                if overlay.contains_point(position) {
-                    let local_y = position.y - overlay.computed_position.y;
-                    let item_index = (local_y / self.style.item_height) as usize;
+            if let Some(overlay) = overlays.get(menu.overlay_id)
+                && overlay.contains_point(position)
+            {
+                let local_y = position.y - overlay.computed_position.y;
+                let item_index = (local_y / self.style.item_height) as usize;
 
-                    if let Some(item) = menu.items.get(item_index) {
-                        if item.is_enabled() {
-                            match item {
-                                MenuItem::Action { on_click, .. } => {
-                                    on_click();
-                                    self.hide(overlays, tree);
-                                    return true;
-                                }
-                                MenuItem::Checkbox {
-                                    checked, on_toggle, ..
-                                } => {
-                                    on_toggle(!*checked);
-                                    self.hide(overlays, tree);
-                                    return true;
-                                }
-                                MenuItem::Radio { on_select, .. } => {
-                                    on_select();
-                                    self.hide(overlays, tree);
-                                    return true;
-                                }
-                                MenuItem::Submenu { .. } => {
-                                    // Submenus don't close on click
-                                    return true;
-                                }
-                                _ => {}
-                            }
+                if let Some(item) = menu.items.get(item_index)
+                    && item.is_enabled()
+                {
+                    match item {
+                        MenuItem::Action { on_click, .. } => {
+                            on_click();
+                            self.hide(overlays, tree);
+                            return true;
                         }
+                        MenuItem::Checkbox {
+                            checked, on_toggle, ..
+                        } => {
+                            on_toggle(!*checked);
+                            self.hide(overlays, tree);
+                            return true;
+                        }
+                        MenuItem::Radio { on_select, .. } => {
+                            on_select();
+                            self.hide(overlays, tree);
+                            return true;
+                        }
+                        MenuItem::Submenu { .. } => {
+                            // Submenus don't close on click
+                            return true;
+                        }
+                        _ => {}
                     }
-                    return true;
                 }
+                return true;
             }
         }
         false
@@ -659,9 +666,9 @@ impl ContextMenu {
 
         self.active_menus.push(ActiveMenu {
             overlay_id,
-            root_node,
-            item_nodes,
-            parent_menu: Some(parent_id),
+            _root_node: root_node,
+            _item_nodes: item_nodes,
+            _parent_menu: Some(parent_id),
             active_submenu: None,
             hovered_item: None,
             items,
@@ -753,20 +760,16 @@ impl ContextMenu {
                 shortcut,
                 enabled,
                 ..
-            } => {
-                self.build_text_item(tree, label, shortcut.as_deref(), None, *enabled, false)
-            }
+            } => self.build_text_item(tree, label, shortcut.as_deref(), None, *enabled, false),
 
-            MenuItem::Submenu { label, enabled, .. } => {
-                self.build_text_item(
-                    tree,
-                    label,
-                    Some(&self.style.submenu_indicator),
-                    None,
-                    *enabled,
-                    true,
-                )
-            }
+            MenuItem::Submenu { label, enabled, .. } => self.build_text_item(
+                tree,
+                label,
+                Some(&self.style.submenu_indicator),
+                None,
+                *enabled,
+                true,
+            ),
 
             MenuItem::Checkbox {
                 label,
@@ -818,8 +821,7 @@ impl ContextMenu {
         item_container.style.layout.flex_direction = taffy::FlexDirection::Row;
         item_container.style.layout.align_items = Some(taffy::AlignItems::Center);
         item_container.style.layout.justify_content = Some(taffy::JustifyContent::SpaceBetween);
-        item_container.style.layout.size.height =
-            taffy::Dimension::Length(self.style.item_height);
+        item_container.style.layout.size.height = taffy::Dimension::Length(self.style.item_height);
         item_container.style.layout.size.width = taffy::Dimension::Percent(1.0);
 
         let padding = taffy::LengthPercentage::Length(self.style.padding_x);
@@ -1071,15 +1073,18 @@ mod tests {
 
     #[test]
     fn test_nested_submenu() {
-        let inner_sub = MenuItem::submenu("More", vec![
-            MenuItem::action("Option A", || {}),
-            MenuItem::action("Option B", || {}),
-        ]);
+        let inner_sub = MenuItem::submenu(
+            "More",
+            vec![
+                MenuItem::action("Option A", || {}),
+                MenuItem::action("Option B", || {}),
+            ],
+        );
 
-        let outer_sub = MenuItem::submenu("Settings", vec![
-            MenuItem::action("Preferences", || {}),
-            inner_sub,
-        ]);
+        let outer_sub = MenuItem::submenu(
+            "Settings",
+            vec![MenuItem::action("Preferences", || {}), inner_sub],
+        );
 
         assert!(outer_sub.is_submenu());
         if let MenuItem::Submenu { items, .. } = &outer_sub {

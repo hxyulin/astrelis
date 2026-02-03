@@ -1,5 +1,7 @@
 use std::time::{Duration, Instant};
 
+use astrelis_core::profiling::profile_function;
+
 /// Frame timing information for the app lifecycle.
 ///
 /// This is a simplified time struct used by the winit app loop.
@@ -84,6 +86,7 @@ impl TimeTracker {
     }
 
     pub fn tick(&mut self) -> FrameTime {
+        profile_function!();
         let now = Instant::now();
         let delta = now.duration_since(self.last_frame_time);
         let elapsed = now.duration_since(self.start_time);

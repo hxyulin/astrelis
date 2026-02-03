@@ -12,10 +12,17 @@
 
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
-use astrelis_render::{Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu};
+use astrelis_render::{
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
+};
 use astrelis_ui::UiSystem;
-use astrelis_winit::{WindowId, app::{App, AppCtx, run_app}, event::{EventBatch, Event, HandleStatus, Key, NamedKey}, window::{WinitPhysicalSize, WindowBackend, WindowDescriptor}};
 use astrelis_winit::time::FrameTime;
+use astrelis_winit::{
+    WindowId,
+    app::{App, AppCtx, run_app},
+    event::{Event, EventBatch, HandleStatus, Key, NamedKey},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
+};
 use std::time::Instant;
 
 struct UiStressTest {
@@ -34,17 +41,24 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
-        let window = ctx.create_window(WindowDescriptor {
-            title: "UI Stress Test - Performance Benchmark".to_string(),
-            size: Some(WinitPhysicalSize::new(1400.0, 900.0)),
-            ..Default::default()
-        }).expect("Failed to create window");
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let window = ctx
+            .create_window(WindowDescriptor {
+                title: "UI Stress Test - Performance Benchmark".to_string(),
+                size: Some(WinitPhysicalSize::new(1400.0, 900.0)),
+                ..Default::default()
+            })
+            .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(window, graphics_ctx.clone(), WindowContextDescriptor {
-            format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-            ..Default::default()
-        }).expect("Failed to create renderable window");
+        let window = RenderableWindow::new_with_descriptor(
+            window,
+            graphics_ctx.clone(),
+            WindowContextDescriptor {
+                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+                ..Default::default()
+            },
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = window.id();
         let mut ui = UiSystem::new(graphics_ctx.clone());
@@ -63,8 +77,14 @@ fn main() {
         println!("═════════════════════════════════════════════════════\n");
 
         Box::new(UiStressTest {
-            window, window_id, ui, widget_count, updating: false,
-            frame_count: 0, last_fps_time: Instant::now(), fps: 0.0
+            window,
+            window_id,
+            ui,
+            widget_count,
+            updating: false,
+            frame_count: 0,
+            last_fps_time: Instant::now(),
+            fps: 0.0,
         })
     });
 }
@@ -72,6 +92,10 @@ fn main() {
 fn build_stress_ui(ui: &mut UiSystem, count: usize, frame: u64) {
     let width = 1400.0;
     let height = 900.0;
+
+    let theme = ui.theme().clone();
+    let bg = theme.colors.background;
+    let text_primary = theme.colors.text_primary;
 
     // Predefined color palette for widget backgrounds
     let colors = [
@@ -88,55 +112,75 @@ fn build_stress_ui(ui: &mut UiSystem, count: usize, frame: u64) {
     ];
 
     ui.build(|root| {
-        root.container().width(width).height(height).padding(20.0).background_color(Color::from_rgb_u8(20, 20, 30)).child(|root| {
-            let mut col = root.column().gap(5.0);
+        root.container()
+            .width(width)
+            .height(height)
+            .padding(20.0)
+            .background_color(bg)
+            .child(|root| {
+                let mut col = root.column().gap(5.0);
 
-            // Header
-            col = col.child(|root| {
-                root.text(format!("Widgets: {} | Frame: {} | Press SPACE to toggle updates", count, frame))
-                    .size(16.0).color(Color::WHITE).build()
-            });
+                // Header
+                col = col.child(|root| {
+                    root.text(format!(
+                        "Widgets: {} | Frame: {} | Press SPACE to toggle updates",
+                        count, frame
+                    ))
+                    .size(16.0)
+                    .color(text_primary)
+                    .build()
+                });
 
-            // Grid of widgets
-            col = col.child(|root| {
-                let cols = 10;
-                let rows = (count + cols - 1) / cols;
-                let mut grid_col = root.column().gap(2.0);
+                // Grid of widgets
+                col = col.child(|root| {
+                    let cols = 10;
+                    let rows = (count + cols - 1) / cols;
+                    let mut grid_col = root.column().gap(2.0);
 
-                for row in 0..rows {
-                    grid_col = grid_col.child(|root| {
-                        let mut grid_row = root.row().gap(2.0);
+                    for row in 0..rows {
+                        grid_col = grid_col.child(|root| {
+                            let mut grid_row = root.row().gap(2.0);
 
-                        for col_idx in 0..cols {
-                            let idx = row * cols + col_idx;
-                            if idx < count {
-                                let color = colors[idx % colors.len()];
-                                // Calculate a value that changes each frame
-                                let value = ((frame as f32 + idx as f32 * 0.5).sin() * 50.0 + 50.0) as i32;
-                                grid_row = grid_row.child(|root| {
-                                    root.container().width(120.0).height(60.0).background_color(color)
-                                        .justify_content(taffy::JustifyContent::Center)
-                                        .align_items(taffy::AlignItems::Center)
-                                        .child(|root| {
-                                            root.text(format!("#{}\n{}", idx, value)).size(12.0).color(Color::WHITE).build()
-                                        }).build()
-                                });
-                            } else {
-                                grid_row = grid_row.child(|root| {
-                                    root.container().width(120.0).height(60.0).build()
-                                });
+                            for col_idx in 0..cols {
+                                let idx = row * cols + col_idx;
+                                if idx < count {
+                                    let color = colors[idx % colors.len()];
+                                    // Calculate a value that changes each frame
+                                    let value = ((frame as f32 + idx as f32 * 0.5).sin() * 50.0
+                                        + 50.0)
+                                        as i32;
+                                    grid_row = grid_row.child(|root| {
+                                        root.container()
+                                            .width(120.0)
+                                            .height(60.0)
+                                            .background_color(color)
+                                            .justify_content(taffy::JustifyContent::Center)
+                                            .align_items(taffy::AlignItems::Center)
+                                            .child(|root| {
+                                                root.text(format!("#{}\n{}", idx, value))
+                                                    .size(12.0)
+                                                    .color(Color::WHITE)
+                                                    .build()
+                                            })
+                                            .build()
+                                    });
+                                } else {
+                                    grid_row = grid_row.child(|root| {
+                                        root.container().width(120.0).height(60.0).build()
+                                    });
+                                }
                             }
-                        }
 
-                        grid_row.build()
-                    });
-                }
+                            grid_row.build()
+                        });
+                    }
 
-                grid_col.build()
-            });
+                    grid_col.build()
+                });
 
-            col.build()
-        }).build();
+                col.build()
+            })
+            .build();
     });
 }
 
@@ -151,12 +195,17 @@ impl App for UiStressTest {
             self.fps = self.frame_count as f32;
             self.frame_count = 0;
             self.last_fps_time = now;
-            println!("FPS: {:.1} | Widgets: {} | Updating: {}", self.fps, self.widget_count, self.updating);
+            println!(
+                "FPS: {:.1} | Widgets: {} | Updating: {}",
+                self.fps, self.widget_count, self.updating
+            );
         }
     }
 
     fn render(&mut self, _ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
-        if window_id != self.window_id { return; }
+        if window_id != self.window_id {
+            return;
+        }
 
         events.dispatch(|event| {
             if let Event::WindowResized(size) = event {
@@ -200,10 +249,15 @@ impl App for UiStressTest {
             build_stress_ui(&mut self.ui, self.widget_count, self.frame_count);
         }
 
+        let bg = self.ui.theme().colors.background;
         let mut frame = self.window.begin_drawing();
-        frame.clear_and_render(RenderTarget::Surface, Color::from_rgb_u8(20, 20, 30), |pass| {
-            self.ui.render(pass.descriptor());
-        });
+        frame.clear_and_render(
+            RenderTarget::Surface,
+            bg,
+            |pass| {
+                self.ui.render(pass.wgpu_pass());
+            },
+        );
         frame.finish();
     }
 }

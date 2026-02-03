@@ -14,15 +14,14 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::UiSystem;
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
-    event::{EventBatch, Event, HandleStatus},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    event::{Event, EventBatch, HandleStatus},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 use std::sync::{Arc, RwLock};
 
@@ -40,7 +39,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -57,7 +56,8 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = window.id();
         let size = window.physical_size();
@@ -68,7 +68,12 @@ fn main() {
         let counter = Arc::new(RwLock::new(0));
 
         // Build initial UI
-        let (counter_text_id, input_value_id) = build_gallery_ui(&mut ui, size.width as f32, size.height as f32, counter.clone());
+        let (counter_text_id, input_value_id) = build_gallery_ui(
+            &mut ui,
+            size.width as f32,
+            size.height as f32,
+            counter.clone(),
+        );
 
         println!("\n═══════════════════════════════════════════════════════");
         println!("  🎨 WIDGET GALLERY - All UI Components");
@@ -108,12 +113,15 @@ fn build_gallery_ui(
     let counter_text_id = astrelis_ui::WidgetId::new("counter_text");
     let input_value_id = astrelis_ui::WidgetId::new("input_value");
 
+    let theme = ui.theme().clone();
+    let colors = &theme.colors;
+
     ui.build(|root| {
         root.container()
             .width(width)
             .height(height)
             .padding(30.0)
-            .background_color(Color::from_rgb_u8(18, 18, 25))
+            .background_color(colors.background)
             .child(|root| {
                 root.column()
                     .gap(25.0)
@@ -126,15 +134,17 @@ fn build_gallery_ui(
                                     .child(|root| {
                                         root.text("Widget Gallery")
                                             .size(36.0)
-                                            .color(Color::WHITE)
+                                            .color(colors.text_primary)
                                             .bold()
                                             .build()
                                     })
                                     .child(|root| {
-                                        root.text("A comprehensive showcase of all available UI widgets")
-                                            .size(14.0)
-                                            .color(Color::from_rgb_u8(150, 150, 170))
-                                            .build()
+                                        root.text(
+                                            "A comprehensive showcase of all available UI widgets",
+                                        )
+                                        .size(14.0)
+                                        .color(colors.text_secondary)
+                                        .build()
                                     })
                                     .build()
                             })
@@ -148,30 +158,20 @@ fn build_gallery_ui(
                                 // Left column
                                 root.column()
                                     .gap(20.0)
+                                    .child(|root| build_text_section(root, &theme))
                                     .child(|root| {
-                                        build_text_section(root)
+                                        build_button_section(root, &theme, counter, counter_text_id)
                                     })
-                                    .child(|root| {
-                                        build_button_section(root, counter, counter_text_id)
-                                    })
-                                    .child(|root| {
-                                        build_input_section(root)
-                                    })
+                                    .child(|root| build_input_section(root, &theme))
                                     .build()
                             })
                             .child(|root| {
                                 // Right column
                                 root.column()
                                     .gap(20.0)
-                                    .child(|root| {
-                                        build_container_section(root)
-                                    })
-                                    .child(|root| {
-                                        build_layout_section(root)
-                                    })
-                                    .child(|root| {
-                                        build_tooltip_section(root)
-                                    })
+                                    .child(|root| build_container_section(root, &theme))
+                                    .child(|root| build_layout_section(root, &theme))
+                                    .child(|root| build_tooltip_section(root, &theme))
                                     .build()
                             })
                             .build()
@@ -184,9 +184,13 @@ fn build_gallery_ui(
     (counter_text_id, input_value_id)
 }
 
-fn build_text_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId {
+fn build_text_section(
+    root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
+) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
     root.container()
-        .background_color(Color::from_rgb_u8(30, 30, 45))
+        .background_color(colors.surface)
         .border_radius(12.0)
         .padding(20.0)
         .child(|root| {
@@ -195,34 +199,34 @@ fn build_text_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId 
                 .child(|root| {
                     root.text("Text Widgets")
                         .size(24.0)
-                        .color(Color::from_rgb_u8(100, 180, 255))
+                        .color(colors.info)
                         .bold()
                         .build()
                 })
                 .child(|root| {
                     root.text("Large Heading")
                         .size(28.0)
-                        .color(Color::WHITE)
+                        .color(colors.text_primary)
                         .bold()
                         .build()
                 })
                 .child(|root| {
                     root.text("Medium Heading")
                         .size(20.0)
-                        .color(Color::from_rgb_u8(220, 220, 240))
+                        .color(colors.text_primary)
                         .bold()
                         .build()
                 })
                 .child(|root| {
                     root.text("Regular body text with default styling")
                         .size(14.0)
-                        .color(Color::from_rgb_u8(200, 200, 220))
+                        .color(colors.text_primary)
                         .build()
                 })
                 .child(|root| {
                     root.text("Small caption text for less important info")
                         .size(12.0)
-                        .color(Color::from_rgb_u8(150, 150, 170))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
@@ -231,7 +235,7 @@ fn build_text_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId 
                         .child(|root| {
                             root.text("Colored:")
                                 .size(14.0)
-                                .color(Color::from_rgb_u8(200, 200, 220))
+                                .color(colors.text_primary)
                                 .build()
                         })
                         .child(|root| {
@@ -249,7 +253,7 @@ fn build_text_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId 
                         .child(|root| {
                             root.text("Blue")
                                 .size(14.0)
-                                .color(Color::from_rgb_u8(100, 180, 255))
+                                .color(colors.info)
                                 .build()
                         })
                         .build()
@@ -261,12 +265,14 @@ fn build_text_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId 
 
 fn build_button_section(
     root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
     counter: Arc<RwLock<i32>>,
     counter_text_id: astrelis_ui::WidgetId,
 ) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
     let counter_value = *counter.read().unwrap();
     root.container()
-        .background_color(Color::from_rgb_u8(30, 30, 45))
+        .background_color(colors.surface)
         .border_radius(12.0)
         .padding(20.0)
         .child(|root| {
@@ -275,14 +281,14 @@ fn build_button_section(
                 .child(|root| {
                     root.text("Button Widgets")
                         .size(24.0)
-                        .color(Color::from_rgb_u8(100, 180, 255))
+                        .color(colors.info)
                         .bold()
                         .build()
                 })
                 .child(|root| {
                     root.text("Primary Buttons")
                         .size(14.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
@@ -290,16 +296,14 @@ fn build_button_section(
                         .gap(10.0)
                         .child(|root| {
                             root.button("Primary")
-                                .background_color(Color::from_rgb_u8(60, 120, 200))
-                                .hover_color(Color::from_rgb_u8(70, 130, 210))
+                                .background_color(colors.primary)
                                 .padding(12.0)
                                 .font_size(14.0)
                                 .build()
                         })
                         .child(|root| {
                             root.button("Secondary")
-                                .background_color(Color::from_rgb_u8(80, 80, 100))
-                                .hover_color(Color::from_rgb_u8(90, 90, 110))
+                                .background_color(colors.surface)
                                 .padding(12.0)
                                 .font_size(14.0)
                                 .build()
@@ -309,7 +313,7 @@ fn build_button_section(
                 .child(|root| {
                     root.text("Success / Danger Buttons")
                         .size(14.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
@@ -317,16 +321,14 @@ fn build_button_section(
                         .gap(10.0)
                         .child(|root| {
                             root.button("Success")
-                                .background_color(Color::from_rgb_u8(60, 180, 60))
-                                .hover_color(Color::from_rgb_u8(70, 200, 70))
+                                .background_color(colors.success)
                                 .padding(12.0)
                                 .font_size(14.0)
                                 .build()
                         })
                         .child(|root| {
                             root.button("Danger")
-                                .background_color(Color::from_rgb_u8(200, 60, 60))
-                                .hover_color(Color::from_rgb_u8(220, 70, 70))
+                                .background_color(colors.error)
                                 .padding(12.0)
                                 .font_size(14.0)
                                 .build()
@@ -336,7 +338,7 @@ fn build_button_section(
                 .child(|root| {
                     root.text("Interactive Counter")
                         .size(14.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .margin(10.0)
                         .build()
                 })
@@ -344,7 +346,7 @@ fn build_button_section(
                     let counter_dec = counter.clone();
                     let counter_inc = counter.clone();
                     root.container()
-                        .background_color(Color::from_rgb_u8(40, 40, 60))
+                        .background_color(colors.surface)
                         .border_radius(8.0)
                         .padding(12.0)
                         .justify_content(taffy::JustifyContent::Center)
@@ -354,8 +356,7 @@ fn build_button_section(
                                 .gap(10.0)
                                 .child(|root| {
                                     root.button("-")
-                                        .background_color(Color::from_rgb_u8(200, 60, 60))
-                                        .hover_color(Color::from_rgb_u8(220, 70, 70))
+                                        .background_color(colors.error)
                                         .padding(8.0)
                                         .min_width(30.0)
                                         .font_size(16.0)
@@ -368,14 +369,13 @@ fn build_button_section(
                                     root.text(format!("Count: {}", counter_value))
                                         .id(counter_text_id)
                                         .size(16.0)
-                                        .color(Color::from_rgb_u8(100, 200, 255))
+                                        .color(colors.info)
                                         .bold()
                                         .build()
                                 })
                                 .child(|root| {
                                     root.button("+")
-                                        .background_color(Color::from_rgb_u8(60, 180, 60))
-                                        .hover_color(Color::from_rgb_u8(70, 200, 70))
+                                        .background_color(colors.success)
                                         .padding(8.0)
                                         .min_width(30.0)
                                         .font_size(16.0)
@@ -393,9 +393,13 @@ fn build_button_section(
         .build()
 }
 
-fn build_input_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId {
+fn build_input_section(
+    root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
+) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
     root.container()
-        .background_color(Color::from_rgb_u8(30, 30, 45))
+        .background_color(colors.surface)
         .border_radius(12.0)
         .padding(20.0)
         .child(|root| {
@@ -404,14 +408,14 @@ fn build_input_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId
                 .child(|root| {
                     root.text("Text Input Widgets")
                         .size(24.0)
-                        .color(Color::from_rgb_u8(100, 180, 255))
+                        .color(colors.info)
                         .bold()
                         .build()
                 })
                 .child(|root| {
                     root.text("Username")
                         .size(12.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
@@ -423,7 +427,7 @@ fn build_input_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId
                 .child(|root| {
                     root.text("Email")
                         .size(12.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
@@ -435,7 +439,7 @@ fn build_input_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId
                 .child(|root| {
                     root.text("Message")
                         .size(12.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
@@ -449,9 +453,13 @@ fn build_input_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId
         .build()
 }
 
-fn build_container_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId {
+fn build_container_section(
+    root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
+) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
     root.container()
-        .background_color(Color::from_rgb_u8(30, 30, 45))
+        .background_color(colors.surface)
         .border_radius(12.0)
         .padding(20.0)
         .child(|root| {
@@ -460,55 +468,57 @@ fn build_container_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::No
                 .child(|root| {
                     root.text("Container Widgets")
                         .size(24.0)
-                        .color(Color::from_rgb_u8(100, 180, 255))
+                        .color(colors.info)
                         .bold()
                         .build()
                 })
                 .child(|root| {
                     root.text("Styled Containers")
                         .size(14.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
                     root.container()
-                        .background_color(Color::from_rgb_u8(50, 50, 70))
+                        .background_color(colors.border)
                         .border_radius(8.0)
                         .padding(15.0)
                         .child(|root| {
                             root.text("Box with rounded corners and padding")
                                 .size(13.0)
-                                .color(Color::from_rgb_u8(200, 200, 220))
+                                .color(colors.text_primary)
                                 .build()
                         })
                         .build()
                 })
                 .child(|root| {
+                    // Success-tinted container
                     root.container()
-                        .background_color(Color::from_rgb_u8(40, 60, 50))
-                        .border_color(Color::from_rgb_u8(100, 200, 150))
+                        .background_color(colors.surface)
+                        .border_color(colors.success)
                         .border_width(2.0)
                         .border_radius(8.0)
                         .padding(15.0)
                         .child(|root| {
                             root.text("Box with border and custom color")
                                 .size(13.0)
-                                .color(Color::from_rgb_u8(150, 255, 200))
+                                .color(colors.success)
                                 .build()
                         })
                         .build()
                 })
                 .child(|root| {
+                    // Error-tinted container
                     root.container()
-                        .background_color(Color::from_rgb_u8(60, 40, 50))
-                        .border_color(Color::from_rgb_u8(255, 100, 150))
+                        .background_color(colors.surface)
+                        .border_color(colors.error)
                         .border_width(3.0)
                         .border_radius(12.0)
                         .padding(15.0)
                         .child(|root| {
                             root.text("Box with thick border and large radius")
                                 .size(13.0)
-                                .color(Color::from_rgb_u8(255, 180, 200))
+                                .color(colors.error)
                                 .build()
                         })
                         .build()
@@ -518,9 +528,13 @@ fn build_container_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::No
         .build()
 }
 
-fn build_layout_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId {
+fn build_layout_section(
+    root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
+) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
     root.container()
-        .background_color(Color::from_rgb_u8(30, 30, 45))
+        .background_color(colors.surface)
         .border_radius(12.0)
         .padding(20.0)
         .child(|root| {
@@ -529,14 +543,14 @@ fn build_layout_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeI
                 .child(|root| {
                     root.text("Layout Widgets")
                         .size(24.0)
-                        .color(Color::from_rgb_u8(100, 180, 255))
+                        .color(colors.info)
                         .bold()
                         .build()
                 })
                 .child(|root| {
                     root.text("Row Layout (Horizontal)")
                         .size(14.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .build()
                 })
                 .child(|root| {
@@ -571,7 +585,7 @@ fn build_layout_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeI
                 .child(|root| {
                     root.text("Column Layout (Vertical)")
                         .size(14.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .margin(10.0)
                         .build()
                 })
@@ -609,9 +623,13 @@ fn build_layout_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeI
         .build()
 }
 
-fn build_tooltip_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::NodeId {
+fn build_tooltip_section(
+    root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
+) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
     root.container()
-        .background_color(Color::from_rgb_u8(30, 30, 45))
+        .background_color(colors.surface)
         .border_radius(12.0)
         .padding(20.0)
         .child(|root| {
@@ -620,14 +638,14 @@ fn build_tooltip_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::Node
                 .child(|root| {
                     root.text("Tooltips & Overlays")
                         .size(20.0)
-                        .color(Color::from_rgb_u8(100, 200, 255))
+                        .color(colors.info)
                         .bold()
                         .build()
                 })
                 .child(|root| {
                     root.text("Hover Information")
                         .size(14.0)
-                        .color(Color::from_rgb_u8(180, 180, 200))
+                        .color(colors.text_secondary)
                         .margin(10.0)
                         .build()
                 })
@@ -638,8 +656,8 @@ fn build_tooltip_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::Node
                         .child(|root| {
                             root.tooltip("This is a tooltip with helpful information")
                                 .font_size(12.0)
-                                .text_color(Color::WHITE)
-                                .background_color(Color::from_rgb_u8(40, 40, 60))
+                                .text_color(colors.text_primary)
+                                .background_color(colors.surface)
                                 .padding(8.0)
                                 .build()
                         })
@@ -648,14 +666,14 @@ fn build_tooltip_section(root: &mut astrelis_ui::UiBuilder) -> astrelis_ui::Node
                 .child(|root| {
                     root.text("Note: Tooltip API is implemented. Hover-triggered display is in development.")
                         .size(11.0)
-                        .color(Color::from_rgb_u8(150, 150, 100))
+                        .color(colors.text_disabled)
                         .margin(10.0)
                         .build()
                 })
                 .child(|root| {
                     root.text("Future: Tooltips will show on hover with customizable delay and positioning.")
                         .size(11.0)
-                        .color(Color::from_rgb_u8(120, 120, 140))
+                        .color(colors.text_secondary)
                         .margin(10.0)
                         .build()
                 })
@@ -698,16 +716,18 @@ impl App for WidgetGalleryApp {
 
         // Update counter text every frame
         let counter_value = *self.counter.read().unwrap();
-        self.ui.update_text(self.counter_text_id, format!("Count: {}", counter_value));
+        self.ui
+            .update_text(self.counter_text_id, format!("Count: {}", counter_value));
 
         // Begin frame and render
+        let bg = self.ui.theme().colors.background;
         let mut frame = self.window.begin_drawing();
 
         frame.clear_and_render(
             RenderTarget::Surface,
-            Color::from_rgb_u8(18, 18, 25),
+            bg,
             |pass| {
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

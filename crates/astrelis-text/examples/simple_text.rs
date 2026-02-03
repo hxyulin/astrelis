@@ -1,4 +1,24 @@
-use std::sync::Arc;
+//! Simple Text Rendering Example
+//!
+//! Demonstrates basic text rendering with astrelis-text:
+//! - Loading system fonts with FontSystem
+//! - Creating a FontRenderer
+//! - Rendering text to screen
+//! - Text positioning and alignment
+//! - Font size and color customization
+//!
+//! ## Features Showcased
+//! - `FontSystem` initialization with system fonts
+//! - `FontRenderer` setup and viewport configuration
+//! - `Text` builder API for styling
+//! - GPU-accelerated text rendering
+//! - Glyph atlas caching
+//!
+//! ## Usage
+//! ```bash
+//! cargo run -p astrelis-text --example simple_text
+//! ```
+
 use astrelis_core::logging;
 use astrelis_core::math::Vec2;
 use astrelis_render::{
@@ -14,7 +34,6 @@ use astrelis_winit::{
 };
 
 struct SimpleTextApp {
-    context: Arc<GraphicsContext>,
     window: RenderableWindow,
     window_id: WindowId,
     font_renderer: FontRenderer,
@@ -24,7 +43,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -53,7 +72,6 @@ fn main() {
         tracing::info!("Simple text example initialized");
 
         Box::new(SimpleTextApp {
-            context: graphics_ctx,
             window,
             window_id,
             font_renderer,
@@ -115,7 +133,7 @@ impl App for SimpleTextApp {
             Color::from_rgb_u8(25, 25, 35),
             |pass| {
                 // Render all text
-                self.font_renderer.render(pass.descriptor());
+                self.font_renderer.render(pass.wgpu_pass());
             },
         );
 

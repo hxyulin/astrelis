@@ -18,10 +18,9 @@ use astrelis_winit::{
     window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 use std::collections::HashMap;
-use std::sync::Arc;
 
 struct App {
-    context: Arc<GraphicsContext>,
+    // Each window gets its own RenderableWindow (owns a wgpu::Surface) plus a clear color.
     windows: HashMap<WindowId, (RenderableWindow, wgpu::Color)>,
 }
 
@@ -29,7 +28,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let mut windows = HashMap::new();
 
@@ -78,7 +77,6 @@ fn main() {
         }
 
         Box::new(App {
-            context: graphics_ctx,
             windows,
         })
     });
@@ -101,7 +99,7 @@ impl astrelis_winit::app::App for App {
             return;
         };
 
-        // Handle window-specific resize events
+        // Handle resize: each window dispatches events independently.
         events.dispatch(|event| {
             if let astrelis_winit::event::Event::WindowResized(size) = event {
                 window.resized(*size);

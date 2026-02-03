@@ -20,26 +20,21 @@
 //! - Press F12 to toggle UI inspector (shows widget bounds, dirty flags, layout tree)
 
 use astrelis_core::logging;
-use astrelis_core::profiling::{init_profiling, ProfilingBackend, new_frame};
+use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
-    wgpu,
+    GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
-use astrelis_ui::{
-    Color, FlexDirection, FlexWrap, JustifyContent, UiSystem, WidgetId, AlignItems,
-};
+use astrelis_ui::{AlignItems, FlexDirection, FlexWrap, JustifyContent, UiSystem, WidgetId};
 use astrelis_winit::{
     WindowId,
     app::run_app,
     event::{Event, HandleStatus, Key, NamedKey},
-    window::{WindowDescriptor, WindowBackend, Window, WinitPhysicalSize},
+    window::{Window, WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use std::sync::Arc;
 
 struct App {
-    context: Arc<GraphicsContext>,
     windows: HashMap<WindowId, RenderableWindow>,
     ui: UiSystem,
     last_update: Instant,
@@ -53,7 +48,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut windows = HashMap::new();
 
         let scale = Window::platform_dpi() as f32;
@@ -72,7 +67,8 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = renderable_window.id();
         let viewport = renderable_window.viewport();
@@ -80,7 +76,7 @@ fn main() {
 
         let mut ui = UiSystem::new(graphics_ctx.clone());
         ui.set_viewport(viewport);
-        
+
         // Build the initial UI
         build_dashboard(&mut ui);
 
@@ -97,7 +93,6 @@ fn main() {
         println!("═══════════════════════════════════════════════════════\n");
 
         Box::new(App {
-            context: graphics_ctx,
             windows,
             ui,
             last_update: Instant::now(),
@@ -109,11 +104,20 @@ fn main() {
 }
 
 fn build_dashboard(ui: &mut UiSystem) {
+    let theme = ui.theme().clone();
+    let colors = &theme.colors;
+
+    let bg = colors.background;
+    let surface = colors.surface;
+    let text_primary = colors.text_primary;
+    let text_secondary = colors.text_secondary;
+    let success = colors.success;
+
     ui.build(|root| {
         root.container()
             .width(1280.0)
             .height(800.0)
-            .background_color(Color::from_rgb_u8(20, 20, 25))
+            .background_color(bg)
             .padding(20.0)
             .flex_direction(FlexDirection::Column)
             .child(|col| {
@@ -123,15 +127,17 @@ fn build_dashboard(ui: &mut UiSystem) {
                     .justify_content(JustifyContent::SpaceBetween)
                     .align_items(AlignItems::Center)
                     .child(|header| {
-                        header.text("System Telemetry")
+                        header
+                            .text("System Telemetry")
                             .size(24.0)
                             .bold()
-                            .color(Color::WHITE)
+                            .color(text_primary)
                             .build();
-                        
-                        header.text("Status: ONLINE")
+
+                        header
+                            .text("Status: ONLINE")
                             .size(16.0)
-                            .color(Color::from_rgb_u8(100, 255, 100))
+                            .color(success)
                             .build()
                     })
                     .build();
@@ -145,25 +151,28 @@ fn build_dashboard(ui: &mut UiSystem) {
                         let mut ids = Vec::new();
                         // Create 100 telemetry cards
                         for i in 0..100 {
-                            let card_id = grid.container()
+                            let card_id = grid
+                                .container()
                                 .width(230.0)
                                 .height(100.0)
-                                .background_color(Color::from_rgb_u8(40, 40, 50))
+                                .background_color(surface)
                                 .border_radius(8.0)
                                 .padding(15.0)
                                 .child(|card| {
                                     card.column()
                                         .gap(5.0)
                                         .child(|content| {
-                                            content.text(format!("Sensor #{}", i))
+                                            content
+                                                .text(format!("Sensor #{}", i))
                                                 .size(14.0)
-                                                .color(Color::from_rgb_u8(150, 150, 170))
+                                                .color(text_secondary)
                                                 .build();
-                                            
-                                            content.text("0.000")
+
+                                            content
+                                                .text("0.000")
                                                 .size(28.0)
                                                 .bold()
-                                                .color(Color::WHITE)
+                                                .color(text_primary)
                                                 .id(WidgetId::new(&format!("value_{}", i)))
                                                 .build()
                                         })
@@ -181,7 +190,11 @@ fn build_dashboard(ui: &mut UiSystem) {
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::FrameTime) {
+    fn update(
+        &mut self,
+        _ctx: &mut astrelis_winit::app::AppCtx,
+        _time: &astrelis_winit::FrameTime,
+    ) {
         new_frame();
         let now = Instant::now();
         let _dt = now.duration_since(self.last_update).as_secs_f32();
@@ -199,7 +212,8 @@ impl astrelis_winit::app::App for App {
         if now.duration_since(self.last_metrics_print) > Duration::from_secs(1) {
             let metrics = self.ui.core().tree().last_metrics();
             if let Some(m) = metrics {
-                println!("FPS: {:.1} | Layout: {:.2}ms | Text Dirty: {} | Paint Dirty: {}", 
+                println!(
+                    "FPS: {:.1} | Layout: {:.2}ms | Text Dirty: {} | Paint Dirty: {}",
                     self.frame_count as f32,
                     m.layout_time.as_secs_f64() * 1000.0,
                     m.nodes_text_dirty,
@@ -240,7 +254,10 @@ impl astrelis_winit::app::App for App {
                     match &key.logical_key {
                         Key::Named(NamedKey::F12) => {
                             self.inspector_enabled = !self.inspector_enabled;
-                            println!("Inspector: {}", if self.inspector_enabled { "ON" } else { "OFF" });
+                            println!(
+                                "Inspector: {}",
+                                if self.inspector_enabled { "ON" } else { "OFF" }
+                            );
                             return HandleStatus::consumed();
                         }
                         _ => {}
@@ -250,16 +267,13 @@ impl astrelis_winit::app::App for App {
             HandleStatus::ignored()
         });
 
+        let bg = self.ui.theme().colors.background;
         let mut frame = window.begin_drawing();
 
         // Render UI with automatic scoping (no manual {} block needed)
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::BLACK,
-            |pass| {
-                self.ui.render(pass.descriptor());
-            },
-        );
+        frame.clear_and_render(RenderTarget::Surface, bg, |pass| {
+            self.ui.render(pass.wgpu_pass());
+        });
 
         frame.finish();
     }

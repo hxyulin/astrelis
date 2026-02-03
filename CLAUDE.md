@@ -18,10 +18,18 @@ cargo run -p astrelis-ui --example counter
 cargo run -p astrelis-ui --example simple_ui
 cargo run -p astrelis-ui --example ui_dashboard
 cargo run -p astrelis-ui --example image_widget
+cargo run -p astrelis-ui --example docking_demo
+
+# Geometry examples
+cargo run -p astrelis-geometry --example line_chart
+cargo run -p astrelis-geometry --example interactive_chart
+cargo run -p astrelis-geometry --example shapes
 
 # Render examples
 cargo run -p astrelis-render --example image_blitting
 cargo run -p astrelis-render --example sprite_sheet
+cargo run -p astrelis-render --example batched_renderer
+cargo run -p astrelis-render --example profiling_demo
 
 # egui integration
 cargo run -p astrelis-egui --example egui_demo
@@ -145,6 +153,63 @@ ui.update_color("greeting", Color::RED);
 2. **Draw list generation:** Converts widgets to `QuadCommand`, `TextCommand`, `ImageCommand`
 3. **GPU instanced rendering:** Single draw call per type using unit quad + instance buffers
 
+## Recent Features (v0.1.0+)
+
+**Docking System** (`crates/astrelis-ui/src/widgets/docking/`):
+- Flexible panel layout with drag-and-drop
+- Splitter-based resizing
+- Tab-based window management
+- Plugin-based architecture for custom docking behavior
+
+**Constraint System Extensions** (`crates/astrelis-ui/src/constraint.rs`):
+- Viewport units: `vw()`, `vh()` for responsive layouts
+- Expression constraints: `calc()`, `min()`, `max()`, `clamp()`
+- Pixel-perfect control with automatic layout propagation
+
+**UI Plugin System** (`crates/astrelis-ui/src/plugin/`):
+- Custom widget registration via `PluginRegistry`
+- Event interception for middleware patterns
+- Core widgets plugin for scrolling, docking, etc.
+- Type-safe event handling with generic event types
+
+**Middleware System** (`crates/astrelis-ui/src/middleware/`):
+- Keybind middleware for global keyboard shortcuts
+- Inspector middleware for debugging UI tree
+- Overlay rendering middleware for tooltips, drag previews
+- Composable middleware stack with priority ordering
+
+**Geometry/Charting** (`crates/astrelis-geometry/`):
+- GPU-accelerated 2D vector graphics
+- Interactive charting system with zooming/panning
+- Line, bar, and scatter plot support
+- Real-time streaming charts with efficient updates
+- Fill areas, grid rendering, axis labels
+
+## API Design Principles
+
+Astrelis follows consistent naming conventions for predictable APIs:
+
+**Constructor Patterns:**
+- `new()` - Simple default construction with minimal parameters
+- `with_key_param(param)` - Construction requiring specific configuration
+- `builder()` - Complex configuration with fluent builder pattern (only when 10+ options)
+
+**Method Naming Semantics:**
+- `set_*()` - Full replacement (may trigger full rebuild/re-layout)
+- `update_*()` - Incremental update (optimized with dirty flags)
+- `compute_*()` - Expensive computation (caching recommended)
+- `create_*()` - GPU resource creation (fallible, returns Result)
+
+**Resource Access Patterns:**
+- `resource()` - Panics if unavailable (use when resource is required)
+- `try_resource()` - Returns `Option<&T>` (use when resource is optional)
+- `has_resource()` - Check availability before access
+
+**Error Handling:**
+- Avoid `*_or_panic()` suffixes - use `.expect()` at call sites for clarity
+- Use `*_unchecked()` for unsafe variants with safety documentation
+- Prefer `Result<T, E>` for fallible operations
+
 ## Rendering Pipeline Flow
 
 **Typical frame (recommended pattern):**
@@ -157,7 +222,7 @@ frame.clear_and_render(
     RenderTarget::Surface,
     Color::BLACK,
     |pass| {
-        ui.render(pass.descriptor());
+        ui.render(pass.wgpu_pass());
     },
 );
 
@@ -175,7 +240,7 @@ let mut frame = renderable_window.begin_drawing();
         .clear_color(Color::BLACK)
         .build(&mut frame);
 
-    ui.render(pass.descriptor());
+    ui.render(pass.wgpu_pass());
 } // pass drops here automatically
 
 frame.finish();
@@ -240,7 +305,7 @@ let assets = engine.get::<AssetServer>().unwrap();
 - egui/egui-wgpu 0.33
 
 **Performance-critical areas:**
-- UI dirty flag propagation (see `crates/astrelis-ui/src/dirty.rs`)
+- UI dirty flag propagation (see `crates/astrelis-ui/src/dirty/`)
 - Text shaping and caching (see `crates/astrelis-text/src/shaping.rs`)
 - Asset handle lookups (SparseSet in `crates/astrelis-assets`)
 
@@ -252,11 +317,16 @@ let assets = engine.get::<AssetServer>().unwrap();
 
 ## File Locations for Common Tasks
 
-**Adding a new widget:** `crates/astrelis-ui/src/widget/`
+**Adding a new widget:** `crates/astrelis-ui/src/widgets/`
 **Modifying render pipeline:** `crates/astrelis-render/src/context.rs`
 **Asset loading logic:** `crates/astrelis-assets/src/server.rs`
 **Plugin system:** `crates/astrelis/src/plugin.rs`
-**UI dirty flag logic:** `crates/astrelis-ui/src/dirty.rs`
+**UI dirty flag system:** `crates/astrelis-ui/src/dirty/` (refactored module)
+  - `flags.rs` - DirtyFlags bitflags
+  - `counters.rs` - DirtyCounters for tracking propagation
+  - `ranges.rs` - DirtyRanges for efficient batch updates
+  - `versioned.rs` - Version-tracked dirty state
+  - `guard.rs` - RAII guards for automatic dirty marking
 **Text shaping:** `crates/astrelis-text/src/shaping.rs`
 
 ## Code Style
@@ -267,6 +337,70 @@ let assets = engine.get::<AssetServer>().unwrap();
 - Document public APIs with `///` doc comments
 - Use `tracing` macros (trace!, debug!, info!, warn!, error!) not println!
 - Initialize profiling in examples with `init_profiling(ProfilingBackend::PuffinHttp)`
+
+## API Design Principles
+
+**Constructor Patterns:**
+- `new()` - Simple default construction
+- `with_key_param(param)` - Construction requiring key parameters
+- `builder()` - Complex configuration (only when 10+ options)
+
+**Method Naming Semantics:**
+- `set_*()` - Full replacement (may trigger full rebuild)
+- `update_*()` - Incremental update (optimized with dirty flags)
+- `compute_*()` - Expensive computation
+- `create_*()` - GPU resource creation
+
+**Fallible Accessors:**
+- `resource()` - Returns `&T`, panics if unavailable
+- `try_resource()` - Returns `Option<&T>`, fallible
+- `has_resource()` - Returns `bool`, check availability
+
+**Error Handling:**
+- Avoid `*_or_panic()` methods - use `.expect()` at call site instead
+- Use `*_unchecked()` only for truly unsafe operations with safety docs
+- Return `Result` for all fallible operations
+
+## Recent Features (v0.1.0+)
+
+**Docking System** (`crates/astrelis-ui/src/widgets/docking/`):
+- Flexible panel layout with drag-and-drop
+- Splitter-based resizing
+- Tab-based window management
+- Example: `cargo run -p astrelis-ui --example docking_demo`
+
+**Constraint System Extensions** (`crates/astrelis-ui/src/constraint.rs`):
+- Viewport units: `vw()`, `vh()`
+- Expression constraints: `calc()`, `min()`, `max()`, `clamp()`
+- Complex layout calculations with automatic invalidation
+
+**UI Plugin System** (`crates/astrelis-ui/src/plugin/`):
+- Custom widget registration
+- Event interception and middleware
+- Core widgets plugin for scrolling, tooltips, etc.
+
+**Middleware System** (`crates/astrelis-ui/src/middleware/`):
+- Keybind middleware for keyboard shortcuts
+- Inspector middleware for debugging
+- Overlay rendering middleware for visual effects
+
+**GPU-Accelerated Geometry** (`crates/astrelis-geometry/`):
+- Chart rendering with line, bar, scatter, area charts
+- Interactive charts with pan/zoom/hover
+- GPU instancing for 100k+ points at 60fps
+- Examples: `line_chart`, `interactive_chart`, `streaming_chart`
+
+**Batched Rendering System** (`crates/astrelis-render/src/batched/`):
+- Three rendering tiers: Direct, Indirect, Bindless
+- Automatic tier detection based on GPU capabilities
+- Texture arrays and bindless textures for reduced state changes
+- Example: `cargo run -p astrelis-render --example batched_renderer`
+
+**GPU Profiling** (`crates/astrelis-render/src/gpu_profiling.rs`):
+- Integration with wgpu-profiler and puffin
+- Automatic timestamp query support detection
+- Frame-by-frame GPU timing analysis
+- Example: `cargo run -p astrelis-render --example profiling_demo`
 
 ## Documentation Resources
 

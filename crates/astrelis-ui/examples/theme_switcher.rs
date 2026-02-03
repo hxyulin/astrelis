@@ -16,15 +16,14 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
-use astrelis_ui::{UiSystem, Theme, ColorPalette};
+use astrelis_ui::{ColorPalette, Theme, UiSystem};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
-    event::{EventBatch, Event, HandleStatus, Key},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    event::{Event, EventBatch, HandleStatus, Key, SystemTheme},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -39,6 +38,7 @@ struct ThemeSwitcherApp {
     window_id: WindowId,
     ui: UiSystem,
     current_theme: ThemeMode,
+    is_dark: bool,
     theme: Theme,
 }
 
@@ -47,7 +47,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -64,7 +64,8 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = window.id();
         let size = window.physical_size();
@@ -73,7 +74,13 @@ fn main() {
         ui.set_viewport(window.viewport());
 
         let theme = Theme::dark();
-        build_themed_ui(&mut ui, size.width as f32, size.height as f32, &theme, ThemeMode::Dark);
+        build_themed_ui(
+            &mut ui,
+            size.width as f32,
+            size.height as f32,
+            &theme,
+            ThemeMode::Dark,
+        );
 
         println!("\n═══════════════════════════════════════════════════════");
         println!("  🎨 THEME SWITCHER - Light/Dark Mode Demo");
@@ -93,6 +100,7 @@ fn main() {
             window_id,
             ui,
             current_theme: ThemeMode::Dark,
+            is_dark: true,
             theme,
         })
     });
@@ -482,8 +490,8 @@ fn build_cards_section(root: &mut astrelis_ui::UiBuilder, theme: &Theme) -> astr
 fn create_custom_theme() -> Theme {
     Theme {
         colors: ColorPalette {
-            primary: Color::from_rgb_u8(138, 80, 255),      // Purple
-            secondary: Color::from_rgb_u8(80, 200, 200),    // Teal
+            primary: Color::from_rgb_u8(138, 80, 255),   // Purple
+            secondary: Color::from_rgb_u8(80, 200, 200), // Teal
             background: Color::from_rgb_u8(15, 15, 20),
             surface: Color::from_rgb_u8(25, 25, 35),
             error: Color::from_rgb_u8(255, 80, 120),
@@ -532,29 +540,47 @@ impl App for ThemeSwitcherApp {
             HandleStatus::ignored()
         });
 
-        // Handle keyboard events for theme switching
+        // Handle OS theme changes
         let mut theme_changed = false;
+        events.dispatch(|event| {
+            if let Event::ThemeChanged(system_theme) = event {
+                self.is_dark = *system_theme == SystemTheme::Dark;
+                self.current_theme = if self.is_dark {
+                    ThemeMode::Dark
+                } else {
+                    ThemeMode::Light
+                };
+                theme_changed = true;
+                return HandleStatus::consumed();
+            }
+            HandleStatus::ignored()
+        });
+
+        // Handle keyboard events for theme switching
         events.dispatch(|event| {
             if let Event::KeyInput(key) = event {
                 if key.state == astrelis_winit::event::ElementState::Pressed {
                     match key.logical_key {
                         Key::Character(ref c) if c.as_str() == "t" || c.as_str() == "T" => {
                             // Toggle between dark and light
-                            self.current_theme = if self.current_theme == ThemeMode::Dark {
-                                ThemeMode::Light
-                            } else {
+                            self.is_dark = !self.is_dark;
+                            self.current_theme = if self.is_dark {
                                 ThemeMode::Dark
+                            } else {
+                                ThemeMode::Light
                             };
                             theme_changed = true;
                             return HandleStatus::consumed();
                         }
                         Key::Character(ref c) if c.as_str() == "1" => {
                             self.current_theme = ThemeMode::Dark;
+                            self.is_dark = true;
                             theme_changed = true;
                             return HandleStatus::consumed();
                         }
                         Key::Character(ref c) if c.as_str() == "2" => {
                             self.current_theme = ThemeMode::Light;
+                            self.is_dark = false;
                             theme_changed = true;
                             return HandleStatus::consumed();
                         }
@@ -606,7 +632,7 @@ impl App for ThemeSwitcherApp {
             RenderTarget::Surface,
             self.theme.colors.background,
             |pass| {
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

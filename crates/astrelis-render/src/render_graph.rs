@@ -36,7 +36,8 @@
 //! graph.execute(&context);
 //! ```
 
-use std::collections::{HashMap, HashSet};
+use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
+use astrelis_core::profiling::profile_function;
 use std::sync::Arc;
 
 use crate::GraphicsContext;
@@ -311,13 +312,14 @@ impl RenderGraph {
     ///
     /// This performs topological sorting of passes based on their dependencies.
     pub fn compile(&mut self) -> Result<ExecutionPlan, RenderGraphError> {
+        profile_function!();
         // Build dependency graph
         let mut dependencies: HashMap<PassId, HashSet<PassId>> = HashMap::new();
         let mut dependents: HashMap<PassId, HashSet<PassId>> = HashMap::new();
 
         for (&pass_id, pass) in &self.passes {
             dependencies.insert(pass_id, HashSet::new());
-            dependents.entry(pass_id).or_insert_with(HashSet::new);
+            dependents.entry(pass_id).or_default();
 
             // A pass depends on any pass that writes to its input resources
             for &input_id in &pass.inputs {
@@ -325,7 +327,7 @@ impl RenderGraph {
                 for (&other_pass_id, other_pass) in &self.passes {
                     if other_pass_id != pass_id && other_pass.outputs.contains(&input_id) {
                         dependencies.get_mut(&pass_id).unwrap().insert(other_pass_id);
-                        dependents.entry(other_pass_id).or_insert_with(HashSet::new).insert(pass_id);
+                        dependents.entry(other_pass_id).or_default().insert(pass_id);
                     }
                 }
             }
@@ -373,6 +375,7 @@ impl RenderGraph {
     ///
     /// This must be called after `compile()`.
     pub fn execute(&self, graphics: Arc<GraphicsContext>) -> Result<(), RenderGraphError> {
+        profile_function!();
         let plan = self
             .execution_plan
             .as_ref()
@@ -390,7 +393,7 @@ impl RenderGraph {
                     format,
                     usage,
                 } => {
-                    let texture = context.graphics.device.create_texture(&wgpu::TextureDescriptor {
+                    let texture = context.graphics.device().create_texture(&wgpu::TextureDescriptor {
                         label: Some(&info.name),
                         size: wgpu::Extent3d {
                             width: size.0,
@@ -407,7 +410,7 @@ impl RenderGraph {
                     context.textures.insert(*id, texture);
                 }
                 ResourceType::Buffer { size, usage } => {
-                    let buffer = context.graphics.device.create_buffer(&wgpu::BufferDescriptor {
+                    let buffer = context.graphics.device().create_buffer(&wgpu::BufferDescriptor {
                         label: Some(&info.name),
                         size: *size,
                         usage: *usage,

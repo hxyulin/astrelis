@@ -279,15 +279,13 @@ mod tests {
         // calc(100% - 40px)
         let width = calc(percent(100.0) - px(40.0));
         match width {
-            Constraint::Calc(expr) => {
-                match *expr {
-                    CalcExpr::Sub(lhs, rhs) => {
-                        assert_eq!(*lhs, CalcExpr::Value(Constraint::Percent(100.0)));
-                        assert_eq!(*rhs, CalcExpr::Value(Constraint::Px(40.0)));
-                    }
-                    _ => panic!("Expected Sub expression"),
+            Constraint::Calc(expr) => match *expr {
+                CalcExpr::Sub(lhs, rhs) => {
+                    assert_eq!(*lhs, CalcExpr::Value(Constraint::Percent(100.0)));
+                    assert_eq!(*rhs, CalcExpr::Value(Constraint::Px(40.0)));
                 }
-            }
+                _ => panic!("Expected Sub expression"),
+            },
             _ => panic!("Expected Calc constraint"),
         }
     }

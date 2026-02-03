@@ -231,7 +231,7 @@ frame.clear_and_render(
     RenderTarget::Surface,
     Color::BLACK,
     |pass| {
-        let render_pass = pass.descriptor();
+        let render_pass = pass.wgpu_pass();
         render_pass.set_pipeline(&pipeline);
         render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
         render_pass.draw(0..3, 0..1); // 3 vertices, 1 instance

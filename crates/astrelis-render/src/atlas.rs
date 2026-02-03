@@ -7,7 +7,7 @@
 //! ```ignore
 //! use astrelis_render::{TextureAtlas, GraphicsContext};
 //!
-//! let context = GraphicsContext::new_owned_sync_or_panic();
+//! let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 //! let mut atlas = TextureAtlas::new(context.clone(), 512, wgpu::TextureFormat::Rgba8UnormSrgb);
 //!
 //! // Insert images
@@ -24,6 +24,8 @@
 //!     // Use entry.uv_rect for rendering
 //! }
 //! ```
+
+use astrelis_core::profiling::profile_function;
 
 use crate::extension::AsWgpu;
 use crate::types::GpuTexture;
@@ -105,6 +107,7 @@ impl AtlasEntry {
 
 /// Rectangle packing algorithm.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum PackerNode {
     /// Empty node that can be split.
     Empty {
@@ -231,8 +234,9 @@ impl TextureAtlas {
     /// * `size` - Size of the atlas texture (must be power of 2)
     /// * `format` - Texture format
     pub fn new(context: Arc<GraphicsContext>, size: u32, format: wgpu::TextureFormat) -> Self {
+        profile_function!();
         let texture = GpuTexture::new_2d(
-            &context.device,
+            context.device(),
             Some("TextureAtlas"),
             size,
             size,
@@ -276,6 +280,7 @@ impl TextureAtlas {
         width: u32,
         height: u32,
     ) -> Option<AtlasEntry> {
+        profile_function!();
         // Check if already exists
         if let Some(entry) = self.entries.get(&key) {
             return Some(*entry);
@@ -308,6 +313,7 @@ impl TextureAtlas {
 
     /// Upload all pending data to the GPU.
     pub fn upload(&mut self) {
+        profile_function!();
         if !self.dirty {
             return;
         }
@@ -321,7 +327,7 @@ impl TextureAtlas {
                 _ => 4, // Default to 4 bytes
             };
 
-            self.context.queue.write_texture(
+            self.context.queue().write_texture(
                 wgpu::TexelCopyTextureInfo {
                     texture: self.texture.as_wgpu(),
                     mip_level: 0,
@@ -450,7 +456,7 @@ mod tests {
 
     #[test]
     fn test_atlas_basic() {
-        let context = GraphicsContext::new_owned_sync_or_panic();
+        let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut atlas = TextureAtlas::new(context, 256, wgpu::TextureFormat::Rgba8UnormSrgb);
 
         assert_eq!(atlas.size(), 256);
@@ -481,7 +487,7 @@ mod tests {
 
     #[test]
     fn test_atlas_multiple_inserts() {
-        let context = GraphicsContext::new_owned_sync_or_panic();
+        let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut atlas = TextureAtlas::new(context, 256, wgpu::TextureFormat::Rgba8UnormSrgb);
 
         // Insert multiple images
@@ -498,7 +504,7 @@ mod tests {
 
     #[test]
     fn test_atlas_duplicate_key() {
-        let context = GraphicsContext::new_owned_sync_or_panic();
+        let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut atlas = TextureAtlas::new(context, 256, wgpu::TextureFormat::Rgba8UnormSrgb);
 
         let image_data = vec![0u8; 32 * 32 * 4];
@@ -516,7 +522,7 @@ mod tests {
 
     #[test]
     fn test_atlas_clear() {
-        let context = GraphicsContext::new_owned_sync_or_panic();
+        let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut atlas = TextureAtlas::new(context, 256, wgpu::TextureFormat::Rgba8UnormSrgb);
 
         let image_data = vec![0u8; 32 * 32 * 4];

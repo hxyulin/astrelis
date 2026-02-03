@@ -173,7 +173,9 @@ impl KeybindRegistry {
 
     /// Get all registered keybinds.
     pub fn all_keybinds(&self) -> impl Iterator<Item = (&'static str, &Keybind)> {
-        self.keybinds.iter().map(|(name, keybind, _)| (*name, keybind))
+        self.keybinds
+            .iter()
+            .map(|(name, keybind, _)| (*name, keybind))
     }
 
     /// Clear all registered keybinds.

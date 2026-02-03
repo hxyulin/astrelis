@@ -5,7 +5,7 @@
 //! It tracks which nodes contribute which draw commands for efficient updates.
 
 use crate::clip::ClipRect;
-use crate::dirty_ranges::DirtyRanges;
+use crate::dirty::DirtyRanges;
 use crate::tree::NodeId;
 use crate::widgets::{ImageTexture, ImageUV};
 use astrelis_core::alloc::HashMap;
@@ -333,6 +333,7 @@ impl std::fmt::Debug for ImageCommand {
 
 impl ImageCommand {
     /// Create a new image command.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         position: Vec2,
         size: Vec2,
@@ -916,13 +917,8 @@ mod tests {
             1,
             BaseShapedTextResult::new((100.0, 20.0), vec![]),
         ));
-        let cmd = TextCommand::with_effects(
-            Vec2::new(10.0, 20.0),
-            shaped,
-            Color::WHITE,
-            5,
-            effects,
-        );
+        let cmd =
+            TextCommand::with_effects(Vec2::new(10.0, 20.0), shaped, Color::WHITE, 5, effects);
 
         assert!(cmd.effects.is_some());
         assert_eq!(cmd.render_mode, TextRenderMode::SDF { spread: 4.0 });

@@ -179,7 +179,7 @@ impl Default for AABB {
 }
 
 /// Node bounds data.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct NodeBounds {
     /// Node's own bounds (absolute position).
     pub bounds: AABB,
@@ -187,16 +187,6 @@ pub struct NodeBounds {
     pub hierarchical_bounds: AABB,
     /// Whether this node is visible (bounds computed).
     pub is_visible: bool,
-}
-
-impl Default for NodeBounds {
-    fn default() -> Self {
-        Self {
-            bounds: AABB::empty(),
-            hierarchical_bounds: AABB::empty(),
-            is_visible: false,
-        }
-    }
 }
 
 /// Culling tree for hierarchical visibility testing.
@@ -465,12 +455,7 @@ impl CullingTree {
             .and_then(|root_id| self.hit_test_recursive(tree, root_id, point))
     }
 
-    fn hit_test_recursive(
-        &self,
-        tree: &UiTree,
-        node_id: NodeId,
-        point: Vec2,
-    ) -> Option<NodeId> {
+    fn hit_test_recursive(&self, tree: &UiTree, node_id: NodeId, point: Vec2) -> Option<NodeId> {
         let bounds = self.bounds.get(&node_id)?;
 
         // Quick reject using hierarchical bounds
@@ -634,7 +619,8 @@ mod tests {
         tree.set_root(root);
 
         // Compute layout
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None);
+        let registry = crate::plugin::registry::WidgetTypeRegistry::new();
+        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
 
         let mut culling = CullingTree::new();
         culling.update(&tree);
@@ -661,7 +647,8 @@ mod tests {
         tree.set_root(root);
 
         // Compute layout
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None);
+        let registry = crate::plugin::registry::WidgetTypeRegistry::new();
+        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
 
         let mut culling = CullingTree::new();
         culling.update(&tree);
@@ -688,7 +675,8 @@ mod tests {
         let root = tree.add_widget(Box::new(root_container));
         tree.set_root(root);
 
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None);
+        let registry = crate::plugin::registry::WidgetTypeRegistry::new();
+        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
 
         let mut culling = CullingTree::new();
         culling.update(&tree);
@@ -764,7 +752,8 @@ mod tests {
         let mut tree = UiTree::new();
         let root = tree.add_widget(Box::new(crate::widgets::Container::new()));
         tree.set_root(root);
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None);
+        let registry = crate::plugin::registry::WidgetTypeRegistry::new();
+        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
 
         let mut culling = CullingTree::new();
         culling.update(&tree);
@@ -791,7 +780,8 @@ mod tests {
         container.style.layout.size.height = taffy::Dimension::Length(100.0);
         let root = tree.add_widget(Box::new(container));
         tree.set_root(root);
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None);
+        let registry = crate::plugin::registry::WidgetTypeRegistry::new();
+        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
 
         let mut culling = CullingTree::new();
         culling.update(&tree);

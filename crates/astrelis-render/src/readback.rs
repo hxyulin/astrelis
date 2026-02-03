@@ -57,8 +57,6 @@ impl std::error::Error for ReadbackError {}
 
 /// GPU readback handle for async data retrieval.
 pub struct GpuReadback {
-    /// Graphics context
-    context: Arc<GraphicsContext>,
     /// Readback buffer
     buffer: wgpu::Buffer,
     /// Texture dimensions (width, height)
@@ -95,11 +93,11 @@ impl GpuReadback {
 
         let unpadded_bytes_per_row = dimensions.0 * bytes_per_pixel;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let bytes_per_row = ((unpadded_bytes_per_row + align - 1) / align) * align;
+        let bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
 
         // Create staging buffer
         let buffer_size = (bytes_per_row * dimensions.1) as wgpu::BufferAddress;
-        let buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = context.device().create_buffer(&wgpu::BufferDescriptor {
             label: Some("readback_buffer"),
             size: buffer_size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
@@ -107,7 +105,7 @@ impl GpuReadback {
         });
 
         // Copy texture to buffer
-        let mut encoder = context.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        let mut encoder = context.device().create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("readback_encoder"),
         });
 
@@ -129,10 +127,9 @@ impl GpuReadback {
             size,
         );
 
-        context.queue.submit(Some(encoder.finish()));
+        context.queue().submit(Some(encoder.finish()));
 
         Ok(Self {
-            context,
             buffer,
             dimensions,
             bytes_per_row,
@@ -232,8 +229,8 @@ mod tests {
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
 
         // Width 100, 4 bytes per pixel = 400 bytes
-        let unpadded = 100 * 4;
-        let padded = ((unpadded + align - 1) / align) * align;
+        let unpadded: u32 = 100 * 4;
+        let padded = unpadded.div_ceil(align) * align;
 
         // Should be padded to next multiple of 256
         assert_eq!(padded, 512);

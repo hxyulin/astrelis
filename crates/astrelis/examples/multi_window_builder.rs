@@ -1,71 +1,71 @@
-///! ApplicationBuilder comparison example
-///!
-///! This example shows the boilerplate reduction achieved by ApplicationBuilder
-///! compared to the traditional manual setup approach.
-///!
-///! # Boilerplate Comparison
-///!
-///! ## Traditional Approach (~60 lines minimum):
-///! ```ignore
-///! fn main() {
-///!     logging::init();
-///!
-///!     run_app(|ctx| {
-///!         // 1. Manual GraphicsContext creation
-///!         let graphics = GraphicsContext::new_owned_sync_or_panic();
-///!
-///!         // 2. Manual WindowManager creation
-///!         let mut window_manager = WindowManager::new(graphics);
-///!
-///!         // 3. Manual window creation with verbose descriptor
-///!         let window_id = window_manager.create_window(
-///!             ctx,
-///!             WindowDescriptor {
-///!                 title: "My App".to_string(),
-///!                 size: Some(WinitPhysicalSize::new(800.0, 600.0)),
-///!                 ..Default::default()
-///!             },
-///!         ).expect("Failed to create window");
-///!
-///!         // 4. Manual Engine building
-///!         let engine = EngineBuilder::new()
-///!             .add_plugin(TimePlugin)
-///!             .add_plugin(AssetPlugin)
-///!             .add_plugin(RenderPlugin)
-///!             .add_plugin(TextPlugin)
-///!             .build();
-///!
-///!         // 5. Finally, create app with all manual setup
-///!         Box::new(MyApp {
-///!             window_manager,
-///!             engine,
-///!             window_id,
-///!         })
-///!     });
-///! }
-///! ```
-///!
-///! ## ApplicationBuilder Approach (~10 lines):
-///! ```ignore
-///! fn main() {
-///!     logging::init();
-///!
-///!     ApplicationBuilder::new()
-///!         .with_title("My App")
-///!         .with_size(800, 600)
-///!         .add_plugins(DefaultPlugins)
-///!         .run(|_ctx, _engine| MyApp);
-///! }
-///! ```
-///!
-///! # Benefits
-///! - **85% less boilerplate** (60 lines → 10 lines)
-///! - **Declarative API** - intent is clear from builder calls
-///! - **No manual resource wiring** - everything connected automatically
-///! - **Type-safe** - compiler catches configuration errors
-///! - **Extensible** - easy to add custom plugins
-///!
-///! Run with: cargo run --example multi_window_builder
+//! ApplicationBuilder comparison example
+//!
+//! This example shows the boilerplate reduction achieved by ApplicationBuilder
+//! compared to the traditional manual setup approach.
+//!
+//! # Boilerplate Comparison
+//!
+//! ## Traditional Approach (~60 lines minimum):
+//! ```ignore
+//! fn main() {
+//!     logging::init();
+//!
+//!     run_app(|ctx| {
+//!         // 1. Manual GraphicsContext creation
+//!         let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+//!
+//!         // 2. Manual WindowManager creation
+//!         let mut window_manager = WindowManager::new(graphics);
+//!
+//!         // 3. Manual window creation with verbose descriptor
+//!         let window_id = window_manager.create_window(
+//!             ctx,
+//!             WindowDescriptor {
+//!                 title: "My App".to_string(),
+//!                 size: Some(WinitPhysicalSize::new(800.0, 600.0)),
+//!                 ..Default::default()
+//!             },
+//!         ).expect("Failed to create window");
+//!
+//!         // 4. Manual Engine building
+//!         let engine = EngineBuilder::new()
+//!             .add_plugin(TimePlugin)
+//!             .add_plugin(AssetPlugin)
+//!             .add_plugin(RenderPlugin)
+//!             .add_plugin(TextPlugin)
+//!             .build();
+//!
+//!         // 5. Finally, create app with all manual setup
+//!         Box::new(MyApp {
+//!             window_manager,
+//!             engine,
+//!             window_id,
+//!         })
+//!     });
+//! }
+//! ```
+//!
+//! ## ApplicationBuilder Approach (~10 lines):
+//! ```ignore
+//! fn main() {
+//!     logging::init();
+//!
+//!     ApplicationBuilder::new()
+//!         .with_title("My App")
+//!         .with_size(800, 600)
+//!         .add_plugins(DefaultPlugins)
+//!         .run(|_ctx, _engine| MyApp);
+//! }
+//! ```
+//!
+//! # Benefits
+//! - **85% less boilerplate** (60 lines → 10 lines)
+//! - **Declarative API** - intent is clear from builder calls
+//! - **No manual resource wiring** - everything connected automatically
+//! - **Type-safe** - compiler catches configuration errors
+//! - **Extensible** - easy to add custom plugins
+//!
+//! Run with: cargo run --example multi_window_builder
 
 use astrelis::prelude::*;
 

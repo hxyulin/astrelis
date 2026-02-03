@@ -6,10 +6,10 @@
 use astrelis_winit::event::KeyCode;
 
 use super::{
+    UiMiddleware,
     context::{MiddlewareContext, OverlayContext},
     keybind::{KeybindRegistry, Modifiers},
     overlay_draw_list::OverlayDrawList,
-    UiMiddleware,
 };
 use crate::tree::UiTree;
 
@@ -119,7 +119,10 @@ impl MiddlewareManager {
 
     /// Get names of all registered middlewares.
     pub fn middleware_names(&self) -> Vec<&str> {
-        self.middlewares.iter().map(|e| e.middleware.name()).collect()
+        self.middlewares
+            .iter()
+            .map(|e| e.middleware.name())
+            .collect()
     }
 
     /// Update all middlewares.
@@ -202,7 +205,10 @@ impl MiddlewareManager {
 
         for (middleware_name, keybind) in matches {
             // Find the middleware and call its handler
-            if let Some(entry) = self.middlewares.iter_mut().find(|e| e.middleware.name() == middleware_name)
+            if let Some(entry) = self
+                .middlewares
+                .iter_mut()
+                .find(|e| e.middleware.name() == middleware_name)
                 && entry.middleware.is_enabled()
                 && entry.middleware.handle_keybind(keybind, ctx)
             {
@@ -212,7 +218,10 @@ impl MiddlewareManager {
 
         // Pass to middlewares for direct key handling (in priority order)
         for entry in self.middlewares.iter_mut().rev() {
-            if entry.middleware.handle_key_event(key, modifiers, pressed, ctx) {
+            if entry
+                .middleware
+                .handle_key_event(key, modifiers, pressed, ctx)
+            {
                 return true;
             }
         }
@@ -228,13 +237,13 @@ impl MiddlewareManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::keybind::Keybind;
+    use super::*;
     use crate::event::UiEventSystem;
     use crate::widget_id::WidgetIdRegistry;
     use astrelis_render::Viewport;
-    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
     struct TestMiddleware {
         name: &'static str,
@@ -427,13 +436,13 @@ mod tests {
     fn test_keybind_registry() {
         let mut manager = MiddlewareManager::new();
 
-        manager.keybind_registry_mut().register(
-            "test",
-            Keybind::key(KeyCode::F12, "Toggle"),
-            100,
-        );
+        manager
+            .keybind_registry_mut()
+            .register("test", Keybind::key(KeyCode::F12, "Toggle"), 100);
 
-        let matches = manager.keybind_registry().find_matches(KeyCode::F12, Modifiers::NONE);
+        let matches = manager
+            .keybind_registry()
+            .find_matches(KeyCode::F12, Modifiers::NONE);
         assert_eq!(matches.len(), 1);
     }
 

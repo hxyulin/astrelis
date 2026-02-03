@@ -6,14 +6,14 @@ use astrelis_text::{FontRenderer, FontSystem, Text};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 fn setup() -> (Arc<GraphicsContext>, FontRenderer) {
-    let context = GraphicsContext::new_owned_sync_or_panic();
+    let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
     let font_system = FontSystem::with_system_fonts();
     let renderer = FontRenderer::new(context.clone(), font_system);
     (context, renderer)
 }
 
 fn bench_measure_basic(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("measure_basic");
 
     let long_text = "Lorem ipsum dolor sit amet. ".repeat(20);
@@ -36,7 +36,7 @@ fn bench_measure_basic(c: &mut Criterion) {
 }
 
 fn bench_measure_different_sizes(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("measure_different_sizes");
 
     let content = "Sample text for size measurement";
@@ -56,7 +56,7 @@ fn bench_measure_different_sizes(c: &mut Criterion) {
 }
 
 fn bench_measure_unicode(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("measure_unicode");
 
     let texts = vec![
@@ -78,7 +78,7 @@ fn bench_measure_unicode(c: &mut Criterion) {
 }
 
 fn bench_measure_varying_lengths(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("measure_varying_lengths");
 
     for length in [10, 50, 100, 500, 1000] {
@@ -99,7 +99,7 @@ fn bench_measure_varying_lengths(c: &mut Criterion) {
 }
 
 fn bench_measure_with_styles(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("measure_with_styles");
 
     let content = "Styled text measurement";
@@ -127,7 +127,7 @@ fn bench_measure_with_styles(c: &mut Criterion) {
 }
 
 fn bench_measure_cached(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("measure_cached");
 
     let content = "Sample text for caching test";
@@ -148,7 +148,7 @@ fn bench_measure_cached(c: &mut Criterion) {
 }
 
 fn bench_measure_batch(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("measure_batch");
 
     for count in [10, 50, 100, 500] {
@@ -171,7 +171,7 @@ fn bench_measure_batch(c: &mut Criterion) {
 }
 
 fn bench_measure_line_breaks(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("measure_line_breaks");
 
     let single_line = "This is a single line of text";
@@ -200,7 +200,7 @@ fn bench_measure_line_breaks(c: &mut Criterion) {
 }
 
 fn bench_measure_realistic_scenarios(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("measure_realistic_scenarios");
 
     group.bench_function("ui_label", |b| {

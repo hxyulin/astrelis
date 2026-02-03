@@ -1,3 +1,24 @@
+//! Basic Window Example - Minimal Astrelis Application
+//!
+//! Demonstrates the simplest possible Astrelis application using the App trait:
+//! - Window creation and management
+//! - Basic app lifecycle (update/render)
+//! - Event loop integration
+//! - Frame counting
+//!
+//! ## Features Showcased
+//! - `App` trait implementation
+//! - Window creation with `WindowDescriptor`
+//! - Basic event handling
+//! - Frame-by-frame updates
+//!
+//! ## Usage
+//! ```bash
+//! cargo run -p astrelis-winit --example basic_window
+//! ```
+//!
+//! This is the starting point for understanding Astrelis applications.
+
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},

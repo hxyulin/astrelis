@@ -7,7 +7,8 @@
 //! # Feature Requirements
 //!
 //! - `INDIRECT_FIRST_INSTANCE`: Required for using `first_instance` in indirect commands.
-//! - `MULTI_DRAW_INDIRECT`: Required for multiple draw calls from a single buffer.
+//! - `multi_draw_indirect()`: Available on all desktop GPUs (requires `DownlevelFlags::INDIRECT_EXECUTION`).
+//! - `MULTI_DRAW_INDIRECT_COUNT`: Required for GPU-driven draw count variant.
 
 use std::marker::PhantomData;
 
@@ -201,7 +202,7 @@ impl<T: IndirectCommand> IndirectBuffer<T> {
         // Check that required feature is available
         context.require_feature(GpuFeatures::INDIRECT_FIRST_INSTANCE);
 
-        let buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = context.device().create_buffer(&wgpu::BufferDescriptor {
             label,
             size: T::SIZE * capacity as u64,
             usage: wgpu::BufferUsages::INDIRECT
@@ -235,7 +236,7 @@ impl<T: IndirectCommand> IndirectBuffer<T> {
     ) -> Self {
         context.require_feature(GpuFeatures::INDIRECT_FIRST_INSTANCE);
 
-        let buffer = context.device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = context.device().create_buffer(&wgpu::BufferDescriptor {
             label,
             size: T::SIZE * commands.len() as u64,
             usage: wgpu::BufferUsages::INDIRECT
@@ -245,7 +246,7 @@ impl<T: IndirectCommand> IndirectBuffer<T> {
         });
 
         context
-            .queue
+            .queue()
             .write_buffer(&buffer, 0, bytemuck::cast_slice(commands));
 
         Self {
@@ -365,7 +366,7 @@ impl<'a> RenderPassIndirectExt<'a> for wgpu::RenderPass<'a> {
 
 /// Extension trait for multi-draw indirect operations.
 ///
-/// Requires the `MULTI_DRAW_INDIRECT` feature.
+/// Requires `DownlevelFlags::INDIRECT_EXECUTION` (available on all desktop GPUs).
 pub trait RenderPassMultiDrawIndirectExt<'a> {
     /// Draw non-indexed geometry multiple times using an indirect buffer.
     ///
@@ -377,7 +378,7 @@ pub trait RenderPassMultiDrawIndirectExt<'a> {
     ///
     /// # Panics
     ///
-    /// Panics if `MULTI_DRAW_INDIRECT` feature is not enabled.
+    /// Requires `DownlevelFlags::INDIRECT_EXECUTION`.
     fn multi_draw_indirect(
         &mut self,
         indirect_buffer: &'a IndirectBuffer<DrawIndirect>,
@@ -395,7 +396,7 @@ pub trait RenderPassMultiDrawIndirectExt<'a> {
     ///
     /// # Panics
     ///
-    /// Panics if `MULTI_DRAW_INDIRECT` feature is not enabled.
+    /// Requires `DownlevelFlags::INDIRECT_EXECUTION`.
     fn multi_draw_indexed_indirect(
         &mut self,
         indirect_buffer: &'a IndirectBuffer<DrawIndexedIndirect>,

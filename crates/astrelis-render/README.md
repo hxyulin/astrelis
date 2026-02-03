@@ -123,7 +123,7 @@ impl App for MyApp {
                 )
                 .build(&mut frame);
             
-            let pass = render_pass.descriptor();
+            let pass = render_pass.wgpu_pass();
             // ... render commands
         }
         
@@ -301,7 +301,7 @@ let mut render_pass = RenderPassBuilder::new()
     .build(&mut frame);
 
 // Use the render pass
-let pass = render_pass.descriptor();
+let pass = render_pass.wgpu_pass();
 pass.set_pipeline(&pipeline);
 // ... render commands
 

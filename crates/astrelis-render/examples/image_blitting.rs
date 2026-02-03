@@ -168,7 +168,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut windows = HashMap::new();
 
         let scale = Window::platform_dpi() as f32;
@@ -193,13 +193,13 @@ fn main() {
         windows.insert(window_id, renderable_window);
 
         // Create shader module
-        let shader = graphics_ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let shader = graphics_ctx.device().create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Blit Shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
 
         // Create bind group layout
-        let bind_group_layout = graphics_ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let bind_group_layout = graphics_ctx.device().create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Blit Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -232,14 +232,14 @@ fn main() {
         });
 
         // Create pipeline layout
-        let pipeline_layout = graphics_ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let pipeline_layout = graphics_ctx.device().create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Blit Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
         // Create render pipeline
-        let pipeline = graphics_ctx.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = graphics_ctx.device().create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Blit Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -297,7 +297,7 @@ fn main() {
             Vertex { position: [0.8, 0.8], uv: [1.0, 0.0] },
             Vertex { position: [-0.8, 0.8], uv: [0.0, 0.0] },
         ];
-        let vertex_buffer = graphics_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vertex_buffer = graphics_ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
@@ -313,7 +313,7 @@ fn main() {
             ],
             tint: [1.0, 1.0, 1.0, 1.0],
         };
-        let uniform_buffer = graphics_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = graphics_ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
             contents: bytemuck::cast_slice(&[uniforms]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -324,7 +324,7 @@ fn main() {
         image_buffer.clear(30, 30, 40, 255);
 
         // Create GPU texture
-        let texture = graphics_ctx.device.create_texture(&wgpu::TextureDescriptor {
+        let texture = graphics_ctx.device().create_texture(&wgpu::TextureDescriptor {
             label: Some("Blit Texture"),
             size: wgpu::Extent3d {
                 width: 256,
@@ -341,7 +341,7 @@ fn main() {
 
         // Create texture view and sampler
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = graphics_ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler = graphics_ctx.device().create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Blit Sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -353,7 +353,7 @@ fn main() {
         });
 
         // Create bind group
-        let bind_group = graphics_ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = graphics_ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Blit Bind Group"),
             layout: &bind_group_layout,
             entries: &[
@@ -420,7 +420,7 @@ impl astrelis_winit::app::App for App {
         }
         
         // Upload to GPU (this is the "blit" operation)
-        self.context.queue.write_texture(
+        self.context.queue().write_texture(
             wgpu::TexelCopyTextureInfo {
                 texture: &self.texture,
                 mip_level: 0,
@@ -468,7 +468,7 @@ impl astrelis_winit::app::App for App {
             RenderTarget::Surface,
             Color::rgb(0.05, 0.05, 0.08),
             |pass| {
-                let pass = pass.descriptor();
+                let pass = pass.wgpu_pass();
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));

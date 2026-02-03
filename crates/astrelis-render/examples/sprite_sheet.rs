@@ -79,11 +79,12 @@ fn generate_sprite_sheet_data() -> (Vec<u8>, u32, u32) {
     let height = SPRITE_SIZE * ROWS;
     let mut pixels = vec![0u8; (width * height * 4) as usize];
     
-    // Generate 4 frames of a spinning indicator
+    // Generate 4 frames of a spinning indicator.
+    // Each frame rotates the "bright spot" by 90° (PI/2) around the circle.
     for frame in 0..4 {
         let base_x = frame * SPRITE_SIZE;
         let center = SPRITE_SIZE as f32 / 2.0;
-        let radius = SPRITE_SIZE as f32 / 2.0 - 4.0;
+        let radius = SPRITE_SIZE as f32 / 2.0 - 4.0; // 4px inset from sprite edge
         
         for y in 0..SPRITE_SIZE {
             for x in 0..SPRITE_SIZE {
@@ -96,10 +97,11 @@ fn generate_sprite_sheet_data() -> (Vec<u8>, u32, u32) {
                 let dist = (dx * dx + dy * dy).sqrt();
                 let angle = dy.atan2(dx);
                 
-                // Draw a circle outline
+                // Draw a 3px-wide circle outline (anti-aliased ring)
                 if (dist - radius).abs() < 3.0 {
-                    // Calculate which segment of the circle we're in
+                    // Rotate the "bright spot" origin by 90° per frame
                     let segment_angle = std::f32::consts::PI / 2.0 * frame as f32;
+                    // Compute angle relative to this frame's origin, then wrap to [0, 2π]
                     let mut rel_angle = angle - segment_angle;
                     while rel_angle < 0.0 {
                         rel_angle += std::f32::consts::PI * 2.0;
@@ -107,19 +109,21 @@ fn generate_sprite_sheet_data() -> (Vec<u8>, u32, u32) {
                     while rel_angle > std::f32::consts::PI * 2.0 {
                         rel_angle -= std::f32::consts::PI * 2.0;
                     }
-                    
-                    // Color gradient around the circle
+
+                    // Brightness fades from 1.0 (at the origin) to 0.0 going around the circle.
+                    // This creates a "comet tail" gradient effect.
                     let brightness = 1.0 - (rel_angle / (std::f32::consts::PI * 2.0));
-                    let r = (100.0 + 155.0 * brightness) as u8;
-                    let g = (150.0 + 105.0 * brightness) as u8;
-                    let b = 255;
+                    let r = (100.0 + 155.0 * brightness) as u8; // 100..255
+                    let g = (150.0 + 105.0 * brightness) as u8; // 150..255
+                    let b = 255; // always full blue
                     
                     pixels[idx] = r;
                     pixels[idx + 1] = g;
                     pixels[idx + 2] = b;
                     pixels[idx + 3] = 255;
                 } else if dist < radius - 3.0 {
-                    // Inner fill with slight gradient
+                    // Inner fill: alpha fades from 0.3 at 10px inside the ring to 0.0 at the ring edge.
+                    // This gives a subtle glow effect inside the spinner.
                     let alpha = ((radius - 3.0 - dist) / 10.0).clamp(0.0, 0.3);
                     pixels[idx] = 100;
                     pixels[idx + 1] = 150;
@@ -149,7 +153,7 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut windows = HashMap::new();
 
         let scale = Window::platform_dpi() as f32;
@@ -193,13 +197,13 @@ fn main() {
         let animation = SpriteAnimation::new(4, 8.0);
 
         // Create shader module
-        let shader = graphics_ctx.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        let shader = graphics_ctx.device().create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Sprite Shader"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
 
         // Create bind group layout
-        let bind_group_layout = graphics_ctx.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let bind_group_layout = graphics_ctx.device().create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Sprite Bind Group Layout"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
@@ -232,14 +236,14 @@ fn main() {
         });
 
         // Create pipeline layout
-        let pipeline_layout = graphics_ctx.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let pipeline_layout = graphics_ctx.device().create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Sprite Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
         // Create render pipeline
-        let pipeline = graphics_ctx.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let pipeline = graphics_ctx.device().create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Sprite Pipeline"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -292,14 +296,14 @@ fn main() {
                 [0.0, 0.0, 0.0, 1.0],
             ],
         };
-        let uniform_buffer = graphics_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buffer = graphics_ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Uniform Buffer"),
             contents: bytemuck::cast_slice(&[uniforms]),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
         // Create sampler
-        let sampler = graphics_ctx.device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler = graphics_ctx.device().create_sampler(&wgpu::SamplerDescriptor {
             label: Some("Sprite Sampler"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
@@ -307,7 +311,7 @@ fn main() {
         });
 
         // Create bind group
-        let bind_group = graphics_ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = graphics_ctx.device().create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Sprite Bind Group"),
             layout: &bind_group_layout,
             entries: &[
@@ -328,7 +332,7 @@ fn main() {
 
         // Initial vertex buffer (will be updated each frame with new UVs)
         let vertices = create_quad_vertices(0.0, 0.0, 1.0, 1.0);
-        let vertex_buffer = graphics_ctx.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let vertex_buffer = graphics_ctx.device().create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
@@ -374,7 +378,7 @@ impl astrelis_winit::app::App for App {
             
             // Get context from first window
             if let Some(window) = self.windows.values().next() {
-                window.context().graphics_context().queue.write_buffer(
+                window.context().graphics_context().queue().write_buffer(
                     &self.vertex_buffer,
                     0,
                     bytemuck::cast_slice(&vertices),
@@ -410,7 +414,7 @@ impl astrelis_winit::app::App for App {
             RenderTarget::Surface,
             Color::rgb(0.1, 0.1, 0.15),
             |pass| {
-                let pass = pass.descriptor();
+                let pass = pass.wgpu_pass();
                 pass.set_pipeline(&self.pipeline);
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));

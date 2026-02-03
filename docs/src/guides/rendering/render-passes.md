@@ -31,8 +31,8 @@ frame.clear_and_render(
     Color::rgb(0.2, 0.3, 0.4),
     |pass| {
         // Render commands go here
-        ui.render(pass.descriptor());
-        sprite_renderer.render(pass.descriptor());
+        ui.render(pass.wgpu_pass());
+        sprite_renderer.render(pass.wgpu_pass());
     },
 );
 
@@ -64,7 +64,7 @@ let mut frame = renderable_window.begin_drawing();
         .build(&mut frame);
 
     // Render commands
-    ui.render(pass.descriptor());
+    ui.render(pass.wgpu_pass());
 
 } // Pass drops here automatically
 
@@ -84,7 +84,7 @@ let mut pass = RenderPassBuilder::new()
     .clear_color(Color::BLACK)
     .build(&mut frame);
 
-ui.render(pass.descriptor());
+ui.render(pass.wgpu_pass());
 
 frame.finish(); // PANIC: pass still borrowed
 ```
@@ -98,7 +98,7 @@ let mut pass = RenderPassBuilder::new()
     .clear_color(Color::BLACK)
     .build(&mut frame);
 
-ui.render(pass.descriptor());
+ui.render(pass.wgpu_pass());
 drop(pass); // Explicit drop
 
 frame.finish();
@@ -228,7 +228,7 @@ let mut frame = renderable_window.begin_drawing();
         .clear_color(Color::BLACK)
         .build(&mut frame);
 
-    scene_renderer.render(pass.descriptor());
+    scene_renderer.render(pass.wgpu_pass());
 } // Pass 1 drops here
 
 // Pass 2: Apply post-processing and render to surface
@@ -238,7 +238,7 @@ let mut frame = renderable_window.begin_drawing();
         .clear_color(Color::BLACK)
         .build(&mut frame);
 
-    post_process_renderer.render(pass.descriptor(), scene_texture);
+    post_process_renderer.render(pass.wgpu_pass(), scene_texture);
 } // Pass 2 drops here
 
 frame.finish();
@@ -260,7 +260,7 @@ let mut frame = renderable_window.begin_drawing();
         .clear_color(Color::BLACK)
         .build(&mut frame);
 
-    background_renderer.render(pass.descriptor());
+    background_renderer.render(pass.wgpu_pass());
 }
 
 // Pass 2: Load and render foreground on top
@@ -270,7 +270,7 @@ let mut frame = renderable_window.begin_drawing();
         .color_load_op(LoadOp::Load) // Don't clear, load existing
         .build(&mut frame);
 
-    foreground_renderer.render(pass.descriptor());
+    foreground_renderer.render(pass.wgpu_pass());
 }
 
 // Pass 3: Load and render UI on top
@@ -280,7 +280,7 @@ let mut frame = renderable_window.begin_drawing();
         .color_load_op(LoadOp::Load)
         .build(&mut frame);
 
-    ui.render(pass.descriptor());
+    ui.render(pass.wgpu_pass());
 }
 
 frame.finish();
@@ -300,7 +300,7 @@ frame.clear_and_render(
     RenderTarget::Surface,
     Color::BLACK,
     |pass| {
-        scene_renderer.render(pass.descriptor());
+        scene_renderer.render(pass.wgpu_pass());
     },
 );
 
@@ -311,7 +311,7 @@ if debug_mode {
         .color_load_op(LoadOp::Load) // Load scene
         .build(&mut frame);
 
-    debug_overlay.render(pass.descriptor());
+    debug_overlay.render(pass.wgpu_pass());
 }
 
 frame.finish();
@@ -319,7 +319,7 @@ frame.finish();
 
 ## Pass Descriptor
 
-The `pass.descriptor()` method returns a `&mut wgpu::RenderPass` for executing draw commands:
+The `pass.wgpu_pass()` method returns a `&mut wgpu::RenderPass` for executing draw commands:
 
 ```rust
 let mut pass = RenderPassBuilder::new()
@@ -327,7 +327,7 @@ let mut pass = RenderPassBuilder::new()
     .clear_color(Color::BLACK)
     .build(&mut frame);
 
-let render_pass = pass.descriptor();
+let render_pass = pass.wgpu_pass();
 
 // Use wgpu RenderPass API
 render_pass.set_pipeline(&pipeline);
@@ -338,9 +338,9 @@ render_pass.draw(0..3, 0..1);
 
 **Most systems accept `&mut wgpu::RenderPass`:**
 ```rust
-ui.render(pass.descriptor());
-sprite_renderer.render(pass.descriptor());
-mesh_renderer.render(pass.descriptor());
+ui.render(pass.wgpu_pass());
+sprite_renderer.render(pass.wgpu_pass());
+mesh_renderer.render(pass.wgpu_pass());
 ```
 
 ## Advanced Techniques
@@ -375,7 +375,7 @@ let mut pass = RenderPassBuilder::new()
     .msaa_view(msaa_view) // Add MSAA
     .build(&mut frame);
 
-scene_renderer.render(pass.descriptor());
+scene_renderer.render(pass.wgpu_pass());
 ```
 
 **Result:** GPU automatically resolves MSAA to surface.
@@ -396,7 +396,7 @@ let mut frame = renderable_window.begin_drawing();
         .depth_store_op(StoreOp::Store)
         .build(&mut frame);
 
-    scene_renderer.render_depth_only(pass.descriptor());
+    scene_renderer.render_depth_only(pass.wgpu_pass());
 }
 
 // Pass 2: Color pass with early-Z culling
@@ -409,7 +409,7 @@ let mut frame = renderable_window.begin_drawing();
         .depth_store_op(StoreOp::Discard)
         .build(&mut frame);
 
-    scene_renderer.render_color(pass.descriptor());
+    scene_renderer.render_color(pass.wgpu_pass());
 }
 
 frame.finish();
@@ -433,7 +433,7 @@ let mut frame = renderable_window.begin_drawing();
         .depth_store_op(StoreOp::Store)
         .build(&mut frame);
 
-    scene_renderer.render_from_light(pass.descriptor(), light_view_proj);
+    scene_renderer.render_from_light(pass.wgpu_pass(), light_view_proj);
 }
 
 // Pass 2: Render scene with shadows
@@ -445,7 +445,7 @@ let mut frame = renderable_window.begin_drawing();
         .depth_load_op(LoadOp::Clear(1.0))
         .build(&mut frame);
 
-    scene_renderer.render_with_shadows(pass.descriptor(), shadow_texture);
+    scene_renderer.render_with_shadows(pass.wgpu_pass(), shadow_texture);
 }
 
 frame.finish();
@@ -463,7 +463,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(scene_fb),
     Color::BLACK,
     |pass| {
-        scene_renderer.render(pass.descriptor());
+        scene_renderer.render(pass.wgpu_pass());
     },
 );
 
@@ -472,7 +472,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(blur_fb),
     Color::BLACK,
     |pass| {
-        blur_renderer.render(pass.descriptor(), scene_texture);
+        blur_renderer.render(pass.wgpu_pass(), scene_texture);
     },
 );
 
@@ -481,7 +481,7 @@ frame.clear_and_render(
     RenderTarget::Framebuffer(bloom_fb),
     Color::BLACK,
     |pass| {
-        bloom_renderer.render(pass.descriptor(), blur_texture);
+        bloom_renderer.render(pass.wgpu_pass(), blur_texture);
     },
 );
 
@@ -490,7 +490,7 @@ frame.clear_and_render(
     RenderTarget::Surface,
     Color::BLACK,
     |pass| {
-        composite_renderer.render(pass.descriptor(), scene_texture, bloom_texture);
+        composite_renderer.render(pass.wgpu_pass(), scene_texture, bloom_texture);
     },
 );
 

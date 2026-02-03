@@ -53,6 +53,7 @@ impl TextSpan {
 
 /// Style attributes for a text span.
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub struct TextSpanStyle {
     /// Font size (None = inherit from parent)
     pub font_size: Option<f32>,
@@ -147,21 +148,6 @@ impl TextSpanStyle {
     }
 }
 
-impl Default for TextSpanStyle {
-    fn default() -> Self {
-        Self {
-            font_size: None,
-            color: None,
-            weight: None,
-            style: None,
-            font_family: None,
-            underline: false,
-            strikethrough: false,
-            background: None,
-            scale: None,
-        }
-    }
-}
 
 /// Rich text with multiple styled spans.
 #[derive(Debug, Clone)]
@@ -420,7 +406,7 @@ impl RichText {
                         let mut italic_text = String::new();
                         let mut found_end = false;
 
-                        while let Some(ch) = chars.next() {
+                        for ch in chars.by_ref() {
                             if ch == '*' {
                                 found_end = true;
                                 break;

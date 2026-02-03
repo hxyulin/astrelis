@@ -162,7 +162,7 @@ fn render(&mut self, ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBa
         Color::from_rgb(0.1, 0.1, 0.1),
         |pass| {
             // All rendering happens inside this closure
-            self.ui.render(pass.descriptor());
+            self.ui.render(pass.wgpu_pass());
         },
     );
 
@@ -477,12 +477,12 @@ let renderer = CustomRenderer::new(graphics.clone());
 ```rust
 // Good: Pass is dropped at end of closure
 frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
-    self.ui.render(pass.descriptor());
+    self.ui.render(pass.wgpu_pass());
 }); // pass dropped here
 
 // Bad: Manual pass management without drop
 let mut pass = RenderPassBuilder::new().build(&mut frame);
-self.ui.render(pass.descriptor());
+self.ui.render(pass.wgpu_pass());
 // Forgot to drop pass before finish - ERROR!
 frame.finish();
 ```

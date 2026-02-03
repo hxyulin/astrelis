@@ -4,9 +4,9 @@
 //! Used in conjunction with the Overflow style property to clip content
 //! that exceeds widget boundaries.
 
-use astrelis_core::math::Vec2;
 use crate::style::Overflow;
 use crate::tree::LayoutRect;
+use astrelis_core::math::Vec2;
 
 /// A clip rectangle defining a region for scissor clipping.
 ///
@@ -23,7 +23,7 @@ use crate::tree::LayoutRect;
 /// assert!(clip.contains(Vec2::new(100.0, 100.0)));
 /// assert!(!clip.contains(Vec2::new(500.0, 100.0)));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 pub struct ClipRect {
     /// Minimum point (top-left corner)
     pub min: Vec2,
@@ -135,6 +135,28 @@ impl Default for ClipRect {
     }
 }
 
+impl PartialEq for ClipRect {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare using bit-level equality for floats to handle infinity correctly
+        self.min.x.to_bits() == other.min.x.to_bits()
+            && self.min.y.to_bits() == other.min.y.to_bits()
+            && self.max.x.to_bits() == other.max.x.to_bits()
+            && self.max.y.to_bits() == other.max.y.to_bits()
+    }
+}
+
+impl Eq for ClipRect {}
+
+impl std::hash::Hash for ClipRect {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // Use bit representation for deterministic hashing of floats (including infinity)
+        self.min.x.to_bits().hash(state);
+        self.min.y.to_bits().hash(state);
+        self.max.x.to_bits().hash(state);
+        self.max.y.to_bits().hash(state);
+    }
+}
+
 /// A clip rectangle in physical pixel coordinates.
 ///
 /// Used directly with GPU scissor rect APIs which require integer pixel values.
@@ -153,7 +175,12 @@ pub struct PhysicalClipRect {
 impl PhysicalClipRect {
     /// Create a new physical clip rect.
     pub fn new(x: u32, y: u32, width: u32, height: u32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// Clamp the clip rect to fit within viewport bounds.
@@ -164,14 +191,24 @@ impl PhysicalClipRect {
         let y = self.y.min(viewport_height);
         let width = self.width.min(viewport_width.saturating_sub(x));
         let height = self.height.min(viewport_height.saturating_sub(y));
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 }
 
 /// Determines if a node should clip its children based on overflow settings.
 pub fn should_clip(overflow_x: Overflow, overflow_y: Overflow) -> bool {
-    matches!(overflow_x, Overflow::Hidden | Overflow::Scroll | Overflow::Auto)
-        || matches!(overflow_y, Overflow::Hidden | Overflow::Scroll | Overflow::Auto)
+    matches!(
+        overflow_x,
+        Overflow::Hidden | Overflow::Scroll | Overflow::Auto
+    ) || matches!(
+        overflow_y,
+        Overflow::Hidden | Overflow::Scroll | Overflow::Auto
+    )
 }
 
 /// Compute the clip rect for a node, considering its parent's clip.
@@ -317,7 +354,12 @@ mod tests {
 
         // With parent clip
         let parent_clip = ClipRect::from_bounds(50.0, 50.0, 300.0, 250.0);
-        let clip = compute_clip_rect(&layout, Overflow::Hidden, Overflow::Hidden, Some(parent_clip));
+        let clip = compute_clip_rect(
+            &layout,
+            Overflow::Hidden,
+            Overflow::Hidden,
+            Some(parent_clip),
+        );
         // Should intersect with parent
         assert_eq!(clip.min, Vec2::new(100.0, 100.0));
         assert_eq!(clip.max, Vec2::new(300.0, 250.0));

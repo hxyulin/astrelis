@@ -7,11 +7,11 @@
 //! # Example
 //!
 //! ```ignore
-//! use astrelis_render::{GraphicsContext, GraphicsContextExt, AsWgpu};
+//! use astrelis_render::{GraphicsContext, AsWgpu};
 //!
-//! let ctx = GraphicsContext::new_owned_sync_or_panic();
+//! let ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 //!
-//! // Access raw wgpu device
+//! // Access raw wgpu device via inherent methods
 //! let device: &wgpu::Device = ctx.device();
 //! let queue: &wgpu::Queue = ctx.queue();
 //!
@@ -65,64 +65,6 @@ pub trait IntoWgpu {
 }
 
 // =============================================================================
-// GraphicsContextExt
-// =============================================================================
-
-/// Extended access to GraphicsContext internals.
-///
-/// This trait provides direct access to the underlying wgpu components
-/// for advanced use cases that require raw wgpu operations.
-pub trait GraphicsContextExt {
-    /// Get a reference to the wgpu device.
-    fn device(&self) -> &wgpu::Device;
-
-    /// Get a reference to the wgpu queue.
-    fn queue(&self) -> &wgpu::Queue;
-
-    /// Get a reference to the wgpu adapter.
-    fn adapter(&self) -> &wgpu::Adapter;
-
-    /// Get a reference to the wgpu instance.
-    fn instance(&self) -> &wgpu::Instance;
-}
-
-impl GraphicsContextExt for GraphicsContext {
-    fn device(&self) -> &wgpu::Device {
-        &self.device
-    }
-
-    fn queue(&self) -> &wgpu::Queue {
-        &self.queue
-    }
-
-    fn adapter(&self) -> &wgpu::Adapter {
-        &self.adapter
-    }
-
-    fn instance(&self) -> &wgpu::Instance {
-        &self.instance
-    }
-}
-
-impl GraphicsContextExt for Arc<GraphicsContext> {
-    fn device(&self) -> &wgpu::Device {
-        &self.device
-    }
-
-    fn queue(&self) -> &wgpu::Queue {
-        &self.queue
-    }
-
-    fn adapter(&self) -> &wgpu::Adapter {
-        &self.adapter
-    }
-
-    fn instance(&self) -> &wgpu::Instance {
-        &self.instance
-    }
-}
-
-// =============================================================================
 // AsWgpu Implementations
 // =============================================================================
 
@@ -130,7 +72,7 @@ impl AsWgpu for GraphicsContext {
     type WgpuType = wgpu::Device;
 
     fn as_wgpu(&self) -> &Self::WgpuType {
-        &self.device
+        self.device()
     }
 }
 
@@ -138,11 +80,11 @@ impl AsWgpu for Arc<GraphicsContext> {
     type WgpuType = wgpu::Device;
 
     fn as_wgpu(&self) -> &Self::WgpuType {
-        &self.device
+        self.device()
     }
 }
 
-impl<'a> AsWgpu for FrameContext {
+impl AsWgpu for FrameContext {
     type WgpuType = wgpu::CommandEncoder;
 
     fn as_wgpu(&self) -> &Self::WgpuType {
@@ -150,7 +92,7 @@ impl<'a> AsWgpu for FrameContext {
     }
 }
 
-impl<'a> AsWgpuMut for FrameContext {
+impl AsWgpuMut for FrameContext {
     fn as_wgpu_mut(&mut self) -> &mut Self::WgpuType {
         self.encoder.as_mut().expect("FrameContext encoder already taken - ensure finish() wasn't called early")
     }
@@ -160,13 +102,13 @@ impl<'a> AsWgpu for RenderPass<'a> {
     type WgpuType = wgpu::RenderPass<'static>;
 
     fn as_wgpu(&self) -> &Self::WgpuType {
-        self.descriptor.as_ref().expect("RenderPass already consumed - ensure it wasn't dropped early")
+        self.pass.as_ref().expect("RenderPass already consumed - ensure it wasn't dropped early")
     }
 }
 
 impl<'a> AsWgpuMut for RenderPass<'a> {
     fn as_wgpu_mut(&mut self) -> &mut Self::WgpuType {
-        self.descriptor.as_mut().expect("RenderPass already consumed - ensure it wasn't dropped early")
+        self.pass.as_mut().expect("RenderPass already consumed - ensure it wasn't dropped early")
     }
 }
 
@@ -200,109 +142,6 @@ impl AsWgpu for WindowContext {
     }
 }
 
-// =============================================================================
-// FrameContextExt
-// =============================================================================
-
-/// Extended access to FrameContext internals.
-pub trait FrameContextExt {
-    /// Get direct access to the command encoder.
-    fn encoder_ref(&self) -> Option<&wgpu::CommandEncoder>;
-
-    /// Get mutable access to the command encoder.
-    fn encoder_mut(&mut self) -> Option<&mut wgpu::CommandEncoder>;
-
-    /// Get the surface texture view for this frame.
-    ///
-    /// # Panics
-    /// Panics if the surface has been consumed. Use `try_surface_view()` for fallible access.
-    fn surface_view(&self) -> &wgpu::TextureView;
-
-    /// Try to get the surface texture view for this frame.
-    fn try_surface_view(&self) -> Option<&wgpu::TextureView>;
-
-    /// Get the surface texture for this frame.
-    ///
-    /// # Panics
-    /// Panics if the surface has been consumed. Use `try_surface_texture()` for fallible access.
-    fn surface_texture(&self) -> &wgpu::Texture;
-
-    /// Try to get the surface texture for this frame.
-    fn try_surface_texture(&self) -> Option<&wgpu::Texture>;
-}
-
-impl FrameContextExt for FrameContext {
-    fn encoder_ref(&self) -> Option<&wgpu::CommandEncoder> {
-        self.encoder.as_ref()
-    }
-
-    fn encoder_mut(&mut self) -> Option<&mut wgpu::CommandEncoder> {
-        self.encoder.as_mut()
-    }
-
-    fn surface_view(&self) -> &wgpu::TextureView {
-        self.surface().view()
-    }
-
-    fn try_surface_view(&self) -> Option<&wgpu::TextureView> {
-        self.try_surface().map(|s| s.view())
-    }
-
-    fn surface_texture(&self) -> &wgpu::Texture {
-        self.surface().texture()
-    }
-
-    fn try_surface_texture(&self) -> Option<&wgpu::Texture> {
-        self.try_surface().map(|s| s.texture())
-    }
-}
-
-// =============================================================================
-// RenderPassExt (for raw access)
-// =============================================================================
-
-/// Extended access to RenderPass internals.
-pub trait RenderPassRawExt<'a> {
-    /// Get raw access to the underlying wgpu render pass.
-    fn raw_pass(&mut self) -> &mut wgpu::RenderPass<'static>;
-
-    /// Get the graphics context.
-    fn graphics_context(&self) -> &GraphicsContext;
-}
-
-impl<'a> RenderPassRawExt<'a> for RenderPass<'a> {
-    fn raw_pass(&mut self) -> &mut wgpu::RenderPass<'static> {
-        self.descriptor.as_mut().unwrap()
-    }
-
-    fn graphics_context(&self) -> &GraphicsContext {
-        &self.context.context
-    }
-}
-
-// =============================================================================
-// ComputePassExt (for raw access)
-// =============================================================================
-
-/// Extended access to ComputePass internals.
-pub trait ComputePassRawExt<'a> {
-    /// Get raw access to the underlying wgpu compute pass.
-    fn raw_pass(&mut self) -> &mut wgpu::ComputePass<'static>;
-
-    /// Get the graphics context.
-    fn graphics_context(&self) -> &GraphicsContext;
-}
-
-impl<'a> ComputePassRawExt<'a> for ComputePass<'a> {
-    fn raw_pass(&mut self) -> &mut wgpu::ComputePass<'static> {
-        self.pass.as_mut().unwrap()
-    }
-
-    fn graphics_context(&self) -> &GraphicsContext {
-        &self.context.context
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -316,6 +155,5 @@ mod tests {
         fn _takes_as_wgpu<T: AsWgpu>(_: &T) {}
         fn _takes_as_wgpu_mut<T: AsWgpuMut>(_: &mut T) {}
         fn _takes_into_wgpu<T: IntoWgpu>(_: T) {}
-        fn _takes_graphics_context_ext<T: GraphicsContextExt>(_: &T) {}
     }
 }

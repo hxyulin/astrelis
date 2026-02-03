@@ -22,8 +22,10 @@ use astrelis_render::Color;
 
 /// Line style for underlines and strikethrough.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum LineStyle {
     /// Solid line
+    #[default]
     Solid,
     /// Dashed line
     Dashed,
@@ -33,11 +35,6 @@ pub enum LineStyle {
     Wavy,
 }
 
-impl Default for LineStyle {
-    fn default() -> Self {
-        Self::Solid
-    }
-}
 
 /// Underline style configuration.
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -16,22 +16,20 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+    GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
 };
-use astrelis_ui::{UiSystem, FocusManager, FocusPolicy};
+use astrelis_ui::{FocusManager, FocusPolicy, UiSystem};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
-    event::{EventBatch, Event, HandleStatus, Key, NamedKey},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    event::{Event, EventBatch, HandleStatus, Key, NamedKey},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 
 struct FocusNavigationApp {
     window: RenderableWindow,
     window_id: WindowId,
     ui: UiSystem,
-    focus_manager: FocusManager,
     button_ids: Vec<astrelis_ui::WidgetId>,
     focused_index: Option<usize>,
     status_text_id: astrelis_ui::WidgetId,
@@ -42,7 +40,7 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync_or_panic();
+        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -59,7 +57,8 @@ fn main() {
                 format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
                 ..Default::default()
             },
-        ).expect("Failed to create renderable window");
+        )
+        .expect("Failed to create renderable window");
 
         let window_id = window.id();
         let size = window.physical_size();
@@ -109,7 +108,6 @@ fn main() {
             window,
             window_id,
             ui,
-            focus_manager,
             button_ids,
             focused_index: None,
             status_text_id,
@@ -131,19 +129,22 @@ fn build_focus_ui(
         "No widget focused (press Tab to start)".to_string()
     };
 
+    let theme = ui.theme().clone();
+    let colors = &theme.colors;
+
     ui.build(|root| {
         root.container()
             .width(width)
             .height(height)
             .padding(30.0)
-            .background_color(Color::from_rgb_u8(20, 20, 30))
+            .background_color(colors.background)
             .child(|root| {
                 root.column()
                     .gap(25.0)
                     .child(|root| {
                         // Header
                         root.container()
-                            .background_color(Color::from_rgb_u8(30, 30, 45))
+                            .background_color(colors.surface)
                             .border_radius(12.0)
                             .padding(20.0)
                             .child(|root| {
@@ -152,21 +153,21 @@ fn build_focus_ui(
                                     .child(|root| {
                                         root.text("Focus Navigation Demo")
                                             .size(32.0)
-                                            .color(Color::WHITE)
+                                            .color(colors.text_primary)
                                             .bold()
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text("Use Tab/Shift+Tab to navigate between widgets")
                                             .size(14.0)
-                                            .color(Color::from_rgb_u8(150, 150, 170))
+                                            .color(colors.text_secondary)
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text(status_text)
                                             .id(status_text_id)
                                             .size(16.0)
-                                            .color(Color::from_rgb_u8(100, 200, 255))
+                                            .color(colors.info)
                                             .bold()
                                             .margin(5.0)
                                             .build()
@@ -178,7 +179,7 @@ fn build_focus_ui(
                     .child(|root| {
                         // Focusable widgets section
                         root.container()
-                            .background_color(Color::from_rgb_u8(30, 30, 45))
+                            .background_color(colors.surface)
                             .border_radius(12.0)
                             .padding(20.0)
                             .child(|root| {
@@ -187,14 +188,14 @@ fn build_focus_ui(
                                     .child(|root| {
                                         root.text("Focusable Buttons")
                                             .size(24.0)
-                                            .color(Color::from_rgb_u8(100, 180, 255))
+                                            .color(colors.info)
                                             .bold()
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text("Press Tab to cycle through these buttons:")
                                             .size(14.0)
-                                            .color(Color::from_rgb_u8(180, 180, 200))
+                                            .color(colors.text_secondary)
                                             .build()
                                     })
                                     .child(|root| {
@@ -202,13 +203,13 @@ fn build_focus_ui(
                                         root.row()
                                             .gap(15.0)
                                             .child(|root| {
-                                                build_focusable_button(root, button_ids[0], "Button 1", focused_index == Some(0))
+                                                build_focusable_button(root, &theme, button_ids[0], "Button 1", focused_index == Some(0))
                                             })
                                             .child(|root| {
-                                                build_focusable_button(root, button_ids[1], "Button 2", focused_index == Some(1))
+                                                build_focusable_button(root, &theme, button_ids[1], "Button 2", focused_index == Some(1))
                                             })
                                             .child(|root| {
-                                                build_focusable_button(root, button_ids[2], "Button 3", focused_index == Some(2))
+                                                build_focusable_button(root, &theme, button_ids[2], "Button 3", focused_index == Some(2))
                                             })
                                             .build()
                                     })
@@ -217,13 +218,13 @@ fn build_focus_ui(
                                         root.row()
                                             .gap(15.0)
                                             .child(|root| {
-                                                build_focusable_button(root, button_ids[3], "Button 4", focused_index == Some(3))
+                                                build_focusable_button(root, &theme, button_ids[3], "Button 4", focused_index == Some(3))
                                             })
                                             .child(|root| {
-                                                build_focusable_button(root, button_ids[4], "Button 5", focused_index == Some(4))
+                                                build_focusable_button(root, &theme, button_ids[4], "Button 5", focused_index == Some(4))
                                             })
                                             .child(|root| {
-                                                build_focusable_button(root, button_ids[5], "Button 6", focused_index == Some(5))
+                                                build_focusable_button(root, &theme, button_ids[5], "Button 6", focused_index == Some(5))
                                             })
                                             .build()
                                     })
@@ -234,7 +235,7 @@ fn build_focus_ui(
                     .child(|root| {
                         // Info panel
                         root.container()
-                            .background_color(Color::from_rgb_u8(30, 30, 45))
+                            .background_color(colors.surface)
                             .border_radius(12.0)
                             .padding(20.0)
                             .child(|root| {
@@ -243,26 +244,26 @@ fn build_focus_ui(
                                     .child(|root| {
                                         root.text("Focus Indicators")
                                             .size(20.0)
-                                            .color(Color::from_rgb_u8(100, 180, 255))
+                                            .color(colors.info)
                                             .bold()
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text("• Focused widgets have a bright blue border")
                                             .size(13.0)
-                                            .color(Color::from_rgb_u8(200, 200, 220))
+                                            .color(colors.text_primary)
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text("• Unfocused widgets have normal styling")
                                             .size(13.0)
-                                            .color(Color::from_rgb_u8(200, 200, 220))
+                                            .color(colors.text_primary)
                                             .build()
                                     })
                                     .child(|root| {
                                         root.text("• Tab order follows visual layout (left-to-right, top-to-bottom)")
                                             .size(13.0)
-                                            .color(Color::from_rgb_u8(200, 200, 220))
+                                            .color(colors.text_primary)
                                             .build()
                                     })
                                     .build()
@@ -277,21 +278,23 @@ fn build_focus_ui(
 
 fn build_focusable_button(
     root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
     widget_id: astrelis_ui::WidgetId,
     label: &str,
     is_focused: bool,
 ) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
     let (bg_color, border_color, border_width) = if is_focused {
         (
-            Color::from_rgb_u8(80, 140, 220), // Brighter background when focused
-            Color::from_rgb_u8(100, 180, 255), // Bright blue border
-            3.0, // Thicker border
+            colors.info,    // Brighter background when focused
+            colors.primary, // Primary border
+            3.0,            // Thicker border
         )
     } else {
         (
-            Color::from_rgb_u8(60, 120, 200), // Normal background
-            Color::from_rgb_u8(70, 130, 210),  // Subtle border
-            1.0, // Thin border
+            colors.primary, // Normal background
+            colors.primary, // Subtle border
+            1.0,            // Thin border
         )
     };
 
@@ -306,7 +309,7 @@ fn build_focusable_button(
             root.text(label)
                 .id(widget_id)
                 .size(14.0)
-                .color(Color::WHITE)
+                .color(colors.text_primary)
                 .bold()
                 .build()
         })
@@ -356,7 +359,10 @@ impl App for FocusNavigationApp {
                                 Some(idx) => Some((idx + 1) % self.button_ids.len()),
                             };
                             focus_changed = true;
-                            println!("  ⌨️  Focus moved to Button {}", self.focused_index.unwrap() + 1);
+                            println!(
+                                "  ⌨️  Focus moved to Button {}",
+                                self.focused_index.unwrap() + 1
+                            );
                             return HandleStatus::consumed();
                         }
                         Key::Character(ref c) if c.as_str() == "f" || c.as_str() == "F" => {
@@ -403,13 +409,14 @@ impl App for FocusNavigationApp {
         }
 
         // Begin frame and render
+        let bg = self.ui.theme().colors.background;
         let mut frame = self.window.begin_drawing();
 
         frame.clear_and_render(
             RenderTarget::Surface,
-            Color::from_rgb_u8(20, 20, 30),
+            bg,
             |pass| {
-                self.ui.render(pass.descriptor());
+                self.ui.render(pass.wgpu_pass());
             },
         );
 

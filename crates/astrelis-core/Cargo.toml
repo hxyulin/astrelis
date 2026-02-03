@@ -10,13 +10,14 @@ repository.workspace = true
 description = "Core utilities for Astrelis engine"
 
 [features]
-default = ["winit"]
+default = ["winit", "profiling"]
 winit = ["dep:winit"]
+profiling = ["dep:puffin", "dep:puffin_http"]
 
 [dependencies]
 tracing.workspace = true
-puffin.workspace = true
-puffin_http.workspace = true
+puffin = { workspace = true, optional = true }
+puffin_http = { workspace = true, optional = true }
 glam.workspace = true
 mint.workspace = true
 bytemuck = { workspace = true, features = ["derive"] }
