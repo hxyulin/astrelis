@@ -830,6 +830,28 @@ impl UiSystem {
         self.renderer.font_renderer()
     }
 
+    /// Get the depth texture view for render pass attachment.
+    ///
+    /// This should be used when creating render passes that will render UI.
+    /// The depth buffer is used for proper z-ordering of UI elements.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// frame.clear_and_render_with_depth(
+    ///     RenderTarget::Surface,
+    ///     Color::BLACK,
+    ///     ui.depth_view(),
+    ///     0.0, // Clear to 0.0 for reverse-Z depth testing
+    ///     |pass| {
+    ///         ui.render(pass.wgpu_pass());
+    ///     },
+    /// );
+    /// ```
+    pub fn depth_view(&self) -> &astrelis_render::wgpu::TextureView {
+        self.renderer.depth_view()
+    }
+
     /// Set the theme, marking all widget colors dirty.
     pub fn set_theme(&mut self, theme: Theme) {
         self.renderer.set_theme_colors(theme.colors.clone());

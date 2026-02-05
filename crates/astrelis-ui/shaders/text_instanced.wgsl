@@ -14,6 +14,7 @@ struct InstanceInput {
     @location(4) instance_atlas_uv_min: vec2<f32>, // Atlas UV top-left
     @location(5) instance_atlas_uv_max: vec2<f32>, // Atlas UV bottom-right
     @location(6) instance_color: vec4<f32>,        // Text color
+    @location(7) instance_z_depth: f32,            // Depth for z-ordering
 }
 
 struct VertexOutput {
@@ -41,7 +42,7 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
 
     // Scale and position the unit quad based on instance data
     let world_pos = instance.instance_position + vertex.position * instance.instance_size;
-    out.clip_position = uniforms.projection * vec4<f32>(world_pos, 0.0, 1.0);
+    out.clip_position = uniforms.projection * vec4<f32>(world_pos, instance.instance_z_depth, 1.0);
 
     // Interpolate atlas UV coordinates based on vertex position in unit quad
     out.tex_coords = mix(

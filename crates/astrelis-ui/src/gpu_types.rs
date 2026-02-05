@@ -26,32 +26,42 @@ pub struct QuadInstance {
     pub border_radius: f32,
     /// Border thickness (0 = filled quad, >0 = border outline)
     pub border_thickness: f32,
+    /// Depth value for z-ordering (0.0 = far, 1.0 = near)
+    pub z_depth: f32,
     /// Padding to align to 16-byte boundary for optimal GPU performance
-    pub _padding: [f32; 2],
+    pub _padding: f32,
 }
 
 impl QuadInstance {
     /// Create a filled quad instance.
-    pub fn filled(position: Vec2, size: Vec2, color: Color) -> Self {
+    pub fn filled(position: Vec2, size: Vec2, color: Color, z_depth: f32) -> Self {
         Self {
             position: position.into(),
             size: size.into(),
             color: color.into(),
             border_radius: 0.0,
             border_thickness: 0.0,
-            _padding: [0.0; 2],
+            z_depth,
+            _padding: 0.0,
         }
     }
 
     /// Create a rounded filled quad instance.
-    pub fn rounded(position: Vec2, size: Vec2, color: Color, border_radius: f32) -> Self {
+    pub fn rounded(
+        position: Vec2,
+        size: Vec2,
+        color: Color,
+        border_radius: f32,
+        z_depth: f32,
+    ) -> Self {
         Self {
             position: position.into(),
             size: size.into(),
             color: color.into(),
             border_radius,
             border_thickness: 0.0,
-            _padding: [0.0; 2],
+            z_depth,
+            _padding: 0.0,
         }
     }
 
@@ -62,6 +72,7 @@ impl QuadInstance {
         color: Color,
         border_thickness: f32,
         border_radius: f32,
+        z_depth: f32,
     ) -> Self {
         Self {
             position: position.into(),
@@ -69,7 +80,8 @@ impl QuadInstance {
             color: color.into(),
             border_radius,
             border_thickness,
-            _padding: [0.0; 2],
+            z_depth,
+            _padding: 0.0,
         }
     }
 
@@ -110,6 +122,12 @@ impl QuadInstance {
                     shader_location: 6,
                     format: VertexFormat::Float32,
                 },
+                // z_depth
+                VertexAttribute {
+                    offset: 40,
+                    shader_location: 7,
+                    format: VertexFormat::Float32,
+                },
             ],
         }
     }
@@ -137,6 +155,10 @@ pub struct TextInstance {
     pub atlas_uv_max: [f32; 2],
     /// Color (RGBA)
     pub color: [f32; 4],
+    /// Depth value for z-ordering (0.0 = far, 1.0 = near)
+    pub z_depth: f32,
+    /// Padding to align to 16-byte boundary (64 bytes total)
+    pub _padding: [f32; 3],
 }
 
 impl TextInstance {
@@ -147,6 +169,7 @@ impl TextInstance {
         atlas_uv_min: [f32; 2],
         atlas_uv_max: [f32; 2],
         color: Color,
+        z_depth: f32,
     ) -> Self {
         Self {
             position: position.into(),
@@ -154,6 +177,8 @@ impl TextInstance {
             atlas_uv_min,
             atlas_uv_max,
             color: color.into(),
+            z_depth,
+            _padding: [0.0; 3],
         }
     }
 
@@ -194,6 +219,12 @@ impl TextInstance {
                     shader_location: 6,
                     format: VertexFormat::Float32x4,
                 },
+                // z_depth
+                VertexAttribute {
+                    offset: 48,
+                    shader_location: 7,
+                    format: VertexFormat::Float32,
+                },
             ],
         }
     }
@@ -220,13 +251,15 @@ pub struct ImageInstance {
     pub border_radius: f32,
     /// Texture index (for texture arrays, 0 for single texture)
     pub texture_index: u32,
+    /// Depth value for z-ordering (0.0 = far, 1.0 = near)
+    pub z_depth: f32,
     /// Padding to align to 16-byte boundary
-    pub _padding: [f32; 2],
+    pub _padding: f32,
 }
 
 impl ImageInstance {
     /// Create a new image instance covering the full texture.
-    pub fn new(position: Vec2, size: Vec2) -> Self {
+    pub fn new(position: Vec2, size: Vec2, z_depth: f32) -> Self {
         Self {
             position: position.into(),
             size: size.into(),
@@ -235,12 +268,19 @@ impl ImageInstance {
             tint: [1.0, 1.0, 1.0, 1.0],
             border_radius: 0.0,
             texture_index: 0,
-            _padding: [0.0; 2],
+            z_depth,
+            _padding: 0.0,
         }
     }
 
     /// Create an image instance with specific UV coordinates (for sprites).
-    pub fn with_uv(position: Vec2, size: Vec2, uv_min: [f32; 2], uv_max: [f32; 2]) -> Self {
+    pub fn with_uv(
+        position: Vec2,
+        size: Vec2,
+        uv_min: [f32; 2],
+        uv_max: [f32; 2],
+        z_depth: f32,
+    ) -> Self {
         Self {
             position: position.into(),
             size: size.into(),
@@ -249,12 +289,13 @@ impl ImageInstance {
             tint: [1.0, 1.0, 1.0, 1.0],
             border_radius: 0.0,
             texture_index: 0,
-            _padding: [0.0; 2],
+            z_depth,
+            _padding: 0.0,
         }
     }
 
     /// Create an image instance with a tint color.
-    pub fn with_tint(position: Vec2, size: Vec2, tint: Color) -> Self {
+    pub fn with_tint(position: Vec2, size: Vec2, tint: Color, z_depth: f32) -> Self {
         Self {
             position: position.into(),
             size: size.into(),
@@ -263,7 +304,8 @@ impl ImageInstance {
             tint: tint.into(),
             border_radius: 0.0,
             texture_index: 0,
-            _padding: [0.0; 2],
+            z_depth,
+            _padding: 0.0,
         }
     }
 
@@ -282,6 +324,12 @@ impl ImageInstance {
     /// Set the texture index (for texture arrays).
     pub fn texture_index(mut self, index: u32) -> Self {
         self.texture_index = index;
+        self
+    }
+
+    /// Set the z depth for depth ordering.
+    pub fn z_depth(mut self, z_depth: f32) -> Self {
+        self.z_depth = z_depth;
         self
     }
 
@@ -333,6 +381,12 @@ impl ImageInstance {
                     offset: 52,
                     shader_location: 8,
                     format: VertexFormat::Uint32,
+                },
+                // z_depth
+                VertexAttribute {
+                    offset: 56,
+                    shader_location: 9,
+                    format: VertexFormat::Float32,
                 },
             ],
         }
@@ -410,7 +464,7 @@ mod tests {
     #[test]
     fn test_text_instance_size() {
         let size = std::mem::size_of::<TextInstance>();
-        assert_eq!(size, 48, "TextInstance should be 48 bytes");
+        assert_eq!(size, 64, "TextInstance should be 64 bytes");
         assert_eq!(size % 16, 0, "TextInstance should be 16-byte aligned");
     }
 
@@ -439,11 +493,12 @@ mod tests {
     #[test]
     fn test_quad_instance_creation() {
         let instance =
-            QuadInstance::filled(Vec2::new(10.0, 20.0), Vec2::new(100.0, 50.0), Color::RED);
+            QuadInstance::filled(Vec2::new(10.0, 20.0), Vec2::new(100.0, 50.0), Color::RED, 0.5);
 
         assert_eq!(instance.position, [10.0, 20.0]);
         assert_eq!(instance.size, [100.0, 50.0]);
         assert_eq!(instance.border_thickness, 0.0);
+        assert_eq!(instance.z_depth, 0.5);
     }
 
     #[test]
@@ -454,11 +509,31 @@ mod tests {
             [0.1, 0.2],
             [0.3, 0.4],
             Color::WHITE,
+            0.75,
         );
 
         assert_eq!(instance.position, [5.0, 15.0]);
         assert_eq!(instance.size, [10.0, 12.0]);
         assert_eq!(instance.atlas_uv_min, [0.1, 0.2]);
         assert_eq!(instance.atlas_uv_max, [0.3, 0.4]);
+        assert_eq!(instance.z_depth, 0.75);
+    }
+
+    #[test]
+    fn test_image_instance_creation() {
+        let instance = ImageInstance::new(Vec2::new(100.0, 200.0), Vec2::new(50.0, 60.0), 0.25);
+
+        assert_eq!(instance.position, [100.0, 200.0]);
+        assert_eq!(instance.size, [50.0, 60.0]);
+        assert_eq!(instance.z_depth, 0.25);
+        assert_eq!(instance.uv_min, [0.0, 0.0]);
+        assert_eq!(instance.uv_max, [1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_image_instance_size() {
+        let size = std::mem::size_of::<ImageInstance>();
+        assert_eq!(size, 64, "ImageInstance should be 64 bytes");
+        assert_eq!(size % 16, 0, "ImageInstance should be 16-byte aligned");
     }
 }

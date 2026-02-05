@@ -70,6 +70,9 @@ struct ImageBindGroupKey {
     sampling: astrelis_render::ImageSampling,
 }
 
+/// Depth format used for UI depth testing.
+pub const UI_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
 /// UI renderer for rendering all widgets.
 pub struct UiRenderer {
     renderer: Renderer,
@@ -119,6 +122,13 @@ pub struct UiRenderer {
 
     /// Current theme colors for resolving widget defaults
     theme_colors: ColorPalette,
+
+    /// Depth texture for z-ordering
+    depth_texture: wgpu::Texture,
+    /// Depth texture view for render pass attachment
+    depth_view: wgpu::TextureView,
+    /// Current depth texture size (width, height)
+    depth_size: (u32, u32),
 }
 
 impl UiRenderer {
@@ -283,6 +293,16 @@ impl UiRenderer {
         // Create sampler cache for different sampling modes
         let sampler_cache = astrelis_render::SamplerCache::new();
 
+        // Create depth stencil state for depth testing
+        // Uses reverse-Z for better depth precision (higher z_index = closer to camera)
+        let depth_stencil_state = wgpu::DepthStencilState {
+            format: UI_DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        };
+
         // 6. Create instanced pipelines
         let quad_instanced_layout = renderer.create_pipeline_layout(
             Some("Quad Instanced Pipeline Layout"),
@@ -319,7 +339,7 @@ impl UiRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None,
+                depth_stencil: Some(depth_stencil_state.clone()),
                 multisample: wgpu::MultisampleState {
                     count: 1,
                     mask: !0,
@@ -367,7 +387,7 @@ impl UiRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None,
+                depth_stencil: Some(depth_stencil_state.clone()),
                 multisample: wgpu::MultisampleState {
                     count: 1,
                     mask: !0,
@@ -416,7 +436,7 @@ impl UiRenderer {
                     unclipped_depth: false,
                     conservative: false,
                 },
-                depth_stencil: None,
+                depth_stencil: Some(depth_stencil_state),
                 multisample: wgpu::MultisampleState {
                     count: 1,
                     mask: !0,
@@ -432,6 +452,9 @@ impl UiRenderer {
         let quad_instances = InstanceBuffer::new(context.device(), Some("Quad Instances"), 1024);
         let text_instances = InstanceBuffer::new(context.device(), Some("Text Instances"), 4096);
         let image_instances = InstanceBuffer::new(context.device(), Some("Image Instances"), 256);
+
+        // 8. Create initial depth texture (1x1 placeholder, will be resized on first viewport set)
+        let (depth_texture, depth_view) = create_ui_depth_texture(context.device(), 1, 1);
 
         Self {
             renderer,
@@ -463,6 +486,9 @@ impl UiRenderer {
             frame_image_instances: Vec::with_capacity(256),
             frame_image_groups: HashMap::new(),
             theme_colors: ColorPalette::dark(),
+            depth_texture,
+            depth_view,
+            depth_size: (1, 1),
         }
     }
 
@@ -480,6 +506,16 @@ impl UiRenderer {
         }
         self.scale_factor = viewport.scale_factor.0;
         self.font_renderer.set_viewport(viewport);
+
+        // Resize depth texture if viewport size changed
+        let new_size = (viewport.size.width as u32, viewport.size.height as u32);
+        if self.depth_size != new_size && new_size.0 > 0 && new_size.1 > 0 {
+            let (texture, view) =
+                create_ui_depth_texture(self.context.device(), new_size.0, new_size.1);
+            self.depth_texture = texture;
+            self.depth_view = view;
+            self.depth_size = new_size;
+        }
     }
 
     /// Get reference to the font renderer for text measurement.
@@ -1233,7 +1269,8 @@ impl UiRenderer {
                             color: [q.color.r, q.color.g, q.color.b, q.color.a],
                             border_radius: q.border_radius,
                             border_thickness: q.border_thickness,
-                            _padding: [0.0; 2],
+                            z_depth: z_index_to_depth(q.z_index),
+                            _padding: 0.0,
                         });
                     }
                     DrawCommand::Text(t) => {
@@ -1242,6 +1279,7 @@ impl UiRenderer {
                             &t.shaped_text.inner.glyphs,
                             t.position,
                             t.color,
+                            z_index_to_depth(t.z_index),
                             &mut self.frame_text_instances,
                         );
                     }
@@ -1260,7 +1298,8 @@ impl UiRenderer {
                             tint: [i.tint.r, i.tint.g, i.tint.b, i.tint.a],
                             border_radius: i.border_radius,
                             texture_index: 0, // Not used for now
-                            _padding: [0.0; 2],
+                            z_depth: z_index_to_depth(i.z_index),
+                            _padding: 0.0,
                         };
 
                         self.frame_image_groups
@@ -1308,7 +1347,8 @@ impl UiRenderer {
                             color: [q.color.r, q.color.g, q.color.b, q.color.a],
                             border_radius: q.border_radius,
                             border_thickness: q.border_thickness,
-                            _padding: [0.0; 2],
+                            z_depth: z_index_to_depth(q.z_index),
+                            _padding: 0.0,
                         });
                     }
                     DrawCommand::Text(t) => {
@@ -1317,6 +1357,7 @@ impl UiRenderer {
                             &t.shaped_text.inner.glyphs,
                             t.position,
                             t.color,
+                            z_index_to_depth(t.z_index),
                             &mut self.frame_text_instances,
                         );
                     }
@@ -1685,6 +1726,77 @@ impl UiRenderer {
         let viewport_height = viewport.size.height as u32;
         render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
     }
+
+    /// Get the depth texture view for render pass attachment.
+    ///
+    /// The depth texture is used for proper z-ordering of UI elements.
+    /// It should be attached to the render pass when calling `render_instanced`.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    ///     label: Some("UI Pass"),
+    ///     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+    ///         view: &surface_view,
+    ///         resolve_target: None,
+    ///         ops: wgpu::Operations {
+    ///             load: wgpu::LoadOp::Load, // Don't clear, UI overlays on existing content
+    ///             store: wgpu::StoreOp::Store,
+    ///         },
+    ///     })],
+    ///     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+    ///         view: ui_renderer.depth_view(),
+    ///         depth_ops: Some(wgpu::Operations {
+    ///             load: wgpu::LoadOp::Clear(0.0), // Clear to 0.0 for reverse-Z
+    ///             store: wgpu::StoreOp::Store,
+    ///         }),
+    ///         stencil_ops: None,
+    ///     }),
+    ///     ..Default::default()
+    /// });
+    /// ui_renderer.render_instanced(&tree, &mut pass, viewport, &registry);
+    /// ```
+    pub fn depth_view(&self) -> &wgpu::TextureView {
+        &self.depth_view
+    }
+
+    /// Get the current depth texture size.
+    ///
+    /// The depth texture is automatically resized when `set_viewport` is called.
+    pub fn depth_size(&self) -> (u32, u32) {
+        self.depth_size
+    }
+}
+
+/// Create a depth texture for UI depth testing.
+///
+/// Returns the texture and its view. The texture is configured for:
+/// - Depth32Float format for precision
+/// - RENDER_ATTACHMENT usage for depth buffer attachment
+fn create_ui_depth_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("UI Depth Texture"),
+        size: wgpu::Extent3d {
+            width: width.max(1),
+            height: height.max(1),
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: UI_DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+    (texture, view)
 }
 
 /// Create an orthographic projection matrix for 2D rendering.
@@ -1695,4 +1807,19 @@ fn orthographic_projection(width: f32, height: f32) -> [[f32; 4]; 4] {
         [0.0, 0.0, 1.0, 0.0],
         [-1.0, 1.0, 0.0, 1.0],
     ]
+}
+
+/// Convert a z_index (u16) to a depth value for the depth buffer.
+///
+/// Uses reverse-Z convention where higher z_index values result in depth values
+/// closer to 1.0 (nearer to the camera). This provides better depth precision
+/// for elements that are closer together in z-order.
+///
+/// The conversion maps z_index range [0, 65535] to depth range (0.0, 1.0]:
+/// - z_index 0 → depth ≈ 0.000015 (furthest from camera)
+/// - z_index 65535 → depth = 1.0 (nearest to camera)
+#[inline]
+fn z_index_to_depth(z_index: u16) -> f32 {
+    // Add 1 to avoid depth = 0 which can cause issues with some depth tests
+    (z_index as f32 + 1.0) / 65536.0
 }

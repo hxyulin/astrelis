@@ -23,7 +23,7 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderableWindow, WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::{
     InspectorMiddleware, MiddlewareContext, MiddlewareManager, OverlayRenderer, UiSystem, WidgetId,
@@ -524,69 +524,98 @@ impl App for InspectorDemoApp {
             self.middlewares.post_layout(&ctx);
         }
 
-        // Begin frame and render
+        // Begin frame and render with depth buffer for proper z-ordering
         let bg = self.ui.theme().colors.background;
+
+        // Get depth view before starting frame (avoids borrow conflicts)
+        let depth_view = self.ui.depth_view();
+
         let mut frame = self.window.begin_drawing();
 
-        // Render main UI and overlays in a single render pass
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            bg,
-            |pass| {
-                // Render main UI without computing layout (we already did that above)
-                // When frozen, don't clear dirty flags so inspector can keep showing them
-                self.ui
-                    .render_without_layout(pass.wgpu_pass(), !skip_layout);
+        // Render main UI and overlays in a single render pass with depth attachment
+        {
+            // SAFETY: We're creating a scope that ensures pass is dropped before we call
+            // frame methods. The raw pointer usage is to work around borrow checker limitations.
+            let surface_view = frame.surface().view() as *const wgpu::TextureView;
+            let encoder = frame.encoder();
 
-                // Collect overlay commands AFTER UI render but in same pass
-                // Note: dirty flags are cleared by ui.render(), but inspector
-                // has already captured them in update()
-                if self.middlewares.has_middlewares() {
-                    let ctx = MiddlewareContext::new(
-                        self.ui.tree(),
-                        self.ui.core().events(),
-                        self.ui.core().widget_registry(),
-                        self.window.viewport(),
-                    )
-                    .with_delta_time(self.delta_time)
-                    .with_frame_number(self.frame_count);
+            // SAFETY: surface_view pointer is valid for the duration of this scope
+            let surface_view = unsafe { &*surface_view };
 
-                    let draw_list = self.middlewares.post_render(&ctx);
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("UI Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: surface_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(bg.to_wgpu()),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0), // Clear to 0.0 for reverse-Z
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
 
-                    if !draw_list.is_empty() {
-                        // Clone commands to avoid borrow issues
-                        let commands: Vec<_> = draw_list.commands().to_vec();
+            // Render main UI without computing layout (we already did that above)
+            // When frozen, don't clear dirty flags so inspector can keep showing them
+            self.ui.render_without_layout(&mut pass, !skip_layout);
 
-                        // Re-create draw list from collected commands for rendering
-                        let mut render_list = astrelis_ui::OverlayDrawList::new();
-                        for cmd in commands {
-                            match cmd {
-                                astrelis_ui::middleware::OverlayCommand::Quad(q) => {
-                                    render_list.add_quad(
-                                        q.position,
-                                        q.size,
-                                        q.fill_color,
-                                        q.border_color,
-                                        q.border_width,
-                                        q.border_radius,
-                                    );
-                                }
-                                astrelis_ui::middleware::OverlayCommand::Text(t) => {
-                                    render_list.add_text(t.position, t.text, t.color, t.size);
-                                }
-                                astrelis_ui::middleware::OverlayCommand::Line(l) => {
-                                    render_list.add_line(l.start, l.end, l.color, l.thickness);
-                                }
+            // Collect overlay commands AFTER UI render but in same pass
+            // Note: dirty flags are cleared by ui.render(), but inspector
+            // has already captured them in update()
+            if self.middlewares.has_middlewares() {
+                let ctx = MiddlewareContext::new(
+                    self.ui.tree(),
+                    self.ui.core().events(),
+                    self.ui.core().widget_registry(),
+                    self.window.viewport(),
+                )
+                .with_delta_time(self.delta_time)
+                .with_frame_number(self.frame_count);
+
+                let draw_list = self.middlewares.post_render(&ctx);
+
+                if !draw_list.is_empty() {
+                    // Clone commands to avoid borrow issues
+                    let commands: Vec<_> = draw_list.commands().to_vec();
+
+                    // Re-create draw list from collected commands for rendering
+                    let mut render_list = astrelis_ui::OverlayDrawList::new();
+                    for cmd in commands {
+                        match cmd {
+                            astrelis_ui::middleware::OverlayCommand::Quad(q) => {
+                                render_list.add_quad(
+                                    q.position,
+                                    q.size,
+                                    q.fill_color,
+                                    q.border_color,
+                                    q.border_width,
+                                    q.border_radius,
+                                );
+                            }
+                            astrelis_ui::middleware::OverlayCommand::Text(t) => {
+                                render_list.add_text(t.position, t.text, t.color, t.size);
+                            }
+                            astrelis_ui::middleware::OverlayCommand::Line(l) => {
+                                render_list.add_line(l.start, l.end, l.color, l.thickness);
                             }
                         }
-
-                        let viewport = self.window.viewport();
-                        self.overlay_renderer
-                            .render(&render_list, pass.wgpu_pass(), viewport);
                     }
+
+                    let viewport = self.window.viewport();
+                    self.overlay_renderer.render(&render_list, &mut pass, viewport);
                 }
-            },
-        );
+            }
+        }
 
         // Log inspector info periodically
         if self.middlewares.has_middlewares() {
@@ -607,6 +636,7 @@ impl App for InspectorDemoApp {
             }
         }
 
+        frame.increment_passes();
         frame.finish();
     }
 }

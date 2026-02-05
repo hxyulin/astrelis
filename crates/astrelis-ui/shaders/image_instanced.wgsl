@@ -23,6 +23,8 @@ struct InstanceInput {
     @location(5) inst_uv_max: vec2<f32>,
     @location(6) inst_tint: vec4<f32>,
     @location(7) inst_border_radius: f32,
+    @location(8) inst_texture_index: u32,
+    @location(9) inst_z_depth: f32,
 }
 
 struct VertexOutput {
@@ -37,19 +39,19 @@ struct VertexOutput {
 @vertex
 fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
     var out: VertexOutput;
-    
+
     // Transform unit quad to world position
     let world_pos = instance.inst_position + vertex.position * instance.inst_size;
-    out.clip_position = projection.matrix * vec4<f32>(world_pos, 0.0, 1.0);
-    
+    out.clip_position = projection.matrix * vec4<f32>(world_pos, instance.inst_z_depth, 1.0);
+
     // Interpolate UV coordinates based on instance UV bounds
     out.uv = mix(instance.inst_uv_min, instance.inst_uv_max, vertex.uv);
-    
+
     out.tint = instance.inst_tint;
     out.local_pos = vertex.position * instance.inst_size;
     out.size = instance.inst_size;
     out.border_radius = instance.inst_border_radius;
-    
+
     return out;
 }
 

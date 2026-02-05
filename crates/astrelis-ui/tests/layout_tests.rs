@@ -6,6 +6,7 @@
 use astrelis_core::geometry::{PhysicalPosition, PhysicalSize, ScaleFactor, Size};
 use astrelis_render::Viewport;
 use astrelis_ui::{UiCore, WidgetId};
+use astrelis_ui::constraint::Constraint;
 
 fn default_viewport() -> Viewport {
     Viewport {
@@ -279,4 +280,354 @@ fn test_ui_core_is_render_agnostic() {
     // Verify we can update widgets
     let changed = ui.update_text(widget_id, "New text");
     assert!(changed);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Margin and Padding Tests
+// ════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_layout_with_margin() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .child(|container| {
+                container
+                    .container()
+                    .width(200.0)
+                    .height(100.0)
+                    .margin(20.0) // Uniform margin
+                    .build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle uniform margin without errors
+}
+
+#[test]
+fn test_layout_with_per_side_padding() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .padding_left(10.0)
+            .padding_top(20.0)
+            .padding_right(30.0)
+            .padding_bottom(40.0)
+            .child(|container| {
+                container.container().width(100.0).height(100.0).build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle per-side padding without errors
+}
+
+#[test]
+fn test_layout_with_per_side_margin() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .child(|container| {
+                container
+                    .container()
+                    .width(200.0)
+                    .height(100.0)
+                    .margin_left(10.0)
+                    .margin_top(20.0)
+                    .margin_right(30.0)
+                    .margin_bottom(40.0)
+                    .build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle per-side margin without errors
+}
+
+#[test]
+fn test_padding_x_y() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .padding_x(40.0) // Left and right
+            .padding_y(20.0) // Top and bottom
+            .child(|container| {
+                container.container().width(100.0).height(100.0).build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle horizontal/vertical padding shortcuts
+}
+
+#[test]
+fn test_margin_x_y() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .child(|container| {
+                container
+                    .container()
+                    .width(200.0)
+                    .height(100.0)
+                    .margin_x(30.0) // Left and right
+                    .margin_y(15.0) // Top and bottom
+                    .build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle horizontal/vertical margin shortcuts
+}
+
+#[test]
+fn test_individual_padding_setters() {
+    let mut ui = UiCore::new();
+
+    // Test each individual padding setter
+    ui.build(|root| {
+        root.column()
+            .width(800.0)
+            .height(600.0)
+            .child(|col| {
+                col.container()
+                    .padding_left(10.0)
+                    .width(100.0)
+                    .height(50.0)
+                    .build()
+            })
+            .child(|col| {
+                col.container()
+                    .padding_top(15.0)
+                    .width(100.0)
+                    .height(50.0)
+                    .build()
+            })
+            .child(|col| {
+                col.container()
+                    .padding_right(20.0)
+                    .width(100.0)
+                    .height(50.0)
+                    .build()
+            })
+            .child(|col| {
+                col.container()
+                    .padding_bottom(25.0)
+                    .width(100.0)
+                    .height(50.0)
+                    .build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle individual padding setters
+}
+
+#[test]
+fn test_individual_margin_setters() {
+    let mut ui = UiCore::new();
+
+    // Test each individual margin setter
+    ui.build(|root| {
+        root.column()
+            .width(800.0)
+            .height(600.0)
+            .child(|col| {
+                col.container()
+                    .margin_left(10.0)
+                    .width(100.0)
+                    .height(50.0)
+                    .build()
+            })
+            .child(|col| {
+                col.container()
+                    .margin_top(15.0)
+                    .width(100.0)
+                    .height(50.0)
+                    .build()
+            })
+            .child(|col| {
+                col.container()
+                    .margin_right(20.0)
+                    .width(100.0)
+                    .height(50.0)
+                    .build()
+            })
+            .child(|col| {
+                col.container()
+                    .margin_bottom(25.0)
+                    .width(100.0)
+                    .height(50.0)
+                    .build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle individual margin setters
+}
+
+#[test]
+fn test_padding_with_percent_constraint() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        // Use per-side methods with Constraint since Constraint doesn't impl Copy
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .padding_left(Constraint::Percent(5.0))
+            .padding_top(Constraint::Percent(5.0))
+            .padding_right(Constraint::Percent(5.0))
+            .padding_bottom(Constraint::Percent(5.0))
+            .child(|container| {
+                container.container().width(100.0).height(100.0).build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle percentage padding
+}
+
+#[test]
+fn test_margin_auto_centering() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .child(|container| {
+                container
+                    .container()
+                    .width(Constraint::Percent(50.0))
+                    .height(100.0)
+                    .margin_left(Constraint::Auto)  // Center horizontally
+                    .margin_right(Constraint::Auto)
+                    .build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle auto margins for centering
+}
+
+#[test]
+fn test_mixed_padding_and_margin() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .padding_x(20.0)
+            .padding_y(10.0)
+            .child(|container| {
+                container
+                    .container()
+                    .width(200.0)
+                    .height(100.0)
+                    .margin_left(15.0)
+                    .margin_top(5.0)
+                    .build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should handle combined padding and margin
+}
+
+#[test]
+fn test_padding_preserves_existing_values() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        // Set uniform padding first, then override one side
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .padding(20.0)
+            .padding_left(50.0) // Override just the left side
+            .child(|container| {
+                container.container().width(100.0).height(100.0).build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should preserve other padding values when setting individual sides
+}
+
+#[test]
+fn test_margin_preserves_existing_values() {
+    let mut ui = UiCore::new();
+
+    ui.build(|root| {
+        root.container()
+            .width(800.0)
+            .height(600.0)
+            .child(|container| {
+                // Set uniform margin first, then override one side
+                container
+                    .container()
+                    .width(200.0)
+                    .height(100.0)
+                    .margin(15.0)
+                    .margin_top(30.0) // Override just the top side
+                    .build()
+            })
+            .build();
+    });
+
+    ui.set_viewport(default_viewport());
+    ui.compute_layout();
+
+    // Should preserve other margin values when setting individual sides
 }

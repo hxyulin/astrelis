@@ -15,7 +15,7 @@ cargo build -p astrelis-ui            # Build specific crate
 ```bash
 # UI examples (most commonly used)
 cargo run -p astrelis-ui --example counter
-cargo run -p astrelis-ui --example simple_ui
+cargo run -p astrelis-ui --example widget_gallery
 cargo run -p astrelis-ui --example ui_dashboard
 cargo run -p astrelis-ui --example image_widget
 cargo run -p astrelis-ui --example docking_demo
@@ -32,7 +32,7 @@ cargo run -p astrelis-render --example batched_renderer
 cargo run -p astrelis-render --example profiling_demo
 
 # egui integration
-cargo run -p astrelis-egui --example egui_demo
+cargo run -p astrelis-egui --example egui_app
 ```
 
 **Testing:**

@@ -14,6 +14,7 @@ struct InstanceInput {
     @location(4) instance_color: vec4<f32>,
     @location(5) instance_border_radius: f32,
     @location(6) instance_border_thickness: f32,
+    @location(7) instance_z_depth: f32,
 }
 
 struct VertexOutput {
@@ -38,7 +39,7 @@ fn vs_main(vertex: VertexInput, instance: InstanceInput) -> VertexOutput {
 
     // Scale and position the unit quad based on instance data
     let world_pos = instance.instance_position + vertex.position * instance.instance_size;
-    out.clip_position = uniforms.projection * vec4<f32>(world_pos, 0.0, 1.0);
+    out.clip_position = uniforms.projection * vec4<f32>(world_pos, instance.instance_z_depth, 1.0);
 
     out.color = instance.instance_color;
     out.uv = vertex.uv;

@@ -297,6 +297,9 @@ impl OverlayRenderer {
         let mut quad_instances = Vec::new();
         let mut text_instances = Vec::new();
 
+        // Overlays render on top of all UI content, use maximum z_depth
+        const OVERLAY_Z_DEPTH: f32 = 1.0;
+
         for cmd in draw_list.commands() {
             match cmd {
                 OverlayCommand::Quad(q) => {
@@ -312,7 +315,8 @@ impl OverlayRenderer {
                         ],
                         border_radius: q.border_radius,
                         border_thickness: 0.0,
-                        _padding: [0.0; 2],
+                        z_depth: OVERLAY_Z_DEPTH,
+                        _padding: 0.0,
                     });
 
                     // Border quad (if present)
@@ -330,7 +334,8 @@ impl OverlayRenderer {
                             ],
                             border_radius: q.border_radius,
                             border_thickness: q.border_width,
-                            _padding: [0.0; 2],
+                            z_depth: OVERLAY_Z_DEPTH,
+                            _padding: 0.0,
                         });
                     }
                 }
@@ -353,6 +358,7 @@ impl OverlayRenderer {
                         &shaped.glyphs,
                         t.position,
                         t.color,
+                        OVERLAY_Z_DEPTH,
                     );
                     text_instances.extend(instances);
                 }
@@ -366,7 +372,7 @@ impl OverlayRenderer {
 
                     // Calculate center and rotation
                     let center = (l.start + l.end) * 0.5;
-                    let angle = delta.y.atan2(delta.x);
+                    let _angle = delta.y.atan2(delta.x);
 
                     // For now, render as axis-aligned quad (simplified)
                     // A proper implementation would use a rotation in the shader
@@ -384,7 +390,8 @@ impl OverlayRenderer {
                         color: [l.color.r, l.color.g, l.color.b, l.color.a],
                         border_radius: 0.0,
                         border_thickness: 0.0,
-                        _padding: [angle, 0.0], // Store angle for potential future use
+                        z_depth: OVERLAY_Z_DEPTH,
+                        _padding: 0.0,
                     });
                 }
             }

@@ -60,6 +60,82 @@ macro_rules! impl_node_style_methods {
             self
         }
 
+        // ── Per-side padding methods ─────────────────────────────────────────
+
+        /// Set left padding only.
+        pub fn padding_left(mut self, value: impl Into<crate::constraint::Constraint>) -> Self {
+            self.widget.style_mut().set_padding_left(value);
+            self
+        }
+
+        /// Set right padding only.
+        pub fn padding_right(mut self, value: impl Into<crate::constraint::Constraint>) -> Self {
+            self.widget.style_mut().set_padding_right(value);
+            self
+        }
+
+        /// Set top padding only.
+        pub fn padding_top(mut self, value: impl Into<crate::constraint::Constraint>) -> Self {
+            self.widget.style_mut().set_padding_top(value);
+            self
+        }
+
+        /// Set bottom padding only.
+        pub fn padding_bottom(mut self, value: impl Into<crate::constraint::Constraint>) -> Self {
+            self.widget.style_mut().set_padding_bottom(value);
+            self
+        }
+
+        /// Set horizontal padding (left and right).
+        pub fn padding_x(mut self, value: impl Into<crate::constraint::Constraint> + Copy) -> Self {
+            self.widget.style_mut().set_padding_x(value);
+            self
+        }
+
+        /// Set vertical padding (top and bottom).
+        pub fn padding_y(mut self, value: impl Into<crate::constraint::Constraint> + Copy) -> Self {
+            self.widget.style_mut().set_padding_y(value);
+            self
+        }
+
+        // ── Per-side margin methods ──────────────────────────────────────────
+
+        /// Set left margin only.
+        pub fn margin_left(mut self, value: impl Into<crate::constraint::Constraint>) -> Self {
+            self.widget.style_mut().set_margin_left(value);
+            self
+        }
+
+        /// Set right margin only.
+        pub fn margin_right(mut self, value: impl Into<crate::constraint::Constraint>) -> Self {
+            self.widget.style_mut().set_margin_right(value);
+            self
+        }
+
+        /// Set top margin only.
+        pub fn margin_top(mut self, value: impl Into<crate::constraint::Constraint>) -> Self {
+            self.widget.style_mut().set_margin_top(value);
+            self
+        }
+
+        /// Set bottom margin only.
+        pub fn margin_bottom(mut self, value: impl Into<crate::constraint::Constraint>) -> Self {
+            self.widget.style_mut().set_margin_bottom(value);
+            self
+        }
+
+        /// Set horizontal margin (left and right).
+        pub fn margin_x(mut self, value: impl Into<crate::constraint::Constraint> + Copy) -> Self {
+            self.widget.style_mut().set_margin_x(value);
+            self
+        }
+
+        /// Set vertical margin (top and bottom).
+        pub fn margin_y(mut self, value: impl Into<crate::constraint::Constraint> + Copy) -> Self {
+            self.widget.style_mut().set_margin_y(value);
+            self
+        }
+
         /// Set minimum width constraint.
         pub fn min_width(mut self, width: impl Into<crate::constraint::Constraint>) -> Self {
             self.widget.style_mut().set_min_width(width);

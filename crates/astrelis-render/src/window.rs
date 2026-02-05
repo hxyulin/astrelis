@@ -15,11 +15,12 @@
 //!
 //! ```rust,no_run
 //! use astrelis_render::{GraphicsContext, RenderableWindow, Color};
-//! use astrelis_winit::WindowDescriptor;
+//! use astrelis_winit::window::WindowBackend;
 //! # use std::sync::Arc;
 //!
 //! # fn example(window: astrelis_winit::window::Window, graphics: Arc<GraphicsContext>) {
-//! let mut renderable = RenderableWindow::new(window, graphics);
+//! let mut renderable = RenderableWindow::new(window, graphics)
+//!     .expect("Failed to create renderable window");
 //!
 //! // In render loop:
 //! let mut frame = renderable.begin_drawing();

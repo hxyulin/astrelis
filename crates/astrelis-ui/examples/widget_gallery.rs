@@ -14,7 +14,7 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderableWindow, WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::UiSystem;
 use astrelis_winit::{
@@ -171,6 +171,7 @@ fn build_gallery_ui(
                                     .gap(20.0)
                                     .child(|root| build_container_section(root, &theme))
                                     .child(|root| build_layout_section(root, &theme))
+                                    .child(|root| build_spacing_section(root, &theme))
                                     .child(|root| build_tooltip_section(root, &theme))
                                     .build()
                             })
@@ -623,6 +624,112 @@ fn build_layout_section(
         .build()
 }
 
+fn build_spacing_section(
+    root: &mut astrelis_ui::UiBuilder,
+    theme: &astrelis_ui::Theme,
+) -> astrelis_ui::NodeId {
+    let colors = &theme.colors;
+    root.container()
+        .background_color(colors.surface)
+        .border_radius(12.0)
+        .padding(20.0)
+        .child(|root| {
+            root.column()
+                .gap(15.0)
+                .child(|root| {
+                    root.text("Spacing Examples")
+                        .size(24.0)
+                        .color(colors.info)
+                        .bold()
+                        .build()
+                })
+                // Asymmetric padding example
+                .child(|root| {
+                    root.text("Asymmetric Padding (more horizontal)")
+                        .size(12.0)
+                        .color(colors.text_secondary)
+                        .build()
+                })
+                .child(|root| {
+                    root.container()
+                        .background_color(colors.border)
+                        .border_radius(8.0)
+                        .padding_x(40.0) // More horizontal padding
+                        .padding_y(10.0) // Less vertical padding
+                        .child(|root| {
+                            root.text("Horizontal emphasis")
+                                .size(13.0)
+                                .color(colors.text_primary)
+                                .build()
+                        })
+                        .build()
+                })
+                // Card with different top/bottom padding
+                .child(|root| {
+                    root.text("Card Header/Content Padding")
+                        .size(12.0)
+                        .color(colors.text_secondary)
+                        .margin_top(10.0)
+                        .build()
+                })
+                .child(|root| {
+                    root.column()
+                        .background_color(colors.border)
+                        .border_radius(8.0)
+                        .padding_top(20.0)
+                        .padding_bottom(10.0)
+                        .padding_x(15.0)
+                        .gap(8.0)
+                        .child(|root| {
+                            root.text("Card Title")
+                                .size(16.0)
+                                .color(colors.text_primary)
+                                .bold()
+                                .build()
+                        })
+                        .child(|root| {
+                            root.text("Different top/bottom padding")
+                                .size(12.0)
+                                .color(colors.text_secondary)
+                                .build()
+                        })
+                        .build()
+                })
+                // Per-side margin example
+                .child(|root| {
+                    root.text("Per-Side Margins")
+                        .size(12.0)
+                        .color(colors.text_secondary)
+                        .margin_top(10.0)
+                        .build()
+                })
+                .child(|root| {
+                    root.container()
+                        .background_color(colors.border)
+                        .border_radius(8.0)
+                        .padding(10.0)
+                        .child(|root| {
+                            root.container()
+                                .background_color(colors.primary)
+                                .border_radius(6.0)
+                                .margin_left(30.0) // Indented from left
+                                .margin_right(10.0)
+                                .padding(10.0)
+                                .child(|root| {
+                                    root.text("Indented content")
+                                        .size(12.0)
+                                        .color(Color::WHITE)
+                                        .build()
+                                })
+                                .build()
+                        })
+                        .build()
+                })
+                .build()
+        })
+        .build()
+}
+
 fn build_tooltip_section(
     root: &mut astrelis_ui::UiBuilder,
     theme: &astrelis_ui::Theme,
@@ -719,18 +826,52 @@ impl App for WidgetGalleryApp {
         self.ui
             .update_text(self.counter_text_id, format!("Count: {}", counter_value));
 
-        // Begin frame and render
+        // Begin frame and render with depth buffer for proper z-ordering
         let bg = self.ui.theme().colors.background;
+
+        // Get depth view before starting frame (avoids borrow conflicts)
+        let depth_view = self.ui.depth_view();
+
         let mut frame = self.window.begin_drawing();
 
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            bg,
-            |pass| {
-                self.ui.render(pass.wgpu_pass());
-            },
-        );
+        // Create render pass with depth attachment
+        // We need to use raw wgpu API because frame.clear_and_render doesn't support depth
+        {
+            // SAFETY: We're creating a scope that ensures pass is dropped before we call
+            // frame methods. The raw pointer usage is to work around borrow checker limitations.
+            let surface_view = frame.surface().view() as *const wgpu::TextureView;
+            let encoder = frame.encoder();
 
+            // SAFETY: surface_view pointer is valid for the duration of this scope
+            let surface_view = unsafe { &*surface_view };
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("UI Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: surface_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(bg.to_wgpu()),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0), // Clear to 0.0 for reverse-Z
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            self.ui.render(&mut pass);
+        }
+
+        frame.increment_passes();
         frame.finish();
     }
 }

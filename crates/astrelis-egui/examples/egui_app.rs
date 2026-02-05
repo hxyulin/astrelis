@@ -240,18 +240,18 @@ impl App for DemoApp {
                 ui.collapsing("Layout Examples", |ui| {
                     ui.label("Horizontal layout:");
                     ui.horizontal(|ui| {
-                        ui.button("Button 1");
-                        ui.button("Button 2");
-                        ui.button("Button 3");
+                        let _ = ui.button("Button 1");
+                        let _ = ui.button("Button 2");
+                        let _ = ui.button("Button 3");
                     });
 
                     ui.label("Vertical layout with spacing:");
                     ui.vertical(|ui| {
-                        ui.button("Button A");
+                        let _ = ui.button("Button A");
                         ui.add_space(5.0);
-                        ui.button("Button B");
+                        let _ = ui.button("Button B");
                         ui.add_space(5.0);
-                        ui.button("Button C");
+                        let _ = ui.button("Button C");
                     });
                 });
             });

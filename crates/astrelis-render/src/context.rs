@@ -22,8 +22,8 @@
 //! // Clone for sharing (cheap Arc clone)
 //! let graphics_clone = graphics.clone();
 //!
-//! // Use for resource creation
-//! let shader = graphics.create_shader_module(/* ... */);
+//! // Access the wgpu device for resource creation
+//! let device = graphics.device();
 //! ```
 //!
 //! # Thread Safety

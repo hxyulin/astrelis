@@ -116,15 +116,27 @@ impl ClipRect {
 
     /// Convert to physical pixel coordinates.
     ///
+    /// Uses `round()` for min coordinates and `floor()` for max coordinates
+    /// to ensure the scissor rect never exceeds the logical bounds. This prevents
+    /// off-by-one errors that can cause GPU validation failures when the rect
+    /// would otherwise extend beyond the viewport.
+    ///
     /// # Arguments
     /// * `scale_factor` - Display scale factor (e.g., 2.0 for Retina)
     pub fn to_physical(&self, scale_factor: f64) -> PhysicalClipRect {
         let scale = scale_factor as f32;
+        // Round min to ensure accurate starting position
+        let x = (self.min.x * scale).round() as u32;
+        let y = (self.min.y * scale).round() as u32;
+        // Floor max to ensure we never exceed bounds
+        let x_max = (self.max.x * scale).floor() as u32;
+        let y_max = (self.max.y * scale).floor() as u32;
+
         PhysicalClipRect {
-            x: (self.min.x * scale).round() as u32,
-            y: (self.min.y * scale).round() as u32,
-            width: (self.width() * scale).round() as u32,
-            height: (self.height() * scale).round() as u32,
+            x,
+            y,
+            width: x_max.saturating_sub(x),
+            height: y_max.saturating_sub(y),
         }
     }
 }
@@ -306,10 +318,30 @@ mod tests {
         let clip = ClipRect::from_bounds(10.5, 20.5, 100.0, 50.0);
         let physical = clip.to_physical(2.0);
 
-        assert_eq!(physical.x, 21); // 10.5 * 2 rounded
-        assert_eq!(physical.y, 41); // 20.5 * 2 rounded
-        assert_eq!(physical.width, 200); // 100 * 2
-        assert_eq!(physical.height, 100); // 50 * 2
+        // min.x = 10.5, max.x = 110.5
+        // x = (10.5 * 2).round() = 21
+        // x_max = (110.5 * 2).floor() = 221
+        // width = 221 - 21 = 200
+        assert_eq!(physical.x, 21);
+        assert_eq!(physical.y, 41);
+        assert_eq!(physical.width, 200);
+        assert_eq!(physical.height, 100);
+    }
+
+    #[test]
+    fn test_clip_rect_to_physical_no_overshoot() {
+        // Edge case: bounds that would overshoot with round()
+        // This reproduces the Windows fullscreen docking crash
+        let clip = ClipRect::from_bounds(0.0, 0.0, 550.25, 550.25);
+        let physical = clip.to_physical(2.0);
+
+        // With floor() for max, we get 1100, not 1101
+        // Old behavior: (550.25 * 2).round() = 1101 (CRASH - exceeds viewport)
+        // New behavior: (550.25 * 2).floor() = 1100 (OK)
+        assert_eq!(physical.x, 0);
+        assert_eq!(physical.y, 0);
+        assert_eq!(physical.width, 1100);
+        assert_eq!(physical.height, 1100);
     }
 
     #[test]

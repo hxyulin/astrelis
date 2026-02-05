@@ -8,7 +8,8 @@
 //!
 //! ```rust,no_run
 //! # use astrelis_render::RenderableWindow;
-//! # let renderable_window: RenderableWindow = todo!();
+//! # use astrelis_winit::window::WindowBackend;
+//! # let mut renderable_window: RenderableWindow = todo!();
 //! {
 //!     let mut frame = renderable_window.begin_drawing();
 //!
@@ -388,6 +389,60 @@ impl FrameContext {
                 .label("main_pass")
                 .target(target)
                 .clear_color(clear_color.into()),
+            f,
+        );
+    }
+
+    /// Clear the target and render with depth testing enabled.
+    ///
+    /// This is the same as `clear_and_render` but also attaches a depth buffer
+    /// and clears it to the specified value (typically 0.0 for reverse-Z depth).
+    ///
+    /// # Arguments
+    /// - `target`: The render target (Surface or Framebuffer)
+    /// - `clear_color`: The color to clear to
+    /// - `depth_view`: The depth texture view for depth testing
+    /// - `depth_clear_value`: The value to clear the depth buffer to (0.0 for reverse-Z)
+    /// - `f`: The closure to execute rendering commands
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let ui_depth_view = ui_renderer.depth_view();
+    /// frame.clear_and_render_with_depth(
+    ///     RenderTarget::Surface,
+    ///     Color::BLACK,
+    ///     ui_depth_view,
+    ///     0.0, // Clear to 0.0 for reverse-Z
+    ///     |pass| {
+    ///         ui_system.render(pass.wgpu_pass());
+    ///     },
+    /// );
+    /// ```
+    pub fn clear_and_render_with_depth<'a, F>(
+        &'a mut self,
+        target: RenderTarget<'a>,
+        clear_color: impl Into<crate::Color>,
+        depth_view: &'a wgpu::TextureView,
+        depth_clear_value: f32,
+        f: F,
+    ) where
+        F: FnOnce(&mut RenderPass<'a>),
+    {
+        profile_scope!("clear_and_render_with_depth");
+        self.with_pass(
+            RenderPassBuilder::new()
+                .label("main_pass_with_depth")
+                .target(target)
+                .clear_color(clear_color.into())
+                .depth_stencil_attachment(
+                    depth_view,
+                    Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(depth_clear_value),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    None,
+                ),
             f,
         );
     }

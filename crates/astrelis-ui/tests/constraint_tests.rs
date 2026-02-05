@@ -1,7 +1,6 @@
 //! Constraint system tests for viewport units and expressions.
 
 use astrelis_ui::constraint::Constraint;
-use astrelis_ui::constraint_builder::{vw, vh};
 
 #[test]
 fn test_constraint_pixel() {

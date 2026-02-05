@@ -675,6 +675,25 @@ impl Style {
     }
 }
 
+// ── Helper functions for constraint conversion ───────────────────────────────
+
+/// Convert a TaffyLengthPercentage to a Constraint.
+fn constraint_from_length_percentage(lp: TaffyLengthPercentage) -> Constraint {
+    match lp {
+        TaffyLengthPercentage::Length(v) => Constraint::Px(v),
+        TaffyLengthPercentage::Percent(v) => Constraint::Percent(v * 100.0),
+    }
+}
+
+/// Convert a TaffyLengthPercentageAuto to a Constraint.
+fn constraint_from_length_percentage_auto(lpa: TaffyLengthPercentageAuto) -> Constraint {
+    match lpa {
+        TaffyLengthPercentageAuto::Length(v) => Constraint::Px(v),
+        TaffyLengthPercentageAuto::Percent(v) => Constraint::Percent(v * 100.0),
+        TaffyLengthPercentageAuto::Auto => Constraint::Auto,
+    }
+}
+
 // In-place setter methods (`&mut self`) for use by node builders.
 impl Style {
     /// Set display mode in place.
@@ -835,6 +854,150 @@ impl Style {
         }
         if let Some(b) = bottom_c.try_to_length_percentage_auto() {
             self.layout.margin.bottom = b;
+        }
+    }
+
+    // ── Per-side padding setters ─────────────────────────────────────────
+
+    /// Set left padding in place.
+    pub fn set_padding_left(&mut self, value: impl Into<Constraint>) {
+        let c = value.into();
+        self.ensure_padding_array();
+        self.constraints_mut().padding.as_mut().unwrap()[0] = c.clone();
+        if let Some(l) = c.try_to_length_percentage() {
+            self.layout.padding.left = l;
+        }
+    }
+
+    /// Set top padding in place.
+    pub fn set_padding_top(&mut self, value: impl Into<Constraint>) {
+        let c = value.into();
+        self.ensure_padding_array();
+        self.constraints_mut().padding.as_mut().unwrap()[1] = c.clone();
+        if let Some(t) = c.try_to_length_percentage() {
+            self.layout.padding.top = t;
+        }
+    }
+
+    /// Set right padding in place.
+    pub fn set_padding_right(&mut self, value: impl Into<Constraint>) {
+        let c = value.into();
+        self.ensure_padding_array();
+        self.constraints_mut().padding.as_mut().unwrap()[2] = c.clone();
+        if let Some(r) = c.try_to_length_percentage() {
+            self.layout.padding.right = r;
+        }
+    }
+
+    /// Set bottom padding in place.
+    pub fn set_padding_bottom(&mut self, value: impl Into<Constraint>) {
+        let c = value.into();
+        self.ensure_padding_array();
+        self.constraints_mut().padding.as_mut().unwrap()[3] = c.clone();
+        if let Some(b) = c.try_to_length_percentage() {
+            self.layout.padding.bottom = b;
+        }
+    }
+
+    /// Set horizontal padding (left and right) in place.
+    pub fn set_padding_x(&mut self, value: impl Into<Constraint> + Copy) {
+        self.set_padding_left(value);
+        self.set_padding_right(value);
+    }
+
+    /// Set vertical padding (top and bottom) in place.
+    pub fn set_padding_y(&mut self, value: impl Into<Constraint> + Copy) {
+        self.set_padding_top(value);
+        self.set_padding_bottom(value);
+    }
+
+    // ── Per-side margin setters ──────────────────────────────────────────
+
+    /// Set left margin in place.
+    pub fn set_margin_left(&mut self, value: impl Into<Constraint>) {
+        let c = value.into();
+        self.ensure_margin_array();
+        self.constraints_mut().margin.as_mut().unwrap()[0] = c.clone();
+        if let Some(l) = c.try_to_length_percentage_auto() {
+            self.layout.margin.left = l;
+        }
+    }
+
+    /// Set top margin in place.
+    pub fn set_margin_top(&mut self, value: impl Into<Constraint>) {
+        let c = value.into();
+        self.ensure_margin_array();
+        self.constraints_mut().margin.as_mut().unwrap()[1] = c.clone();
+        if let Some(t) = c.try_to_length_percentage_auto() {
+            self.layout.margin.top = t;
+        }
+    }
+
+    /// Set right margin in place.
+    pub fn set_margin_right(&mut self, value: impl Into<Constraint>) {
+        let c = value.into();
+        self.ensure_margin_array();
+        self.constraints_mut().margin.as_mut().unwrap()[2] = c.clone();
+        if let Some(r) = c.try_to_length_percentage_auto() {
+            self.layout.margin.right = r;
+        }
+    }
+
+    /// Set bottom margin in place.
+    pub fn set_margin_bottom(&mut self, value: impl Into<Constraint>) {
+        let c = value.into();
+        self.ensure_margin_array();
+        self.constraints_mut().margin.as_mut().unwrap()[3] = c.clone();
+        if let Some(b) = c.try_to_length_percentage_auto() {
+            self.layout.margin.bottom = b;
+        }
+    }
+
+    /// Set horizontal margin (left and right) in place.
+    pub fn set_margin_x(&mut self, value: impl Into<Constraint> + Copy) {
+        self.set_margin_left(value);
+        self.set_margin_right(value);
+    }
+
+    /// Set vertical margin (top and bottom) in place.
+    pub fn set_margin_y(&mut self, value: impl Into<Constraint> + Copy) {
+        self.set_margin_top(value);
+        self.set_margin_bottom(value);
+    }
+
+    // ── Helper methods ───────────────────────────────────────────────────
+
+    /// Ensure padding constraint array exists with default values.
+    fn ensure_padding_array(&mut self) {
+        if self.constraints_mut().padding.is_none() {
+            // Get current layout padding values to preserve existing state
+            let left = self.layout.padding.left;
+            let top = self.layout.padding.top;
+            let right = self.layout.padding.right;
+            let bottom = self.layout.padding.bottom;
+            self.constraints_mut().padding = Some([
+                constraint_from_length_percentage(left),
+                constraint_from_length_percentage(top),
+                constraint_from_length_percentage(right),
+                constraint_from_length_percentage(bottom),
+            ]);
+        }
+    }
+
+    /// Ensure margin constraint array exists with default values.
+    fn ensure_margin_array(&mut self) {
+        if self.constraints_mut().margin.is_none() {
+            // Get current layout margin values to preserve existing state
+            let left = self.layout.margin.left;
+            let top = self.layout.margin.top;
+            let right = self.layout.margin.right;
+            let bottom = self.layout.margin.bottom;
+            self.constraints_mut().margin = Some([
+                constraint_from_length_percentage_auto(left),
+                constraint_from_length_percentage_auto(top),
+                constraint_from_length_percentage_auto(right),
+                constraint_from_length_percentage_auto(bottom),
+            ]);
         }
     }
 

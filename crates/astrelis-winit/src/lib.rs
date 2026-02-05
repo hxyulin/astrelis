@@ -6,7 +6,7 @@
 //! # Quick Start
 //!
 //! ```rust,no_run
-//! use astrelis_winit::{run_app, app::{App, AppCtx}, FrameTime, WindowId, event::EventBatch};
+//! use astrelis_winit::{app::{run_app, App, AppCtx}, FrameTime, WindowId, event::EventBatch};
 //!
 //! struct MyApp;
 //!

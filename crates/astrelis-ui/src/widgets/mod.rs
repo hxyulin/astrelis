@@ -16,22 +16,13 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! # use astrelis_ui::builder::WidgetBuilder;
 //! # use astrelis_ui::Color;
 //! # fn example(ui: &mut astrelis_ui::UiCore) {
 //! ui.build(|root| {
-//!     root.column(|col| {
-//!         col.text("Hello World")
-//!             .color(Color::WHITE)
-//!             .size(24.0)
-//!             .build();
-//!
-//!         col.rect()
-//!             .color(Color::RED)
-//!             .width(100.0)
-//!             .height(50.0)
-//!             .build();
-//!     });
+//!     root.column()
+//!         .child(|c| c.text("Hello World").color(Color::WHITE).size(24.0).build())
+//!         .child(|c| c.button("Click me").width(100.0).height(50.0).build())
+//!         .build();
 //! });
 //! # }
 //! ```

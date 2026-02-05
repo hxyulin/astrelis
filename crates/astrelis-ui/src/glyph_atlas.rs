@@ -36,9 +36,10 @@ pub fn glyphs_to_instances(
     glyphs: &[ShapedGlyph],
     base_position: Vec2,
     color: Color,
+    z_depth: f32,
 ) -> Vec<TextInstance> {
     let mut instances = Vec::with_capacity(glyphs.len());
-    glyphs_to_instances_into(font_renderer, glyphs, base_position, color, &mut instances);
+    glyphs_to_instances_into(font_renderer, glyphs, base_position, color, z_depth, &mut instances);
     instances
 }
 
@@ -51,6 +52,7 @@ pub fn glyphs_to_instances_into(
     glyphs: &[ShapedGlyph],
     base_position: Vec2,
     color: Color,
+    z_depth: f32,
     out: &mut Vec<TextInstance>,
 ) {
     profile_function!();
@@ -95,6 +97,7 @@ pub fn glyphs_to_instances_into(
                 atlas_uv_min,
                 atlas_uv_max,
                 color,
+                z_depth,
             ));
         }
         // Skip glyphs that fail to rasterize (whitespace, missing glyphs, etc.)
@@ -109,6 +112,7 @@ pub fn glyph_to_instance(
     glyph: &ShapedGlyph,
     base_position: Vec2,
     color: Color,
+    z_depth: f32,
 ) -> Option<TextInstance> {
     let atlas_size = font_renderer.atlas_size() as f32;
     let (atlas_entry, placement) = font_renderer.ensure_glyph_with_placement(glyph.cache_key)?;
@@ -134,6 +138,7 @@ pub fn glyph_to_instance(
         atlas_uv_min,
         atlas_uv_max,
         color,
+        z_depth,
     ))
 }
 

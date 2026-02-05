@@ -13,7 +13,7 @@
 use astrelis_core::logging;
 use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, RenderableWindow, WindowContextDescriptor, wgpu,
 };
 use astrelis_ui::UiSystem;
 use astrelis_winit::time::FrameTime;
@@ -250,14 +250,49 @@ impl App for UiStressTest {
         }
 
         let bg = self.ui.theme().colors.background;
+
+        // Get depth view before starting frame (avoids borrow conflicts)
+        let depth_view = self.ui.depth_view();
+
         let mut frame = self.window.begin_drawing();
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            bg,
-            |pass| {
-                self.ui.render(pass.wgpu_pass());
-            },
-        );
+
+        // Create render pass with depth attachment
+        {
+            // SAFETY: We're creating a scope that ensures pass is dropped before we call
+            // frame methods. The raw pointer usage is to work around borrow checker limitations.
+            let surface_view = frame.surface().view() as *const wgpu::TextureView;
+            let encoder = frame.encoder();
+
+            // SAFETY: surface_view pointer is valid for the duration of this scope
+            let surface_view = unsafe { &*surface_view };
+
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("UI Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: surface_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(bg.to_wgpu()),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0), // Clear to 0.0 for reverse-Z
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            self.ui.render(&mut pass);
+        }
+
+        frame.increment_passes();
         frame.finish();
     }
 }

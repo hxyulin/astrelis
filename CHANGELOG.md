@@ -5,6 +5,43 @@ All notable changes to the Astrelis Game Engine will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-02-05
+
+### Added
+
+#### Depth Buffer Support (`astrelis-ui`)
+**GPU depth testing for proper z-ordering** - UI elements now respect z_index for depth ordering
+
+- **Instance z_depth fields** - All GPU instance types now include depth information
+  - `QuadInstance`, `TextInstance`, `ImageInstance` support z_depth
+  - Reverse-Z depth convention for better precision
+  - `z_index_to_depth()` conversion for u16 z_index to depth values
+
+- **Depth texture management** - Automatic depth buffer creation and resizing
+  - `depth_view()` method on `UiRenderer` and `UiSystem`
+  - Depth texture resized on viewport changes
+  - `Depth32Float` format with reverse-Z (GreaterEqual compare)
+
+- **Shader updates** - All instanced shaders use instance z_depth
+  - `quad_instanced.wgsl` - Quad rendering with depth
+  - `text_instanced.wgsl` - Text rendering with depth
+  - `image_instanced.wgsl` - Image rendering with depth
+
+#### Frame Context Improvements (`astrelis-render`)
+- `clear_and_render_with_depth()` method for depth-aware render passes
+- `increment_passes()` for manual render pass tracking
+
+#### Layout Tests (`astrelis-ui`)
+- Comprehensive layout test suite in `tests/layout_tests.rs`
+
+### Changed
+
+- All UI examples updated to use depth buffer for proper z-ordering
+- `TextInstance` struct size increased from 48 to 64 bytes for alignment
+- Overlay renderer uses z_depth for overlay commands
+
+---
+
 ## [0.2.0] - 2026-02-03
 
 ### Added
@@ -778,6 +815,7 @@ let window_id = match window_manager.create_window(ctx, descriptor) {
 ```
 ---
 
+[0.2.1]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.1
 [0.2.0]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.0
 [0.1.2]: https://github.com/hxyulin/astrelis/releases/tag/v0.1.2
 [0.1.1]: https://github.com/hxyulin/astrelis/releases/tag/v0.1.1
