@@ -5,6 +5,228 @@ All notable changes to the Astrelis Game Engine will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-02-05
+
+### Added
+
+#### Renderer Descriptor Pattern (`astrelis-ui`, `astrelis-geometry`)
+**Unified configuration API for all renderers** - Consistent, type-safe renderer setup
+
+- **`UiRendererDescriptor`** - Configuration struct for UI renderer
+  - `name` - Pipeline label prefix for GPU debuggers/profilers
+  - `surface_format` - Render target texture format
+  - `depth_format` - Optional depth format for z-ordering
+  - `from_window(window)` - Auto-configure from `RenderWindow` (recommended)
+  - Builder methods: `with_name()`, `with_depth()`, `with_depth_default()`, `without_depth()`
+
+- **`UiRendererBuilder`** - Fluent builder API for UI renderer
+  - `UiRendererBuilder::new()` - Start with defaults
+  - `UiRendererBuilder::from_window(window)` - Start from window config
+  - Chainable: `.name()`, `.surface_format()`, `.with_depth_default()`, `.build()`
+
+- **`GeometryRendererDescriptor`** - Configuration struct for geometry renderer
+  - Same pattern as `UiRendererDescriptor`
+  - `from_window(window)` for automatic format inheritance
+
+- **`GeometryRenderer::from_window()`** - Recommended constructor
+  - Ensures pipeline-renderpass format compatibility
+  - Replaces manual format specification
+
+#### Reconfigure API (`astrelis-ui`, `astrelis-geometry`)
+**Runtime format changes without full recreation** - Dynamic format switching
+
+- **`UiRenderer::reconfigure(descriptor)`** - Change formats at runtime
+  - Only recreates pipelines when formats actually change
+  - Preserves buffers, bind groups, caches
+  - Format comparison optimization avoids unnecessary work
+
+- **`UiRenderer::reconfigure_from_window(window)`** - Convenience method
+  - One-liner to match renderer to window after format change
+
+- **`GeometryRenderer::reconfigure(descriptor)`** - Same pattern for geometry
+- **`GeometryRenderer::reconfigure_from_window(window)`** - Convenience method
+
+- **`UiSystem::reconfigure(descriptor)`** - High-level reconfigure
+- **`UiSystem::reconfigure_from_window(window)`** - Convenience method
+
+#### DepthTexture Abstraction (`astrelis-render`)
+**First-class depth texture with Arc-wrapped views** - Lifetime-free depth sharing
+
+- **`DepthTexture` struct** - Manages depth texture lifecycle
+  - `new(device, width, height, format)` - Create depth texture
+  - `with_label()` - Create with debug label
+  - `view()` - Get `Arc<TextureView>` for cheap, lifetime-free sharing
+  - `needs_resize()` - Check if resize needed
+  - `resize()` - Resize texture (creates new, old Arc remains valid)
+  - `format()`, `size()` - Accessors
+
+- **`DEFAULT_DEPTH_FORMAT`** - `Depth32Float` constant
+
+#### RenderWindow Builder Pattern (`astrelis-render`)
+**Builder API with integrated depth support** - Clean window setup
+
+- **`RenderWindow::builder()`** - Start building a render window
+  - `.with_depth(format)` - Enable depth with specific format
+  - `.with_depth_default()` - Enable depth with `Depth32Float`
+  - `.present_mode(mode)` - Set presentation mode
+  - `.alpha_mode(mode)` - Set alpha compositing mode
+  - `.build(window, graphics)` - Create the `RenderWindow`
+
+- **`WindowContextDescriptor`** additions
+  - `with_depth: bool` - Enable auto-resizing depth texture
+  - `depth_format: Option<TextureFormat>` - Depth format (default: `Depth32Float`)
+
+- **`RenderWindow` depth methods**
+  - `depth_view()` - Get `Option<Arc<TextureView>>`
+  - `depth_view_ref()` - Get `Option<&TextureView>`
+  - `depth_format()` - Get `Option<TextureFormat>`
+  - `has_depth()` - Check if depth enabled
+
+#### Frame API Improvements (`astrelis-render`)
+**Each pass owns its encoder** - No borrow conflicts, cleaner ownership
+
+- **Architecture change** - RenderPass now owns its CommandEncoder
+  - No encoder movement between passes
+  - No mutable borrow conflicts with GPU profiling
+  - Frame collects command buffers via `RefCell<Vec<CommandBuffer>>`
+
+- **`AtomicFrameStats`** - Thread-safe frame statistics
+  - `increment_passes()`, `increment_draw_calls()` - Lock-free updates
+  - `to_frame_stats()` - Convert to non-atomic `FrameStats`
+
+- **`RenderPassBuilder` improvements**
+  - `.with_window_depth()` - Use window's depth buffer
+  - `.clear_depth(value)` - Clear depth to value
+  - `.label(name)` - Set pass label for debugging
+
+- **Cleaner lifecycle**
+  ```rust
+  let frame = window.begin_frame()?;
+  {
+      let mut pass = frame.render_pass()
+          .clear_color(Color::BLACK)
+          .with_window_depth()
+          .clear_depth(0.0)
+          .build();
+      // Render...
+  } // Pass auto-finishes and pushes command buffer
+  frame.submit(); // Or auto-submit on drop
+  ```
+
+### Changed
+
+#### API Naming Updates
+- **`RenderableWindow`** → **`RenderWindow`** (old name deprecated)
+- **`FrameContext`** → **`Frame`** (old name deprecated)
+- **`begin_drawing()`** → **`begin_frame()`** (old name deprecated)
+- **`clear_and_render()`** deprecated in favor of builder pattern
+
+#### Example Updates
+**All 50+ examples updated** to use new APIs
+
+- Builder pattern for `RenderWindow` creation
+- `UiRenderer::from_window()` / `GeometryRenderer::from_window()` usage
+- New `Frame` / `RenderPass` builder pattern
+- Proper depth buffer setup for UI examples
+
+#### Code Quality Improvements
+**Clippy warnings resolved** - Improved code quality across the workspace
+
+- **Derivable Default implementations** (`astrelis-render`)
+  - `ColorTarget`, `ColorOp`, `DepthConfig` use `#[derive(Default)]` with `#[default]`
+
+- **Collapsible if statements** - Let-chains for cleaner conditionals
+- **Option map improvements** (`astrelis-text`) - Proper `if let Some` usage
+- **Doc comment syntax** - Fixed `///!` → `//!` for module docs
+
+### Fixed
+
+#### Documentation Links
+**Broken rustdoc links resolved** - All documentation builds without warnings
+
+- Fixed `GraphicsContextDescriptor` links in `capability.rs`, `batched/mod.rs`
+- Fixed `Frame::with_gpu_scope` references in `gpu_profiling.rs`
+- Fixed `TransformUniform` visibility in `transform.rs`
+- Fixed unclosed HTML tag in `depth.rs`
+- Fixed UI plugin/event system doc links
+- Removed broken geometry type links in `astrelis-core`
+
+### Upgrade Guide
+
+#### Renderer Creation (Recommended Pattern)
+
+```rust
+// Before (0.2.1):
+let ui_renderer = UiRenderer::new(
+    graphics.clone(),
+    surface_format,
+    Some(depth_format),
+);
+
+// After (0.2.2 - recommended):
+let ui_renderer = UiRenderer::from_window(graphics.clone(), &window);
+
+// Or with builder:
+let ui_renderer = UiRenderer::builder()
+    .from_window(&window)
+    .name("Game HUD")
+    .build(graphics.clone());
+```
+
+#### RenderWindow Creation
+
+```rust
+// Before (0.2.1):
+let window = RenderableWindow::new(win, graphics)?;
+
+// After (0.2.2):
+let window = RenderWindow::builder()
+    .with_depth_default()  // Enable depth buffer
+    .build(win, graphics)?;
+```
+
+#### Frame Rendering
+
+```rust
+// Before (0.2.1):
+let mut frame = window.begin_drawing();
+frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
+    ui.render(pass.wgpu_pass());
+});
+frame.finish();
+
+// After (0.2.2):
+let frame = window.begin_frame().expect("Surface available");
+{
+    let mut pass = frame.render_pass()
+        .clear_color(Color::BLACK)
+        .with_window_depth()
+        .clear_depth(0.0)
+        .build();
+    ui.render(&mut pass);
+}
+// Auto-submits on drop, or call frame.submit()
+```
+
+#### Runtime Format Changes
+
+```rust
+// New in 0.2.2: Reconfigure after format change
+window.reconfigure_surface(new_config);
+ui_renderer.reconfigure_from_window(&window);
+geometry_renderer.reconfigure_from_window(&window);
+```
+
+### Verification
+
+- `cargo fmt --check` - Passes
+- `cargo clippy --workspace` - 34 warnings (all low-priority: dead code, type complexity)
+- `cargo test --workspace` - All tests pass
+- `cargo doc --workspace --no-deps` - No documentation warnings
+- `cargo build --workspace` - Success
+
+---
+
 ## [0.2.1] - 2026-02-05
 
 ### Added
@@ -815,6 +1037,7 @@ let window_id = match window_manager.create_window(ctx, descriptor) {
 ```
 ---
 
+[0.2.2]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.2
 [0.2.1]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.1
 [0.2.0]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.0
 [0.1.2]: https://github.com/hxyulin/astrelis/releases/tag/v0.1.2
