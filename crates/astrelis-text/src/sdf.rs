@@ -33,8 +33,7 @@
 use cosmic_text::SwashImage;
 
 /// Text rendering mode.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum TextRenderMode {
     /// Standard grayscale bitmap rendering.
     #[default]
@@ -47,7 +46,6 @@ pub enum TextRenderMode {
         spread: f32,
     },
 }
-
 
 impl TextRenderMode {
     /// Check if this is SDF mode.
@@ -350,16 +348,14 @@ mod tests {
 
     #[test]
     fn test_sdf_config_edge_softness_clamp() {
-        let config = SdfConfig::new()
-            .edge_softness(2.0); // Should clamp to 1.0
+        let config = SdfConfig::new().edge_softness(2.0); // Should clamp to 1.0
 
         assert_eq!(config.edge_softness, 1.0);
     }
 
     #[test]
     fn test_sdf_config_outline_width_clamp() {
-        let config = SdfConfig::new()
-            .outline_width(-5.0); // Should clamp to 0.0
+        let config = SdfConfig::new().outline_width(-5.0); // Should clamp to 0.0
 
         assert_eq!(config.outline_width, 0.0);
     }

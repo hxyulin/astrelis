@@ -6,8 +6,8 @@
 use std::any::TypeId;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use astrelis_core::alloc::sparse_set::IndexSlot;
 
@@ -152,10 +152,7 @@ impl UntypedHandle {
     #[cfg(test)]
     pub(crate) fn test_handle(index: u32, generation: u32) -> Self {
         Self {
-            id: HandleId::new(
-                IndexSlot::new(index, generation),
-                TypeId::of::<()>(),
-            ),
+            id: HandleId::new(IndexSlot::new(index, generation), TypeId::of::<()>()),
         }
     }
 
@@ -390,7 +387,6 @@ impl<T: Asset> Clone for TrackedHandle<T> {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

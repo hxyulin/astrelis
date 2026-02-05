@@ -11,18 +11,18 @@
 //! Full graph-based rendering is in development.
 
 use astrelis_core::logging;
-use astrelis_render::{Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder, wgpu};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 use std::sync::Arc;
 
 struct RenderGraphDemo {
     _context: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
 }
 
@@ -30,7 +30,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -40,14 +41,11 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        ).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .with_depth_default()
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
 
@@ -102,12 +100,16 @@ impl App for RenderGraphDemo {
             }
         });
 
-        let mut frame = self.window.begin_drawing();
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::from_rgb_u8(20, 30, 40),
-            |_pass| {},
-        );
-        frame.finish();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available
+        };
+        {
+            let _pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(20, 30, 40))
+                .label("render_graph_demo_pass")
+                .build();
+        }
+        // Frame auto-submits on drop
     }
 }

@@ -69,14 +69,21 @@ bitflags! {
 
 impl DirtyFlags {
     /// Layout-affecting flags group.
-    pub const LAYOUT_GROUP: Self = Self::LAYOUT.union(Self::TEXT_SHAPING).union(Self::CHILDREN_ORDER);
+    pub const LAYOUT_GROUP: Self = Self::LAYOUT
+        .union(Self::TEXT_SHAPING)
+        .union(Self::CHILDREN_ORDER);
 
     /// Paint-only flags group.
-    pub const PAINT_GROUP: Self = Self::COLOR.union(Self::OPACITY).union(Self::GEOMETRY)
-        .union(Self::IMAGE).union(Self::FOCUS);
+    pub const PAINT_GROUP: Self = Self::COLOR
+        .union(Self::OPACITY)
+        .union(Self::GEOMETRY)
+        .union(Self::IMAGE)
+        .union(Self::FOCUS);
 
     /// Flags that should propagate to parent nodes.
-    pub const PROPAGATE_GROUP: Self = Self::LAYOUT.union(Self::TEXT_SHAPING).union(Self::CHILDREN_ORDER);
+    pub const PROPAGATE_GROUP: Self = Self::LAYOUT
+        .union(Self::TEXT_SHAPING)
+        .union(Self::CHILDREN_ORDER);
 
     /// Returns true if any layout-affecting flags are set.
     #[inline]
@@ -95,10 +102,7 @@ impl DirtyFlags {
     pub fn is_paint_only(&self) -> bool {
         !self.is_empty()
             && !self.intersects(
-                Self::LAYOUT
-                    | Self::TEXT_SHAPING
-                    | Self::CHILDREN_ORDER
-                    | Self::TRANSFORM,
+                Self::LAYOUT | Self::TEXT_SHAPING | Self::CHILDREN_ORDER | Self::TRANSFORM,
             )
     }
 

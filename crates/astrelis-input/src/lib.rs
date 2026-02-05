@@ -167,9 +167,10 @@ impl InputState {
 
                     // Collect text input
                     if key_event.state == ElementState::Pressed
-                        && let Some(ref text) = key_event.text {
-                            self.text_input.push_str(text);
-                        }
+                        && let Some(ref text) = key_event.text
+                    {
+                        self.text_input.push_str(text);
+                    }
 
                     HandleStatus::handled()
                 }
@@ -409,7 +410,9 @@ impl InputState {
             KeyCode::ShiftLeft | KeyCode::ShiftRight => self.modifiers.shift = pressed,
             KeyCode::ControlLeft | KeyCode::ControlRight => self.modifiers.ctrl = pressed,
             KeyCode::AltLeft | KeyCode::AltRight => self.modifiers.alt = pressed,
-            KeyCode::SuperLeft | KeyCode::SuperRight | KeyCode::Meta => self.modifiers.meta = pressed,
+            KeyCode::SuperLeft | KeyCode::SuperRight | KeyCode::Meta => {
+                self.modifiers.meta = pressed
+            }
             _ => {}
         }
     }

@@ -84,7 +84,10 @@ impl DashPattern {
 
     /// Create a pattern from explicit segments.
     pub fn custom(segments: Vec<f32>) -> Self {
-        Self { segments, phase: 0.0 }
+        Self {
+            segments,
+            phase: 0.0,
+        }
     }
 
     /// Set the phase offset.
@@ -286,7 +289,9 @@ impl Default for GridSpacing {
 impl GridSpacing {
     /// Create auto spacing with the given target count.
     pub fn auto(count: usize) -> Self {
-        Self::Auto { target_count: count }
+        Self::Auto {
+            target_count: count,
+        }
     }
 
     /// Create fixed spacing with the given interval.
@@ -319,7 +324,9 @@ impl GridSpacing {
         }
 
         let (major, minor) = match self {
-            Self::Auto { target_count } => self.calculate_auto(min, max, *target_count, minor_divisions),
+            Self::Auto { target_count } => {
+                self.calculate_auto(min, max, *target_count, minor_divisions)
+            }
 
             Self::Fixed { interval } => {
                 let major = self.calculate_fixed(min, max, *interval);
@@ -343,7 +350,9 @@ impl GridSpacing {
                 (major, vec![])
             }
 
-            Self::LogDecades { subdivisions } => self.calculate_log_decades(min, max, *subdivisions),
+            Self::LogDecades { subdivisions } => {
+                self.calculate_log_decades(min, max, *subdivisions)
+            }
 
             Self::TimeAware => self.calculate_time_aware(min, max, minor_divisions),
         };
@@ -407,7 +416,12 @@ impl GridSpacing {
         positions
     }
 
-    fn calculate_log_decades(&self, min: f64, max: f64, subdivisions: usize) -> (Vec<f64>, Vec<f64>) {
+    fn calculate_log_decades(
+        &self,
+        min: f64,
+        max: f64,
+        subdivisions: usize,
+    ) -> (Vec<f64>, Vec<f64>) {
         if min <= 0.0 || max <= 0.0 {
             return (vec![], vec![]);
         }
@@ -443,7 +457,12 @@ impl GridSpacing {
         (major, minor)
     }
 
-    fn calculate_time_aware(&self, min: f64, max: f64, minor_divisions: usize) -> (Vec<f64>, Vec<f64>) {
+    fn calculate_time_aware(
+        &self,
+        min: f64,
+        max: f64,
+        minor_divisions: usize,
+    ) -> (Vec<f64>, Vec<f64>) {
         let range = max - min;
 
         // Choose appropriate interval based on range

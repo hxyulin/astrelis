@@ -7,8 +7,7 @@ use crate::error::AssetError;
 use crate::source::AssetSource;
 
 /// The current state of an asset in the loading pipeline.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub enum AssetState<T> {
     /// The asset has not been loaded yet.
     #[default]
@@ -69,7 +68,6 @@ impl<T> AssetState<T> {
         }
     }
 }
-
 
 /// Load state for tracking async loading progress.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -70,7 +70,8 @@ pub struct WidgetTypeDescriptor {
 
     /// Render the widget into draw commands.
     /// Arguments: (widget, render_context)
-    pub render: Option<for<'a> fn(&dyn std::any::Any, &mut WidgetRenderContext<'a>) -> Vec<DrawCommand>>,
+    pub render:
+        Option<for<'a> fn(&dyn std::any::Any, &mut WidgetRenderContext<'a>) -> Vec<DrawCommand>>,
 
     /// Measure intrinsic content size.
     /// Arguments: (widget, available_space, font_renderer)
@@ -92,7 +93,6 @@ pub struct WidgetTypeDescriptor {
     pub caches_measurement: bool,
 
     // -- Event handlers --
-
     /// Called when mouse enters (`true`) or leaves (`false`) the widget.
     pub on_hover: Option<fn(&mut dyn std::any::Any, bool)>,
 

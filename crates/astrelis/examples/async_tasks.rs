@@ -38,7 +38,11 @@ fn main() {
     let tasks: Vec<_> = (0..8)
         .map(|i| {
             pool.spawn(async move {
-                println!("Task {} starting on thread {:?}", i, std::thread::current().id());
+                println!(
+                    "Task {} starting on thread {:?}",
+                    i,
+                    std::thread::current().id()
+                );
 
                 // Simulate some work
                 std::thread::sleep(Duration::from_millis(100));
@@ -50,10 +54,7 @@ fn main() {
         .collect();
 
     // Wait for all tasks to complete
-    let results: Vec<_> = tasks
-        .into_iter()
-        .map(|t| pollster::block_on(t))
-        .collect();
+    let results: Vec<_> = tasks.into_iter().map(|t| pollster::block_on(t)).collect();
 
     let elapsed = start.elapsed();
     println!("\nAll tasks completed in {:?}", elapsed);
@@ -116,7 +117,10 @@ fn main() {
         .build();
 
     let custom_pool = custom_engine.get::<TaskPool>().unwrap();
-    println!("Created TaskPool with {} threads", custom_pool.thread_count());
+    println!(
+        "Created TaskPool with {} threads",
+        custom_pool.thread_count()
+    );
 
     // Spawn tasks on the custom pool
     let task = custom_pool.spawn(async {

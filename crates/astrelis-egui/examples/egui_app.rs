@@ -25,20 +25,20 @@
 //! - Toggle checkboxes
 //! - Drag sliders
 
-use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_egui::{Color32, Egui, RichText, Slider};
-use astrelis_render::{GraphicsContext, RenderableWindow};
+use astrelis_render::{GraphicsContext, RenderWindow, RenderWindowBuilder};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
+use std::sync::Arc;
 
 struct DemoApp {
     _context: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     egui: Egui,
 
@@ -54,7 +54,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -64,7 +65,9 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new(window, graphics_ctx.clone()).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
         let window_id = window.id();
         let egui = Egui::new(&window, &graphics_ctx);
 
@@ -277,20 +280,20 @@ impl App for DemoApp {
             }
         });
 
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available (minimized, etc.)
+        };
 
         // Clear to dark background with automatic scoping
         {
-            use astrelis_render::{RenderPassBuilder, RenderTarget};
-            let render_pass = RenderPassBuilder::new()
+            let _pass = frame
+                .render_pass()
                 .label("Clear Pass")
-                .target(RenderTarget::Surface)
                 .clear_color(astrelis_render::Color::rgb(0.1, 0.1, 0.1))
-                .build(&mut frame);
-            drop(render_pass);
+                .build();
         }
 
-        self.egui.render(&self.window, &mut frame);
-        frame.finish();
+        self.egui.render(&frame);
+        // Frame auto-submits on drop
     }
 }

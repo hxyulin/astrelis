@@ -8,9 +8,7 @@
 //! 5. Per-frame rendering via `clear_and_render`
 
 use astrelis_core::logging;
-use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
-};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder};
 use astrelis_winit::{
     WindowId,
     app::run_app,
@@ -18,7 +16,7 @@ use astrelis_winit::{
 };
 
 struct App {
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
@@ -29,7 +27,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -38,14 +37,11 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        ).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .with_depth_default()
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         // --- Shader ---
         let shader = graphics_ctx
@@ -231,12 +227,14 @@ fn main() {
             -0.8,  0.8,  0.0, 0.0,
         ];
 
-        let vertex_buffer = graphics_ctx.device().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Vertex Buffer"),
-            size: (vertices.len() * std::mem::size_of::<f32>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vertex_buffer = graphics_ctx
+            .device()
+            .create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Vertex Buffer"),
+                size: (vertices.len() * std::mem::size_of::<f32>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
 
         graphics_ctx
             .queue()
@@ -255,7 +253,11 @@ fn main() {
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::FrameTime) {
+    fn update(
+        &mut self,
+        _ctx: &mut astrelis_winit::app::AppCtx,
+        _time: &astrelis_winit::FrameTime,
+    ) {
         // Global logic (none needed for this example)
     }
 
@@ -280,22 +282,21 @@ impl astrelis_winit::app::App for App {
         });
 
         // --- Render Loop ---
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available
+        };
 
-        // clear_and_render handles render pass scoping automatically:
-        // the pass is created, the closure runs, then the pass drops.
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::rgb(0.1, 0.2, 0.3),
-            |pass| {
-                let pass = pass.wgpu_pass();
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.bind_group, &[]);
-                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.draw(0..6, 0..1);
-            },
-        );
-
-        frame.finish();
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::rgb(0.1, 0.2, 0.3))
+                .label("textured_window_pass")
+                .build();
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            pass.draw(0..6, 0..1);
+        }
+        // Frame auto-submits on drop
     }
 }

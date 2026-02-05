@@ -355,7 +355,11 @@ impl TextEditor {
     ///
     /// This is a simplified version that returns a single rectangle.
     /// For real usage with multi-line selections, you'd need line layout information.
-    pub fn selection_rects(&self, _line_height: f32, _char_width: f32) -> Vec<(f32, f32, f32, f32)> {
+    pub fn selection_rects(
+        &self,
+        _line_height: f32,
+        _char_width: f32,
+    ) -> Vec<(f32, f32, f32, f32)> {
         if let Some(sel) = self.selection {
             if !sel.is_empty() {
                 let (start, end) = sel.range();

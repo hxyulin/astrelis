@@ -136,7 +136,12 @@ impl<'a> Widget for ChartWidget<'a> {
 }
 
 impl<'a> ChartWidget<'a> {
-    fn handle_interactions(&self, ui: &mut Ui, response: &Response, plot_rect: &egui::Rect) -> Response {
+    fn handle_interactions(
+        &self,
+        ui: &mut Ui,
+        response: &Response,
+        plot_rect: &egui::Rect,
+    ) -> Response {
         let mut response = response.clone();
 
         // Handle hover
@@ -450,7 +455,11 @@ impl<'a> ChartWidget<'a> {
 
         // Draw background
         let bg_rect = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(width, height));
-        painter.rect_filled(bg_rect, 4.0, egui::Color32::from_rgba_unmultiplied(25, 25, 30, 230));
+        painter.rect_filled(
+            bg_rect,
+            4.0,
+            egui::Color32::from_rgba_unmultiplied(25, 25, 30, 230),
+        );
         painter.rect_stroke(
             bg_rect,
             4.0,
@@ -477,7 +486,10 @@ impl<'a> ChartWidget<'a> {
 
             // Draw series name
             painter.text(
-                egui::pos2(x + padding + swatch_size + 8.0, entry_y + entry_height * 0.5),
+                egui::pos2(
+                    x + padding + swatch_size + 8.0,
+                    entry_y + entry_height * 0.5,
+                ),
                 Align2::LEFT_CENTER,
                 &series.name,
                 legend_font.clone(),
@@ -507,7 +519,10 @@ impl<'a> ChartWidget<'a> {
                         let t = i as f32 / tick_count as f32;
                         let x = plot_rect.min.x + t * plot_rect.width();
                         painter.line_segment(
-                            [egui::pos2(x, plot_rect.min.y), egui::pos2(x, plot_rect.max.y)],
+                            [
+                                egui::pos2(x, plot_rect.min.y),
+                                egui::pos2(x, plot_rect.max.y),
+                            ],
                             egui::Stroke::new(axis.style.grid_width, grid_color),
                         );
                     }
@@ -517,7 +532,10 @@ impl<'a> ChartWidget<'a> {
                         let t = i as f32 / tick_count as f32;
                         let y = plot_rect.min.y + t * plot_rect.height();
                         painter.line_segment(
-                            [egui::pos2(plot_rect.min.x, y), egui::pos2(plot_rect.max.x, y)],
+                            [
+                                egui::pos2(plot_rect.min.x, y),
+                                egui::pos2(plot_rect.max.x, y),
+                            ],
                             egui::Stroke::new(axis.style.grid_width, grid_color),
                         );
                     }
@@ -549,7 +567,10 @@ impl<'a> ChartWidget<'a> {
             match (axis.orientation, axis.position) {
                 (super::types::AxisOrientation::Horizontal, super::types::AxisPosition::Bottom) => {
                     painter.line_segment(
-                        [egui::pos2(plot_rect.min.x, plot_rect.max.y), egui::pos2(plot_rect.max.x, plot_rect.max.y)],
+                        [
+                            egui::pos2(plot_rect.min.x, plot_rect.max.y),
+                            egui::pos2(plot_rect.max.x, plot_rect.max.y),
+                        ],
                         egui::Stroke::new(axis.style.line_width, line_color),
                     );
 
@@ -557,14 +578,20 @@ impl<'a> ChartWidget<'a> {
                         let t = i as f32 / axis.tick_count as f32;
                         let x = plot_rect.min.x + t * plot_rect.width();
                         painter.line_segment(
-                            [egui::pos2(x, plot_rect.max.y), egui::pos2(x, plot_rect.max.y + axis.style.tick_length)],
+                            [
+                                egui::pos2(x, plot_rect.max.y),
+                                egui::pos2(x, plot_rect.max.y + axis.style.tick_length),
+                            ],
                             egui::Stroke::new(axis.style.line_width, tick_color),
                         );
                     }
                 }
                 (super::types::AxisOrientation::Vertical, super::types::AxisPosition::Left) => {
                     painter.line_segment(
-                        [egui::pos2(plot_rect.min.x, plot_rect.min.y), egui::pos2(plot_rect.min.x, plot_rect.max.y)],
+                        [
+                            egui::pos2(plot_rect.min.x, plot_rect.min.y),
+                            egui::pos2(plot_rect.min.x, plot_rect.max.y),
+                        ],
                         egui::Stroke::new(axis.style.line_width, line_color),
                     );
 
@@ -572,14 +599,20 @@ impl<'a> ChartWidget<'a> {
                         let t = i as f32 / axis.tick_count as f32;
                         let y = plot_rect.min.y + t * plot_rect.height();
                         painter.line_segment(
-                            [egui::pos2(plot_rect.min.x - axis.style.tick_length, y), egui::pos2(plot_rect.min.x, y)],
+                            [
+                                egui::pos2(plot_rect.min.x - axis.style.tick_length, y),
+                                egui::pos2(plot_rect.min.x, y),
+                            ],
                             egui::Stroke::new(axis.style.line_width, tick_color),
                         );
                     }
                 }
                 (super::types::AxisOrientation::Vertical, super::types::AxisPosition::Right) => {
                     painter.line_segment(
-                        [egui::pos2(plot_rect.max.x, plot_rect.min.y), egui::pos2(plot_rect.max.x, plot_rect.max.y)],
+                        [
+                            egui::pos2(plot_rect.max.x, plot_rect.min.y),
+                            egui::pos2(plot_rect.max.x, plot_rect.max.y),
+                        ],
                         egui::Stroke::new(axis.style.line_width, line_color),
                     );
 
@@ -587,7 +620,10 @@ impl<'a> ChartWidget<'a> {
                         let t = i as f32 / axis.tick_count as f32;
                         let y = plot_rect.min.y + t * plot_rect.height();
                         painter.line_segment(
-                            [egui::pos2(plot_rect.max.x, y), egui::pos2(plot_rect.max.x + axis.style.tick_length, y)],
+                            [
+                                egui::pos2(plot_rect.max.x, y),
+                                egui::pos2(plot_rect.max.x + axis.style.tick_length, y),
+                            ],
                             egui::Stroke::new(axis.style.line_width, tick_color),
                         );
                     }
@@ -611,8 +647,10 @@ impl<'a> ChartWidget<'a> {
             match &region.kind {
                 FillRegionKind::HorizontalBand { y_min, y_max } => {
                     let (x_range_min, x_range_max) = self.chart.x_range();
-                    let top_left = self.data_to_screen(plot_rect, DataPoint::new(x_range_min, *y_max));
-                    let bottom_right = self.data_to_screen(plot_rect, DataPoint::new(x_range_max, *y_min));
+                    let top_left =
+                        self.data_to_screen(plot_rect, DataPoint::new(x_range_min, *y_max));
+                    let bottom_right =
+                        self.data_to_screen(plot_rect, DataPoint::new(x_range_max, *y_min));
                     painter.rect_filled(
                         egui::Rect::from_min_max(top_left, bottom_right),
                         0.0,
@@ -621,17 +659,25 @@ impl<'a> ChartWidget<'a> {
                 }
                 FillRegionKind::VerticalBand { x_min, x_max } => {
                     let (y_range_min, y_range_max) = self.chart.y_range();
-                    let top_left = self.data_to_screen(plot_rect, DataPoint::new(*x_min, y_range_max));
-                    let bottom_right = self.data_to_screen(plot_rect, DataPoint::new(*x_max, y_range_min));
+                    let top_left =
+                        self.data_to_screen(plot_rect, DataPoint::new(*x_min, y_range_max));
+                    let bottom_right =
+                        self.data_to_screen(plot_rect, DataPoint::new(*x_max, y_range_min));
                     painter.rect_filled(
                         egui::Rect::from_min_max(top_left, bottom_right),
                         0.0,
                         fill_color,
                     );
                 }
-                FillRegionKind::Rectangle { x_min, y_min, x_max, y_max } => {
+                FillRegionKind::Rectangle {
+                    x_min,
+                    y_min,
+                    x_max,
+                    y_max,
+                } => {
                     let top_left = self.data_to_screen(plot_rect, DataPoint::new(*x_min, *y_max));
-                    let bottom_right = self.data_to_screen(plot_rect, DataPoint::new(*x_max, *y_min));
+                    let bottom_right =
+                        self.data_to_screen(plot_rect, DataPoint::new(*x_max, *y_min));
                     painter.rect_filled(
                         egui::Rect::from_min_max(top_left, bottom_right),
                         0.0,
@@ -658,10 +704,7 @@ impl<'a> ChartWidget<'a> {
             let start = self.data_to_screen(plot_rect, annotation.start);
             let end = self.data_to_screen(plot_rect, annotation.end);
 
-            painter.line_segment(
-                [start, end],
-                egui::Stroke::new(annotation.width, color),
-            );
+            painter.line_segment([start, end], egui::Stroke::new(annotation.width, color));
         }
     }
 
@@ -700,7 +743,9 @@ impl<'a> ChartWidget<'a> {
                         let mut points = Vec::with_capacity(series.data.len() + 2);
 
                         // Start at baseline
-                        points.push(self.data_to_screen(plot_rect, DataPoint::new(series.data[0].x, y_min)));
+                        points.push(
+                            self.data_to_screen(plot_rect, DataPoint::new(series.data[0].x, y_min)),
+                        );
 
                         // Add all data points
                         for point in &series.data {
@@ -708,15 +753,21 @@ impl<'a> ChartWidget<'a> {
                         }
 
                         // End at baseline
-                        points.push(self.data_to_screen(plot_rect, DataPoint::new(series.data.last().unwrap().x, y_min)));
+                        points.push(self.data_to_screen(
+                            plot_rect,
+                            DataPoint::new(series.data.last().unwrap().x, y_min),
+                        ));
 
                         // Draw as a filled polygon
-                        let shape = egui::Shape::convex_polygon(points, fill_color, egui::Stroke::NONE);
+                        let shape =
+                            egui::Shape::convex_polygon(points, fill_color, egui::Stroke::NONE);
                         painter.add(shape);
                     }
 
                     // Draw line
-                    let points: Vec<egui::Pos2> = series.data.iter()
+                    let points: Vec<egui::Pos2> = series
+                        .data
+                        .iter()
                         .map(|p| self.data_to_screen(plot_rect, *p))
                         .collect();
 
@@ -751,7 +802,10 @@ impl<'a> ChartWidget<'a> {
                         (series.style.color.a * 255.0) as u8,
                     );
 
-                    let point_size = series.style.point_style.as_ref()
+                    let point_size = series
+                        .style
+                        .point_style
+                        .as_ref()
                         .map(|p| p.size)
                         .unwrap_or(6.0);
 

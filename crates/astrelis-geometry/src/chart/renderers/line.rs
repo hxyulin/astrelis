@@ -3,7 +3,7 @@
 use super::super::rect::Rect;
 use super::super::types::Chart;
 use astrelis_core::profiling::profile_scope;
-use astrelis_render::{wgpu, GraphicsContext, LineRenderer, LineSegment, Viewport};
+use astrelis_render::{GraphicsContext, LineRenderer, LineSegment, Viewport, wgpu};
 use glam::Vec2;
 use std::sync::Arc;
 

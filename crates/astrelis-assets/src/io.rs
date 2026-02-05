@@ -176,9 +176,8 @@ impl BytesReader for FetchReader {
             use wasm_bindgen_futures::JsFuture;
             use web_sys::{Request, RequestInit, Response};
 
-            let window = web_sys::window().ok_or_else(|| {
-                AssetError::IoError("No window object available".to_string())
-            })?;
+            let window = web_sys::window()
+                .ok_or_else(|| AssetError::IoError("No window object available".to_string()))?;
 
             let opts = RequestInit::new();
             opts.set_method("GET");
@@ -198,10 +197,9 @@ impl BytesReader for FetchReader {
                 return Err(AssetError::NotFound(url));
             }
 
-            let array_buffer = JsFuture::from(
-                resp.array_buffer()
-                    .map_err(|e| AssetError::IoError(format!("Failed to get array buffer: {:?}", e)))?,
-            )
+            let array_buffer = JsFuture::from(resp.array_buffer().map_err(|e| {
+                AssetError::IoError(format!("Failed to get array buffer: {:?}", e))
+            })?)
             .await
             .map_err(|e| AssetError::IoError(format!("Failed to read response: {:?}", e)))?;
 

@@ -7,9 +7,9 @@ use std::collections::HashMap;
 #[cfg(feature = "hot-reload")]
 use std::path::{Path, PathBuf};
 #[cfg(feature = "hot-reload")]
-use std::sync::mpsc::{channel, Receiver};
-#[cfg(feature = "hot-reload")]
 use std::sync::Mutex;
+#[cfg(feature = "hot-reload")]
+use std::sync::mpsc::{Receiver, channel};
 
 #[cfg(feature = "hot-reload")]
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -54,8 +54,7 @@ impl AssetWatcher {
         let path = path.as_ref();
 
         if !self.watched_dirs.contains(&path.to_path_buf()) {
-            self.watcher
-                .watch(path, RecursiveMode::Recursive)?;
+            self.watcher.watch(path, RecursiveMode::Recursive)?;
             self.watched_dirs.push(path.to_path_buf());
             tracing::debug!("Watching directory for changes: {}", path.display());
         }
@@ -95,13 +94,13 @@ impl AssetWatcher {
             match event {
                 Ok(event) => {
                     // We only care about modify events
-                    if matches!(
-                        event.kind,
-                        EventKind::Modify(_) | EventKind::Create(_)
-                    ) {
+                    if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
                         for path in &event.paths {
                             if let Some(handles) = self.path_to_handle.get(path) {
-                                tracing::debug!("File changed, marking for reload: {}", path.display());
+                                tracing::debug!(
+                                    "File changed, marking for reload: {}",
+                                    path.display()
+                                );
                                 changed_handles.extend(handles.iter().copied());
                             }
                         }
@@ -118,12 +117,14 @@ impl AssetWatcher {
             let a_id = a.id();
             let b_id = b.id();
             // Compare by slot index and generation
-            (a_id.slot.index(), a_id.slot.generation()).cmp(&(b_id.slot.index(), b_id.slot.generation()))
+            (a_id.slot.index(), a_id.slot.generation())
+                .cmp(&(b_id.slot.index(), b_id.slot.generation()))
         });
         changed_handles.dedup_by(|a, b| {
             let a_id = a.id();
             let b_id = b.id();
-            a_id.slot.index() == b_id.slot.index() && a_id.slot.generation() == b_id.slot.generation()
+            a_id.slot.index() == b_id.slot.index()
+                && a_id.slot.generation() == b_id.slot.generation()
         });
 
         changed_handles
@@ -197,7 +198,11 @@ mod tests {
         watcher.register_file("/some/path/file.txt", handle);
 
         // Verify the file is registered
-        assert!(watcher.path_to_handle.contains_key(Path::new("/some/path/file.txt")));
+        assert!(
+            watcher
+                .path_to_handle
+                .contains_key(Path::new("/some/path/file.txt"))
+        );
     }
 
     #[test]
@@ -209,7 +214,10 @@ mod tests {
         watcher.register_file("/path/file.txt", handle1);
         watcher.register_file("/path/file.txt", handle2);
 
-        let handles = watcher.path_to_handle.get(Path::new("/path/file.txt")).unwrap();
+        let handles = watcher
+            .path_to_handle
+            .get(Path::new("/path/file.txt"))
+            .unwrap();
         assert_eq!(handles.len(), 2);
     }
 
@@ -225,7 +233,10 @@ mod tests {
         // Unregister handle1
         watcher.unregister_file("/path/file.txt", &handle1);
 
-        let handles = watcher.path_to_handle.get(Path::new("/path/file.txt")).unwrap();
+        let handles = watcher
+            .path_to_handle
+            .get(Path::new("/path/file.txt"))
+            .unwrap();
         assert_eq!(handles.len(), 1);
         assert_eq!(handles[0].id().slot.index(), 1);
     }
@@ -239,7 +250,11 @@ mod tests {
         watcher.unregister_file("/path/file.txt", &handle);
 
         // Path should be removed when no handles remain
-        assert!(!watcher.path_to_handle.contains_key(Path::new("/path/file.txt")));
+        assert!(
+            !watcher
+                .path_to_handle
+                .contains_key(Path::new("/path/file.txt"))
+        );
     }
 
     #[test]
@@ -282,6 +297,10 @@ mod tests {
 
         // Even with multiple modifications, we should only get one handle back
         // (due to deduplication)
-        assert!(changes.len() <= 1, "Expected at most 1 change, got {}", changes.len());
+        assert!(
+            changes.len() <= 1,
+            "Expected at most 1 change, got {}",
+            changes.len()
+        );
     }
 }

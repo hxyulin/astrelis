@@ -48,11 +48,11 @@ use super::cache::{ChartCache, ChartDirtyFlags};
 use super::data::downsample_data;
 use super::rect::Rect;
 use super::renderers::{
-    GpuChartAreaRenderer, GpuChartBarRenderer, GpuChartLineRenderer, GpuChartScatterRenderer,
-    GPU_RENDER_THRESHOLD,
+    GPU_RENDER_THRESHOLD, GpuChartAreaRenderer, GpuChartBarRenderer, GpuChartLineRenderer,
+    GpuChartScatterRenderer,
 };
 use super::types::{AxisId, Chart, ChartType, DataPoint};
-use astrelis_render::{wgpu, GraphicsContext, Viewport};
+use astrelis_render::{GraphicsContext, Viewport, wgpu};
 use std::sync::Arc;
 
 #[cfg(feature = "chart-text")]
@@ -366,7 +366,10 @@ impl StreamingChart {
                     Some(SeriesUpdateInfo {
                         index: idx,
                         full_rebuild: dirty_state.needs_full_rebuild,
-                        new_points: series.data.len().saturating_sub(dirty_state.last_rendered_count),
+                        new_points: series
+                            .data
+                            .len()
+                            .saturating_sub(dirty_state.last_rendered_count),
                     })
                 } else {
                     None
@@ -1024,7 +1027,8 @@ impl GpuStreamingChart {
             }
             ChartType::Scatter => {
                 if self.scatter_renderer.point_count() > 0 {
-                    self.scatter_renderer.render(pass, viewport, plot_area, chart);
+                    self.scatter_renderer
+                        .render(pass, viewport, plot_area, chart);
                 }
             }
             ChartType::Bar => {
@@ -1050,9 +1054,7 @@ impl GpuStreamingChart {
             ChartType::Line => self.line_renderer.segment_count(),
             ChartType::Scatter => self.scatter_renderer.point_count(),
             ChartType::Bar => self.bar_renderer.quad_count(),
-            ChartType::Area => {
-                self.area_renderer.quad_count() + self.area_renderer.segment_count()
-            }
+            ChartType::Area => self.area_renderer.quad_count() + self.area_renderer.segment_count(),
         };
 
         GpuStreamingStatistics {
@@ -1080,7 +1082,9 @@ impl std::ops::Deref for GpuStreamingChart {
 }
 
 impl From<(Chart, Arc<GraphicsContext>, wgpu::TextureFormat)> for GpuStreamingChart {
-    fn from((chart, context, target_format): (Chart, Arc<GraphicsContext>, wgpu::TextureFormat)) -> Self {
+    fn from(
+        (chart, context, target_format): (Chart, Arc<GraphicsContext>, wgpu::TextureFormat),
+    ) -> Self {
         Self::new(chart, context, target_format)
     }
 }
@@ -1120,7 +1124,12 @@ mod tests {
         streaming.append_data(0, &[DataPoint::new(1.0, 2.0), DataPoint::new(2.0, 3.0)]);
 
         assert_eq!(streaming.chart.series_len(0), 3);
-        assert!(streaming.cache.dirty_flags().contains(ChartDirtyFlags::DATA_APPENDED));
+        assert!(
+            streaming
+                .cache
+                .dirty_flags()
+                .contains(ChartDirtyFlags::DATA_APPENDED)
+        );
     }
 
     #[test]
@@ -1139,6 +1148,11 @@ mod tests {
         // Should only have last 3 points
         assert_eq!(streaming.chart.series_len(0), 3);
         // Sliding window should trigger full data change
-        assert!(streaming.cache.dirty_flags().contains(ChartDirtyFlags::DATA_CHANGED));
+        assert!(
+            streaming
+                .cache
+                .dirty_flags()
+                .contains(ChartDirtyFlags::DATA_CHANGED)
+        );
     }
 }

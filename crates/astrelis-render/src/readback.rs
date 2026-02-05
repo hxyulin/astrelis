@@ -71,7 +71,10 @@ impl GpuReadback {
     /// Create a readback from a texture.
     ///
     /// This copies the texture to a staging buffer for CPU readback.
-    pub fn from_texture(context: Arc<GraphicsContext>, texture: &wgpu::Texture) -> Result<Self, ReadbackError> {
+    pub fn from_texture(
+        context: Arc<GraphicsContext>,
+        texture: &wgpu::Texture,
+    ) -> Result<Self, ReadbackError> {
         let size = texture.size();
         let dimensions = (size.width, size.height);
         let format = texture.format();
@@ -105,9 +108,12 @@ impl GpuReadback {
         });
 
         // Copy texture to buffer
-        let mut encoder = context.device().create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("readback_encoder"),
-        });
+        let mut encoder =
+            context
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("readback_encoder"),
+                });
 
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
@@ -154,7 +160,8 @@ impl GpuReadback {
         // Read data
         let data = buffer_slice.get_mapped_range();
         let bytes_per_pixel = 4; // RGBA
-        let mut result = Vec::with_capacity((self.dimensions.0 * self.dimensions.1 * bytes_per_pixel) as usize);
+        let mut result =
+            Vec::with_capacity((self.dimensions.0 * self.dimensions.1 * bytes_per_pixel) as usize);
 
         // Copy data, removing row padding
         for y in 0..self.dimensions.1 {
@@ -175,10 +182,9 @@ impl GpuReadback {
         let data = self.read()?;
 
         // Convert to image format
-        let img = image::RgbaImage::from_raw(self.dimensions.0, self.dimensions.1, data)
-            .ok_or(ReadbackError::EncodeFailed(
-                "Failed to create image from raw data".to_string(),
-            ))?;
+        let img = image::RgbaImage::from_raw(self.dimensions.0, self.dimensions.1, data).ok_or(
+            ReadbackError::EncodeFailed("Failed to create image from raw data".to_string()),
+        )?;
 
         // Save to PNG
         img.save(path)

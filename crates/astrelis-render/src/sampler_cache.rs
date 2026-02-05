@@ -3,8 +3,8 @@
 //! Creating GPU samplers is expensive. This module provides a cache
 //! that reuses samplers with identical descriptors.
 
-use astrelis_core::profiling::profile_function;
 use ahash::HashMap;
+use astrelis_core::profiling::profile_function;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 
@@ -275,7 +275,9 @@ impl SamplerCache {
         profile_function!();
         // Try read lock first (fast path)
         {
-            let cache = self.cache.read()
+            let cache = self
+                .cache
+                .read()
                 .expect("SamplerCache lock poisoned - a thread panicked while accessing the cache");
             if let Some(sampler) = cache.get(&key) {
                 return Arc::clone(sampler);
@@ -283,7 +285,9 @@ impl SamplerCache {
         }
 
         // Slow path: create sampler and insert
-        let mut cache = self.cache.write()
+        let mut cache = self
+            .cache
+            .write()
             .expect("SamplerCache lock poisoned - a thread panicked while accessing the cache");
 
         // Double-check in case another thread inserted while we waited
@@ -341,7 +345,11 @@ impl SamplerCache {
     }
 
     /// Get a sampler for the given sampling mode.
-    pub fn from_sampling(&self, device: &wgpu::Device, sampling: ImageSampling) -> Arc<wgpu::Sampler> {
+    pub fn from_sampling(
+        &self,
+        device: &wgpu::Device,
+        sampling: ImageSampling,
+    ) -> Arc<wgpu::Sampler> {
         self.get_or_create(device, sampling.to_sampler_key())
     }
 
@@ -350,9 +358,7 @@ impl SamplerCache {
     /// # Panics
     /// Panics if the internal RwLock is poisoned.
     pub fn len(&self) -> usize {
-        self.cache.read()
-            .expect("SamplerCache lock poisoned")
-            .len()
+        self.cache.read().expect("SamplerCache lock poisoned").len()
     }
 
     /// Check if the cache is empty.
@@ -360,7 +366,8 @@ impl SamplerCache {
     /// # Panics
     /// Panics if the internal RwLock is poisoned.
     pub fn is_empty(&self) -> bool {
-        self.cache.read()
+        self.cache
+            .read()
             .expect("SamplerCache lock poisoned")
             .is_empty()
     }
@@ -373,7 +380,8 @@ impl SamplerCache {
     /// # Panics
     /// Panics if the internal RwLock is poisoned.
     pub fn clear(&self) {
-        self.cache.write()
+        self.cache
+            .write()
             .expect("SamplerCache lock poisoned")
             .clear();
     }

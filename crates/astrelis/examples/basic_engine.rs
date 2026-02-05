@@ -90,7 +90,10 @@ fn main() {
 
     // Check that AssetPlugin was registered
     assert!(engine.has_plugin("AssetPlugin"));
-    println!("AssetPlugin is registered: {}", engine.has_plugin("AssetPlugin"));
+    println!(
+        "AssetPlugin is registered: {}",
+        engine.has_plugin("AssetPlugin")
+    );
 
     // List all registered plugins
     println!("Registered plugins:");

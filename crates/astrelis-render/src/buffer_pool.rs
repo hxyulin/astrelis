@@ -122,11 +122,7 @@ impl RingBuffer {
     /// * `context` - Graphics context
     /// * `size` - Total size in bytes (will be multiplied by RING_BUFFER_FRAMES)
     /// * `usage` - Buffer usage flags (UNIFORM, STORAGE, etc.)
-    pub fn new(
-        context: Arc<GraphicsContext>,
-        size: u64,
-        usage: wgpu::BufferUsages,
-    ) -> Self {
+    pub fn new(context: Arc<GraphicsContext>, size: u64, usage: wgpu::BufferUsages) -> Self {
         let total_size = size * RING_BUFFER_FRAMES as u64;
 
         let buffer = context.device().create_buffer(&wgpu::BufferDescriptor {

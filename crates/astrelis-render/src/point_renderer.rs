@@ -6,10 +6,10 @@
 //!
 //! This means pan/zoom only updates a small uniform buffer, not all point data.
 
-use astrelis_core::profiling::profile_scope;
 use crate::capability::{GpuRequirements, RenderCapability};
 use crate::transform::{DataTransform, TransformUniform};
 use crate::{Color, GraphicsContext, Viewport};
+use astrelis_core::profiling::profile_scope;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec2;
 use std::sync::Arc;
@@ -28,7 +28,11 @@ pub struct Point {
 
 impl Point {
     pub fn new(position: Vec2, size: f32, color: Color) -> Self {
-        Self { position, size, color }
+        Self {
+            position,
+            size,
+            color,
+        }
     }
 }
 
@@ -115,14 +119,16 @@ impl PointRenderer {
                     }],
                 });
 
-        let transform_bind_group = context.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Point Renderer Transform Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: transform_buffer.as_entire_binding(),
-            }],
-        });
+        let transform_bind_group = context
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Point Renderer Transform Bind Group"),
+                layout: &bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: transform_buffer.as_entire_binding(),
+                }],
+            });
 
         // Shader
         let shader = context
@@ -208,20 +214,16 @@ impl PointRenderer {
             });
 
         // Unit quad (for rendering circles as billboards)
-        let quad_vertices: [[f32; 2]; 4] = [
-            [-0.5, -0.5],
-            [0.5, -0.5],
-            [-0.5, 0.5],
-            [0.5, 0.5],
-        ];
+        let quad_vertices: [[f32; 2]; 4] = [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]];
 
-        let vertex_buffer = context
-            .device()
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Point Renderer Vertex Buffer"),
-                contents: bytemuck::cast_slice(&quad_vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        let vertex_buffer =
+            context
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Point Renderer Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&quad_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
         Self {
             context,
@@ -287,15 +289,13 @@ impl PointRenderer {
         // Create buffer
         {
             profile_scope!("create_instance_buffer");
-            self.instance_buffer = Some(
-                self.context
-                    .device()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Point Renderer Instance Buffer"),
-                        contents: bytemuck::cast_slice(&instances),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            );
+            self.instance_buffer = Some(self.context.device().create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Point Renderer Instance Buffer"),
+                    contents: bytemuck::cast_slice(&instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                },
+            ));
         }
 
         self.instance_count = self.pending_points.len() as u32;

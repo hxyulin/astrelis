@@ -279,7 +279,11 @@ fn test_font_load_creates_event() {
 
     // Should have a Created event
     assert!(!events.is_empty());
-    assert!(events.iter().any(|e| matches!(e, AssetEvent::Created { .. })));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, AssetEvent::Created { .. }))
+    );
 }
 
 // ============================================================================

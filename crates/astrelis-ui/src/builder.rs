@@ -13,20 +13,20 @@
 //! type with appropriate methods. Convenience methods like `text()`, `container()`,
 //! and `button()` are provided for common widgets.
 
+use crate::style::Style;
+use crate::tree::{NodeId, UiTree};
+use crate::widget_id::{WidgetId, WidgetIdRegistry};
+#[cfg(feature = "docking")]
+use crate::widgets::ScrollbarTheme;
 #[cfg(feature = "docking")]
 use crate::widgets::docking::{
     DockSplitter, DockTabs, PanelConstraints, TabScrollIndicator, TabScrollbarPosition,
 };
-#[cfg(feature = "docking")]
-use crate::widgets::ScrollbarTheme;
-use crate::style::Style;
-use crate::tree::{NodeId, UiTree};
-use crate::widget_id::{WidgetId, WidgetIdRegistry};
+use crate::widgets::scroll_container::{ScrollAxis, ScrollContainer, ScrollbarVisibility};
 use crate::widgets::{
     Button, Column, Container, Image, ImageFit, ImageTexture, ImageUV, Row, Text, TextInput,
     Tooltip, Widget,
 };
-use crate::widgets::scroll_container::{ScrollAxis, ScrollContainer, ScrollbarVisibility};
 use astrelis_render::Color;
 
 // ── Style macros (must be defined before use) ───────────────────────────────
@@ -274,10 +274,8 @@ pub trait IntoNodeBuilder: Widget + Sized {
     type Builder<'b, 'a: 'b>;
 
     /// Convert this widget into a node builder.
-    fn into_node_builder<'b, 'a: 'b>(
-        self,
-        builder: &'b mut UiBuilder<'a>,
-    ) -> Self::Builder<'b, 'a>;
+    fn into_node_builder<'b, 'a: 'b>(self, builder: &'b mut UiBuilder<'a>)
+    -> Self::Builder<'b, 'a>;
 }
 
 // ── Node Builder: Leaf ──────────────────────────────────────────────────────

@@ -21,20 +21,17 @@
 
 use astrelis_core::logging;
 use astrelis_core::math::Vec2;
-use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
-};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder, wgpu};
 use astrelis_text::{FontRenderer, FontSystem, Text};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 
 struct SimpleTextApp {
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     font_renderer: FontRenderer,
 }
@@ -43,7 +40,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -53,14 +51,10 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        ).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
 
@@ -125,18 +119,19 @@ impl App for SimpleTextApp {
             .draw_text(&mut info_buffer, Vec2::new(50.0, 500.0));
 
         // Begin frame and render
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available (minimized, etc.)
+        };
 
-        // Render with automatic scoping (no manual {} block needed)
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::from_rgb_u8(25, 25, 35),
-            |pass| {
-                // Render all text
-                self.font_renderer.render(pass.wgpu_pass());
-            },
-        );
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(25, 25, 35))
+                .build();
 
-        frame.finish();
+            // Render all text
+            self.font_renderer.render(pass.wgpu_pass());
+        }
+        // Frame auto-submits on drop
     }
 }

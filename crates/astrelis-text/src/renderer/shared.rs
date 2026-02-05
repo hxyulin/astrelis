@@ -11,7 +11,7 @@
 //! - [`SdfCacheKey`]: Size-independent cache key for SDF glyphs
 //! - [`SdfAtlasEntry`]: SDF glyph entry with scaling metadata
 //! - [`SdfParams`]: SDF rendering parameters for shaders
-//! - [`TextRendererConfig`]: Configuration for atlas sizes
+//! - [`TextRendererConfig`]: Configuration for atlas sizes and formats
 
 use std::sync::{Arc, RwLock};
 
@@ -19,7 +19,7 @@ use astrelis_core::math::Vec2;
 use astrelis_core::profiling::profile_function;
 use cosmic_text::{Buffer, CacheKey, Metrics, Shaping, SwashCache};
 
-use astrelis_render::{GraphicsContext, Renderer, Viewport, wgpu};
+use astrelis_render::{GraphicsContext, RenderWindow, Renderer, Viewport, wgpu};
 
 use crate::{
     decoration::{DecorationQuad, TextBounds, TextDecoration, generate_decoration_quads},
@@ -32,7 +32,7 @@ use super::orthographic_projection;
 
 /// Configuration for text renderer backends.
 ///
-/// Controls atlas texture sizes which directly impact memory usage.
+/// Controls atlas texture sizes and surface formats for pipelines.
 /// Smaller atlases use less memory but may need to evict glyphs more frequently.
 ///
 /// # Memory Usage
@@ -55,11 +55,11 @@ use super::orthographic_projection;
 ///     TextRendererConfig::small()
 /// );
 ///
-/// // For text-heavy applications
-/// let renderer = BitmapTextRenderer::with_config(
+/// // Create from window for automatic format matching
+/// let renderer = FontRenderer::with_config(
 ///     context,
 ///     font_system,
-///     TextRendererConfig::large()
+///     TextRendererConfig::from_window(&window)
 /// );
 /// ```
 #[derive(Clone, Debug)]
@@ -69,6 +69,12 @@ pub struct TextRendererConfig {
     pub atlas_size: u32,
     /// SDF-specific settings (only used by SDF/Hybrid renderers).
     pub sdf: SdfConfig,
+    /// Surface texture format for pipelines.
+    /// Default: Bgra8UnormSrgb
+    pub surface_format: wgpu::TextureFormat,
+    /// Depth format for z-ordering. `None` disables depth testing.
+    /// Default: None
+    pub depth_format: Option<wgpu::TextureFormat>,
 }
 
 impl Default for TextRendererConfig {
@@ -76,6 +82,8 @@ impl Default for TextRendererConfig {
         Self {
             atlas_size: 2048,
             sdf: SdfConfig::default(),
+            surface_format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            depth_format: None,
         }
     }
 }
@@ -84,6 +92,18 @@ impl TextRendererConfig {
     /// Create default configuration (2048x2048 atlas, ~8 MB per atlas).
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create configuration from a [`RenderWindow`], inheriting its format settings.
+    ///
+    /// This is the **recommended** way to create a config as it ensures
+    /// pipeline-renderpass format compatibility automatically.
+    pub fn from_window(window: &RenderWindow) -> Self {
+        Self {
+            surface_format: window.surface_format(),
+            depth_format: window.depth_format(),
+            ..Default::default()
+        }
     }
 
     /// Small config for memory-constrained environments (512x512, ~0.5 MB per atlas).
@@ -129,6 +149,24 @@ impl TextRendererConfig {
     /// Set SDF configuration.
     pub fn with_sdf_config(mut self, config: SdfConfig) -> Self {
         self.sdf = config;
+        self
+    }
+
+    /// Set surface format for pipelines.
+    pub fn with_surface_format(mut self, format: wgpu::TextureFormat) -> Self {
+        self.surface_format = format;
+        self
+    }
+
+    /// Enable depth testing with the specified format.
+    pub fn with_depth(mut self, format: wgpu::TextureFormat) -> Self {
+        self.depth_format = Some(format);
+        self
+    }
+
+    /// Disable depth testing.
+    pub fn without_depth(mut self) -> Self {
+        self.depth_format = None;
         self
     }
 }
@@ -729,7 +767,12 @@ impl DecorationRenderer {
     }
 
     /// Render background decorations (should be called before rendering text).
-    pub fn render_backgrounds(&mut self, render_pass: &mut wgpu::RenderPass, renderer: &Renderer, viewport: &Viewport) {
+    pub fn render_backgrounds(
+        &mut self,
+        render_pass: &mut wgpu::RenderPass,
+        renderer: &Renderer,
+        viewport: &Viewport,
+    ) {
         profile_function!();
 
         if self.background_vertices.is_empty() {
@@ -749,7 +792,12 @@ impl DecorationRenderer {
     }
 
     /// Render line decorations (underline, strikethrough - should be called after rendering text).
-    pub fn render_lines(&mut self, render_pass: &mut wgpu::RenderPass, renderer: &Renderer, viewport: &Viewport) {
+    pub fn render_lines(
+        &mut self,
+        render_pass: &mut wgpu::RenderPass,
+        renderer: &Renderer,
+        viewport: &Viewport,
+    ) {
         profile_function!();
 
         if self.line_vertices.is_empty() {
@@ -782,13 +830,15 @@ impl DecorationRenderer {
         }
 
         // Create buffers
-        let vertex_buffer = renderer.create_vertex_buffer(Some("Decoration Vertex Buffer"), vertices);
+        let vertex_buffer =
+            renderer.create_vertex_buffer(Some("Decoration Vertex Buffer"), vertices);
         let index_buffer = renderer.create_index_buffer(Some("Decoration Index Buffer"), indices);
 
         // Create projection uniform
         let size = viewport.to_logical();
         let projection = orthographic_projection(size.width, size.height);
-        let uniform_buffer = renderer.create_uniform_buffer(Some("Decoration Projection"), &projection);
+        let uniform_buffer =
+            renderer.create_uniform_buffer(Some("Decoration Projection"), &projection);
 
         // Create uniform bind group
         let uniform_bind_group = renderer.create_bind_group(

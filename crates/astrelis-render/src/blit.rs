@@ -5,10 +5,10 @@
 
 use astrelis_core::profiling::profile_function;
 
+use crate::Renderer;
 use crate::capability::{GpuRequirements, RenderCapability};
 use crate::context::GraphicsContext;
 use crate::types::{GpuTexture, TypedBuffer};
-use crate::Renderer;
 use std::sync::Arc;
 
 /// A renderer for blitting textures to the screen.
@@ -63,10 +63,7 @@ impl BlitRenderer {
         let renderer = Renderer::new(context.clone());
 
         // Create shader
-        let shader = renderer.create_shader(
-            Some("Blit Shader"),
-            include_str!("shaders/blit.wgsl"),
-        );
+        let shader = renderer.create_shader(Some("Blit Shader"), include_str!("shaders/blit.wgsl"));
 
         // Create sampler
         let sampler = context.device().create_sampler(&wgpu::SamplerDescriptor {
@@ -173,7 +170,8 @@ impl BlitRenderer {
             -1.0,  1.0,               0.0, 0.0,
         ];
 
-        let vertex_buffer = renderer.create_typed_vertex_buffer(Some("Blit Vertex Buffer"), &vertices);
+        let vertex_buffer =
+            renderer.create_typed_vertex_buffer(Some("Blit Vertex Buffer"), &vertices);
 
         Self {
             pipeline,

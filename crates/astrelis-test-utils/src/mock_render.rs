@@ -244,7 +244,6 @@ impl RenderContext for MockRenderContext {
         GpuTexture::mock(id, desc.size.width, desc.size.height, desc.format)
     }
 
-
     fn create_shader_module(&self, desc: &ShaderModuleDescriptor) -> GpuShaderModule {
         let mut id = self.next_shader_id.lock();
         let shader_id = *id;
@@ -262,11 +261,9 @@ impl RenderContext for MockRenderContext {
         let pipeline_id = *id;
         *id += 1;
 
-        self.calls
-            .lock()
-            .push(RenderCall::CreateRenderPipeline {
-                label: desc.label.map(|s| s.to_string()),
-            });
+        self.calls.lock().push(RenderCall::CreateRenderPipeline {
+            label: desc.label.map(|s| s.to_string()),
+        });
 
         GpuRenderPipeline::mock(pipeline_id)
     }
@@ -276,11 +273,9 @@ impl RenderContext for MockRenderContext {
         let pipeline_id = *id;
         *id += 1;
 
-        self.calls
-            .lock()
-            .push(RenderCall::CreateComputePipeline {
-                label: desc.label.map(|s| s.to_string()),
-            });
+        self.calls.lock().push(RenderCall::CreateComputePipeline {
+            label: desc.label.map(|s| s.to_string()),
+        });
 
         GpuComputePipeline::mock(pipeline_id)
     }
@@ -290,11 +285,9 @@ impl RenderContext for MockRenderContext {
         let layout_id = *id;
         *id += 1;
 
-        self.calls
-            .lock()
-            .push(RenderCall::CreateBindGroupLayout {
-                label: desc.label.map(|s| s.to_string()),
-            });
+        self.calls.lock().push(RenderCall::CreateBindGroupLayout {
+            label: desc.label.map(|s| s.to_string()),
+        });
 
         GpuBindGroupLayout::mock(layout_id)
     }

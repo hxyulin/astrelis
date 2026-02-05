@@ -30,10 +30,7 @@ impl ChartDirtyFlags {
     /// Check if the cache needs to be rebuilt.
     pub fn needs_cache_rebuild(&self) -> bool {
         self.intersects(
-            Self::DATA_CHANGED
-                | Self::VIEW_CHANGED
-                | Self::AXES_CHANGED
-                | Self::BOUNDS_CHANGED,
+            Self::DATA_CHANGED | Self::VIEW_CHANGED | Self::AXES_CHANGED | Self::BOUNDS_CHANGED,
         )
     }
 
@@ -79,12 +76,7 @@ impl SeriesPixelCache {
     }
 
     /// Check if the cache is valid for the given parameters.
-    pub fn is_valid(
-        &self,
-        x_range: (f64, f64),
-        y_range: (f64, f64),
-        data_count: usize,
-    ) -> bool {
+    pub fn is_valid(&self, x_range: (f64, f64), y_range: (f64, f64), data_count: usize) -> bool {
         self.x_range == x_range && self.y_range == y_range && self.data_count == data_count
     }
 }
@@ -242,10 +234,8 @@ impl ChartCache {
         for (series_idx, series) in chart.series.iter().enumerate() {
             if series_idx >= self.series_caches.len() {
                 // New series, need full rebuild for this one
-                self.series_caches.push(SeriesPixelCache::new(
-                    series.x_axis,
-                    series.y_axis,
-                ));
+                self.series_caches
+                    .push(SeriesPixelCache::new(series.x_axis, series.y_axis));
             }
 
             let cache = &mut self.series_caches[series_idx];
@@ -265,7 +255,9 @@ impl ChartCache {
                 }
             } else if series.data.len() > cache.data_count {
                 // Append new points
-                cache.positions.reserve(series.data.len() - cache.data_count);
+                cache
+                    .positions
+                    .reserve(series.data.len() - cache.data_count);
                 for point in &series.data[cache.data_count..] {
                     let pixel = data_to_pixel(point, plot_area, x_range, y_range);
                     cache.positions.push(pixel);
@@ -317,27 +309,27 @@ impl ChartCache {
 
         for (series_idx, point_idx) in index.query_near(pixel, max_distance) {
             if let Some(cache) = self.series_caches.get(series_idx)
-                && let Some(&point_pixel) = cache.positions.get(point_idx) {
-                    let dist = pixel.distance(point_pixel);
-                    if dist <= max_distance
-                        && best.as_ref().is_none_or(|b| dist < b.distance) {
-                            let data_point = chart
-                                .series
-                                .get(series_idx)
-                                .and_then(|s| s.data.get(point_idx))
-                                .copied();
+                && let Some(&point_pixel) = cache.positions.get(point_idx)
+            {
+                let dist = pixel.distance(point_pixel);
+                if dist <= max_distance && best.as_ref().is_none_or(|b| dist < b.distance) {
+                    let data_point = chart
+                        .series
+                        .get(series_idx)
+                        .and_then(|s| s.data.get(point_idx))
+                        .copied();
 
-                            if let Some(data_point) = data_point {
-                                best = Some(CacheHitResult {
-                                    series_index: series_idx,
-                                    point_index: point_idx,
-                                    distance: dist,
-                                    data_point,
-                                    pixel_position: point_pixel,
-                                });
-                            }
-                        }
+                    if let Some(data_point) = data_point {
+                        best = Some(CacheHitResult {
+                            series_index: series_idx,
+                            point_index: point_idx,
+                            distance: dist,
+                            data_point,
+                            pixel_position: point_pixel,
+                        });
+                    }
                 }
+            }
         }
 
         best

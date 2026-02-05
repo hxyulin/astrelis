@@ -14,7 +14,7 @@ use super::types::{
 };
 use crate::{GeometryRenderer, PathBuilder, ScissorRect, Stroke, Style};
 use astrelis_core::profiling::profile_scope;
-use astrelis_render::{wgpu, Color, Viewport};
+use astrelis_render::{Color, Viewport, wgpu};
 use glam::Vec2;
 
 /// Renders charts using a GeometryRenderer, with optional GPU acceleration.
@@ -80,11 +80,8 @@ impl<'a> ChartRenderer<'a> {
         let use_gpu_for_lines = skip_gpu_lines && chart.chart_type == ChartType::Line;
 
         // Draw background
-        self.geometry.draw_rect(
-            bounds.position(),
-            bounds.size(),
-            chart.background_color,
-        );
+        self.geometry
+            .draw_rect(bounds.position(), bounds.size(), chart.background_color);
 
         // Calculate plot area (inside padding and axis labels)
         let plot_area = bounds.inset(chart.padding);
@@ -413,12 +410,7 @@ impl<'a> ChartRenderer<'a> {
 
                         for point in &s1.data[1..] {
                             let p = self.data_to_pixel_with_axes(
-                                chart,
-                                plot_area,
-                                point.x,
-                                point.y,
-                                s1.x_axis,
-                                s1.y_axis,
+                                chart, plot_area, point.x, point.y, s1.x_axis, s1.y_axis,
                             );
                             builder.line_to(p);
                         }
@@ -426,12 +418,7 @@ impl<'a> ChartRenderer<'a> {
                         // Backward along series 2
                         for point in s2.data.iter().rev() {
                             let p = self.data_to_pixel_with_axes(
-                                chart,
-                                plot_area,
-                                point.x,
-                                point.y,
-                                s2.x_axis,
-                                s2.y_axis,
+                                chart, plot_area, point.x, point.y, s2.x_axis, s2.y_axis,
                             );
                             builder.line_to(p);
                         }
@@ -536,38 +523,38 @@ impl<'a> ChartRenderer<'a> {
     fn draw_crosshair(&mut self, chart: &Chart, plot_area: &Rect) {
         if let Some((series_idx, point_idx)) = chart.interactive.hovered_point
             && let Some(series) = chart.series.get(series_idx)
-                && let Some(point) = series.data.get(point_idx) {
-                    let pixel = self.data_to_pixel_with_axes(
-                        chart,
-                        plot_area,
-                        point.x,
-                        point.y,
-                        series.x_axis,
-                        series.y_axis,
-                    );
+            && let Some(point) = series.data.get(point_idx)
+        {
+            let pixel = self.data_to_pixel_with_axes(
+                chart,
+                plot_area,
+                point.x,
+                point.y,
+                series.x_axis,
+                series.y_axis,
+            );
 
-                    let crosshair_color = Color::rgba(1.0, 1.0, 1.0, 0.5);
+            let crosshair_color = Color::rgba(1.0, 1.0, 1.0, 0.5);
 
-                    // Vertical line
-                    self.geometry.draw_line(
-                        Vec2::new(pixel.x, plot_area.y),
-                        Vec2::new(pixel.x, plot_area.bottom()),
-                        1.0,
-                        crosshair_color,
-                    );
+            // Vertical line
+            self.geometry.draw_line(
+                Vec2::new(pixel.x, plot_area.y),
+                Vec2::new(pixel.x, plot_area.bottom()),
+                1.0,
+                crosshair_color,
+            );
 
-                    // Horizontal line
-                    self.geometry.draw_line(
-                        Vec2::new(plot_area.x, pixel.y),
-                        Vec2::new(plot_area.right(), pixel.y),
-                        1.0,
-                        crosshair_color,
-                    );
+            // Horizontal line
+            self.geometry.draw_line(
+                Vec2::new(plot_area.x, pixel.y),
+                Vec2::new(plot_area.right(), pixel.y),
+                1.0,
+                crosshair_color,
+            );
 
-                    // Highlight point
-                    self.geometry
-                        .draw_circle(pixel, 6.0, series.style.color);
-                }
+            // Highlight point
+            self.geometry.draw_circle(pixel, 6.0, series.style.color);
+        }
     }
 
     fn draw_grid(&mut self, chart: &Chart, plot_area: &Rect) {
@@ -1108,16 +1095,15 @@ impl ChartRenderer<'_> {
 
                 let dist = pixel.distance(point_pixel);
 
-                if dist <= max_distance
-                    && best.as_ref().is_none_or(|b| dist < b.distance) {
-                        best = Some(HitTestResult {
-                            series_index: series_idx,
-                            point_index: point_idx,
-                            distance: dist,
-                            data_point: *point,
-                            pixel_position: point_pixel,
-                        });
-                    }
+                if dist <= max_distance && best.as_ref().is_none_or(|b| dist < b.distance) {
+                    best = Some(HitTestResult {
+                        series_index: series_idx,
+                        point_index: point_idx,
+                        distance: dist,
+                        data_point: *point,
+                        pixel_position: point_pixel,
+                    });
+                }
             }
         }
 

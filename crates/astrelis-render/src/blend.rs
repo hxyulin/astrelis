@@ -4,8 +4,7 @@
 ///
 /// Use these to configure how source and destination colors are combined
 /// during rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BlendMode {
     /// No blending - source completely replaces destination.
     Replace,
@@ -87,7 +86,6 @@ impl BlendMode {
         }
     }
 }
-
 
 impl From<BlendMode> for Option<wgpu::BlendState> {
     fn from(mode: BlendMode) -> Self {

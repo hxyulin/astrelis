@@ -74,7 +74,10 @@ impl Framebuffer {
 
     /// Get the view to render to (MSAA view if enabled, otherwise color view).
     pub fn render_view(&self) -> &wgpu::TextureView {
-        self.msaa.as_ref().map(|m| m.view()).unwrap_or(self.color.view())
+        self.msaa
+            .as_ref()
+            .map(|m| m.view())
+            .unwrap_or(self.color.view())
     }
 
     /// Get the resolve target (color view if MSAA enabled, None otherwise).

@@ -11,19 +11,19 @@
 //! Press +/- to adjust object count.
 
 use astrelis_core::logging;
-use astrelis_render::{Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor, wgpu};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder, wgpu};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
-    event::{EventBatch, Event, HandleStatus, Key, NamedKey},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    event::{Event, EventBatch, HandleStatus, Key, NamedKey},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 use std::sync::Arc;
 use std::time::Instant;
 
 struct PerformanceBenchmark {
     _context: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     object_count: usize,
     rendering: bool,
@@ -37,7 +37,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -47,14 +48,11 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        ).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .with_depth_default()
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
 
@@ -92,10 +90,7 @@ impl App for PerformanceBenchmark {
             self.last_fps_time = now;
             println!(
                 "FPS: {:.1} | Frame Time: {:.2}ms | Objects: {} | Rendering: {}",
-                self.fps,
-                self.last_frame_time,
-                self.object_count,
-                self.rendering
+                self.fps, self.last_frame_time, self.object_count, self.rendering
             );
         }
     }
@@ -145,7 +140,9 @@ impl App for PerformanceBenchmark {
         });
 
         // Begin frame
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available
+        };
 
         if self.rendering {
             // Simulate rendering thousands of objects
@@ -155,24 +152,22 @@ impl App for PerformanceBenchmark {
             // - Texture binding
             // - Shader state changes
 
-            frame.clear_and_render(
-                RenderTarget::Surface,
-                Color::from_rgb_u8(10, 10, 15),
-                |_pass| {
-                    // Actual rendering would happen here
-                    // For benchmark purposes, we're measuring the overhead
-                    // of the render pass itself with clear operations
-                },
-            );
+            let _pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(10, 10, 15))
+                .label("benchmark_pass")
+                .build();
+            // Actual rendering would happen here
+            // For benchmark purposes, we're measuring the overhead
+            // of the render pass itself with clear operations
         } else {
-            frame.clear_and_render(
-                RenderTarget::Surface,
-                Color::from_rgb_u8(10, 10, 15),
-                |_pass| {},
-            );
+            let _pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(10, 10, 15))
+                .label("benchmark_pass")
+                .build();
         }
-
-        frame.finish();
+        // Frame auto-submits on drop
 
         let frame_end = Instant::now();
         self.last_frame_time = frame_end.duration_since(frame_start).as_secs_f32() * 1000.0;

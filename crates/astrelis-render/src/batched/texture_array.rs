@@ -115,8 +115,7 @@ pub struct BindlessTextureArray {
 impl BindlessTextureArray {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, max_textures: u32) -> Self {
         let layout = pipeline::create_bindless_texture_bind_group_layout(device, max_textures);
-        let (fallback_texture, fallback_view, _) =
-            pipeline::create_fallback_texture(device, queue);
+        let (fallback_texture, fallback_view, _) = pipeline::create_fallback_texture(device, queue);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("batched_bindless_sampler"),
             mag_filter: wgpu::FilterMode::Linear,

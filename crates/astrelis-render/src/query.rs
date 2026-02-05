@@ -206,7 +206,9 @@ impl QueryResultBuffer {
     /// Map the read buffer for CPU access.
     ///
     /// Returns a future that completes when the buffer is mapped.
-    pub fn map_async(&self) -> impl std::future::Future<Output = Result<(), wgpu::BufferAsyncError>> {
+    pub fn map_async(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), wgpu::BufferAsyncError>> {
         let slice = self.read_buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
 
@@ -324,11 +326,8 @@ impl GpuProfiler {
             max_queries,
         );
 
-        let result_buffer = QueryResultBuffer::new(
-            context.device(),
-            Some("GPU Profiler Results"),
-            max_queries,
-        );
+        let result_buffer =
+            QueryResultBuffer::new(context.device(), Some("GPU Profiler Results"), max_queries);
 
         Self {
             context,
@@ -406,12 +405,8 @@ impl GpuProfiler {
             return;
         }
 
-        self.result_buffer.resolve(
-            encoder,
-            &self.query_set,
-            0..self.current_query,
-            0,
-        );
+        self.result_buffer
+            .resolve(encoder, &self.query_set, 0..self.current_query, 0);
         self.result_buffer.copy_to_readable(encoder);
     }
 
@@ -457,8 +452,8 @@ impl GpuProfiler {
                 let end_ts = timestamps.get(*end as usize).copied().unwrap_or(0);
 
                 // Convert ticks to milliseconds
-                let duration_ns = (end_ts.saturating_sub(start_ts)) as f64
-                    * self.timestamp_period as f64;
+                let duration_ns =
+                    (end_ts.saturating_sub(start_ts)) as f64 * self.timestamp_period as f64;
                 let duration_ms = duration_ns / 1_000_000.0;
 
                 self.cached_results.push((label.clone(), duration_ms));
@@ -509,8 +504,8 @@ impl GpuProfiler {
                 let end_ts = timestamps.get(*end as usize).copied().unwrap_or(0);
 
                 // Convert ticks to milliseconds
-                let duration_ns = (end_ts.saturating_sub(start_ts)) as f64
-                    * self.timestamp_period as f64;
+                let duration_ns =
+                    (end_ts.saturating_sub(start_ts)) as f64 * self.timestamp_period as f64;
                 let duration_ms = duration_ns / 1_000_000.0;
 
                 self.cached_results.push((label.clone(), duration_ms));

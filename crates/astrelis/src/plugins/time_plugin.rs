@@ -1,5 +1,4 @@
-///! Time plugin for tracking frame timing and game time.
-
+//! Time plugin for tracking frame timing and game time.
 use crate::plugin::Plugin;
 use crate::resource::Resources;
 use crate::time::Time;
@@ -49,18 +48,14 @@ mod tests {
 
     #[test]
     fn test_time_plugin_registers_time() {
-        let engine = EngineBuilder::new()
-            .add_plugin(TimePlugin)
-            .build();
+        let engine = EngineBuilder::new().add_plugin(TimePlugin).build();
 
         assert!(engine.get::<Time>().is_some());
     }
 
     #[test]
     fn test_time_starts_at_zero() {
-        let engine = EngineBuilder::new()
-            .add_plugin(TimePlugin)
-            .build();
+        let engine = EngineBuilder::new().add_plugin(TimePlugin).build();
 
         let time = engine.get::<Time>().unwrap();
         assert_eq!(time.frame_count(), 0);

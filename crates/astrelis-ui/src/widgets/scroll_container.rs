@@ -102,10 +102,8 @@ impl ScrollContainer {
 
     /// Whether horizontal scrolling is needed (content wider than viewport).
     pub fn needs_h_scroll(&self) -> bool {
-        matches!(
-            self.scroll_axis,
-            ScrollAxis::Horizontal | ScrollAxis::Both
-        ) && self.content_size.x > self.viewport_size.x
+        matches!(self.scroll_axis, ScrollAxis::Horizontal | ScrollAxis::Both)
+            && self.content_size.x > self.viewport_size.x
     }
 
     /// Whether the vertical scrollbar should be visible.
@@ -124,10 +122,7 @@ impl ScrollContainer {
         match self.scrollbar_visibility {
             ScrollbarVisibility::Auto => self.needs_h_scroll(),
             ScrollbarVisibility::Always => {
-                matches!(
-                    self.scroll_axis,
-                    ScrollAxis::Horizontal | ScrollAxis::Both
-                )
+                matches!(self.scroll_axis, ScrollAxis::Horizontal | ScrollAxis::Both)
             }
             ScrollbarVisibility::Never => false,
         }
@@ -260,7 +255,8 @@ impl ScrollContainer {
 
     /// Hit-test the vertical scrollbar thumb.
     pub fn hit_test_v_thumb(&self, pos: Vec2, abs_layout: &LayoutRect) -> bool {
-        self.should_show_v_scrollbar() && Self::rect_contains(&self.v_scrollbar_thumb(abs_layout), pos)
+        self.should_show_v_scrollbar()
+            && Self::rect_contains(&self.v_scrollbar_thumb(abs_layout), pos)
     }
 
     /// Hit-test the horizontal scrollbar thumb.

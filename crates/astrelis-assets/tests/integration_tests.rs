@@ -90,8 +90,7 @@ impl AssetLoader for BinaryDataLoader {
             });
         }
 
-        let header =
-            u32::from_le_bytes([ctx.bytes[0], ctx.bytes[1], ctx.bytes[2], ctx.bytes[3]]);
+        let header = u32::from_le_bytes([ctx.bytes[0], ctx.bytes[1], ctx.bytes[2], ctx.bytes[3]]);
         let payload = ctx.bytes[4..].to_vec();
 
         Ok(BinaryData { header, payload })
@@ -286,10 +285,13 @@ fn test_version_tracking() {
     // For now, we simulate this by directly manipulating storage
     {
         let storage = server.assets_mut::<TestConfig>();
-        storage.set_loaded(&handle, TestConfig {
-            name: "Updated".to_string(),
-            value: 2,
-        });
+        storage.set_loaded(
+            &handle,
+            TestConfig {
+                name: "Updated".to_string(),
+                value: 2,
+            },
+        );
     }
 
     let version2 = server.version(&handle).unwrap();
@@ -321,7 +323,7 @@ fn test_hot_reload_simulation() {
 
     // In a real hot-reload scenario, a file watcher would detect this
     // and trigger a reload. Here we manually reload.
-    
+
     // Read the new bytes and reload
     let new_bytes = std::fs::read(&file_path).unwrap();
     let source = AssetSource::disk("config.cfg");
@@ -367,10 +369,13 @@ fn test_tracked_handle_change_detection() {
     // Update the asset
     {
         let storage = server.assets_mut::<TestConfig>();
-        storage.set_loaded(&handle, TestConfig {
-            name: "Updated".to_string(),
-            value: 2,
-        });
+        storage.set_loaded(
+            &handle,
+            TestConfig {
+                name: "Updated".to_string(),
+                value: 2,
+            },
+        );
     }
 
     // Now should show change again
@@ -483,10 +488,7 @@ fn test_insert_from_bytes() {
     };
 
     let bytes_arc: Arc<[u8]> = bytes.into();
-    let handle = server.insert(
-        AssetSource::bytes("test-data", bytes_arc),
-        data.clone(),
-    );
+    let handle = server.insert(AssetSource::bytes("test-data", bytes_arc), data.clone());
 
     assert!(server.is_ready(&handle));
     let stored = server.get(&handle).unwrap();
@@ -504,9 +506,7 @@ fn test_concurrent_reads() {
     let file_path = temp_dir.path().join("shared.txt");
     std::fs::write(&file_path, "Shared Content").unwrap();
 
-    let server = std::sync::Arc::new(std::sync::Mutex::new(
-        create_test_server(temp_dir.path()),
-    ));
+    let server = std::sync::Arc::new(std::sync::Mutex::new(create_test_server(temp_dir.path())));
 
     // Load the asset first
     let handle: Handle<String> = {
@@ -543,9 +543,7 @@ fn test_concurrent_loads() {
         std::fs::write(&path, format!("Content {}", i)).unwrap();
     }
 
-    let server = Arc::new(std::sync::Mutex::new(
-        create_test_server(temp_dir.path()),
-    ));
+    let server = Arc::new(std::sync::Mutex::new(create_test_server(temp_dir.path())));
 
     // Spawn threads to load different files
     let mut handles = vec![];
@@ -584,9 +582,9 @@ fn test_disk_source() {
     std::fs::write(&file_path, "Disk Content").unwrap();
 
     let mut server = create_test_server(temp_dir.path());
-    let handle: Handle<String> = server.load_from_source_sync(
-        AssetSource::disk(file_path),
-    ).unwrap();
+    let handle: Handle<String> = server
+        .load_from_source_sync(AssetSource::disk(file_path))
+        .unwrap();
 
     let text = server.get(&handle).unwrap();
     assert_eq!(**text, "Disk Content");
@@ -738,11 +736,11 @@ fn test_find_by_path() {
 fn test_has_loader_for() {
     let temp_dir = tempfile::tempdir().unwrap();
     let server = create_test_server(temp_dir.path());
-    
+
     // TextLoader handles txt files
     assert!(server.has_loader_for::<String>("txt"));
     assert!(server.has_loader_for_type::<String>());
-    
+
     // No loader for unknown extension/type
     assert!(!server.has_loader_for::<String>("xyz"));
 }
@@ -781,14 +779,14 @@ fn test_get_asset_state() {
 #[test]
 fn test_drain_events_for_type() {
     let temp_dir = tempfile::tempdir().unwrap();
-    
+
     // Create files for different types
     std::fs::write(temp_dir.path().join("text.txt"), "text").unwrap();
     let bin_data: Vec<u8> = vec![0, 0, 0, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     std::fs::write(temp_dir.path().join("data.bin"), &bin_data).unwrap();
 
     let mut server = create_test_server(temp_dir.path());
-    
+
     // Load assets of different types
     let _text: Handle<String> = server.load_sync("text.txt").unwrap();
     let _data: Handle<BinaryData> = server.load_sync("data.bin").unwrap();
@@ -796,8 +794,8 @@ fn test_drain_events_for_type() {
     // Drain only String events
     let string_events: Vec<_> = server.drain_events_for::<String>().collect();
     assert_eq!(string_events.len(), 1);
-    
-    // BinaryData events should still be in the buffer... 
+
+    // BinaryData events should still be in the buffer...
     // Actually, drain_events_for drains from the buffer filtering in place.
     // After draining for String, we should have BinaryData events remaining
 }

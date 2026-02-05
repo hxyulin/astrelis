@@ -174,12 +174,7 @@ impl DockSplitter {
     }
 
     /// Check if a point is within the separator bounds (using tolerance for the hit zone).
-    pub fn is_point_in_separator(
-        &self,
-        layout: &LayoutRect,
-        point: Vec2,
-        tolerance: f32,
-    ) -> bool {
+    pub fn is_point_in_separator(&self, layout: &LayoutRect, point: Vec2, tolerance: f32) -> bool {
         let sep = self.separator_hit_bounds(layout, tolerance);
         point.x >= sep.x
             && point.x <= sep.x + sep.width

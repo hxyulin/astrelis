@@ -11,24 +11,21 @@
 //! Rich text allows you to create sophisticated formatted text without needing
 //! multiple separate text objects.
 
-use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_core::math::Vec2;
-use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder, wgpu};
+use astrelis_text::{
+    FontRenderer, FontSystem, FontWeight, RichText, RichTextBuilder, TextSpanStyle,
 };
-use astrelis_text::{FontRenderer, FontSystem, RichText, RichTextBuilder, TextSpanStyle, FontWeight};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 
 struct RichTextDemo {
-    _context: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     font_renderer: FontRenderer,
 }
@@ -37,7 +34,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -47,14 +45,10 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        ).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
 
@@ -79,7 +73,6 @@ fn main() {
         tracing::info!("Rich text demo initialized");
 
         Box::new(RichTextDemo {
-            _context: graphics_ctx,
             window,
             window_id,
             font_renderer,
@@ -126,7 +119,7 @@ impl App for RichTextDemo {
                 TextSpanStyle::default()
                     .with_color(Color::from_rgb_u8(255, 180, 100))
                     .bold()
-                    .italic()
+                    .italic(),
             )
             .text(".")
             .build();
@@ -144,7 +137,9 @@ impl App for RichTextDemo {
         manual.push_str(", or even ");
         manual.push(
             "scale text",
-            TextSpanStyle::default().with_scale(1.5).with_color(Color::from_rgb_u8(150, 255, 150))
+            TextSpanStyle::default()
+                .with_scale(1.5)
+                .with_color(Color::from_rgb_u8(150, 255, 150)),
         );
         manual.push_str(" within the same block!");
         manual.set_max_width(Some(width - 100.0));
@@ -156,30 +151,30 @@ impl App for RichTextDemo {
                 "fn main()",
                 TextSpanStyle::default()
                     .with_color(Color::from_rgb_u8(255, 150, 100))
-                    .with_weight(FontWeight::Bold)
+                    .with_weight(FontWeight::Bold),
             )
             .text(" ")
             .span(
                 "{",
-                TextSpanStyle::default().with_color(Color::from_rgb_u8(200, 200, 200))
+                TextSpanStyle::default().with_color(Color::from_rgb_u8(200, 200, 200)),
             )
             .text("\n    ")
             .span(
                 "println!",
-                TextSpanStyle::default().with_color(Color::from_rgb_u8(100, 200, 255))
+                TextSpanStyle::default().with_color(Color::from_rgb_u8(100, 200, 255)),
             )
             .span(
                 "(\"Hello, World!\")",
-                TextSpanStyle::default().with_color(Color::from_rgb_u8(150, 255, 150))
+                TextSpanStyle::default().with_color(Color::from_rgb_u8(150, 255, 150)),
             )
             .span(
                 ";",
-                TextSpanStyle::default().with_color(Color::from_rgb_u8(200, 200, 200))
+                TextSpanStyle::default().with_color(Color::from_rgb_u8(200, 200, 200)),
             )
             .text("\n")
             .span(
                 "}",
-                TextSpanStyle::default().with_color(Color::from_rgb_u8(200, 200, 200))
+                TextSpanStyle::default().with_color(Color::from_rgb_u8(200, 200, 200)),
             )
             .build();
 
@@ -187,7 +182,7 @@ impl App for RichTextDemo {
 
         // Example 4: Markdown parsing
         let mut markdown = RichText::from_markup(
-            "Markdown-like syntax: **bold text**, *italic text*, __underlined__, and ~~strikethrough~~."
+            "Markdown-like syntax: **bold text**, *italic text*, __underlined__, and ~~strikethrough~~.",
         );
         markdown.set_max_width(Some(width - 100.0));
 
@@ -198,7 +193,7 @@ impl App for RichTextDemo {
                 " highlighted backgrounds ",
                 TextSpanStyle::default()
                     .with_background(Color::from_rgb_u8(80, 80, 100))
-                    .with_color(Color::WHITE)
+                    .with_color(Color::WHITE),
             )
             .text(" or ")
             .span(
@@ -206,7 +201,7 @@ impl App for RichTextDemo {
                 TextSpanStyle::default()
                     .with_background(Color::from_rgb_u8(150, 50, 50))
                     .with_color(Color::WHITE)
-                    .with_weight(FontWeight::Bold)
+                    .with_weight(FontWeight::Bold),
             )
             .text(" inline!")
             .build();
@@ -262,7 +257,8 @@ impl App for RichTextDemo {
 
         for (mut title_buffer, mut segment_buffers) in all_buffers {
             // Draw title
-            self.font_renderer.draw_text(&mut title_buffer, Vec2::new(50.0, y));
+            self.font_renderer
+                .draw_text(&mut title_buffer, Vec2::new(50.0, y));
             y += 35.0;
 
             // Draw segments with proper inline layout
@@ -290,17 +286,18 @@ impl App for RichTextDemo {
         }
 
         // Begin frame
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available (minimized, etc.)
+        };
 
-        // Render with automatic scoping
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::from_rgb_u8(20, 20, 30),
-            |pass| {
-                self.font_renderer.render(pass.wgpu_pass());
-            },
-        );
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(20, 20, 30))
+                .build();
 
-        frame.finish();
+            self.font_renderer.render(pass.wgpu_pass());
+        }
+        // Frame auto-submits on drop
     }
 }

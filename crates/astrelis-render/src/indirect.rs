@@ -194,11 +194,7 @@ impl<T: IndirectCommand> IndirectBuffer<T> {
     /// # Panics
     ///
     /// Panics if `INDIRECT_FIRST_INSTANCE` feature is not enabled on the context.
-    pub fn new(
-        context: &GraphicsContext,
-        label: Option<&str>,
-        capacity: usize,
-    ) -> Self {
+    pub fn new(context: &GraphicsContext, label: Option<&str>, capacity: usize) -> Self {
         // Check that required feature is available
         context.require_feature(GpuFeatures::INDIRECT_FIRST_INSTANCE);
 
@@ -229,11 +225,7 @@ impl<T: IndirectCommand> IndirectBuffer<T> {
     /// # Panics
     ///
     /// Panics if `INDIRECT_FIRST_INSTANCE` feature is not enabled on the context.
-    pub fn new_init(
-        context: &GraphicsContext,
-        label: Option<&str>,
-        commands: &[T],
-    ) -> Self {
+    pub fn new_init(context: &GraphicsContext, label: Option<&str>, commands: &[T]) -> Self {
         context.require_feature(GpuFeatures::INDIRECT_FIRST_INSTANCE);
 
         let buffer = context.device().create_buffer(&wgpu::BufferDescriptor {

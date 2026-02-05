@@ -9,7 +9,7 @@
 //! - [`UiPlugin`]: Trait for implementing widget plugins (core, docking, scrolling, etc.)
 //! - [`PluginHandle`]: Zero-cost proof token that a plugin is registered
 //! - [`PluginManager`]: Owns plugins and the widget type registry
-//! - [`WidgetTypeRegistry`]: Maps `TypeId` → handler functions for O(1) dispatch
+//! - [`registry::WidgetTypeRegistry`]: Maps `TypeId` → handler functions for O(1) dispatch
 //!
 //! # Example
 //!
@@ -58,11 +58,7 @@ pub trait UiPlugin: Any + 'static {
     ///
     /// Called before per-widget-type dispatch, in plugin registration order.
     /// Use this for cross-widget stateful interactions (drags, etc.)
-    fn handle_event(
-        &mut self,
-        _event: &UiInputEvent,
-        _ctx: &mut PluginEventContext<'_>,
-    ) -> bool {
+    fn handle_event(&mut self, _event: &UiInputEvent, _ctx: &mut PluginEventContext<'_>) -> bool {
         false
     }
 
@@ -218,11 +214,7 @@ impl PluginManager {
     }
 
     /// Dispatch an event to all plugins in order. Returns `true` if consumed.
-    pub fn handle_event(
-        &mut self,
-        event: &UiInputEvent,
-        ctx: &mut PluginEventContext<'_>,
-    ) -> bool {
+    pub fn handle_event(&mut self, event: &UiInputEvent, ctx: &mut PluginEventContext<'_>) -> bool {
         for plugin in &mut self.plugins {
             if plugin.handle_event(event, ctx) {
                 return true;
@@ -284,15 +276,12 @@ impl UiPlugin for CorePlugin {
                 .with_on_key_input(text_input_key)
                 .with_on_char_input(text_input_char),
         );
-        registry.register::<Image>(
-            WidgetTypeDescriptor::new("Image").with_render(render_image),
-        );
+        registry.register::<Image>(WidgetTypeDescriptor::new("Image").with_render(render_image));
         // Row and Column are layout-only — no visual rendering in current code
         registry.register::<Row>(WidgetTypeDescriptor::new("Row"));
         registry.register::<Column>(WidgetTypeDescriptor::new("Column"));
-        registry.register::<Tooltip>(
-            WidgetTypeDescriptor::new("Tooltip").with_render(render_tooltip),
-        );
+        registry
+            .register::<Tooltip>(WidgetTypeDescriptor::new("Tooltip").with_render(render_tooltip));
         registry.register::<HScrollbar>(
             WidgetTypeDescriptor::new("HScrollbar").with_render(render_hscrollbar),
         );
@@ -415,8 +404,7 @@ mod tests {
 
     #[test]
     fn test_widget_type_descriptor_builder() {
-        let desc = WidgetTypeDescriptor::new("Test")
-            .with_clips_children(|_| true);
+        let desc = WidgetTypeDescriptor::new("Test").with_clips_children(|_| true);
 
         assert_eq!(desc.name, "Test");
         assert!(desc.clips_children.is_some());

@@ -57,11 +57,11 @@ use crate::font::FontSystem;
 use crate::sdf::{SdfConfig, generate_sdf};
 use crate::text::{Text, TextMetrics};
 
-use super::{SDF_BASE_SIZE, SDF_DEFAULT_SPREAD, orthographic_projection};
 use super::shared::{
     AtlasEntry, AtlasPacker, GlyphPlacement, SdfAtlasEntry, SdfCacheKey, SdfParams, SharedContext,
     TextBuffer, TextRender, TextRendererConfig, TextVertex,
 };
+use super::{SDF_BASE_SIZE, SDF_DEFAULT_SPREAD, orthographic_projection};
 
 /// SDF text renderer backend.
 ///
@@ -154,10 +154,8 @@ impl SdfBackend {
         );
 
         // SDF params uniform buffer using UniformBuffer
-        let params_buffer = renderer.create_typed_uniform(
-            Some("SDF Params Buffer"),
-            &SdfParams::default(),
-        );
+        let params_buffer =
+            renderer.create_typed_uniform(Some("SDF Params Buffer"), &SdfParams::default());
 
         // SDF params bind group layout
         let params_bind_group_layout = renderer.create_bind_group_layout(
@@ -259,7 +257,11 @@ impl SdfBackend {
     }
 
     /// Ensure a glyph is in the SDF atlas.
-    pub fn ensure_glyph(&mut self, shared: &SharedContext, cache_key: CacheKey) -> Option<&SdfAtlasEntry> {
+    pub fn ensure_glyph(
+        &mut self,
+        shared: &SharedContext,
+        cache_key: CacheKey,
+    ) -> Option<&SdfAtlasEntry> {
         let sdf_key = SdfCacheKey::from_cache_key(cache_key);
 
         // Check if already in SDF atlas
@@ -278,10 +280,14 @@ impl SdfBackend {
         };
 
         // Rasterize the glyph at base size
-        let mut font_system = shared.font_system.write()
+        let mut font_system = shared
+            .font_system
+            .write()
             .map_err(|e| crate::error::TextError::LockPoisoned(e.to_string()))
             .ok()?;
-        let mut swash_cache = shared.swash_cache.write()
+        let mut swash_cache = shared
+            .swash_cache
+            .write()
             .map_err(|e| crate::error::TextError::LockPoisoned(e.to_string()))
             .ok()?;
         let image = match swash_cache.get_image(&mut font_system, base_cache_key) {
@@ -507,7 +513,10 @@ impl SdfTextRenderer {
         let mut font_system = match self.shared.font_system.write() {
             Ok(guard) => guard,
             Err(e) => {
-                tracing::error!("Font system lock poisoned during prepare: {}. Attempting recovery.", e);
+                tracing::error!(
+                    "Font system lock poisoned during prepare: {}. Attempting recovery.",
+                    e
+                );
                 // Try to recover by taking the poisoned lock
                 self.shared.font_system.write().unwrap_or_else(|poisoned| {
                     tracing::warn!("Clearing poisoned lock and continuing");
@@ -557,7 +566,10 @@ impl SdfTextRenderer {
         let mut font_system = match self.shared.font_system.write() {
             Ok(guard) => guard,
             Err(e) => {
-                tracing::error!("Font system lock poisoned during draw: {}. Skipping layout.", e);
+                tracing::error!(
+                    "Font system lock poisoned during draw: {}. Skipping layout.",
+                    e
+                );
                 return; // Skip rendering on error
             }
         };

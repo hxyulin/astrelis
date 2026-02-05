@@ -18,21 +18,21 @@
 //! cargo run -p astrelis-egui --example textured_quad
 //! ```
 
-use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_egui::Egui;
-use astrelis_render::{GraphicsContext, RenderableWindow};
+use astrelis_render::{GraphicsContext, RenderWindow, RenderWindowBuilder};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
+use std::sync::Arc;
 
 #[allow(dead_code)]
 struct TexturedQuadApp {
     _context: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     egui: Egui,
 
@@ -54,7 +54,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -64,7 +65,9 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new(window, graphics_ctx.clone()).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
         let window_id = window.id();
         let egui = Egui::new(&window, &graphics_ctx);
 
@@ -247,12 +250,14 @@ fn main() {
             -0.8,  0.8,  0.0, 0.0,
         ];
 
-        let vertex_buffer = graphics_ctx.device().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Vertex Buffer"),
-            size: (vertices.len() * std::mem::size_of::<f32>()) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let vertex_buffer = graphics_ctx
+            .device()
+            .create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Vertex Buffer"),
+                size: (vertices.len() * std::mem::size_of::<f32>()) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
 
         graphics_ctx
             .queue()
@@ -408,25 +413,27 @@ impl App for TexturedQuadApp {
                 render_pass.draw(0..6, 0..1);
             }
 
-            graphics_ctx.queue().submit(std::iter::once(encoder.finish()));
+            graphics_ctx
+                .queue()
+                .submit(std::iter::once(encoder.finish()));
         }
 
         // Main window rendering
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available (minimized, etc.)
+        };
 
         // Clear to dark background with automatic scoping
         {
-            use astrelis_render::{RenderPassBuilder, RenderTarget};
-            let render_pass = RenderPassBuilder::new()
+            let _pass = frame
+                .render_pass()
                 .label("Clear Pass")
-                .target(RenderTarget::Surface)
                 .clear_color(astrelis_render::Color::rgb(0.15, 0.15, 0.15))
-                .build(&mut frame);
-            drop(render_pass);
+                .build();
         }
 
-        self.egui.render(&self.window, &mut frame);
-        frame.finish();
+        self.egui.render(&frame);
+        // Frame auto-submits on drop
     }
 }
 

@@ -5,8 +5,8 @@
 
 use astrelis_core::geometry::{PhysicalPosition, PhysicalSize, ScaleFactor, Size};
 use astrelis_render::Viewport;
-use astrelis_ui::{UiCore, WidgetId};
 use astrelis_ui::constraint::Constraint;
+use astrelis_ui::{UiCore, WidgetId};
 
 fn default_viewport() -> Viewport {
     Viewport {
@@ -323,9 +323,7 @@ fn test_layout_with_per_side_padding() {
             .padding_top(20.0)
             .padding_right(30.0)
             .padding_bottom(40.0)
-            .child(|container| {
-                container.container().width(100.0).height(100.0).build()
-            })
+            .child(|container| container.container().width(100.0).height(100.0).build())
             .build();
     });
 
@@ -373,9 +371,7 @@ fn test_padding_x_y() {
             .height(600.0)
             .padding_x(40.0) // Left and right
             .padding_y(20.0) // Top and bottom
-            .child(|container| {
-                container.container().width(100.0).height(100.0).build()
-            })
+            .child(|container| container.container().width(100.0).height(100.0).build())
             .build();
     });
 
@@ -516,9 +512,7 @@ fn test_padding_with_percent_constraint() {
             .padding_top(Constraint::Percent(5.0))
             .padding_right(Constraint::Percent(5.0))
             .padding_bottom(Constraint::Percent(5.0))
-            .child(|container| {
-                container.container().width(100.0).height(100.0).build()
-            })
+            .child(|container| container.container().width(100.0).height(100.0).build())
             .build();
     });
 
@@ -541,7 +535,7 @@ fn test_margin_auto_centering() {
                     .container()
                     .width(Constraint::Percent(50.0))
                     .height(100.0)
-                    .margin_left(Constraint::Auto)  // Center horizontally
+                    .margin_left(Constraint::Auto) // Center horizontally
                     .margin_right(Constraint::Auto)
                     .build()
             })
@@ -593,9 +587,7 @@ fn test_padding_preserves_existing_values() {
             .height(600.0)
             .padding(20.0)
             .padding_left(50.0) // Override just the left side
-            .child(|container| {
-                container.container().width(100.0).height(100.0).build()
-            })
+            .child(|container| container.container().width(100.0).height(100.0).build())
             .build();
     });
 

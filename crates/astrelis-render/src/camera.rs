@@ -423,7 +423,8 @@ mod tests {
         let mut camera = Camera::orthographic(800.0, 600.0, 0.1, 100.0);
         camera.look_at(Vec3::new(0.0, 0.0, 1.0), Vec3::ZERO, Vec3::Y);
 
-        let world_pos = camera.screen_to_world(Vec2::new(400.0, 300.0), Vec2::new(800.0, 600.0), 0.0);
+        let world_pos =
+            camera.screen_to_world(Vec2::new(400.0, 300.0), Vec2::new(800.0, 600.0), 0.0);
 
         // Center of screen should map to roughly (0, 0) in world space
         assert!((world_pos.x.abs()) < 0.1);

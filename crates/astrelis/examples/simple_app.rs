@@ -35,7 +35,11 @@ impl astrelis_winit::app::App for SimpleApp {
     fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, time: &astrelis_winit::FrameTime) {
         // Application logic here
         if time.frame_count % 60 == 0 {
-            println!("Frame {}: {:.1} FPS", time.frame_count, 1.0 / time.delta.as_secs_f32());
+            println!(
+                "Frame {}: {:.1} FPS",
+                time.frame_count,
+                1.0 / time.delta.as_secs_f32()
+            );
         }
     }
 
@@ -70,4 +74,3 @@ fn main() {
             SimpleApp
         });
 }
-

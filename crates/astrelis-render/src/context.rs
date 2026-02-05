@@ -33,11 +33,11 @@
 
 use astrelis_core::profiling::{profile_function, profile_scope};
 
-use crate::capability::{clamp_limits_to_adapter, RenderCapability};
+use crate::capability::{RenderCapability, clamp_limits_to_adapter};
 use crate::features::GpuFeatures;
 use astrelis_test_utils::{
-    GpuBindGroup, GpuBindGroupLayout, GpuBuffer, GpuComputePipeline, GpuRenderPipeline,
-    GpuSampler, GpuShaderModule, GpuTexture, RenderContext,
+    GpuBindGroup, GpuBindGroupLayout, GpuBuffer, GpuComputePipeline, GpuRenderPipeline, GpuSampler,
+    GpuShaderModule, GpuTexture, RenderContext,
 };
 use std::sync::Arc;
 use wgpu::{
@@ -83,6 +83,9 @@ pub enum GraphicsError {
 
     /// Surface acquisition timed out.
     SurfaceTimeout,
+
+    /// GPU profiling initialization failed.
+    GpuProfilingFailed(String),
 }
 
 impl std::fmt::Display for GraphicsError {
@@ -94,7 +97,11 @@ impl std::fmt::Display for GraphicsError {
             GraphicsError::DeviceCreationFailed(msg) => {
                 write!(f, "Failed to create device: {}", msg)
             }
-            GraphicsError::MissingRequiredFeatures { missing, adapter_name, supported } => {
+            GraphicsError::MissingRequiredFeatures {
+                missing,
+                adapter_name,
+                supported,
+            } => {
                 write!(
                     f,
                     "Required GPU features not supported by adapter '{}': {:?}\nSupported: {:?}",
@@ -111,10 +118,16 @@ impl std::fmt::Display for GraphicsError {
                 write!(f, "Failed to acquire surface texture: {}", msg)
             }
             GraphicsError::SurfaceLost => {
-                write!(f, "Surface lost - needs recreation (window minimize, GPU reset, etc.)")
+                write!(
+                    f,
+                    "Surface lost - needs recreation (window minimize, GPU reset, etc.)"
+                )
             }
             GraphicsError::SurfaceOutdated => {
-                write!(f, "Surface outdated - needs reconfiguration (window resized)")
+                write!(
+                    f,
+                    "Surface outdated - needs reconfiguration (window resized)"
+                )
             }
             GraphicsError::SurfaceOutOfMemory => {
                 write!(f, "Out of memory acquiring surface texture")
@@ -122,11 +135,20 @@ impl std::fmt::Display for GraphicsError {
             GraphicsError::SurfaceTimeout => {
                 write!(f, "Timeout acquiring surface texture")
             }
+            GraphicsError::GpuProfilingFailed(msg) => {
+                write!(f, "GPU profiling initialization failed: {}", msg)
+            }
         }
     }
 }
 
 impl std::error::Error for GraphicsError {}
+
+impl From<crate::gpu_profiling::GpuFrameProfilerError> for GraphicsError {
+    fn from(err: crate::gpu_profiling::GpuFrameProfilerError) -> Self {
+        GraphicsError::GpuProfilingFailed(err.to_string())
+    }
+}
 
 /// A globally shared graphics context.
 ///
@@ -219,13 +241,17 @@ impl GraphicsContext {
     }
 
     /// Creates a new graphics context with custom descriptor (owned).
-    pub async fn new_owned_with_descriptor(descriptor: GraphicsContextDescriptor) -> Result<Arc<Self>, GraphicsError> {
+    pub async fn new_owned_with_descriptor(
+        descriptor: GraphicsContextDescriptor,
+    ) -> Result<Arc<Self>, GraphicsError> {
         let context = Self::create_context_internal(descriptor).await?;
         Ok(Arc::new(context))
     }
 
     /// Internal method to create context without deciding on ownership pattern.
-    async fn create_context_internal(descriptor: GraphicsContextDescriptor) -> Result<Self, GraphicsError> {
+    async fn create_context_internal(
+        descriptor: GraphicsContextDescriptor,
+    ) -> Result<Self, GraphicsError> {
         profile_function!();
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -256,12 +282,11 @@ impl GraphicsContext {
         }
 
         // Determine which requested features are available
-        let available_requested = descriptor.requested_gpu_features
-            & GpuFeatures::from_wgpu(adapter.features());
+        let available_requested =
+            descriptor.requested_gpu_features & GpuFeatures::from_wgpu(adapter.features());
 
         // Log which requested features were not available
-        let unavailable_requested =
-            descriptor.requested_gpu_features - available_requested;
+        let unavailable_requested = descriptor.requested_gpu_features - available_requested;
         if !unavailable_requested.is_empty() {
             tracing::warn!(
                 "Some requested GPU features are not available: {:?}",

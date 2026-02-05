@@ -1,6 +1,6 @@
 //! Shared data-to-screen coordinate transformation for instanced renderers.
 //!
-//! This module provides [`DataTransform`] and [`TransformUniform`] used by
+//! This module provides [`DataTransform`] used by
 //! [`LineRenderer`](crate::LineRenderer), [`PointRenderer`](crate::PointRenderer),
 //! and [`QuadRenderer`](crate::QuadRenderer) to map data coordinates to screen
 //! pixels on the GPU.
@@ -237,10 +237,10 @@ mod tests {
     #[test]
     fn test_data_range_transform() {
         let params = DataRangeParams::new(
-            100.0, 50.0,  // plot origin
+            100.0, 50.0, // plot origin
             600.0, 400.0, // plot size
-            0.0, 10.0,    // data x range
-            0.0, 100.0,   // data y range
+            0.0, 10.0, // data x range
+            0.0, 100.0, // data y range
         );
         let transform = DataTransform::from_data_range(test_viewport(), params);
         let u = transform.uniform();

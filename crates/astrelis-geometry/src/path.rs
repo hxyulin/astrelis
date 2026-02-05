@@ -282,8 +282,9 @@ impl PathBuilder {
     /// Draw a smooth cubic Bezier (first control point reflected from previous).
     pub fn smooth_cubic_to(&mut self, control2: Vec2, to: Vec2) -> &mut Self {
         // Reflect previous control2
-        let control1 = if let Some(PathCommand::CubicTo { control2, to: prev, .. }) =
-            self.commands.last().copied()
+        let control1 = if let Some(PathCommand::CubicTo {
+            control2, to: prev, ..
+        }) = self.commands.last().copied()
         {
             prev * 2.0 - control2
         } else {
@@ -339,13 +340,7 @@ impl PathBuilder {
         // Top edge
         self.line_to(position + Vec2::new(size.x - r, 0.0));
         // Top-right corner
-        self.arc_to(
-            radii,
-            0.0,
-            false,
-            true,
-            position + Vec2::new(size.x, r),
-        );
+        self.arc_to(radii, 0.0, false, true, position + Vec2::new(size.x, r));
 
         // Right edge
         self.line_to(position + Vec2::new(size.x, size.y - r));
@@ -361,7 +356,13 @@ impl PathBuilder {
         // Bottom edge
         self.line_to(position + Vec2::new(r, size.y));
         // Bottom-left corner
-        self.arc_to(radii, 0.0, false, true, position + Vec2::new(0.0, size.y - r));
+        self.arc_to(
+            radii,
+            0.0,
+            false,
+            true,
+            position + Vec2::new(0.0, size.y - r),
+        );
 
         // Left edge
         self.line_to(position + Vec2::new(0.0, r));
@@ -438,57 +439,53 @@ pub trait PathCurves {
 impl PathCurves for Path {
     fn quadratic_curves(&self) -> impl Iterator<Item = QuadraticBezier> + '_ {
         let mut current = Vec2::ZERO;
-        self.commands.iter().filter_map(move |cmd| {
-            match cmd {
-                PathCommand::MoveTo(to) | PathCommand::LineTo(to) => {
-                    current = *to;
-                    None
-                }
-                PathCommand::QuadTo { control, to } => {
-                    let curve = QuadraticBezier::new(current, *control, *to);
-                    current = *to;
-                    Some(curve)
-                }
-                PathCommand::CubicTo { to, .. } => {
-                    current = *to;
-                    None
-                }
-                PathCommand::ArcTo { to, .. } => {
-                    current = *to;
-                    None
-                }
-                PathCommand::Close => None,
+        self.commands.iter().filter_map(move |cmd| match cmd {
+            PathCommand::MoveTo(to) | PathCommand::LineTo(to) => {
+                current = *to;
+                None
             }
+            PathCommand::QuadTo { control, to } => {
+                let curve = QuadraticBezier::new(current, *control, *to);
+                current = *to;
+                Some(curve)
+            }
+            PathCommand::CubicTo { to, .. } => {
+                current = *to;
+                None
+            }
+            PathCommand::ArcTo { to, .. } => {
+                current = *to;
+                None
+            }
+            PathCommand::Close => None,
         })
     }
 
     fn cubic_curves(&self) -> impl Iterator<Item = CubicBezier> + '_ {
         let mut current = Vec2::ZERO;
-        self.commands.iter().filter_map(move |cmd| {
-            match cmd {
-                PathCommand::MoveTo(to) | PathCommand::LineTo(to) => {
-                    current = *to;
-                    None
-                }
-                PathCommand::QuadTo { to, .. } => {
-                    current = *to;
-                    None
-                }
-                PathCommand::CubicTo {
-                    control1,
-                    control2,
-                    to,
-                } => {
-                    let curve = CubicBezier::new(current, *control1, *control2, *to);
-                    current = *to;
-                    Some(curve)
-                }
-                PathCommand::ArcTo { to, .. } => {
-                    current = *to;
-                    None
-                }
-                PathCommand::Close => None,
+        self.commands.iter().filter_map(move |cmd| match cmd {
+            PathCommand::MoveTo(to) | PathCommand::LineTo(to) => {
+                current = *to;
+                None
             }
+            PathCommand::QuadTo { to, .. } => {
+                current = *to;
+                None
+            }
+            PathCommand::CubicTo {
+                control1,
+                control2,
+                to,
+            } => {
+                let curve = CubicBezier::new(current, *control1, *control2, *to);
+                current = *to;
+                Some(curve)
+            }
+            PathCommand::ArcTo { to, .. } => {
+                current = *to;
+                None
+            }
+            PathCommand::Close => None,
         })
     }
 }

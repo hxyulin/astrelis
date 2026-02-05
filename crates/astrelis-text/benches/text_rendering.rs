@@ -1,10 +1,10 @@
 //! Benchmarks for text rendering operations
 
-use std::sync::Arc;
 use astrelis_core::math::Vec2;
 use astrelis_render::{Color, GraphicsContext};
 use astrelis_text::{FontRenderer, FontSystem, Text, TextAlign, TextWrap};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use std::sync::Arc;
 
 fn setup() -> (Arc<GraphicsContext>, FontRenderer) {
     let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");

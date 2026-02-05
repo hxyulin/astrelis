@@ -6,10 +6,10 @@
 //!
 //! This means pan/zoom only updates a small uniform buffer, not all line data.
 
-use astrelis_core::profiling::profile_scope;
 use crate::capability::{GpuRequirements, RenderCapability};
 use crate::transform::{DataTransform, TransformUniform};
 use crate::{Color, GraphicsContext, Viewport};
+use astrelis_core::profiling::profile_scope;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec2;
 use std::sync::Arc;
@@ -29,7 +29,12 @@ pub struct LineSegment {
 
 impl LineSegment {
     pub fn new(start: Vec2, end: Vec2, width: f32, color: Color) -> Self {
-        Self { start, end, width, color }
+        Self {
+            start,
+            end,
+            width,
+            color,
+        }
     }
 }
 
@@ -50,7 +55,12 @@ impl LineInstance {
             start: [segment.start.x, segment.start.y],
             end: [segment.end.x, segment.end.y],
             width: segment.width,
-            color: [segment.color.r, segment.color.g, segment.color.b, segment.color.a],
+            color: [
+                segment.color.r,
+                segment.color.g,
+                segment.color.b,
+                segment.color.a,
+            ],
             _padding: [0.0],
         }
     }
@@ -118,14 +128,16 @@ impl LineRenderer {
                     }],
                 });
 
-        let transform_bind_group = context.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Line Renderer Transform Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: transform_buffer.as_entire_binding(),
-            }],
-        });
+        let transform_bind_group = context
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Line Renderer Transform Bind Group"),
+                layout: &bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: transform_buffer.as_entire_binding(),
+                }],
+            });
 
         // Shader
         let shader = context
@@ -216,20 +228,16 @@ impl LineRenderer {
             });
 
         // Unit quad
-        let quad_vertices: [[f32; 2]; 4] = [
-            [-0.5, -0.5],
-            [0.5, -0.5],
-            [-0.5, 0.5],
-            [0.5, 0.5],
-        ];
+        let quad_vertices: [[f32; 2]; 4] = [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]];
 
-        let vertex_buffer = context
-            .device()
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Line Renderer Vertex Buffer"),
-                contents: bytemuck::cast_slice(&quad_vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        let vertex_buffer =
+            context
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Line Renderer Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&quad_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
         Self {
             context,
@@ -253,7 +261,8 @@ impl LineRenderer {
     /// Add a line segment.
     #[inline]
     pub fn add_line(&mut self, start: Vec2, end: Vec2, width: f32, color: Color) {
-        self.pending_segments.push(LineSegment::new(start, end, width, color));
+        self.pending_segments
+            .push(LineSegment::new(start, end, width, color));
         self.data_dirty = true;
     }
 
@@ -284,26 +293,30 @@ impl LineRenderer {
             return;
         }
 
-        tracing::trace!("Uploading {} line segments to GPU", self.pending_segments.len());
+        tracing::trace!(
+            "Uploading {} line segments to GPU",
+            self.pending_segments.len()
+        );
 
         // Convert to GPU format
         let instances: Vec<LineInstance> = {
             profile_scope!("convert_instances");
-            self.pending_segments.iter().map(LineInstance::new).collect()
+            self.pending_segments
+                .iter()
+                .map(LineInstance::new)
+                .collect()
         };
 
         // Create buffer
         {
             profile_scope!("create_instance_buffer");
-            self.instance_buffer = Some(
-                self.context
-                    .device()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Line Renderer Instance Buffer"),
-                        contents: bytemuck::cast_slice(&instances),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            );
+            self.instance_buffer = Some(self.context.device().create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Line Renderer Instance Buffer"),
+                    contents: bytemuck::cast_slice(&instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                },
+            ));
         }
 
         self.instance_count = self.pending_segments.len() as u32;

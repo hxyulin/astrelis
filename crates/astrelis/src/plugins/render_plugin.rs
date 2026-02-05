@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use astrelis_core::geometry::LogicalSize;
 use astrelis_render::{GraphicsContext, WindowContext, WindowContextDescriptor, WindowManager};
-use astrelis_winit::window::Window;
 use astrelis_winit::WindowId;
+use astrelis_winit::window::Window;
 
 use crate::plugin::Plugin;
 use crate::resource::Resources;
@@ -43,7 +43,10 @@ impl RenderContexts {
     /// Create a render context for a window.
     ///
     /// The window is consumed and owned by the WindowContext.
-    pub fn create_for_window(&mut self, window: Window) -> Result<&mut WindowContext, astrelis_render::GraphicsError> {
+    pub fn create_for_window(
+        &mut self,
+        window: Window,
+    ) -> Result<&mut WindowContext, astrelis_render::GraphicsError> {
         let graphics = self
             .graphics
             .as_ref()
@@ -167,7 +170,8 @@ impl Plugin for RenderPlugin {
 
     fn build(&self, resources: &mut Resources) {
         // Create graphics context with Arc (no memory leak)
-        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         tracing::info!(
             "RenderPlugin: GraphicsContext created (backend: {:?})",
@@ -178,7 +182,9 @@ impl Plugin for RenderPlugin {
         resources.insert(RenderContexts::with_graphics(graphics.clone()));
         resources.insert(WindowManager::new(graphics));
 
-        tracing::debug!("RenderPlugin: Registered GraphicsContext, RenderContexts, and WindowManager");
+        tracing::debug!(
+            "RenderPlugin: Registered GraphicsContext, RenderContexts, and WindowManager"
+        );
     }
 }
 

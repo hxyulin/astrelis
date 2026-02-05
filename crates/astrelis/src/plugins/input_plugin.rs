@@ -42,9 +42,7 @@ mod tests {
 
     #[test]
     fn test_input_plugin_registers_state() {
-        let engine = EngineBuilder::new()
-            .add_plugin(InputPlugin)
-            .build();
+        let engine = EngineBuilder::new().add_plugin(InputPlugin).build();
 
         assert!(engine.get::<astrelis_input::InputState>().is_some());
     }

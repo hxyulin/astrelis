@@ -99,7 +99,11 @@ pub fn shape_text(
 ///
 /// This is useful when you already have a shaped buffer and want to convert
 /// it to our retained rendering format.
-pub fn extract_glyphs_from_buffer(buffer: &Buffer, _font_size: f32, scale: f32) -> ShapedTextResult {
+pub fn extract_glyphs_from_buffer(
+    buffer: &Buffer,
+    _font_size: f32,
+    scale: f32,
+) -> ShapedTextResult {
     let mut max_x = 0.0_f32;
     let mut min_y = f32::MAX;
     let mut max_y = f32::MIN;

@@ -620,7 +620,11 @@ mod tests {
 
         // Compute layout
         let registry = crate::plugin::registry::WidgetTypeRegistry::new();
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
+        tree.compute_layout(
+            astrelis_core::geometry::Size::new(800.0, 600.0),
+            None,
+            &registry,
+        );
 
         let mut culling = CullingTree::new();
         culling.update(&tree);
@@ -648,7 +652,11 @@ mod tests {
 
         // Compute layout
         let registry = crate::plugin::registry::WidgetTypeRegistry::new();
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
+        tree.compute_layout(
+            astrelis_core::geometry::Size::new(800.0, 600.0),
+            None,
+            &registry,
+        );
 
         let mut culling = CullingTree::new();
         culling.update(&tree);
@@ -676,7 +684,11 @@ mod tests {
         tree.set_root(root);
 
         let registry = crate::plugin::registry::WidgetTypeRegistry::new();
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
+        tree.compute_layout(
+            astrelis_core::geometry::Size::new(800.0, 600.0),
+            None,
+            &registry,
+        );
 
         let mut culling = CullingTree::new();
         culling.update(&tree);
@@ -753,7 +765,11 @@ mod tests {
         let root = tree.add_widget(Box::new(crate::widgets::Container::new()));
         tree.set_root(root);
         let registry = crate::plugin::registry::WidgetTypeRegistry::new();
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
+        tree.compute_layout(
+            astrelis_core::geometry::Size::new(800.0, 600.0),
+            None,
+            &registry,
+        );
 
         let mut culling = CullingTree::new();
         culling.update(&tree);
@@ -781,7 +797,11 @@ mod tests {
         let root = tree.add_widget(Box::new(container));
         tree.set_root(root);
         let registry = crate::plugin::registry::WidgetTypeRegistry::new();
-        tree.compute_layout(astrelis_core::geometry::Size::new(800.0, 600.0), None, &registry);
+        tree.compute_layout(
+            astrelis_core::geometry::Size::new(800.0, 600.0),
+            None,
+            &registry,
+        );
 
         let mut culling = CullingTree::new();
         culling.update(&tree);

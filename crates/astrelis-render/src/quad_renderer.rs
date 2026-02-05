@@ -7,10 +7,10 @@
 //! This is primarily used for bar charts but can be used for any axis-aligned
 //! rectangle rendering where data-to-screen transformation is needed.
 
-use astrelis_core::profiling::profile_scope;
 use crate::capability::{GpuRequirements, RenderCapability};
 use crate::transform::{DataTransform, TransformUniform};
 use crate::{Color, GraphicsContext, Viewport};
+use astrelis_core::profiling::profile_scope;
 use bytemuck::{Pod, Zeroable};
 use glam::Vec2;
 use std::sync::Arc;
@@ -137,14 +137,16 @@ impl QuadRenderer {
                     }],
                 });
 
-        let transform_bind_group = context.device().create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Quad Renderer Transform Bind Group"),
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: transform_buffer.as_entire_binding(),
-            }],
-        });
+        let transform_bind_group = context
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Quad Renderer Transform Bind Group"),
+                layout: &bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: transform_buffer.as_entire_binding(),
+                }],
+            });
 
         // Shader
         let shader = context
@@ -230,20 +232,16 @@ impl QuadRenderer {
             });
 
         // Unit quad (0,0 to 1,1)
-        let quad_vertices: [[f32; 2]; 4] = [
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [0.0, 1.0],
-            [1.0, 1.0],
-        ];
+        let quad_vertices: [[f32; 2]; 4] = [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
 
-        let vertex_buffer = context
-            .device()
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Quad Renderer Vertex Buffer"),
-                contents: bytemuck::cast_slice(&quad_vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        let vertex_buffer =
+            context
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Quad Renderer Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&quad_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
         Self {
             context,
@@ -274,7 +272,8 @@ impl QuadRenderer {
     /// Add a bar from center x, width, y range.
     #[inline]
     pub fn add_bar(&mut self, x_center: f32, width: f32, y_bottom: f32, y_top: f32, color: Color) {
-        self.pending_quads.push(Quad::bar(x_center, width, y_bottom, y_top, color));
+        self.pending_quads
+            .push(Quad::bar(x_center, width, y_bottom, y_top, color));
         self.data_dirty = true;
     }
 
@@ -316,15 +315,13 @@ impl QuadRenderer {
         // Create buffer
         {
             profile_scope!("create_instance_buffer");
-            self.instance_buffer = Some(
-                self.context
-                    .device()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Quad Renderer Instance Buffer"),
-                        contents: bytemuck::cast_slice(&instances),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            );
+            self.instance_buffer = Some(self.context.device().create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Quad Renderer Instance Buffer"),
+                    contents: bytemuck::cast_slice(&instances),
+                    usage: wgpu::BufferUsages::VERTEX,
+                },
+            ));
         }
 
         self.instance_count = self.pending_quads.len() as u32;

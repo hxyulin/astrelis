@@ -340,10 +340,7 @@ where
     /// Convert to physical coordinates as f64.
     #[inline]
     pub fn to_physical_f64(self, scale: ScaleFactor) -> PhysicalSize<f64> {
-        PhysicalSize::new(
-            self.width.into() * scale.0,
-            self.height.into() * scale.0,
-        )
+        PhysicalSize::new(self.width.into() * scale.0, self.height.into() * scale.0)
     }
 }
 
@@ -364,10 +361,7 @@ where
     /// Convert to logical coordinates as f64.
     #[inline]
     pub fn to_logical_f64(self, scale: ScaleFactor) -> LogicalSize<f64> {
-        LogicalSize::new(
-            self.width.into() / scale.0,
-            self.height.into() / scale.0,
-        )
+        LogicalSize::new(self.width.into() / scale.0, self.height.into() / scale.0)
     }
 }
 
@@ -530,10 +524,7 @@ where
     /// Convert to physical coordinates as f64.
     #[inline]
     pub fn to_physical_f64(self, scale: ScaleFactor) -> PhysicalPosition<f64> {
-        PhysicalPosition::new(
-            self.x.into() * scale.0,
-            self.y.into() * scale.0,
-        )
+        PhysicalPosition::new(self.x.into() * scale.0, self.y.into() * scale.0)
     }
 }
 
@@ -554,10 +545,7 @@ where
     /// Convert to logical coordinates as f64.
     #[inline]
     pub fn to_logical_f64(self, scale: ScaleFactor) -> LogicalPosition<f64> {
-        LogicalPosition::new(
-            self.x.into() / scale.0,
-            self.y.into() / scale.0,
-        )
+        LogicalPosition::new(self.x.into() / scale.0, self.y.into() / scale.0)
     }
 }
 
@@ -1027,7 +1015,12 @@ impl<T> Rect<T> {
     /// Create a new rectangle.
     #[inline]
     pub const fn new(x: T, y: T, width: T, height: T) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 
     /// Create from position and size.

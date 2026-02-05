@@ -28,7 +28,7 @@
 
 use std::sync::Arc;
 
-use astrelis_render::{wgpu, Color, GraphicsContext, Viewport};
+use astrelis_render::{Color, GraphicsContext, Viewport, wgpu};
 use astrelis_text::{FontRenderer, FontSystem, Text, TextAlign};
 use glam::Vec2;
 
@@ -235,7 +235,8 @@ impl ChartTextRenderer {
             let x = bounds.x + (bounds.width - w) / 2.0;
 
             let mut buffer = self.font_renderer.prepare(&text);
-            self.font_renderer.draw_text(&mut buffer, Vec2::new(x, y_offset));
+            self.font_renderer
+                .draw_text(&mut buffer, Vec2::new(x, y_offset));
 
             y_offset += h + 4.0;
         }
@@ -251,7 +252,8 @@ impl ChartTextRenderer {
             let x = bounds.x + (bounds.width - w) / 2.0;
 
             let mut buffer = self.font_renderer.prepare(&text);
-            self.font_renderer.draw_text(&mut buffer, Vec2::new(x, y_offset));
+            self.font_renderer
+                .draw_text(&mut buffer, Vec2::new(x, y_offset));
 
             y_offset += h + 4.0;
         }
@@ -400,7 +402,12 @@ impl ChartTextRenderer {
     ///
     /// Uses the geometry renderer to draw color swatches and the text renderer
     /// for series names.
-    pub fn draw_legend(&mut self, chart: &Chart, plot_area: &Rect, geometry: &mut GeometryRenderer) {
+    pub fn draw_legend(
+        &mut self,
+        chart: &Chart,
+        plot_area: &Rect,
+        geometry: &mut GeometryRenderer,
+    ) {
         let Some(legend) = &chart.legend else {
             return;
         };

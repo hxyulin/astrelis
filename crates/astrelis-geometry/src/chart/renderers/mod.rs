@@ -10,5 +10,5 @@ pub mod scatter;
 
 pub use area::GpuChartAreaRenderer;
 pub use bar::GpuChartBarRenderer;
-pub use line::{GpuChartLineRenderer, SeriesGpuState, GPU_RENDER_THRESHOLD};
+pub use line::{GPU_RENDER_THRESHOLD, GpuChartLineRenderer, SeriesGpuState};
 pub use scatter::GpuChartScatterRenderer;

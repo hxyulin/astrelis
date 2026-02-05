@@ -6,23 +6,23 @@
 //! - `BlendMode::Alpha` (standard source-over blending for scene geometry)
 //!   vs `BlendMode::PremultipliedAlpha` (for compositing a pre-rendered framebuffer)
 
-use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_render::{
-    BlendMode, Color, Framebuffer, GraphicsContext, RenderTarget, RenderableWindow,
-    Renderer, WindowContextDescriptor, wgpu,
+    BlendMode, Color, Framebuffer, GraphicsContext, RenderTarget, RenderWindow,
+    RenderWindowBuilder, Renderer, wgpu,
 };
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
+use std::sync::Arc;
 
 struct RendererApp {
     context: Arc<GraphicsContext>,
     renderer: Renderer,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
@@ -38,7 +38,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let renderer = Renderer::new(graphics_ctx.clone());
 
         let window = ctx
@@ -49,14 +50,11 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        ).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .with_depth_default()
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
 
@@ -298,35 +296,37 @@ impl App for RendererApp {
             }
         });
 
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available
+        };
 
-        // Pass 1: Render to offscreen framebuffer with automatic scoping
-        frame.clear_and_render(
-            RenderTarget::Framebuffer(&self.offscreen_fb),
-            Color::rgb(0.2, 0.1, 0.3),
-            |pass| {
-                let pass = pass.wgpu_pass();
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.bind_group, &[]);
-                pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-                pass.draw(0..6, 0..1);
-            },
-        );
+        // Pass 1: Render to offscreen framebuffer
+        {
+            let mut pass = frame
+                .render_pass()
+                .target(RenderTarget::Framebuffer(&self.offscreen_fb))
+                .clear_color(Color::rgb(0.2, 0.1, 0.3))
+                .label("offscreen_pass")
+                .build();
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.bind_group, &[]);
+            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            pass.draw(0..6, 0..1);
+        }
 
-        // Pass 2: Blit framebuffer to surface with automatic scoping
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::rgb(0.1, 0.2, 0.3),
-            |pass| {
-                let pass = pass.wgpu_pass();
-                pass.set_pipeline(&self.blit_pipeline);
-                pass.set_bind_group(0, &self.blit_bind_group, &[]);
-                // Draw fullscreen triangle
-                pass.draw(0..3, 0..1);
-            },
-        );
-
-        frame.finish();
+        // Pass 2: Blit framebuffer to surface
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::rgb(0.1, 0.2, 0.3))
+                .label("blit_pass")
+                .build();
+            pass.set_pipeline(&self.blit_pipeline);
+            pass.set_bind_group(0, &self.blit_bind_group, &[]);
+            // Draw fullscreen triangle
+            pass.draw(0..3, 0..1);
+        }
+        // Frame auto-submits on drop
     }
 }
 

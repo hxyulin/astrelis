@@ -159,11 +159,8 @@ impl IndirectBatchRenderer2D {
     fn ensure_indirect_buffer(&mut self, required: usize) {
         if required > self.indirect_capacity {
             let new_capacity = required.next_power_of_two();
-            self.indirect_buffer = IndirectBuffer::new(
-                &self.context,
-                Some("batched_indirect_buffer"),
-                new_capacity,
-            );
+            self.indirect_buffer =
+                IndirectBuffer::new(&self.context, Some("batched_indirect_buffer"), new_capacity);
             self.indirect_capacity = new_capacity;
         }
     }
@@ -378,9 +375,8 @@ impl BatchRenderer2D for IndirectBatchRenderer2D {
             for group in &self.opaque_texture_groups {
                 if group.texture_id == 0 {
                     pass.set_bind_group(0, self.texture_array.fallback_bind_group(), &[]);
-                } else if let Some(bg) = self
-                    .texture_array
-                    .get_standard_bind_group(group.texture_id)
+                } else if let Some(bg) =
+                    self.texture_array.get_standard_bind_group(group.texture_id)
                 {
                     pass.set_bind_group(0, bg, &[]);
                 } else {
@@ -404,9 +400,8 @@ impl BatchRenderer2D for IndirectBatchRenderer2D {
             for group in &self.transparent_texture_groups {
                 if group.texture_id == 0 {
                     pass.set_bind_group(0, self.texture_array.fallback_bind_group(), &[]);
-                } else if let Some(bg) = self
-                    .texture_array
-                    .get_standard_bind_group(group.texture_id)
+                } else if let Some(bg) =
+                    self.texture_array.get_standard_bind_group(group.texture_id)
                 {
                     pass.set_bind_group(0, bg, &[]);
                 } else {

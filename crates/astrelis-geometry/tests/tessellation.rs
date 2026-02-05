@@ -31,7 +31,10 @@ fn test_rounded_rect_shape_to_path() {
     let shape = Shape::rounded_rect(Vec2::new(0.0, 0.0), Vec2::new(100.0, 100.0), 10.0);
     let path = shape.to_path();
 
-    assert!(!path.is_empty(), "Rounded rectangle path should not be empty");
+    assert!(
+        !path.is_empty(),
+        "Rounded rectangle path should not be empty"
+    );
 }
 
 #[test]
@@ -55,7 +58,10 @@ fn test_rect_shape_factory_centered() {
     let shape = Shape::rect_centered(Vec2::new(50.0, 50.0), Vec2::new(100.0, 100.0));
     let path = shape.to_path();
 
-    assert!(!path.is_empty(), "Centered rectangle path should not be empty");
+    assert!(
+        !path.is_empty(),
+        "Centered rectangle path should not be empty"
+    );
 }
 
 #[test]
@@ -158,7 +164,10 @@ fn test_path_builder_convenience_methods() {
     builder.rect(Vec2::new(0.0, 0.0), Vec2::new(100.0, 100.0));
     let path = builder.build();
 
-    assert!(!path.is_empty(), "Rectangle builder path should not be empty");
+    assert!(
+        !path.is_empty(),
+        "Rectangle builder path should not be empty"
+    );
 }
 
 #[test]

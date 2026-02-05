@@ -126,7 +126,6 @@ impl SeriesId {
     }
 }
 
-
 /// A data point in a chart.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct DataPoint {
@@ -589,7 +588,10 @@ pub enum FillRegionKind {
     /// Fill between two X values across the entire Y range
     VerticalBand { x_min: f64, x_max: f64 },
     /// Fill between a series and a constant Y value
-    BelowSeries { series_index: usize, y_baseline: f64 },
+    BelowSeries {
+        series_index: usize,
+        y_baseline: f64,
+    },
     /// Fill between two series
     BetweenSeries {
         series_index_1: usize,
@@ -794,10 +796,8 @@ impl InteractiveState {
 
     /// Apply uniform zoom (centered on current view center).
     pub fn zoom_by(&mut self, factor: f32) {
-        self.zoom = (self.zoom * factor).clamp(
-            Vec2::splat(self.zoom_min),
-            Vec2::splat(self.zoom_max),
-        );
+        self.zoom =
+            (self.zoom * factor).clamp(Vec2::splat(self.zoom_min), Vec2::splat(self.zoom_max));
     }
 
     /// Apply independent X and Y zoom factors.
@@ -822,10 +822,8 @@ impl InteractiveState {
     /// `normalized_center` should be (0.5, 0.5) for center, (0, 0) for top-left, etc.
     pub fn zoom_at_normalized(&mut self, normalized_center: Vec2, factor: f32) {
         let old_zoom = self.zoom;
-        let new_zoom = (self.zoom * factor).clamp(
-            Vec2::splat(self.zoom_min),
-            Vec2::splat(self.zoom_max),
-        );
+        let new_zoom =
+            (self.zoom * factor).clamp(Vec2::splat(self.zoom_min), Vec2::splat(self.zoom_max));
 
         if new_zoom == old_zoom {
             return;
@@ -968,10 +966,11 @@ impl Chart {
 
             // Apply sliding window if specified
             if let Some(max) = max_points
-                && series.data.len() > max {
-                    let excess = series.data.len() - max;
-                    series.data.drain(..excess);
-                }
+                && series.data.len() > max
+            {
+                let excess = series.data.len() - max;
+                series.data.drain(..excess);
+            }
         }
     }
 
@@ -1004,7 +1003,10 @@ impl Chart {
 
     /// Get the number of data points in a series.
     pub fn series_len(&self, series_idx: usize) -> usize {
-        self.series.get(series_idx).map(|s| s.data.len()).unwrap_or(0)
+        self.series
+            .get(series_idx)
+            .map(|s| s.data.len())
+            .unwrap_or(0)
     }
 
     /// Get the total number of data points across all series.
@@ -1071,11 +1073,7 @@ impl Chart {
             }
         }
 
-        if has_data {
-            Some((min, max))
-        } else {
-            None
-        }
+        if has_data { Some((min, max)) } else { None }
     }
 
     /// Get the combined bounds of all series.

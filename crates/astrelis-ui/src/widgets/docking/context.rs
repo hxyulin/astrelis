@@ -6,7 +6,9 @@
 //! invalidates it when the tree structure changes.
 
 use super::DockTabs;
-use super::splitter::{DEFAULT_SEPARATOR_SIZE, default_separator_color, default_separator_hover_color};
+use super::splitter::{
+    DEFAULT_SEPARATOR_SIZE, default_separator_color, default_separator_hover_color,
+};
 use super::tabs::{
     DEFAULT_TAB_BAR_HEIGHT, default_active_tab_color, default_inactive_tab_color,
     default_tab_bar_color, default_tab_hover_color, default_tab_text_color,

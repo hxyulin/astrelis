@@ -29,7 +29,7 @@
 //!
 //! # Manual Scoping
 //!
-//! For custom GPU scopes outside of render passes, use [`FrameContext::with_gpu_scope`](crate::FrameContext::with_gpu_scope):
+//! For custom GPU scopes outside of render passes:
 //!
 //! ```ignore
 //! frame.with_gpu_scope("upload_data", |encoder| {
@@ -51,12 +51,11 @@ impl RenderCapability for GpuFrameProfiler {
         // - TIMESTAMP_QUERY: base feature, allows timestamp writes on pass definition
         // - TIMESTAMP_QUERY_INSIDE_ENCODERS: allows scopes on command encoders
         // - TIMESTAMP_QUERY_INSIDE_PASSES: allows scopes on render/compute passes
-        GpuRequirements::new()
-            .request_features(
-                GpuFeatures::TIMESTAMP_QUERY
-                    | GpuFeatures::TIMESTAMP_QUERY_INSIDE_ENCODERS
-                    | GpuFeatures::TIMESTAMP_QUERY_INSIDE_PASSES,
-            )
+        GpuRequirements::new().request_features(
+            GpuFeatures::TIMESTAMP_QUERY
+                | GpuFeatures::TIMESTAMP_QUERY_INSIDE_ENCODERS
+                | GpuFeatures::TIMESTAMP_QUERY_INSIDE_PASSES,
+        )
     }
 
     fn name() -> &'static str {
@@ -314,13 +313,11 @@ pub use disabled::*;
 // Convenience Macro
 // ============================================================================
 
-/// Execute a block of code within a GPU profiling scope on a `FrameContext`.
+/// Execute a block of code within a GPU profiling scope on a `Frame`.
 ///
 /// When the `gpu-profiling` feature is enabled and a GPU profiler is attached
 /// to the frame, this creates a GPU timing scope around the block.
 /// When disabled or no profiler is attached, the block is executed directly.
-///
-/// This is syntactic sugar for [`FrameContext::with_gpu_scope`](crate::FrameContext::with_gpu_scope).
 ///
 /// # Usage
 ///

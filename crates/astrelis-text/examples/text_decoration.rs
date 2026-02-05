@@ -6,27 +6,21 @@
 //! - Background highlighting
 //! - Color and thickness customization
 
-use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_core::math::Vec2;
-use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
-};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder, wgpu};
 use astrelis_text::{
-    FontRenderer, FontSystem, Text, TextDecoration, UnderlineStyle,
-    StrikethroughStyle,
+    FontRenderer, FontSystem, StrikethroughStyle, Text, TextDecoration, UnderlineStyle,
 };
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 
 struct TextDecorationDemo {
-    _context: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     font_renderer: FontRenderer,
 }
@@ -35,7 +29,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -45,14 +40,10 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        ).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
 
@@ -72,7 +63,6 @@ fn main() {
         tracing::info!("Text decoration demo initialized");
 
         Box::new(TextDecorationDemo {
-            _context: graphics_ctx,
             window,
             window_id,
             font_renderer,
@@ -122,10 +112,10 @@ impl App for TextDecorationDemo {
         let thick_underline = Text::new("Thick Underline")
             .size(24.0)
             .color(Color::WHITE)
-            .with_decoration(
-                TextDecoration::new()
-                    .underline(UnderlineStyle::solid(Color::from_rgb_u8(255, 150, 100), 3.0))
-            );
+            .with_decoration(TextDecoration::new().underline(UnderlineStyle::solid(
+                Color::from_rgb_u8(255, 150, 100),
+                3.0,
+            )));
         let mut thick_underline_buffer = self.font_renderer.prepare(&thick_underline);
 
         // === Strikethrough Examples ===
@@ -142,8 +132,10 @@ impl App for TextDecorationDemo {
             .size(24.0)
             .color(Color::WHITE)
             .with_decoration(
-                TextDecoration::new()
-                    .strikethrough(StrikethroughStyle::solid(Color::from_rgb_u8(255, 200, 50), 2.0))
+                TextDecoration::new().strikethrough(StrikethroughStyle::solid(
+                    Color::from_rgb_u8(255, 200, 50),
+                    2.0,
+                )),
             );
         let mut custom_strike_buffer = self.font_renderer.prepare(&custom_strike);
 
@@ -160,10 +152,7 @@ impl App for TextDecorationDemo {
         let dark_highlight = Text::new("Dark Background")
             .size(24.0)
             .color(Color::WHITE)
-            .with_decoration(
-                TextDecoration::new()
-                    .background(Color::from_rgb_u8(50, 50, 80))
-            );
+            .with_decoration(TextDecoration::new().background(Color::from_rgb_u8(50, 50, 80)));
         let mut dark_highlight_buffer = self.font_renderer.prepare(&dark_highlight);
 
         // === Combined Decorations ===
@@ -174,8 +163,11 @@ impl App for TextDecorationDemo {
             .color(Color::WHITE)
             .with_decoration(
                 TextDecoration::new()
-                    .underline(UnderlineStyle::solid(Color::from_rgb_u8(100, 200, 100), 2.0))
-                    .background(Color::from_rgb_u8(30, 60, 30))
+                    .underline(UnderlineStyle::solid(
+                        Color::from_rgb_u8(100, 200, 100),
+                        2.0,
+                    ))
+                    .background(Color::from_rgb_u8(30, 60, 30)),
             );
         let mut combined1_buffer = self.font_renderer.prepare(&combined1);
 
@@ -186,7 +178,7 @@ impl App for TextDecorationDemo {
             .with_decoration(
                 TextDecoration::new()
                     .strikethrough(StrikethroughStyle::solid(Color::RED, 1.5))
-                    .background(Color::from_rgb_u8(60, 30, 30))
+                    .background(Color::from_rgb_u8(60, 30, 30)),
             );
         let mut combined2_buffer = self.font_renderer.prepare(&combined2);
 
@@ -198,14 +190,14 @@ impl App for TextDecorationDemo {
                 TextDecoration::new()
                     .underline(UnderlineStyle::solid(Color::CYAN, 2.0))
                     .strikethrough(StrikethroughStyle::solid(Color::MAGENTA, 1.5))
-                    .background(Color::from_rgb_u8(40, 40, 60))
+                    .background(Color::from_rgb_u8(40, 40, 60)),
             );
         let mut all_decorations_buffer = self.font_renderer.prepare(&all_decorations);
 
         // === Info text ===
         let info = Text::new(
             "MVP supports solid underlines, strikethrough, and backgrounds.\n\
-             Dashed, dotted, and wavy styles coming in future updates."
+             Dashed, dotted, and wavy styles coming in future updates.",
         )
         .size(14.0)
         .color(Color::from_rgb_u8(180, 180, 180))
@@ -218,54 +210,94 @@ impl App for TextDecorationDemo {
         let x = 50.0;
         let line_spacing = 50.0;
 
-        self.font_renderer.draw_text(&mut title_buffer, Vec2::new(x, y));
+        self.font_renderer
+            .draw_text(&mut title_buffer, Vec2::new(x, y));
         y += 60.0;
 
         // Underline section
-        self.font_renderer.draw_text_with_decoration(&mut underlined_buffer, Vec2::new(x, y), &underlined_text);
+        self.font_renderer.draw_text_with_decoration(
+            &mut underlined_buffer,
+            Vec2::new(x, y),
+            &underlined_text,
+        );
         y += line_spacing;
 
-        self.font_renderer.draw_text_with_decoration(&mut thick_underline_buffer, Vec2::new(x, y), &thick_underline);
+        self.font_renderer.draw_text_with_decoration(
+            &mut thick_underline_buffer,
+            Vec2::new(x, y),
+            &thick_underline,
+        );
         y += line_spacing + 10.0;
 
         // Strikethrough section
-        self.font_renderer.draw_text_with_decoration(&mut strikethrough_buffer, Vec2::new(x, y), &strikethrough_text);
+        self.font_renderer.draw_text_with_decoration(
+            &mut strikethrough_buffer,
+            Vec2::new(x, y),
+            &strikethrough_text,
+        );
         y += line_spacing;
 
-        self.font_renderer.draw_text_with_decoration(&mut custom_strike_buffer, Vec2::new(x, y), &custom_strike);
+        self.font_renderer.draw_text_with_decoration(
+            &mut custom_strike_buffer,
+            Vec2::new(x, y),
+            &custom_strike,
+        );
         y += line_spacing + 10.0;
 
         // Background section
-        self.font_renderer.draw_text_with_decoration(&mut highlighted_buffer, Vec2::new(x, y), &highlighted_text);
+        self.font_renderer.draw_text_with_decoration(
+            &mut highlighted_buffer,
+            Vec2::new(x, y),
+            &highlighted_text,
+        );
         y += line_spacing;
 
-        self.font_renderer.draw_text_with_decoration(&mut dark_highlight_buffer, Vec2::new(x, y), &dark_highlight);
+        self.font_renderer.draw_text_with_decoration(
+            &mut dark_highlight_buffer,
+            Vec2::new(x, y),
+            &dark_highlight,
+        );
         y += line_spacing + 10.0;
 
         // Combined section
-        self.font_renderer.draw_text_with_decoration(&mut combined1_buffer, Vec2::new(x, y), &combined1);
+        self.font_renderer.draw_text_with_decoration(
+            &mut combined1_buffer,
+            Vec2::new(x, y),
+            &combined1,
+        );
         y += line_spacing;
 
-        self.font_renderer.draw_text_with_decoration(&mut combined2_buffer, Vec2::new(x, y), &combined2);
+        self.font_renderer.draw_text_with_decoration(
+            &mut combined2_buffer,
+            Vec2::new(x, y),
+            &combined2,
+        );
         y += line_spacing;
 
-        self.font_renderer.draw_text_with_decoration(&mut all_decorations_buffer, Vec2::new(x, y), &all_decorations);
+        self.font_renderer.draw_text_with_decoration(
+            &mut all_decorations_buffer,
+            Vec2::new(x, y),
+            &all_decorations,
+        );
         y += line_spacing + 20.0;
 
         // Info
-        self.font_renderer.draw_text(&mut info_buffer, Vec2::new(x, y));
+        self.font_renderer
+            .draw_text(&mut info_buffer, Vec2::new(x, y));
 
         // Begin frame
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available (minimized, etc.)
+        };
 
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::from_rgb_u8(20, 20, 30),
-            |pass| {
-                self.font_renderer.render(pass.wgpu_pass());
-            },
-        );
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(20, 20, 30))
+                .build();
 
-        frame.finish();
+            self.font_renderer.render(pass.wgpu_pass());
+        }
+        // Frame auto-submits on drop
     }
 }

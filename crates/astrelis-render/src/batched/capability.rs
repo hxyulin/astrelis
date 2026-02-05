@@ -30,8 +30,7 @@ pub struct IndirectBatchCapability2D;
 
 impl RenderCapability for IndirectBatchCapability2D {
     fn requirements() -> GpuRequirements {
-        GpuRequirements::new()
-            .require_features(GpuFeatures::INDIRECT_FIRST_INSTANCE)
+        GpuRequirements::new().require_features(GpuFeatures::INDIRECT_FIRST_INSTANCE)
     }
 
     fn name() -> &'static str {

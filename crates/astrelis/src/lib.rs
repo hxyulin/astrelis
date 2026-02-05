@@ -74,10 +74,10 @@ pub use astrelis_core::math;
 pub use astrelis_winit as winit;
 #[cfg(feature = "winit")]
 pub use astrelis_winit::{
-    app::{run_app, App, AppCtx, AppFactory},
+    WindowId,
+    app::{App, AppCtx, AppFactory, run_app},
     event::{Event, EventBatch, HandleStatus},
     window::{Window, WindowDescriptor},
-    WindowId,
 };
 
 #[cfg(feature = "assets")]
@@ -102,12 +102,12 @@ pub use astrelis_egui as egui;
 pub use astrelis_audio as audio;
 
 // Re-export engine types
+pub use application::ApplicationBuilder;
 pub use engine::{Engine, EngineBuilder, EngineError};
-pub use plugin::{Plugin, FnPlugin, PluginGroup};
+pub use plugin::{FnPlugin, Plugin, PluginGroup};
 pub use resource::{Resource, Resources};
 pub use task_pool::TaskPool;
 pub use time::Time;
-pub use application::ApplicationBuilder;
 
 // Re-export plugin types when available
 #[cfg(feature = "assets")]
@@ -117,7 +117,7 @@ pub use plugins::AssetPlugin;
 pub use plugins::AsyncRuntimePlugin;
 
 #[cfg(all(feature = "render", feature = "winit"))]
-pub use plugins::{RenderPlugin, RenderContexts};
+pub use plugins::{RenderContexts, RenderPlugin};
 
 #[cfg(feature = "text")]
 pub use plugins::TextPlugin;
@@ -133,12 +133,12 @@ pub use plugins::{DefaultPlugins, MinimalPlugins};
 
 /// Prelude module for convenient imports
 pub mod prelude {
+    pub use crate::application::ApplicationBuilder;
     pub use crate::engine::{Engine, EngineBuilder, EngineError};
-    pub use crate::plugin::{Plugin, FnPlugin};
+    pub use crate::plugin::{FnPlugin, Plugin};
     pub use crate::resource::{Resource, Resources};
     pub use crate::task_pool::TaskPool;
     pub use crate::time::Time;
-    pub use crate::application::ApplicationBuilder;
 
     // Core math types
     pub use astrelis_core::math::{Mat4, Vec2, Vec3, Vec4};
@@ -146,10 +146,10 @@ pub mod prelude {
     // Winit types
     #[cfg(feature = "winit")]
     pub use astrelis_winit::{
-        app::{run_app, App, AppCtx},
+        WindowId,
+        app::{App, AppCtx, run_app},
         event::{Event, EventBatch, HandleStatus},
         window::{Window, WindowDescriptor},
-        WindowId,
     };
 
     // Asset types
@@ -159,7 +159,7 @@ pub mod prelude {
     // Render types
     #[cfg(feature = "render")]
     pub use astrelis_render::{
-        Color, ComputePassBuilder, FrameContext, GraphicsContext, RenderPassBuilder, WindowContext,
+        Color, ComputePassBuilder, Frame, GraphicsContext, RenderPassBuilder, WindowContext,
         WindowManager,
     };
 
@@ -172,7 +172,7 @@ pub mod prelude {
     pub use crate::plugins::{AssetPlugin, AsyncRuntimePlugin, DefaultPlugins, MinimalPlugins};
 
     #[cfg(all(feature = "render", feature = "winit"))]
-    pub use crate::plugins::{RenderPlugin, RenderContexts};
+    pub use crate::plugins::{RenderContexts, RenderPlugin};
 
     #[cfg(feature = "input")]
     pub use crate::plugins::InputPlugin;

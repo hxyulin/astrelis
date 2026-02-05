@@ -185,11 +185,7 @@ impl Material {
     }
 
     /// Create a material from a shader source string.
-    pub fn from_source(
-        source: &str,
-        label: Option<&str>,
-        context: Arc<GraphicsContext>,
-    ) -> Self {
+    pub fn from_source(source: &str, label: Option<&str>, context: Arc<GraphicsContext>) -> Self {
         profile_function!();
         let shader = context
             .device()
@@ -367,13 +363,13 @@ impl Material {
         }
 
         // Create bind group layout
-        let layout = self
-            .context
-            .device()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Material Bind Group Layout"),
-                entries: &layout_entries,
-            });
+        let layout =
+            self.context
+                .device()
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Material Bind Group Layout"),
+                    entries: &layout_entries,
+                });
 
         // Create bind group
         let bind_group = self

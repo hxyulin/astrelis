@@ -282,7 +282,8 @@ impl BatchRenderer2D for DirectBatchRenderer2D {
         }
 
         if !self.transparent_instances.is_empty() {
-            let offset = (self.opaque_instances.len() * std::mem::size_of::<UnifiedInstance2D>()) as u64;
+            let offset =
+                (self.opaque_instances.len() * std::mem::size_of::<UnifiedInstance2D>()) as u64;
             self.context.queue().write_buffer(
                 &self.instance_buffer,
                 offset,

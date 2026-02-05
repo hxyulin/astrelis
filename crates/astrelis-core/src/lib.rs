@@ -11,7 +11,7 @@
 //! - **Math**: Re-exports of `glam` types ([`Vec2`], [`Vec3`], [`Mat4`], etc.) for linear algebra
 //! - **Logging**: Structured logging via `tracing` with [`logging::init()`]
 //! - **Profiling**: Performance profiling integration with `puffin` via [`profiling`]
-//! - **Geometry**: Common 2D geometry types ([`Rect`], [`Size`], [`Point`], [`Transform`])
+//! - **Geometry**: Common 2D geometry types (sizes, positions, coordinate spaces)
 //! - **Allocators**: Custom allocators like `ahash` for fast hashing
 //!
 //! # Modules
@@ -27,17 +27,15 @@
 //! ```no_run
 //! use astrelis_core::{logging, math::Vec2};
 //!
-//! fn main() {
-//!     // Initialize logging (outputs to stdout with timestamps)
-//!     logging::init();
+//! // Initialize logging (outputs to stdout with timestamps)
+//! logging::init();
 //!
-//!     // Use math types
-//!     let position = Vec2::new(10.0, 20.0);
-//!     let velocity = Vec2::new(1.0, 0.5);
-//!     let new_position = position + velocity * 0.016; // Delta time
+//! // Use math types
+//! let position = Vec2::new(10.0, 20.0);
+//! let velocity = Vec2::new(1.0, 0.5);
+//! let new_position = position + velocity * 0.016; // Delta time
 //!
-//!     tracing::info!("New position: {:?}", new_position);
-//! }
+//! tracing::info!("New position: {:?}", new_position);
 //! ```
 //!
 //! # Usage with Other Crates
@@ -65,13 +63,9 @@
 //! [`Vec2`]: math::Vec2
 //! [`Vec3`]: math::Vec3
 //! [`Mat4`]: math::Mat4
-//! [`Rect`]: geometry::Rect
-//! [`Size`]: geometry::Size
-//! [`Point`]: geometry::Point
-//! [`Transform`]: geometry::Transform
 
 pub mod alloc;
+pub mod geometry;
 pub mod logging;
 pub mod math;
 pub mod profiling;
-pub mod geometry;

@@ -277,12 +277,13 @@ impl LoaderRegistry {
         let boxed = loader.load_erased(ctx)?;
 
         // This should always succeed since we looked up by TypeId
-        boxed.downcast::<T>().map(|b| *b).map_err(|_| {
-            AssetError::TypeMismatch {
+        boxed
+            .downcast::<T>()
+            .map(|b| *b)
+            .map_err(|_| AssetError::TypeMismatch {
                 expected: T::type_name(),
                 actual: TypeId::of::<T>(),
-            }
-        })
+            })
     }
 
     /// Load an asset using extension-based lookup (type-erased).
@@ -299,11 +300,11 @@ impl LoaderRegistry {
             extension: "<none>".to_string(),
         })?;
 
-        let loader = self.get_by_extension(ext).ok_or_else(|| {
-            AssetError::NoLoaderForExtension {
-                extension: ext.to_string(),
-            }
-        })?;
+        let loader =
+            self.get_by_extension(ext)
+                .ok_or_else(|| AssetError::NoLoaderForExtension {
+                    extension: ext.to_string(),
+                })?;
 
         let ctx = LoadContext::new(source, bytes, Some(ext));
         loader.load_erased(ctx)
@@ -507,4 +508,3 @@ mod tests {
         assert!(result.is_err());
     }
 }
-

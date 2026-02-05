@@ -13,7 +13,12 @@ use std::sync::Arc;
 /// Darken a color by a factor (0.0 = no change, 1.0 = black).
 fn darken(color: Color, amount: f32) -> Color {
     let factor = 1.0 - amount;
-    Color::rgba(color.r * factor, color.g * factor, color.b * factor, color.a)
+    Color::rgba(
+        color.r * factor,
+        color.g * factor,
+        color.b * factor,
+        color.a,
+    )
 }
 
 /// Lighten a color by a factor (0.0 = no change, 1.0 = white).
@@ -589,7 +594,10 @@ impl Button {
 
     /// Get current background color based on state, with theme fallback.
     pub fn current_bg_color(&self) -> Color {
-        let base = self.style.background_color.unwrap_or(Color::from_rgb_u8(130, 110, 245));
+        let base = self
+            .style
+            .background_color
+            .unwrap_or(Color::from_rgb_u8(130, 110, 245));
         if self.is_pressed {
             self.active_color.unwrap_or_else(|| darken(base, 0.15))
         } else if self.is_hovered {
@@ -891,7 +899,8 @@ impl TextInput {
 
     pub fn display_color(&self) -> Color {
         if self.content.is_empty() {
-            self.placeholder_color.unwrap_or(Color::from_rgb_u8(120, 120, 120))
+            self.placeholder_color
+                .unwrap_or(Color::from_rgb_u8(120, 120, 120))
         } else {
             self.text_color.unwrap_or(Color::WHITE)
         }

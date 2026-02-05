@@ -170,7 +170,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
     };
     let inline_handle = server.insert(AssetSource::memory("inline://config"), inline_config);
-    println!("Inserted inline config, ready: {}", server.is_ready(&inline_handle));
+    println!(
+        "Inserted inline config, ready: {}",
+        server.is_ready(&inline_handle)
+    );
 
     if let Some(config) = server.get(&inline_handle) {
         println!("Inline config: {}", config.data);

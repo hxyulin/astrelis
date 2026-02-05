@@ -399,12 +399,7 @@ impl Shape {
                 Some((*center - r, *center + r))
             }
 
-            Shape::Arc {
-                center, radius, ..
-            }
-            | Shape::Pie {
-                center, radius, ..
-            } => {
+            Shape::Arc { center, radius, .. } | Shape::Pie { center, radius, .. } => {
                 // Conservative bounds
                 let r = Vec2::splat(*radius);
                 Some((*center - r, *center + r))

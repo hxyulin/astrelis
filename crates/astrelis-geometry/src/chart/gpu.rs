@@ -22,7 +22,7 @@ use super::cache::ChartDirtyFlags;
 use super::rect::Rect;
 use super::streaming::PrepareResult;
 use super::types::{Chart, DataPoint};
-use astrelis_render::{wgpu, Color, GraphicsContext};
+use astrelis_render::{Color, GraphicsContext, wgpu};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec2};
 use std::sync::Arc;
@@ -117,14 +117,8 @@ impl ChartTransform {
         let (y_min, y_max) = chart.y_range();
 
         // Create orthographic projection
-        let view_proj = Mat4::orthographic_rh(
-            0.0,
-            viewport_size.x,
-            viewport_size.y,
-            0.0,
-            -1.0,
-            1.0,
-        );
+        let view_proj =
+            Mat4::orthographic_rh(0.0, viewport_size.x, viewport_size.y, 0.0, -1.0, 1.0);
 
         Self {
             view_proj: view_proj.to_cols_array_2d(),
@@ -205,8 +199,7 @@ impl DirtyRange {
 }
 
 /// GPU buffers for a single series.
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct SeriesGpuBuffers {
     /// Vertex buffer for line segments
     pub line_buffer: Option<wgpu::Buffer>,
@@ -221,7 +214,6 @@ pub struct SeriesGpuBuffers {
     /// Data version when buffers were last updated
     pub data_version: u64,
 }
-
 
 /// GPU state for chart rendering.
 ///
@@ -331,9 +323,8 @@ impl ChartGpuState {
         }
 
         // Update series buffers
-        let needs_data_update = dirty_flags.intersects(
-            ChartDirtyFlags::DATA_CHANGED | ChartDirtyFlags::DATA_APPENDED,
-        );
+        let needs_data_update =
+            dirty_flags.intersects(ChartDirtyFlags::DATA_CHANGED | ChartDirtyFlags::DATA_APPENDED);
 
         if needs_data_update {
             // Clone transform to avoid borrow issues

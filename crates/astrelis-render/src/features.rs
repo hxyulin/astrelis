@@ -159,8 +159,10 @@ impl GpuFeatures {
         if self.contains(GpuFeatures::TIMESTAMP_QUERY_INSIDE_PASSES) {
             features |= wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
         }
-        if self.contains(GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING) {
-            features |= wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+        if self.contains(GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING)
+        {
+            features |=
+                wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
         }
 
         features
@@ -229,8 +231,11 @@ impl GpuFeatures {
         if features.contains(wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES) {
             gpu_features |= GpuFeatures::TIMESTAMP_QUERY_INSIDE_PASSES;
         }
-        if features.contains(wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING) {
-            gpu_features |= GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+        if features
+            .contains(wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING)
+        {
+            gpu_features |=
+                GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
         }
 
         gpu_features

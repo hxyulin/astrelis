@@ -185,7 +185,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let handle: Handle<LevelData> = {
                 let mut server = server.lock().unwrap();
-                server.load_sync("level1.lvl").expect("Failed to load level1")
+                server
+                    .load_sync("level1.lvl")
+                    .expect("Failed to load level1")
             };
 
             let server = server.lock().unwrap();
@@ -210,7 +212,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             let handle: Handle<LevelData> = {
                 let mut server = server.lock().unwrap();
-                server.load_sync("level2.lvl").expect("Failed to load level2")
+                server
+                    .load_sync("level2.lvl")
+                    .expect("Failed to load level2")
             };
 
             let server = server.lock().unwrap();

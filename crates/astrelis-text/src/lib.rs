@@ -153,16 +153,28 @@ pub use pipeline::{
     TextShapeRequest, TextShaper,
 };
 pub use renderer::{
-    // Renderers
-    BitmapTextRenderer, FontRenderer, SdfTextRenderer,
     // Common types
-    AtlasEntry, DecorationRenderer, DecorationVertex, GlyphPlacement, SdfAtlasEntry, SdfCacheKey,
-    SdfParams, SharedContext, TextBuffer, TextRender, TextRendererConfig, TextVertex,
+    AtlasEntry,
+    // Renderers
+    BitmapTextRenderer,
+    DecorationRenderer,
+    DecorationVertex,
+    FontRenderer,
+    GlyphPlacement,
+    SdfAtlasEntry,
+    SdfCacheKey,
+    SdfParams,
+    SdfTextRenderer,
+    SharedContext,
+    TextBuffer,
+    TextRender,
+    TextRendererConfig,
+    TextVertex,
 };
 pub use rich_text::{RichText, RichTextBuilder, TextSpan, TextSpanStyle};
 pub use sdf::{SdfConfig, TextRenderMode, generate_sdf, generate_sdf_smooth};
 pub use shaping::{
-    extract_glyphs_from_buffer, measure_text_fast, shape_text, ShapedGlyph, ShapedTextResult,
+    ShapedGlyph, ShapedTextResult, extract_glyphs_from_buffer, measure_text_fast, shape_text,
 };
 pub use text::{LineBreakConfig, Text, TextAlign, TextMetrics, TextWrap, VerticalAlign};
 

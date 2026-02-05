@@ -213,11 +213,8 @@ mod tests {
 
     #[test]
     fn test_fill_and_stroke() {
-        let style = Style::fill_and_stroke(
-            Paint::solid(Color::RED),
-            Paint::solid(Color::BLACK),
-            1.0,
-        );
+        let style =
+            Style::fill_and_stroke(Paint::solid(Color::RED), Paint::solid(Color::BLACK), 1.0);
         assert!(style.has_fill());
         assert!(style.has_stroke());
     }

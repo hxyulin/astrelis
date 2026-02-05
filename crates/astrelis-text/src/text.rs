@@ -1,6 +1,6 @@
 use cosmic_text::Color as CosmicColor;
 
-use crate::decoration::{TextDecoration, UnderlineStyle, StrikethroughStyle};
+use crate::decoration::{StrikethroughStyle, TextDecoration, UnderlineStyle};
 use crate::effects::{TextEffect, TextEffects};
 use crate::font::{FontAttributes, FontStretch, FontStyle, FontWeight};
 use crate::sdf::TextRenderMode;
@@ -32,8 +32,7 @@ impl TextAlign {
 /// Controls how text is positioned vertically within its allocated space.
 /// Position coordinates always represent the top-left corner of the text's bounding box,
 /// and vertical alignment adjusts the text within that space.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VerticalAlign {
     /// Align text to the top of the container (default).
     #[default]
@@ -43,7 +42,6 @@ pub enum VerticalAlign {
     /// Align text to the bottom of the container.
     Bottom,
 }
-
 
 /// Text wrapping mode controlling how text breaks across lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -727,7 +725,10 @@ impl Text {
     ///     .underline(Color::BLUE);
     /// ```
     pub fn underline(self, color: Color) -> Self {
-        let decoration = self.decoration.clone().unwrap_or_default()
+        let decoration = self
+            .decoration
+            .clone()
+            .unwrap_or_default()
             .underline(UnderlineStyle::solid(color, 1.0));
         self.with_decoration(decoration)
     }
@@ -750,7 +751,10 @@ impl Text {
     ///     .strikethrough(Color::RED);
     /// ```
     pub fn strikethrough(self, color: Color) -> Self {
-        let decoration = self.decoration.clone().unwrap_or_default()
+        let decoration = self
+            .decoration
+            .clone()
+            .unwrap_or_default()
             .strikethrough(StrikethroughStyle::solid(color, 1.0));
         self.with_decoration(decoration)
     }
@@ -773,7 +777,10 @@ impl Text {
     ///     .background_color(Color::YELLOW);
     /// ```
     pub fn background_color(self, color: Color) -> Self {
-        let decoration = self.decoration.clone().unwrap_or_default()
+        let decoration = self
+            .decoration
+            .clone()
+            .unwrap_or_default()
             .background(color);
         self.with_decoration(decoration)
     }
@@ -850,8 +857,8 @@ mod tests {
     fn test_text_with_effect() {
         use crate::effects::TextEffect;
 
-        let text = Text::new("Hello")
-            .with_effect(TextEffect::shadow(Vec2::new(1.0, 1.0), Color::BLACK));
+        let text =
+            Text::new("Hello").with_effect(TextEffect::shadow(Vec2::new(1.0, 1.0), Color::BLACK));
 
         assert!(text.has_effects());
         assert_eq!(text.get_effects().unwrap().effects().len(), 1);
@@ -859,8 +866,7 @@ mod tests {
 
     #[test]
     fn test_text_with_shadow() {
-        let text = Text::new("Hello")
-            .with_shadow(Vec2::new(2.0, 2.0), Color::BLACK);
+        let text = Text::new("Hello").with_shadow(Vec2::new(2.0, 2.0), Color::BLACK);
 
         assert!(text.has_effects());
         let effects = text.get_effects().unwrap();
@@ -869,24 +875,21 @@ mod tests {
 
     #[test]
     fn test_text_with_shadow_blurred() {
-        let text = Text::new("Hello")
-            .with_shadow_blurred(Vec2::new(2.0, 2.0), 1.5, Color::BLACK);
+        let text = Text::new("Hello").with_shadow_blurred(Vec2::new(2.0, 2.0), 1.5, Color::BLACK);
 
         assert!(text.has_effects());
     }
 
     #[test]
     fn test_text_with_outline() {
-        let text = Text::new("Hello")
-            .with_outline(1.0, Color::WHITE);
+        let text = Text::new("Hello").with_outline(1.0, Color::WHITE);
 
         assert!(text.has_effects());
     }
 
     #[test]
     fn test_text_with_glow() {
-        let text = Text::new("Hello")
-            .with_glow(5.0, Color::BLUE, 0.8);
+        let text = Text::new("Hello").with_glow(5.0, Color::BLUE, 0.8);
 
         assert!(text.has_effects());
     }
@@ -905,10 +908,12 @@ mod tests {
 
     #[test]
     fn test_text_render_mode_explicit() {
-        let text = Text::new("Hello")
-            .render_mode(TextRenderMode::SDF { spread: 6.0 });
+        let text = Text::new("Hello").render_mode(TextRenderMode::SDF { spread: 6.0 });
 
-        assert_eq!(text.get_render_mode(), Some(TextRenderMode::SDF { spread: 6.0 }));
+        assert_eq!(
+            text.get_render_mode(),
+            Some(TextRenderMode::SDF { spread: 6.0 })
+        );
     }
 
     #[test]
@@ -966,8 +971,7 @@ mod tests {
 
     #[test]
     fn test_text_has_effects_true() {
-        let text = Text::new("Hello")
-            .with_shadow(Vec2::new(1.0, 1.0), Color::BLACK);
+        let text = Text::new("Hello").with_shadow(Vec2::new(1.0, 1.0), Color::BLACK);
 
         assert!(text.has_effects());
     }

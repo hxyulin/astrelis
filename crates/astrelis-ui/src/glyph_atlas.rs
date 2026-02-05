@@ -39,7 +39,14 @@ pub fn glyphs_to_instances(
     z_depth: f32,
 ) -> Vec<TextInstance> {
     let mut instances = Vec::with_capacity(glyphs.len());
-    glyphs_to_instances_into(font_renderer, glyphs, base_position, color, z_depth, &mut instances);
+    glyphs_to_instances_into(
+        font_renderer,
+        glyphs,
+        base_position,
+        color,
+        z_depth,
+        &mut instances,
+    );
     instances
 }
 

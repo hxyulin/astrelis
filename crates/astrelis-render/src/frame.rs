@@ -1,50 +1,71 @@
 //! Frame lifecycle and RAII rendering context.
 //!
-//! This module provides [`FrameContext`], which manages the lifecycle of a single
+//! This module provides [`Frame`], which manages the lifecycle of a single
 //! rendering frame using RAII patterns. The frame automatically submits GPU commands
 //! and presents the surface when dropped.
+//!
+//! # Architecture
+//!
+//! The render system follows a clear ownership hierarchy:
+//!
+//! ```text
+//! GraphicsContext (Global, Arc<Self>)
+//!     └─▶ RenderWindow (Per-window, persistent)
+//!             └─▶ Frame (Per-frame, temporary)
+//!                     └─▶ RenderPass (Per-pass, temporary, owns encoder)
+//! ```
+//!
+//! Key design decisions:
+//! - **Each pass owns its encoder** - No encoder movement, no borrow conflicts
+//! - **Frame collects command buffers** - Via `RefCell<Vec<CommandBuffer>>`
+//! - **Immutable frame reference** - RenderPass takes `&'f Frame`, not `&'f mut Frame`
+//! - **Atomic stats** - Thread-safe counting via `Arc<AtomicFrameStats>`
+//! - **No unsafe code** - Clean ownership, no pointer casts
 //!
 //! # RAII Pattern
 //!
 //! ```rust,no_run
-//! # use astrelis_render::RenderableWindow;
-//! # use astrelis_winit::window::WindowBackend;
-//! # let mut renderable_window: RenderableWindow = todo!();
+//! # use astrelis_render::RenderWindow;
+//! # let mut window: RenderWindow = todo!();
+//! // New API - each pass owns its encoder
+//! let frame = window.begin_frame().expect("Surface available");
 //! {
-//!     let mut frame = renderable_window.begin_drawing();
+//!     let mut pass = frame.render_pass()
+//!         .clear_color(astrelis_render::Color::BLACK)
+//!         .clear_depth(0.0)
+//!         .label("main")
+//!         .build();
 //!
-//!     // Render passes must be dropped before frame.finish()
-//!     frame.clear_and_render(
-//!         astrelis_render::RenderTarget::Surface,
-//!         astrelis_render::Color::BLACK,
-//!         |pass| {
-//!             // Rendering commands
-//!             // Pass is automatically dropped here
-//!         },
-//!     );
+//!     // Render commands here
+//!     // pass.wgpu_pass().draw(...);
+//! } // pass drops: ends pass → finishes encoder → pushes command buffer to frame
 //!
-//!     frame.finish(); // Submits commands and presents surface
-//! } // FrameContext drops here if .finish() not called
+//! frame.submit(); // Or let it drop - auto-submits
 //! ```
 //!
 //! # Important
 //!
-//! - Render passes MUST be dropped before calling `frame.finish()`
-//! - Use `clear_and_render()` for automatic pass scoping
-//! - Forgetting `frame.finish()` will still submit via Drop, but explicitly calling it is recommended
+//! - Render passes own their encoder and push command buffers to the frame on drop
+//! - Multiple passes can be created sequentially within a frame
+//! - Frame auto-submits on drop if not explicitly submitted
 
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use astrelis_core::profiling::{profile_function, profile_scope};
 use astrelis_winit::window::WinitWindow;
 
+use crate::Color;
 use crate::context::GraphicsContext;
+use crate::framebuffer::Framebuffer;
 use crate::gpu_profiling::GpuFrameProfiler;
 use crate::target::RenderTarget;
 
 /// Per-frame rendering statistics.
 ///
 /// Tracks the number of render passes and draw calls executed during a single frame.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct FrameStats {
     /// Number of render passes begun this frame.
     pub passes: usize,
@@ -52,12 +73,56 @@ pub struct FrameStats {
     pub draw_calls: usize,
 }
 
-impl FrameStats {
-    pub(crate) fn new() -> Self {
+/// Thread-safe atomic frame statistics.
+///
+/// Used to eliminate borrow conflicts in GPU profiling code by allowing
+/// stats updates through an Arc without needing mutable access to Frame.
+pub struct AtomicFrameStats {
+    passes: AtomicU32,
+    draw_calls: AtomicU32,
+}
+
+impl AtomicFrameStats {
+    /// Create new atomic stats initialized to zero.
+    pub fn new() -> Self {
         Self {
-            passes: 0,
-            draw_calls: 0,
+            passes: AtomicU32::new(0),
+            draw_calls: AtomicU32::new(0),
         }
+    }
+
+    /// Increment the pass count.
+    pub fn increment_passes(&self) {
+        self.passes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Increment the draw call count.
+    pub fn increment_draw_calls(&self) {
+        self.draw_calls.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get the current pass count.
+    pub fn passes(&self) -> u32 {
+        self.passes.load(Ordering::Relaxed)
+    }
+
+    /// Get the current draw call count.
+    pub fn draw_calls(&self) -> u32 {
+        self.draw_calls.load(Ordering::Relaxed)
+    }
+
+    /// Convert to non-atomic FrameStats for final reporting.
+    pub fn to_frame_stats(&self) -> FrameStats {
+        FrameStats {
+            passes: self.passes() as usize,
+            draw_calls: self.draw_calls() as usize,
+        }
+    }
+}
+
+impl Default for AtomicFrameStats {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -71,10 +136,12 @@ pub struct Surface {
 }
 
 impl Surface {
+    /// Get the underlying texture.
     pub fn texture(&self) -> &wgpu::Texture {
         &self.texture.texture
     }
 
+    /// Get the texture view.
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
@@ -82,111 +149,671 @@ impl Surface {
 
 /// Context for a single frame of rendering.
 ///
-/// When a [`GpuFrameProfiler`] is attached (via [`RenderableWindow::set_gpu_profiler`]),
-/// GPU profiling scopes are automatically created around render passes in
-/// [`with_pass`](Self::with_pass) and [`clear_and_render`](Self::clear_and_render).
-/// Queries are resolved and the profiler frame is ended in the `Drop` implementation.
-pub struct FrameContext {
-    pub(crate) stats: FrameStats,
+/// Frame represents a single frame being rendered. It holds the acquired surface
+/// texture and collects command buffers from render passes. When dropped, it
+/// automatically submits all command buffers and presents the surface.
+///
+/// # Key Design Points
+///
+/// - **Immutable reference**: RenderPasses take `&Frame`, not `&mut Frame`
+/// - **RefCell for command buffers**: Allows multiple passes without mutable borrow
+/// - **Atomic stats**: Thread-safe pass/draw counting
+/// - **RAII cleanup**: Drop handles submit and present
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use astrelis_render::{RenderWindow, Color};
+/// # let mut window: RenderWindow = todo!();
+/// let frame = window.begin_frame().expect("Surface available");
+///
+/// // Create first pass
+/// {
+///     let mut pass = frame.render_pass()
+///         .clear_color(Color::BLACK)
+///         .build();
+///     // Render background
+/// }
+///
+/// // Create second pass (different encoder)
+/// {
+///     let mut pass = frame.render_pass()
+///         .load_color()
+///         .build();
+///     // Render UI overlay
+/// }
+///
+/// // Auto-submits on drop
+/// ```
+pub struct Frame<'w> {
+    /// Reference to the window (provides graphics context, depth view, etc.)
+    pub(crate) window: &'w crate::window::RenderWindow,
+    /// Acquired surface texture for this frame.
     pub(crate) surface: Option<Surface>,
-    pub(crate) encoder: Option<wgpu::CommandEncoder>,
-    pub(crate) context: Arc<GraphicsContext>,
-    pub(crate) window: Arc<WinitWindow>,
+    /// Collected command buffers from render passes.
+    pub(crate) command_buffers: RefCell<Vec<wgpu::CommandBuffer>>,
+    /// Atomic stats for thread-safe counting.
+    pub(crate) stats: Arc<AtomicFrameStats>,
+    /// Whether submit has been called.
+    pub(crate) submitted: Cell<bool>,
+    /// Surface texture format.
     pub(crate) surface_format: wgpu::TextureFormat,
-    /// Optional GPU profiler for automatic render pass profiling.
+    /// Optional GPU profiler.
     pub(crate) gpu_profiler: Option<Arc<GpuFrameProfiler>>,
+    /// Window handle for redraw requests.
+    pub(crate) winit_window: Arc<WinitWindow>,
 }
 
-impl FrameContext {
-    /// Get the surface for this frame.
+impl<'w> Frame<'w> {
+    /// Get the surface texture view for this frame.
     ///
     /// # Panics
-    /// Panics if the surface has already been consumed. Use `try_surface()` for fallible access.
-    pub fn surface(&self) -> &Surface {
-        self.surface.as_ref().expect("Surface already consumed or not acquired")
+    /// Panics if the surface has been consumed. Use `try_surface_view()` for fallible access.
+    pub fn surface_view(&self) -> &wgpu::TextureView {
+        self.surface
+            .as_ref()
+            .expect("Surface already consumed")
+            .view()
     }
 
-    /// Try to get the surface for this frame.
+    /// Try to get the surface texture view for this frame.
+    pub fn try_surface_view(&self) -> Option<&wgpu::TextureView> {
+        self.surface.as_ref().map(|s| s.view())
+    }
+
+    /// Get the window's depth texture view, if the window was created with depth.
     ///
-    /// Returns `None` if the surface has already been consumed.
-    pub fn try_surface(&self) -> Option<&Surface> {
-        self.surface.as_ref()
+    /// This provides access to the window-owned depth buffer for render passes
+    /// that need depth testing.
+    pub fn depth_view(&self) -> Option<&wgpu::TextureView> {
+        self.window.depth_view_ref()
     }
 
-    /// Check if the surface is available.
-    pub fn has_surface(&self) -> bool {
-        self.surface.is_some()
-    }
-
+    /// Get the surface texture format.
     pub fn surface_format(&self) -> wgpu::TextureFormat {
         self.surface_format
     }
 
-    pub fn increment_passes(&mut self) {
-        self.stats.passes += 1;
+    /// Get the frame size in physical pixels.
+    pub fn size(&self) -> (u32, u32) {
+        self.window.size()
     }
 
-    pub fn increment_draw_calls(&mut self) {
-        self.stats.draw_calls += 1;
+    /// Get the graphics context.
+    pub fn graphics(&self) -> &GraphicsContext {
+        self.window.graphics()
     }
 
-    pub fn stats(&self) -> &FrameStats {
+    /// Get the wgpu device.
+    pub fn device(&self) -> &wgpu::Device {
+        self.window.graphics().device()
+    }
+
+    /// Get the wgpu queue.
+    pub fn queue(&self) -> &wgpu::Queue {
+        self.window.graphics().queue()
+    }
+
+    /// Get frame statistics.
+    pub fn stats(&self) -> FrameStats {
+        self.stats.to_frame_stats()
+    }
+
+    /// Get the atomic stats for direct access (used by RenderPass).
+    pub(crate) fn atomic_stats(&self) -> &Arc<AtomicFrameStats> {
         &self.stats
     }
 
-    pub fn graphics_context(&self) -> &GraphicsContext {
-        &self.context
+    /// Get the GPU profiler if attached.
+    pub fn gpu_profiler(&self) -> Option<&GpuFrameProfiler> {
+        self.gpu_profiler.as_deref()
     }
 
-    /// Get a cloneable Arc reference to the graphics context.
-    pub fn graphics_context_arc(&self) -> &Arc<GraphicsContext> {
-        &self.context
+    /// Check if GPU profiling is active.
+    pub fn has_gpu_profiler(&self) -> bool {
+        self.gpu_profiler.is_some()
     }
 
-    /// Get the command encoder for this frame.
+    /// Create a command encoder for custom command recording.
     ///
-    /// # Panics
-    /// Panics if the encoder has already been taken. Use `try_encoder()` for fallible access.
-    pub fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
-        self.encoder.as_mut().expect("Encoder already taken")
+    /// Use this for operations that don't fit the render pass model,
+    /// like buffer copies or texture uploads.
+    pub fn create_encoder(&self, label: Option<&str>) -> wgpu::CommandEncoder {
+        self.device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label })
     }
 
-    /// Try to get the command encoder for this frame.
+    /// Add a pre-built command buffer to the frame.
     ///
-    /// Returns `None` if the encoder has already been taken.
-    pub fn try_encoder(&mut self) -> Option<&mut wgpu::CommandEncoder> {
-        self.encoder.as_mut()
+    /// Use this when you have custom command recording logic.
+    pub fn add_command_buffer(&self, buffer: wgpu::CommandBuffer) {
+        self.command_buffers.borrow_mut().push(buffer);
     }
 
-    /// Check if the encoder is available.
-    pub fn has_encoder(&self) -> bool {
-        self.encoder.is_some()
-    }
-
-    /// Get the encoder and surface together.
+    /// Start building a render pass.
     ///
-    /// # Panics
-    /// Panics if either the encoder or surface has been consumed.
-    /// Use `try_encoder_and_surface()` for fallible access.
-    pub fn encoder_and_surface(&mut self) -> (&mut wgpu::CommandEncoder, &Surface) {
-        (
-            self.encoder.as_mut().expect("Encoder already taken"),
-            self.surface.as_ref().expect("Surface already consumed"),
-        )
+    /// Returns a builder that can be configured with target, clear operations,
+    /// and depth settings before building the actual pass.
+    pub fn render_pass(&self) -> RenderPassBuilder<'_, 'w> {
+        RenderPassBuilder::new(self)
     }
 
-    /// Try to get the encoder and surface together.
+    /// Start building a compute pass.
+    pub fn compute_pass(&self) -> crate::compute::ComputePassBuilder<'_, 'w> {
+        crate::compute::ComputePassBuilder::new(self)
+    }
+
+    /// Submit all collected command buffers and present the surface.
     ///
-    /// Returns `None` if either has been consumed.
-    pub fn try_encoder_and_surface(&mut self) -> Option<(&mut wgpu::CommandEncoder, &Surface)> {
-        match (self.encoder.as_mut(), self.surface.as_ref()) {
-            (Some(encoder), Some(surface)) => Some((encoder, surface)),
-            _ => None,
+    /// This is called automatically on drop, but can be called explicitly
+    /// for more control over timing.
+    pub fn submit(self) {
+        // Move self to trigger drop which handles submission
+        drop(self);
+    }
+
+    /// Internal submit implementation called by Drop.
+    fn submit_inner(&self) {
+        profile_function!();
+
+        if self.stats.passes() == 0 {
+            tracing::warn!("No render passes were executed for this frame");
+        }
+
+        // Resolve GPU profiler queries before submitting
+        if let Some(ref profiler) = self.gpu_profiler {
+            // Create a dedicated encoder for query resolution
+            let mut resolve_encoder = self.create_encoder(Some("Profiler Resolve"));
+            profiler.resolve_queries(&mut resolve_encoder);
+            self.command_buffers
+                .borrow_mut()
+                .push(resolve_encoder.finish());
+        }
+
+        // Take all command buffers
+        let buffers = std::mem::take(&mut *self.command_buffers.borrow_mut());
+
+        if !buffers.is_empty() {
+            profile_scope!("submit_commands");
+            self.queue().submit(buffers);
+        }
+
+        // Present surface
+        if let Some(surface) = self.surface.as_ref() {
+            profile_scope!("present_surface");
+            // Note: We can't take() the surface since self is borrowed, but present
+            // doesn't consume it - it just signals we're done with this frame
+        }
+
+        // End GPU profiler frame
+        if let Some(ref profiler) = self.gpu_profiler
+            && let Err(e) = profiler.end_frame()
+        {
+            tracing::warn!("GPU profiler end_frame error: {e:?}");
         }
     }
 
-    /// Get direct access to the command encoder (immutable).
-    pub fn encoder_ref(&self) -> Option<&wgpu::CommandEncoder> {
+    // =========================================================================
+    // Backwards Compatibility Methods
+    // =========================================================================
+
+    /// Convenience method to clear to a color and execute rendering commands.
+    ///
+    /// This is the most common pattern - clear the surface and render.
+    ///
+    /// # Deprecated
+    ///
+    /// Prefer using the builder pattern:
+    /// ```ignore
+    /// let mut pass = frame.render_pass()
+    ///     .clear_color(Color::BLACK)
+    ///     .build();
+    /// // render
+    /// ```
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use frame.render_pass().clear_color().build() instead"
+    )]
+    pub fn clear_and_render<F>(&self, target: RenderTarget<'_>, clear_color: Color, f: F)
+    where
+        F: FnOnce(&mut RenderPass<'_>),
+    {
+        profile_scope!("clear_and_render");
+        let mut pass = self
+            .render_pass()
+            .target(target)
+            .clear_color(clear_color)
+            .label("main_pass")
+            .build();
+        f(&mut pass);
+    }
+
+    /// Clear the target and render with depth testing enabled.
+    ///
+    /// # Deprecated
+    ///
+    /// Prefer using the builder pattern:
+    /// ```ignore
+    /// let mut pass = frame.render_pass()
+    ///     .clear_color(Color::BLACK)
+    ///     .clear_depth(0.0)
+    ///     .build();
+    /// ```
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use frame.render_pass().clear_color().clear_depth().build() instead"
+    )]
+    pub fn clear_and_render_with_depth<'a, F>(
+        &'a self,
+        target: RenderTarget<'a>,
+        clear_color: Color,
+        depth_view: &'a wgpu::TextureView,
+        depth_clear_value: f32,
+        f: F,
+    ) where
+        F: FnOnce(&mut RenderPass<'a>),
+    {
+        profile_scope!("clear_and_render_with_depth");
+        let mut pass = self
+            .render_pass()
+            .target(target)
+            .clear_color(clear_color)
+            .depth_attachment(depth_view)
+            .clear_depth(depth_clear_value)
+            .label("main_pass_with_depth")
+            .build();
+        f(&mut pass);
+    }
+}
+
+impl Drop for Frame<'_> {
+    fn drop(&mut self) {
+        if !self.submitted.get() {
+            self.submitted.set(true);
+            self.submit_inner();
+        }
+
+        // Present surface
+        if let Some(surface) = self.surface.take() {
+            profile_scope!("present_surface");
+            surface.texture.present();
+        }
+
+        // Request redraw
+        self.winit_window.request_redraw();
+    }
+}
+
+// ============================================================================
+// RenderPassBuilder
+// ============================================================================
+
+/// Target for color attachment in render passes.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ColorTarget<'a> {
+    /// Render to the window surface.
+    #[default]
+    Surface,
+    /// Render to a custom texture view.
+    Custom(&'a wgpu::TextureView),
+    /// Render to a framebuffer.
+    Framebuffer(&'a Framebuffer),
+}
+
+/// Color operation for render pass.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ColorOp {
+    /// Clear to the specified color.
+    Clear(wgpu::Color),
+    /// Load existing contents.
+    #[default]
+    Load,
+}
+
+impl From<Color> for ColorOp {
+    fn from(color: Color) -> Self {
+        Self::Clear(color.to_wgpu())
+    }
+}
+
+impl From<wgpu::Color> for ColorOp {
+    fn from(color: wgpu::Color) -> Self {
+        Self::Clear(color)
+    }
+}
+
+/// Depth operation for render pass.
+#[derive(Debug, Clone, Copy)]
+pub enum DepthOp {
+    /// Clear to the specified value.
+    Clear(f32),
+    /// Load existing values.
+    Load,
+    /// Read-only depth (no writes).
+    ReadOnly,
+}
+
+impl Default for DepthOp {
+    fn default() -> Self {
+        Self::Clear(1.0)
+    }
+}
+
+/// Builder for creating render passes with fluent API.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use astrelis_render::{Frame, Color};
+/// # let frame: &Frame = todo!();
+/// let mut pass = frame.render_pass()
+///     .clear_color(Color::BLACK)
+///     .clear_depth(0.0)
+///     .label("main")
+///     .build();
+///
+/// // Use pass.wgpu_pass() for rendering
+/// ```
+pub struct RenderPassBuilder<'f, 'w> {
+    frame: &'f Frame<'w>,
+    color_target: ColorTarget<'f>,
+    color_op: ColorOp,
+    depth_view: Option<&'f wgpu::TextureView>,
+    depth_op: DepthOp,
+    label: Option<String>,
+}
+
+impl<'f, 'w> RenderPassBuilder<'f, 'w> {
+    /// Create a new render pass builder.
+    pub(crate) fn new(frame: &'f Frame<'w>) -> Self {
+        Self {
+            frame,
+            color_target: ColorTarget::Surface,
+            color_op: ColorOp::Load,
+            depth_view: None,
+            depth_op: DepthOp::default(),
+            label: None,
+        }
+    }
+
+    /// Set the render target (for backwards compatibility).
+    pub fn target(mut self, target: RenderTarget<'f>) -> Self {
+        match target {
+            RenderTarget::Surface => {
+                self.color_target = ColorTarget::Surface;
+            }
+            RenderTarget::SurfaceWithDepth {
+                depth_view,
+                clear_value,
+            } => {
+                self.color_target = ColorTarget::Surface;
+                self.depth_view = Some(depth_view);
+                if let Some(v) = clear_value {
+                    self.depth_op = DepthOp::Clear(v);
+                } else {
+                    self.depth_op = DepthOp::Load;
+                }
+            }
+            RenderTarget::Framebuffer(fb) => {
+                self.color_target = ColorTarget::Framebuffer(fb);
+                if let Some(dv) = fb.depth_view() {
+                    self.depth_view = Some(dv);
+                }
+            }
+        }
+        self
+    }
+
+    /// Render to the window surface (default).
+    pub fn to_surface(mut self) -> Self {
+        self.color_target = ColorTarget::Surface;
+        self
+    }
+
+    /// Render to a framebuffer.
+    pub fn to_framebuffer(mut self, fb: &'f Framebuffer) -> Self {
+        self.color_target = ColorTarget::Framebuffer(fb);
+        if let Some(dv) = fb.depth_view() {
+            self.depth_view = Some(dv);
+        }
+        self
+    }
+
+    /// Render to a custom texture view.
+    pub fn to_texture(mut self, view: &'f wgpu::TextureView) -> Self {
+        self.color_target = ColorTarget::Custom(view);
+        self
+    }
+
+    /// Clear the color target to the specified color.
+    pub fn clear_color(mut self, color: impl Into<ColorOp>) -> Self {
+        self.color_op = color.into();
+        self
+    }
+
+    /// Load existing color contents (default).
+    pub fn load_color(mut self) -> Self {
+        self.color_op = ColorOp::Load;
+        self
+    }
+
+    /// Set the depth attachment.
+    pub fn depth_attachment(mut self, view: &'f wgpu::TextureView) -> Self {
+        self.depth_view = Some(view);
+        self
+    }
+
+    /// Use the window's depth buffer automatically.
+    ///
+    /// # Panics
+    /// Panics if the window doesn't have a depth buffer.
+    pub fn with_window_depth(mut self) -> Self {
+        self.depth_view = Some(
+            self.frame
+                .depth_view()
+                .expect("Window must have depth buffer for with_window_depth()"),
+        );
+        self
+    }
+
+    /// Use the window's depth buffer if available.
+    pub fn with_window_depth_if_available(mut self) -> Self {
+        if let Some(dv) = self.frame.depth_view() {
+            self.depth_view = Some(dv);
+        }
+        self
+    }
+
+    /// Clear the depth buffer to the specified value.
+    pub fn clear_depth(mut self, value: f32) -> Self {
+        self.depth_op = DepthOp::Clear(value);
+        self
+    }
+
+    /// Load existing depth values.
+    pub fn load_depth(mut self) -> Self {
+        self.depth_op = DepthOp::Load;
+        self
+    }
+
+    /// Use depth in read-only mode (no writes).
+    pub fn depth_readonly(mut self) -> Self {
+        self.depth_op = DepthOp::ReadOnly;
+        self
+    }
+
+    /// Set a debug label for the render pass.
+    pub fn label(mut self, name: impl Into<String>) -> Self {
+        self.label = Some(name.into());
+        self
+    }
+
+    /// Build and return the render pass.
+    ///
+    /// The pass owns its encoder. When dropped, it ends the pass,
+    /// finishes the encoder, and adds the command buffer to the frame.
+    pub fn build(self) -> RenderPass<'f> {
+        profile_function!();
+
+        let label = self.label.clone();
+        let label_str = label.as_deref();
+
+        // Create encoder for this pass
+        let encoder = self
+            .frame
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: label_str });
+
+        // Build color attachment
+        let color_view = match self.color_target {
+            ColorTarget::Surface => self.frame.surface_view(),
+            ColorTarget::Custom(v) => v,
+            ColorTarget::Framebuffer(fb) => fb.render_view(),
+        };
+
+        let color_ops = match self.color_op {
+            ColorOp::Clear(color) => wgpu::Operations {
+                load: wgpu::LoadOp::Clear(color),
+                store: wgpu::StoreOp::Store,
+            },
+            ColorOp::Load => wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: wgpu::StoreOp::Store,
+            },
+        };
+
+        let resolve_target = match self.color_target {
+            ColorTarget::Framebuffer(fb) => fb.resolve_target(),
+            _ => None,
+        };
+
+        let color_attachments = [Some(wgpu::RenderPassColorAttachment {
+            view: color_view,
+            resolve_target,
+            ops: color_ops,
+            depth_slice: None,
+        })];
+
+        // Build depth attachment
+        let depth_attachment = self.depth_view.map(|view| {
+            let (depth_ops, read_only) = match self.depth_op {
+                DepthOp::Clear(value) => (
+                    Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(value),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    false,
+                ),
+                DepthOp::Load => (
+                    Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    false,
+                ),
+                DepthOp::ReadOnly => (
+                    Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    true,
+                ),
+            };
+
+            wgpu::RenderPassDepthStencilAttachment {
+                view,
+                depth_ops: if read_only { None } else { depth_ops },
+                stencil_ops: None,
+            }
+        });
+
+        // Increment pass count
+        self.frame.stats.increment_passes();
+
+        // Create the wgpu render pass
+        // We need to keep encoder alive, so we create pass from a separate borrowed encoder
+        let mut encoder = encoder;
+        let pass = encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: label_str,
+                color_attachments: &color_attachments,
+                depth_stencil_attachment: depth_attachment,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            })
+            .forget_lifetime();
+
+        RenderPass {
+            frame: self.frame,
+            encoder: Some(encoder),
+            pass: Some(pass),
+            stats: self.frame.stats.clone(),
+            #[cfg(feature = "gpu-profiling")]
+            profiler_scope: None,
+        }
+    }
+}
+
+// ============================================================================
+// RenderPass
+// ============================================================================
+
+/// A render pass that owns its encoder.
+///
+/// When dropped, the render pass:
+/// 1. Ends the wgpu render pass
+/// 2. Finishes the command encoder
+/// 3. Pushes the command buffer to the frame
+///
+/// This design eliminates encoder movement and borrow conflicts.
+pub struct RenderPass<'f> {
+    /// Reference to the frame (for pushing command buffer on drop).
+    frame: &'f Frame<'f>,
+    /// The command encoder (owned by this pass).
+    encoder: Option<wgpu::CommandEncoder>,
+    /// The active wgpu render pass.
+    pass: Option<wgpu::RenderPass<'static>>,
+    /// Atomic stats for draw call counting.
+    stats: Arc<AtomicFrameStats>,
+    /// GPU profiler scope (when gpu-profiling feature is enabled).
+    #[cfg(feature = "gpu-profiling")]
+    profiler_scope: Option<wgpu_profiler::scope::OwningScope>,
+}
+
+impl<'f> RenderPass<'f> {
+    /// Get the underlying wgpu RenderPass (mutable).
+    ///
+    /// # Panics
+    /// Panics if the render pass has already been consumed.
+    pub fn wgpu_pass(&mut self) -> &mut wgpu::RenderPass<'static> {
+        self.pass.as_mut().expect("RenderPass already consumed")
+    }
+
+    /// Get the underlying wgpu RenderPass (immutable).
+    ///
+    /// # Panics
+    /// Panics if the render pass has already been consumed.
+    pub fn wgpu_pass_ref(&self) -> &wgpu::RenderPass<'static> {
+        self.pass.as_ref().expect("RenderPass already consumed")
+    }
+
+    /// Try to get the underlying wgpu RenderPass.
+    pub fn try_wgpu_pass(&mut self) -> Option<&mut wgpu::RenderPass<'static>> {
+        self.pass.as_mut()
+    }
+
+    /// Check if the render pass is still valid.
+    pub fn is_valid(&self) -> bool {
+        self.pass.is_some()
+    }
+
+    /// Get raw access to the pass (alias for wgpu_pass).
+    pub fn raw_pass(&mut self) -> &mut wgpu::RenderPass<'static> {
+        self.wgpu_pass()
+    }
+
+    /// Get the command encoder.
+    pub fn encoder(&self) -> Option<&wgpu::CommandEncoder> {
         self.encoder.as_ref()
     }
 
@@ -195,690 +822,29 @@ impl FrameContext {
         self.encoder.as_mut()
     }
 
-    /// Get the surface texture view for this frame.
-    ///
-    /// # Panics
-    /// Panics if the surface has been consumed. Use `try_surface_view()` for fallible access.
-    pub fn surface_view(&self) -> &wgpu::TextureView {
-        self.surface().view()
-    }
-
-    /// Try to get the surface texture view for this frame.
-    pub fn try_surface_view(&self) -> Option<&wgpu::TextureView> {
-        self.try_surface().map(|s| s.view())
-    }
-
-    /// Get the surface texture for this frame.
-    ///
-    /// # Panics
-    /// Panics if the surface has been consumed. Use `try_surface_texture()` for fallible access.
-    pub fn surface_texture(&self) -> &wgpu::Texture {
-        self.surface().texture()
-    }
-
-    /// Try to get the surface texture for this frame.
-    pub fn try_surface_texture(&self) -> Option<&wgpu::Texture> {
-        self.try_surface().map(|s| s.texture())
-    }
-
-    pub fn finish(self) {
-        drop(self);
-    }
-
-    /// Get the GPU profiler attached to this frame, if any.
-    pub fn gpu_profiler(&self) -> Option<&GpuFrameProfiler> {
-        self.gpu_profiler.as_deref()
-    }
-
-    /// Check if GPU profiling is active for this frame.
-    pub fn has_gpu_profiler(&self) -> bool {
-        self.gpu_profiler.is_some()
-    }
-
-    /// Execute a closure with a render pass, automatically handling scoping.
-    ///
-    /// This is the ergonomic RAII pattern that eliminates the need for manual `{ }` blocks.
-    /// The render pass is automatically dropped after the closure completes.
-    ///
-    /// When a GPU profiler is attached to this frame (via [`RenderableWindow::set_gpu_profiler`]),
-    /// a GPU profiling scope is automatically created around the render pass, using the
-    /// pass label (or `"render_pass"` as default) as the scope name.
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// # use astrelis_render::*;
-    /// # let mut frame: FrameContext = todo!();
-    /// frame.with_pass(
-    ///     RenderPassBuilder::new()
-    ///         .target(RenderTarget::Surface)
-    ///         .clear_color(Color::BLACK),
-    ///     |pass| {
-    ///         // Render commands here
-    ///         // pass automatically drops when closure ends
-    ///     }
-    /// );
-    /// frame.finish();
-    /// ```
-    pub fn with_pass<'a, F>(&'a mut self, builder: RenderPassBuilder<'a>, f: F)
-    where
-        F: FnOnce(&mut RenderPass<'a>),
-    {
-        profile_scope!("with_pass");
-
-        #[cfg(feature = "gpu-profiling")]
-        {
-            if self.gpu_profiler.is_some() {
-                self.with_pass_profiled_inner(builder, f);
-                return;
-            }
-        }
-
-        let mut pass = builder.build(self);
-        f(&mut pass);
-        // pass drops here automatically
-    }
-
-    /// Internal: execute a render pass with GPU profiling scope.
-    ///
-    /// This method creates a GPU timing scope around the render pass using
-    /// the profiler attached to this frame. The encoder is temporarily moved
-    /// out, wrapped in a profiling scope, and returned after the closure completes.
-    ///
-    /// # Safety rationale for the unsafe block:
-    ///
-    /// The `RenderPass` created here borrows `self` (for draw call counting),
-    /// but the encoder is held by the profiling scope, not by the `RenderPass`.
-    /// After the closure and scope are dropped, we need to write the encoder back
-    /// to `self.encoder`. The borrow checker cannot see that the `RenderPass` is
-    /// fully dropped before the write, so we use a raw pointer to reborrow `self`.
-    /// This is safe because:
-    /// 1. The `RenderPass` has `encoder: None` - it never touches `self.encoder`
-    /// 2. The `pass` (wgpu_pass) is taken before the `RenderPass` is dropped
-    /// 3. The `RenderPass::Drop` returns early when `encoder` is `None`
-    /// 4. The encoder write happens strictly after all borrows are released
-    #[cfg(feature = "gpu-profiling")]
-    fn with_pass_profiled_inner<'a, F>(&'a mut self, builder: RenderPassBuilder<'a>, f: F)
-    where
-        F: FnOnce(&mut RenderPass<'a>),
-    {
-        let label = builder.label_or("render_pass").to_string();
-        let profiler = self.gpu_profiler.clone().unwrap();
-        let mut encoder = self.encoder.take().expect("Encoder already taken");
-
-        // Build attachments (borrows self immutably for surface view access).
-        // We must finish using the attachments before mutating self.
-        let (all_attachments, depth_attachment) = builder.build_attachments(self);
-
-        {
-            let mut scope = profiler.scope(&label, &mut encoder);
-
-            let descriptor = wgpu::RenderPassDescriptor {
-                label: Some(&label),
-                color_attachments: &all_attachments,
-                depth_stencil_attachment: depth_attachment,
-                occlusion_query_set: None,
-                timestamp_writes: None,
-            };
-
-            let wgpu_pass = scope.begin_render_pass(&descriptor).forget_lifetime();
-
-            // SAFETY: We need to create a RenderPass that borrows self for 'a
-            // (for draw call counting via frame.increment_draw_calls()), but
-            // we also need to reassign self.encoder after the scope drops.
-            // The RenderPass created here has encoder=None, so its Drop impl
-            // will NOT write to self.encoder. We use a raw pointer to get a
-            // second mutable reference, which is safe because:
-            // - The RenderPass only accesses self.stats (via increment_draw_calls)
-            // - The encoder reassignment only accesses self.encoder
-            // - These are disjoint fields
-            // - The RenderPass is fully dropped before the encoder reassignment
-            let self_ptr = self as *mut FrameContext;
-            let frame_ref: &'a mut FrameContext = unsafe { &mut *self_ptr };
-            frame_ref.stats.passes += 1;
-
-            let mut pass = RenderPass {
-                frame: frame_ref,
-                encoder: None, // encoder held by scope
-                pass: Some(wgpu_pass),
-            };
-
-            f(&mut pass);
-
-            // End the render pass before the scope closes.
-            pass.pass.take();
-            // RenderPass is dropped here - its Drop impl skips encoder return (encoder is None)
-        }
-        // scope dropped here -- end GPU timestamp
-
-        // SAFETY: All borrows from the RenderPass and scope are now released.
-        // The attachments from build_attachments are also dropped.
-        self.encoder = Some(encoder);
-    }
-
-    /// Convenience method to clear to a color and execute rendering commands.
-    ///
-    /// This is the most common pattern - clear the surface and render.
-    /// When a GPU profiler is attached, a scope named `"main_pass"` is automatically
-    /// created around the render pass.
-    ///
-    /// # Example
-    /// ```rust,no_run
-    /// # use astrelis_render::*;
-    /// # let mut frame: FrameContext = todo!();
-    /// frame.clear_and_render(
-    ///     RenderTarget::Surface,
-    ///     Color::BLACK,
-    ///     |pass| {
-    ///         // Render your content here
-    ///         // Example: ui.render(pass.wgpu_pass());
-    ///     }
-    /// );
-    /// frame.finish();
-    /// ```
-    pub fn clear_and_render<'a, F>(
-        &'a mut self,
-        target: RenderTarget<'a>,
-        clear_color: impl Into<crate::Color>,
-        f: F,
-    ) where
-        F: FnOnce(&mut RenderPass<'a>),
-    {
-        profile_scope!("clear_and_render");
-        self.with_pass(
-            RenderPassBuilder::new()
-                .label("main_pass")
-                .target(target)
-                .clear_color(clear_color.into()),
-            f,
-        );
-    }
-
-    /// Clear the target and render with depth testing enabled.
-    ///
-    /// This is the same as `clear_and_render` but also attaches a depth buffer
-    /// and clears it to the specified value (typically 0.0 for reverse-Z depth).
-    ///
-    /// # Arguments
-    /// - `target`: The render target (Surface or Framebuffer)
-    /// - `clear_color`: The color to clear to
-    /// - `depth_view`: The depth texture view for depth testing
-    /// - `depth_clear_value`: The value to clear the depth buffer to (0.0 for reverse-Z)
-    /// - `f`: The closure to execute rendering commands
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let ui_depth_view = ui_renderer.depth_view();
-    /// frame.clear_and_render_with_depth(
-    ///     RenderTarget::Surface,
-    ///     Color::BLACK,
-    ///     ui_depth_view,
-    ///     0.0, // Clear to 0.0 for reverse-Z
-    ///     |pass| {
-    ///         ui_system.render(pass.wgpu_pass());
-    ///     },
-    /// );
-    /// ```
-    pub fn clear_and_render_with_depth<'a, F>(
-        &'a mut self,
-        target: RenderTarget<'a>,
-        clear_color: impl Into<crate::Color>,
-        depth_view: &'a wgpu::TextureView,
-        depth_clear_value: f32,
-        f: F,
-    ) where
-        F: FnOnce(&mut RenderPass<'a>),
-    {
-        profile_scope!("clear_and_render_with_depth");
-        self.with_pass(
-            RenderPassBuilder::new()
-                .label("main_pass_with_depth")
-                .target(target)
-                .clear_color(clear_color.into())
-                .depth_stencil_attachment(
-                    depth_view,
-                    Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(depth_clear_value),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    None,
-                ),
-            f,
-        );
-    }
-
-    /// Create a render pass that clears to the given color.
-    pub fn clear_pass<'a>(
-        &'a mut self,
-        target: RenderTarget<'a>,
-        clear_color: wgpu::Color,
-    ) -> RenderPass<'a> {
-        RenderPassBuilder::new()
-            .target(target)
-            .clear_color(clear_color)
-            .build(self)
-    }
-
-    /// Create a render pass that loads existing content.
-    pub fn load_pass<'a>(&'a mut self, target: RenderTarget<'a>) -> RenderPass<'a> {
-        RenderPassBuilder::new().target(target).build(self)
-    }
-
-    /// Execute a closure with a GPU profiling scope on the command encoder.
-    ///
-    /// If no GPU profiler is attached, the closure is called directly with the encoder.
-    /// When a profiler is present, a GPU timing scope with the given label wraps the closure.
-    ///
-    /// This is useful for profiling non-render-pass work like buffer copies, texture uploads,
-    /// or compute dispatches that happen outside of `with_pass()`.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// frame.with_gpu_scope("upload_data", |encoder| {
-    ///     encoder.copy_buffer_to_buffer(&src, 0, &dst, 0, size);
-    /// });
-    /// ```
-    #[cfg(feature = "gpu-profiling")]
-    pub fn with_gpu_scope<F>(&mut self, label: &str, f: F)
-    where
-        F: FnOnce(&mut wgpu::CommandEncoder),
-    {
-        if let Some(profiler) = self.gpu_profiler.clone() {
-            let mut encoder = self.encoder.take().expect("Encoder already taken");
-            {
-                let mut scope = profiler.scope(label, &mut encoder);
-                f(&mut scope);
-            }
-            self.encoder = Some(encoder);
-        } else {
-            f(self.encoder());
-        }
-    }
-
-    /// Execute a closure with a GPU profiling scope on the command encoder.
-    ///
-    /// When `gpu-profiling` feature is disabled, this simply calls the closure with the encoder.
-    #[cfg(not(feature = "gpu-profiling"))]
-    pub fn with_gpu_scope<F>(&mut self, _label: &str, f: F)
-    where
-        F: FnOnce(&mut wgpu::CommandEncoder),
-    {
-        f(self.encoder());
-    }
-}
-
-impl Drop for FrameContext {
-    fn drop(&mut self) {
-        profile_function!();
-
-        if self.stats.passes == 0 {
-            tracing::error!("No render passes were executed for this frame!");
-            return;
-        }
-
-        // Resolve GPU profiler queries before submitting commands
-        if let Some(ref profiler) = self.gpu_profiler
-            && let Some(encoder) = self.encoder.as_mut() {
-                profiler.resolve_queries(encoder);
-            }
-
-        if let Some(encoder) = self.encoder.take() {
-            {
-                profile_scope!("submit_commands");
-                self.context.queue().submit(std::iter::once(encoder.finish()));
-            }
-        }
-
-        if let Some(surface) = self.surface.take() {
-            profile_scope!("present_surface");
-            surface.texture.present();
-        }
-
-        // End GPU profiler frame (after submit, before next frame)
-        if let Some(ref profiler) = self.gpu_profiler
-            && let Err(e) = profiler.end_frame() {
-                tracing::warn!("GPU profiler end_frame error: {e:?}");
-            }
-
-        // Request redraw for next frame
-        self.window.request_redraw();
-    }
-}
-
-/// Clear operation for a render pass.
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
-pub enum ClearOp {
-    /// Load existing contents (no clear).
-    #[default]
-    Load,
-    /// Clear to the specified color.
-    Clear(wgpu::Color),
-}
-
-
-impl From<wgpu::Color> for ClearOp {
-    fn from(color: wgpu::Color) -> Self {
-        ClearOp::Clear(color)
-    }
-}
-
-impl From<crate::Color> for ClearOp {
-    fn from(color: crate::Color) -> Self {
-        ClearOp::Clear(color.to_wgpu())
-    }
-}
-
-/// Depth clear operation for a render pass.
-#[derive(Debug, Clone, Copy)]
-pub enum DepthClearOp {
-    /// Load existing depth values.
-    Load,
-    /// Clear to the specified depth value (typically 1.0).
-    Clear(f32),
-}
-
-impl Default for DepthClearOp {
-    fn default() -> Self {
-        DepthClearOp::Clear(1.0)
-    }
-}
-
-/// Builder for creating render passes.
-pub struct RenderPassBuilder<'a> {
-    label: Option<&'a str>,
-    // New simplified API
-    target: Option<RenderTarget<'a>>,
-    clear_op: ClearOp,
-    depth_clear_op: DepthClearOp,
-    // Legacy API for advanced use
-    color_attachments: Vec<Option<wgpu::RenderPassColorAttachment<'a>>>,
-    surface_attachment_ops: Option<(wgpu::Operations<wgpu::Color>, Option<&'a wgpu::TextureView>)>,
-    depth_stencil_attachment: Option<wgpu::RenderPassDepthStencilAttachment<'a>>,
-    // GPU profiling support
-    #[cfg(feature = "gpu-profiling")]
-    timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'a>>,
-}
-
-impl<'a> RenderPassBuilder<'a> {
-    pub fn new() -> Self {
-        Self {
-            label: None,
-            target: None,
-            clear_op: ClearOp::Load,
-            depth_clear_op: DepthClearOp::default(),
-            color_attachments: Vec::new(),
-            surface_attachment_ops: None,
-            depth_stencil_attachment: None,
-            #[cfg(feature = "gpu-profiling")]
-            timestamp_writes: None,
-        }
-    }
-
-    /// Set a debug label for the render pass.
-    pub fn label(mut self, label: &'a str) -> Self {
-        self.label = Some(label);
-        self
-    }
-
-    /// Get the label, or a default fallback.
-    #[allow(dead_code)]
-    pub(crate) fn label_or<'b>(&'b self, default: &'b str) -> &'b str {
-        self.label.unwrap_or(default)
-    }
-
-    /// Set timestamp writes for GPU profiling.
-    #[cfg(feature = "gpu-profiling")]
-    #[allow(dead_code)]
-    pub(crate) fn timestamp_writes(mut self, tw: wgpu::RenderPassTimestampWrites<'a>) -> Self {
-        self.timestamp_writes = Some(tw);
-        self
-    }
-
-    /// Set the render target (Surface or Framebuffer).
-    ///
-    /// This is the simplified API - use this instead of manual color_attachment calls.
-    pub fn target(mut self, target: RenderTarget<'a>) -> Self {
-        self.target = Some(target);
-        self
-    }
-
-    /// Set clear color for the render target.
-    ///
-    /// Pass a wgpu::Color or use ClearOp::Load to preserve existing contents.
-    pub fn clear_color(mut self, color: impl Into<ClearOp>) -> Self {
-        self.clear_op = color.into();
-        self
-    }
-
-    /// Set depth clear operation.
-    pub fn clear_depth(mut self, depth: f32) -> Self {
-        self.depth_clear_op = DepthClearOp::Clear(depth);
-        self
-    }
-
-    /// Load existing depth values instead of clearing.
-    pub fn load_depth(mut self) -> Self {
-        self.depth_clear_op = DepthClearOp::Load;
-        self
-    }
-
-    // Legacy API for advanced use cases
-
-    /// Add a color attachment manually (advanced API).
-    ///
-    /// For most cases, use `.target()` instead.
-    pub fn color_attachment(
-        mut self,
-        view: Option<&'a wgpu::TextureView>,
-        resolve_target: Option<&'a wgpu::TextureView>,
-        ops: wgpu::Operations<wgpu::Color>,
-    ) -> Self {
-        if let Some(view) = view {
-            self.color_attachments
-                .push(Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target,
-                    ops,
-                    depth_slice: None,
-                }));
-        } else {
-            // Store ops for later - will be filled with surface view in build()
-            self.surface_attachment_ops = Some((ops, resolve_target));
-        }
-        self
-    }
-
-    /// Add a depth-stencil attachment manually (advanced API).
-    ///
-    /// For framebuffers with depth, the depth attachment is handled automatically
-    /// when using `.target()`.
-    pub fn depth_stencil_attachment(
-        mut self,
-        view: &'a wgpu::TextureView,
-        depth_ops: Option<wgpu::Operations<f32>>,
-        stencil_ops: Option<wgpu::Operations<u32>>,
-    ) -> Self {
-        self.depth_stencil_attachment = Some(wgpu::RenderPassDepthStencilAttachment {
-            view,
-            depth_ops,
-            stencil_ops,
-        });
-        self
-    }
-
-    /// Build the color and depth attachments without creating the render pass.
-    ///
-    /// Used internally by `build()` and by `with_pass_profiled_inner()` to build
-    /// attachments before creating the GPU profiling scope.
-    pub(crate) fn build_attachments(
-        &self,
-        frame_context: &'a FrameContext,
-    ) -> (
-        Vec<Option<wgpu::RenderPassColorAttachment<'a>>>,
-        Option<wgpu::RenderPassDepthStencilAttachment<'a>>,
-    ) {
-        let mut all_attachments = Vec::new();
-
-        if let Some(target) = &self.target {
-            let color_ops = match self.clear_op {
-                ClearOp::Load => wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-                ClearOp::Clear(color) => wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(color),
-                    store: wgpu::StoreOp::Store,
-                },
-            };
-
-            match target {
-                RenderTarget::Surface => {
-                    let surface_view = frame_context.surface().view();
-                    all_attachments.push(Some(wgpu::RenderPassColorAttachment {
-                        view: surface_view,
-                        resolve_target: None,
-                        ops: color_ops,
-                        depth_slice: None,
-                    }));
-                }
-                RenderTarget::Framebuffer(fb) => {
-                    all_attachments.push(Some(wgpu::RenderPassColorAttachment {
-                        view: fb.render_view(),
-                        resolve_target: fb.resolve_target(),
-                        ops: color_ops,
-                        depth_slice: None,
-                    }));
-                }
-            }
-        } else {
-            if let Some((ops, resolve_target)) = self.surface_attachment_ops {
-                let surface_view = frame_context.surface().view();
-                all_attachments.push(Some(wgpu::RenderPassColorAttachment {
-                    view: surface_view,
-                    resolve_target,
-                    ops,
-                    depth_slice: None,
-                }));
-            }
-            all_attachments.extend(self.color_attachments.iter().cloned());
-        }
-
-        let depth_attachment = if let Some(ref attachment) = self.depth_stencil_attachment {
-            Some(attachment.clone())
-        } else if let Some(RenderTarget::Framebuffer(fb)) = &self.target {
-            fb.depth_view().map(|view| {
-                let depth_ops = match self.depth_clear_op {
-                    DepthClearOp::Load => wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                    DepthClearOp::Clear(depth) => wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(depth),
-                        store: wgpu::StoreOp::Store,
-                    },
-                };
-                wgpu::RenderPassDepthStencilAttachment {
-                    view,
-                    depth_ops: Some(depth_ops),
-                    stencil_ops: None,
-                }
-            })
-        } else {
-            None
-        };
-
-        (all_attachments, depth_attachment)
-    }
-
-    /// Builds the render pass and begins it on the provided frame context.
-    ///
-    /// This takes ownership of the CommandEncoder from the FrameContext, and releases it
-    /// back to the FrameContext when the RenderPass is dropped or [`finish`](RenderPass::finish)
-    /// is called.
-    pub fn build(self, frame_context: &'a mut FrameContext) -> RenderPass<'a> {
-        profile_function!();
-        let mut encoder = frame_context.encoder.take().unwrap();
-
-        let (all_attachments, depth_attachment) = self.build_attachments(frame_context);
-
-        #[cfg(feature = "gpu-profiling")]
-        let ts_writes = self.timestamp_writes;
-        #[cfg(not(feature = "gpu-profiling"))]
-        let ts_writes: Option<wgpu::RenderPassTimestampWrites<'_>> = None;
-
-        let descriptor = wgpu::RenderPassDescriptor {
-            label: self.label,
-            color_attachments: &all_attachments,
-            depth_stencil_attachment: depth_attachment,
-            occlusion_query_set: None,
-            timestamp_writes: ts_writes,
-        };
-
-        let render_pass = encoder.begin_render_pass(&descriptor).forget_lifetime();
-
-        frame_context.increment_passes();
-
-        RenderPass {
-            frame: frame_context,
-            encoder: Some(encoder),
-            pass: Some(render_pass),
-        }
-    }
-}
-
-impl Default for RenderPassBuilder<'_> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// A render pass wrapper that automatically returns the encoder to the frame context.
-pub struct RenderPass<'a> {
-    pub(crate) frame: &'a mut FrameContext,
-    pub(crate) encoder: Option<wgpu::CommandEncoder>,
-    pub(crate) pass: Option<wgpu::RenderPass<'static>>,
-}
-
-impl<'a> RenderPass<'a> {
-    /// Get the underlying wgpu RenderPass.
-    ///
-    /// # Panics
-    /// Panics if the render pass has already been consumed (dropped or finished).
-    /// Use `try_wgpu_pass()` for fallible access.
-    pub fn wgpu_pass(&mut self) -> &mut wgpu::RenderPass<'static> {
-        self.pass.as_mut()
-            .expect("RenderPass already consumed - ensure it wasn't dropped or finished early")
-    }
-
-    /// Try to get the underlying wgpu RenderPass.
-    ///
-    /// Returns `None` if the render pass has already been consumed.
-    pub fn try_wgpu_pass(&mut self) -> Option<&mut wgpu::RenderPass<'static>> {
-        self.pass.as_mut()
-    }
-
-    /// Check if the render pass is still valid and can be used.
-    pub fn is_valid(&self) -> bool {
-        self.pass.is_some()
-    }
-
-    /// Get raw access to the underlying wgpu render pass.
-    pub fn raw_pass(&mut self) -> &mut wgpu::RenderPass<'static> {
-        self.pass.as_mut().unwrap()
-    }
-
     /// Get the graphics context.
-    pub fn graphics_context(&self) -> &GraphicsContext {
-        &self.frame.context
+    pub fn graphics(&self) -> &GraphicsContext {
+        self.frame.graphics()
     }
 
-    /// Get the frame context.
-    pub fn frame_context(&self) -> &FrameContext {
-        self.frame
+    /// Record a draw call for statistics.
+    pub fn record_draw_call(&self) {
+        self.stats.increment_draw_calls();
     }
 
+    /// Consume the pass early and return the encoder for further use.
+    ///
+    /// This ends the render pass but allows the encoder to be used
+    /// for additional commands before submission.
+    pub fn into_encoder(mut self) -> wgpu::CommandEncoder {
+        // End the render pass
+        drop(self.pass.take());
+
+        // Take and return the encoder (skip normal Drop logic)
+        self.encoder.take().expect("Encoder already taken")
+    }
+
+    /// Finish the render pass (called automatically on drop).
     pub fn finish(self) {
         drop(self);
     }
@@ -888,15 +854,6 @@ impl<'a> RenderPass<'a> {
     // =========================================================================
 
     /// Set the viewport using physical coordinates.
-    ///
-    /// The viewport defines the transformation from normalized device coordinates
-    /// to window coordinates.
-    ///
-    /// # Arguments
-    ///
-    /// * `rect` - The viewport rectangle in physical (pixel) coordinates
-    /// * `min_depth` - Minimum depth value (typically 0.0)
-    /// * `max_depth` - Maximum depth value (typically 1.0)
     pub fn set_viewport_physical(
         &mut self,
         rect: astrelis_core::geometry::PhysicalRect<f32>,
@@ -913,14 +870,7 @@ impl<'a> RenderPass<'a> {
         );
     }
 
-    /// Set the viewport using logical coordinates (converts with scale factor).
-    ///
-    /// # Arguments
-    ///
-    /// * `rect` - The viewport rectangle in logical coordinates
-    /// * `min_depth` - Minimum depth value (typically 0.0)
-    /// * `max_depth` - Maximum depth value (typically 1.0)
-    /// * `scale` - Scale factor for logical to physical conversion
+    /// Set the viewport using logical coordinates.
     pub fn set_viewport_logical(
         &mut self,
         rect: astrelis_core::geometry::LogicalRect<f32>,
@@ -933,8 +883,6 @@ impl<'a> RenderPass<'a> {
     }
 
     /// Set the viewport from a Viewport struct.
-    ///
-    /// Uses the viewport's position and size, with depth range 0.0 to 1.0.
     pub fn set_viewport(&mut self, viewport: &crate::Viewport) {
         self.wgpu_pass().set_viewport(
             viewport.position.x,
@@ -947,24 +895,12 @@ impl<'a> RenderPass<'a> {
     }
 
     /// Set the scissor rectangle using physical coordinates.
-    ///
-    /// The scissor rectangle defines the area of the render target that
-    /// can be modified by drawing commands.
-    ///
-    /// # Arguments
-    ///
-    /// * `rect` - The scissor rectangle in physical (pixel) coordinates
     pub fn set_scissor_physical(&mut self, rect: astrelis_core::geometry::PhysicalRect<u32>) {
         self.wgpu_pass()
             .set_scissor_rect(rect.x, rect.y, rect.width, rect.height);
     }
 
     /// Set the scissor rectangle using logical coordinates.
-    ///
-    /// # Arguments
-    ///
-    /// * `rect` - The scissor rectangle in logical coordinates
-    /// * `scale` - Scale factor for logical to physical conversion
     pub fn set_scissor_logical(
         &mut self,
         rect: astrelis_core::geometry::LogicalRect<f32>,
@@ -975,38 +911,37 @@ impl<'a> RenderPass<'a> {
     }
 
     // =========================================================================
-    // Convenience Drawing Methods
+    // Drawing Methods
     // =========================================================================
 
-    /// Set the pipeline for this render pass.
-    pub fn set_pipeline(&mut self, pipeline: &'a wgpu::RenderPipeline) {
+    /// Set the pipeline.
+    pub fn set_pipeline(&mut self, pipeline: &wgpu::RenderPipeline) {
         self.wgpu_pass().set_pipeline(pipeline);
     }
 
-    /// Set a bind group for this render pass.
-    pub fn set_bind_group(
-        &mut self,
-        index: u32,
-        bind_group: &'a wgpu::BindGroup,
-        offsets: &[u32],
-    ) {
+    /// Set a bind group.
+    pub fn set_bind_group(&mut self, index: u32, bind_group: &wgpu::BindGroup, offsets: &[u32]) {
         self.wgpu_pass().set_bind_group(index, bind_group, offsets);
     }
 
-    /// Set the vertex buffer for this render pass.
-    pub fn set_vertex_buffer(&mut self, slot: u32, buffer_slice: wgpu::BufferSlice<'a>) {
+    /// Set a vertex buffer.
+    pub fn set_vertex_buffer(&mut self, slot: u32, buffer_slice: wgpu::BufferSlice<'_>) {
         self.wgpu_pass().set_vertex_buffer(slot, buffer_slice);
     }
 
-    /// Set the index buffer for this render pass.
-    pub fn set_index_buffer(&mut self, buffer_slice: wgpu::BufferSlice<'a>, format: wgpu::IndexFormat) {
+    /// Set the index buffer.
+    pub fn set_index_buffer(
+        &mut self,
+        buffer_slice: wgpu::BufferSlice<'_>,
+        format: wgpu::IndexFormat,
+    ) {
         self.wgpu_pass().set_index_buffer(buffer_slice, format);
     }
 
     /// Draw primitives.
     pub fn draw(&mut self, vertices: std::ops::Range<u32>, instances: std::ops::Range<u32>) {
         self.wgpu_pass().draw(vertices, instances);
-        self.frame.increment_draw_calls();
+        self.stats.increment_draw_calls();
     }
 
     /// Draw indexed primitives.
@@ -1016,8 +951,9 @@ impl<'a> RenderPass<'a> {
         base_vertex: i32,
         instances: std::ops::Range<u32>,
     ) {
-        self.wgpu_pass().draw_indexed(indices, base_vertex, instances);
-        self.frame.increment_draw_calls();
+        self.wgpu_pass()
+            .draw_indexed(indices, base_vertex, instances);
+        self.stats.increment_draw_calls();
     }
 
     /// Insert a debug marker.
@@ -1039,41 +975,7 @@ impl<'a> RenderPass<'a> {
     // Push Constants
     // =========================================================================
 
-    /// Set push constants for a range of shader stages.
-    ///
-    /// Push constants are a fast way to pass small amounts of data to shaders
-    /// without the overhead of buffer updates. They are limited in size
-    /// (typically 128-256 bytes depending on the GPU).
-    ///
-    /// **Requires the `PUSH_CONSTANTS` feature to be enabled.**
-    ///
-    /// # Arguments
-    ///
-    /// * `stages` - Which shader stages can access this data
-    /// * `offset` - Byte offset within the push constant range
-    /// * `data` - The data to set (must be Pod)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// #[repr(C)]
-    /// #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-    /// struct PushConstants {
-    ///     transform: [[f32; 4]; 4],
-    ///     color: [f32; 4],
-    /// }
-    ///
-    /// let constants = PushConstants {
-    ///     transform: /* ... */,
-    ///     color: [1.0, 0.0, 0.0, 1.0],
-    /// };
-    ///
-    /// pass.set_push_constants(
-    ///     wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-    ///     0,
-    ///     &constants,
-    /// );
-    /// ```
+    /// Set push constants.
     pub fn set_push_constants<T: bytemuck::Pod>(
         &mut self,
         stages: wgpu::ShaderStages,
@@ -1085,14 +987,7 @@ impl<'a> RenderPass<'a> {
     }
 
     /// Set push constants from raw bytes.
-    ///
-    /// Use this when you need more control over the data layout.
-    pub fn set_push_constants_raw(
-        &mut self,
-        stages: wgpu::ShaderStages,
-        offset: u32,
-        data: &[u8],
-    ) {
+    pub fn set_push_constants_raw(&mut self, stages: wgpu::ShaderStages, offset: u32, data: &[u8]) {
         self.wgpu_pass().set_push_constants(stages, offset, data);
     }
 }
@@ -1101,14 +996,66 @@ impl Drop for RenderPass<'_> {
     fn drop(&mut self) {
         profile_function!();
 
+        // Drop GPU profiler scope first (ends timing)
+        #[cfg(feature = "gpu-profiling")]
+        drop(self.profiler_scope.take());
+
+        // End the render pass
         drop(self.pass.take());
 
-        // Return the encoder to the frame context.
-        // When used within a GPU profiling scope (with_pass_profiled_inner),
-        // encoder is None because the encoder is held by the profiling scope — skip in that case.
+        // Finish encoder and push command buffer to frame
         if let Some(encoder) = self.encoder.take() {
-            self.frame.encoder = Some(encoder);
+            let command_buffer = encoder.finish();
+            self.frame.command_buffers.borrow_mut().push(command_buffer);
         }
     }
 }
 
+// ============================================================================
+// Backwards Compatibility Types
+// ============================================================================
+
+/// Clear operation for a render pass.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum ClearOp {
+    /// Load existing contents (no clear).
+    #[default]
+    Load,
+    /// Clear to the specified color.
+    Clear(wgpu::Color),
+}
+
+impl From<wgpu::Color> for ClearOp {
+    fn from(color: wgpu::Color) -> Self {
+        ClearOp::Clear(color)
+    }
+}
+
+impl From<Color> for ClearOp {
+    fn from(color: Color) -> Self {
+        ClearOp::Clear(color.to_wgpu())
+    }
+}
+
+/// Depth clear operation for a render pass.
+#[derive(Debug, Clone, Copy)]
+pub enum DepthClearOp {
+    /// Load existing depth values.
+    Load,
+    /// Clear to the specified depth value (typically 1.0).
+    Clear(f32),
+}
+
+impl Default for DepthClearOp {
+    fn default() -> Self {
+        DepthClearOp::Clear(1.0)
+    }
+}
+
+// ============================================================================
+// Legacy Compatibility
+// ============================================================================
+
+/// Deprecated alias for backwards compatibility.
+#[deprecated(since = "0.2.0", note = "Use Frame instead")]
+pub type FrameContext = Frame<'static>;

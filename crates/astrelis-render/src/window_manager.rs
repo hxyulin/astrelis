@@ -17,21 +17,20 @@ use astrelis_winit::{
 
 use crate::{
     context::GraphicsContext,
-    window::{RenderableWindow, WindowContextDescriptor},
+    window::{RenderWindow, WindowContextDescriptor},
 };
 
 /// Manages multiple renderable windows with automatic event handling.
 ///
 /// The WindowManager eliminates the boilerplate of manually managing a
-/// `HashMap<WindowId, RenderableWindow>` and handling common events like resizing.
+/// `HashMap<WindowId, RenderWindow>` and handling common events like resizing.
 ///
 /// # Example
 ///
 /// ```no_run
-/// use astrelis_render::{WindowManager, GraphicsContext, RenderTarget, Color};
+/// use astrelis_render::{WindowManager, GraphicsContext, Color};
 /// use astrelis_winit::app::{App, AppCtx};
 /// use astrelis_winit::{WindowId, FrameTime};
-/// use astrelis_winit::window::WindowBackend;
 /// use astrelis_winit::event::EventBatch;
 ///
 /// struct MyApp {
@@ -43,18 +42,20 @@ use crate::{
 ///     fn render(&mut self, _ctx: &mut AppCtx, window_id: WindowId, events: &mut EventBatch) {
 ///         self.window_manager.render_window(window_id, events, |window, _events| {
 ///             // Resize already handled automatically!
-///             let mut frame = window.begin_drawing();
-///             frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |_pass| {
+///             let Some(frame) = window.begin_frame() else { return };
+///             {
+///                 let mut pass = frame.render_pass()
+///                     .clear_color(Color::BLACK)
+///                     .build();
 ///                 // Your rendering here
-///             });
-///             frame.finish();
+///             }
 ///         });
 ///     }
 /// }
 /// ```
 pub struct WindowManager {
     graphics: Arc<GraphicsContext>,
-    windows: HashMap<WindowId, RenderableWindow>,
+    windows: HashMap<WindowId, RenderWindow>,
 }
 
 impl WindowManager {
@@ -96,7 +97,11 @@ impl WindowManager {
     /// );
     /// # }
     /// ```
-    pub fn create_window(&mut self, ctx: &mut AppCtx, descriptor: WindowDescriptor) -> Result<WindowId, crate::context::GraphicsError> {
+    pub fn create_window(
+        &mut self,
+        ctx: &mut AppCtx,
+        descriptor: WindowDescriptor,
+    ) -> Result<WindowId, crate::context::GraphicsError> {
         self.create_window_with_descriptor(ctx, descriptor, WindowContextDescriptor::default())
     }
 
@@ -126,9 +131,12 @@ impl WindowManager {
         window_descriptor: WindowContextDescriptor,
     ) -> Result<WindowId, crate::context::GraphicsError> {
         profile_function!();
-        let window = ctx.create_window(descriptor).expect("Failed to create window");
+        let window = ctx
+            .create_window(descriptor)
+            .expect("Failed to create window");
         let id = window.id();
-        let renderable = RenderableWindow::new_with_descriptor(window, self.graphics.clone(), window_descriptor)?;
+        let renderable =
+            RenderWindow::new_with_descriptor(window, self.graphics.clone(), window_descriptor)?;
         self.windows.insert(id, renderable);
         Ok(id)
     }
@@ -136,21 +144,21 @@ impl WindowManager {
     /// Gets a reference to a window by its ID.
     ///
     /// Returns `None` if the window doesn't exist.
-    pub fn get_window(&self, id: WindowId) -> Option<&RenderableWindow> {
+    pub fn get_window(&self, id: WindowId) -> Option<&RenderWindow> {
         self.windows.get(&id)
     }
 
     /// Gets a mutable reference to a window by its ID.
     ///
     /// Returns `None` if the window doesn't exist.
-    pub fn get_window_mut(&mut self, id: WindowId) -> Option<&mut RenderableWindow> {
+    pub fn get_window_mut(&mut self, id: WindowId) -> Option<&mut RenderWindow> {
         self.windows.get_mut(&id)
     }
 
     /// Removes a window from the manager.
     ///
     /// Returns the removed window if it existed.
-    pub fn remove_window(&mut self, id: WindowId) -> Option<RenderableWindow> {
+    pub fn remove_window(&mut self, id: WindowId) -> Option<RenderWindow> {
         self.windows.remove(&id)
     }
 
@@ -174,8 +182,7 @@ impl WindowManager {
     /// # Example
     ///
     /// ```no_run
-    /// use astrelis_render::{WindowManager, RenderTarget, Color};
-    /// use astrelis_winit::window::WindowBackend;
+    /// use astrelis_render::{WindowManager, Color};
     ///
     /// # fn example(window_manager: &mut WindowManager, window_id: astrelis_winit::WindowId, events: &mut astrelis_winit::event::EventBatch) {
     /// window_manager.render_window(window_id, events, |window, events| {
@@ -186,17 +193,19 @@ impl WindowManager {
     ///     });
     ///
     ///     // Render
-    ///     let mut frame = window.begin_drawing();
-    ///     frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |_pass| {
+    ///     let Some(frame) = window.begin_frame() else { return };
+    ///     {
+    ///         let mut pass = frame.render_pass()
+    ///             .clear_color(Color::BLACK)
+    ///             .build();
     ///         // Your rendering
-    ///     });
-    ///     frame.finish();
+    ///     }
     /// });
     /// # }
     /// ```
     pub fn render_window<F>(&mut self, id: WindowId, events: &mut EventBatch, mut render_fn: F)
     where
-        F: FnMut(&mut RenderableWindow, &mut EventBatch),
+        F: FnMut(&mut RenderWindow, &mut EventBatch),
     {
         profile_function!();
         let Some(window) = self.windows.get_mut(&id) else {
@@ -204,14 +213,12 @@ impl WindowManager {
         };
 
         // Handle common events automatically
-        events.dispatch(|event| {
-            match event {
-                Event::WindowResized(size) => {
-                    window.resized(*size);
-                    HandleStatus::consumed()
-                }
-                _ => HandleStatus::ignored(),
+        events.dispatch(|event| match event {
+            Event::WindowResized(size) => {
+                window.resized(*size);
+                HandleStatus::consumed()
             }
+            _ => HandleStatus::ignored(),
         });
 
         // Call user's render function with remaining events
@@ -225,23 +232,29 @@ impl WindowManager {
     /// # Example
     ///
     /// ```no_run
-    /// use astrelis_render::{WindowManager, RenderTarget, Color};
-    /// use astrelis_winit::window::WindowBackend;
+    /// use astrelis_render::{WindowManager, Color};
     ///
     /// # fn example(window_manager: &mut WindowManager, window_id: astrelis_winit::WindowId, events: &mut astrelis_winit::event::EventBatch) -> Result<(), String> {
     /// window_manager.render_window_result(window_id, events, |window, _events| {
-    ///     let mut frame = window.begin_drawing();
-    ///     frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |_pass| {
+    ///     let Some(frame) = window.begin_frame() else { return Ok(()) };
+    ///     {
+    ///         let mut pass = frame.render_pass()
+    ///             .clear_color(Color::BLACK)
+    ///             .build();
     ///         // Rendering that might fail
-    ///     });
-    ///     frame.finish();
+    ///     }
     ///     Ok(())
     /// })
     /// # }
     /// ```
-    pub fn render_window_result<F, E>(&mut self, id: WindowId, events: &mut EventBatch, mut render_fn: F) -> Result<(), E>
+    pub fn render_window_result<F, E>(
+        &mut self,
+        id: WindowId,
+        events: &mut EventBatch,
+        mut render_fn: F,
+    ) -> Result<(), E>
     where
-        F: FnMut(&mut RenderableWindow, &mut EventBatch) -> Result<(), E>,
+        F: FnMut(&mut RenderWindow, &mut EventBatch) -> Result<(), E>,
     {
         let Some(window) = self.windows.get_mut(&id) else {
             // Window doesn't exist - not an error, just skip
@@ -249,14 +262,12 @@ impl WindowManager {
         };
 
         // Handle common events automatically
-        events.dispatch(|event| {
-            match event {
-                Event::WindowResized(size) => {
-                    window.resized(*size);
-                    HandleStatus::consumed()
-                }
-                _ => HandleStatus::ignored(),
+        events.dispatch(|event| match event {
+            Event::WindowResized(size) => {
+                window.resized(*size);
+                HandleStatus::consumed()
             }
+            _ => HandleStatus::ignored(),
         });
 
         // Call user's render function with remaining events
@@ -269,12 +280,12 @@ impl WindowManager {
     }
 
     /// Iterates over all windows with their IDs.
-    pub fn iter(&self) -> impl Iterator<Item = (WindowId, &RenderableWindow)> {
+    pub fn iter(&self) -> impl Iterator<Item = (WindowId, &RenderWindow)> {
         self.windows.iter().map(|(&id, window)| (id, window))
     }
 
     /// Iterates mutably over all windows with their IDs.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = (WindowId, &mut RenderableWindow)> {
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (WindowId, &mut RenderWindow)> {
         self.windows.iter_mut().map(|(&id, window)| (id, window))
     }
 }
@@ -285,16 +296,21 @@ mod tests {
 
     #[test]
     fn test_window_manager_creation() {
-        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let manager = WindowManager::new(graphics.clone());
 
         assert_eq!(manager.window_count(), 0);
-        assert_eq!(manager.graphics().as_ref() as *const _, graphics.as_ref() as *const _);
+        assert_eq!(
+            manager.graphics().as_ref() as *const _,
+            graphics.as_ref() as *const _
+        );
     }
 
     #[test]
     fn test_window_manager_window_count() {
-        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let manager = WindowManager::new(graphics);
 
         assert_eq!(manager.window_count(), 0);
@@ -305,7 +321,8 @@ mod tests {
 
     #[test]
     fn test_window_manager_window_ids_empty() {
-        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let manager = WindowManager::new(graphics);
 
         assert_eq!(manager.window_ids().count(), 0);

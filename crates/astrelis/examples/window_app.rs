@@ -7,10 +7,10 @@
 //!
 //! Run with: cargo run -p astrelis --example window_app
 
-use std::sync::Arc;
 use astrelis::prelude::*;
 use astrelis::render::{RenderTarget, RenderableWindow, WindowContextDescriptor};
 use astrelis::winit::window::WindowBackend;
+use std::sync::Arc;
 
 struct WindowApp {
     #[allow(dead_code)]
@@ -86,9 +86,12 @@ fn main() {
         let graphics = engine.get::<Arc<GraphicsContext>>().unwrap();
 
         // Create a renderable window
-        let renderable =
-            RenderableWindow::new_with_descriptor(window, graphics.clone(), WindowContextDescriptor::default())
-                .expect("Failed to create renderable window");
+        let renderable = RenderableWindow::new_with_descriptor(
+            window,
+            graphics.clone(),
+            WindowContextDescriptor::default(),
+        )
+        .expect("Failed to create renderable window");
 
         Box::new(WindowApp {
             engine,

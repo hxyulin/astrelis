@@ -3,15 +3,15 @@
 //! The ApplicationBuilder eliminates 35-50 lines of boilerplate by providing
 //! a clean, declarative API for common app setup patterns.
 
-use crate::{Engine, EngineBuilder};
 use crate::plugin::{Plugin, PluginDyn, PluginGroup};
+use crate::{Engine, EngineBuilder};
 
 #[cfg(all(feature = "render", feature = "winit"))]
-use astrelis_render::{WindowManager, WindowContextDescriptor};
+use astrelis_render::{WindowContextDescriptor, WindowManager};
 
 #[cfg(feature = "winit")]
 use astrelis_winit::{
-    app::{run_app, App, AppCtx},
+    app::{App, AppCtx, run_app},
     window::{WindowDescriptor, WinitPhysicalSize},
 };
 
@@ -263,7 +263,7 @@ impl ApplicationBuilder {
         if !self.plugins.is_empty() {
             use std::cell::RefCell;
             builder = builder.add_plugins(StoredPlugins {
-                plugins: RefCell::new(self.plugins)
+                plugins: RefCell::new(self.plugins),
             });
         }
         let engine = builder.build();
@@ -317,29 +317,38 @@ impl ApplicationBuilder {
                 factory: Box<dyn FnOnce(&mut AppCtx, &Engine) -> Box<dyn App>>,
             }
 
-            let mut data = APP_BUILDER_DATA.with(|d| d.borrow_mut().take())
+            let mut data = APP_BUILDER_DATA
+                .with(|d| d.borrow_mut().take())
                 .expect("ApplicationBuilder data not found");
 
             #[cfg(all(feature = "render", feature = "winit"))]
             {
                 // Create initial window if requested
                 if data.create_window
-                    && let Some(window_manager) = data.engine.get_mut::<WindowManager>() {
-                        // Use WindowManager if available
-                        let descriptor = WindowDescriptor {
-                            title: data.title.clone(),
-                            size: Some(WinitPhysicalSize::new(data.size.0 as f32, data.size.1 as f32)),
-                            ..Default::default()
-                        };
+                    && let Some(window_manager) = data.engine.get_mut::<WindowManager>()
+                {
+                    // Use WindowManager if available
+                    let descriptor = WindowDescriptor {
+                        title: data.title.clone(),
+                        size: Some(WinitPhysicalSize::new(
+                            data.size.0 as f32,
+                            data.size.1 as f32,
+                        )),
+                        ..Default::default()
+                    };
 
-                        if let Some(window_desc) = data.window_descriptor.take() {
-                            if let Err(e) = window_manager.create_window_with_descriptor(ctx, descriptor, window_desc) {
-                                tracing::error!("Failed to create window with descriptor: {}", e);
-                            }
-                        } else if let Err(e) = window_manager.create_window(ctx, descriptor) {
-                            tracing::error!("Failed to create window: {}", e);
+                    if let Some(window_desc) = data.window_descriptor.take() {
+                        if let Err(e) = window_manager.create_window_with_descriptor(
+                            ctx,
+                            descriptor,
+                            window_desc,
+                        ) {
+                            tracing::error!("Failed to create window with descriptor: {}", e);
                         }
+                    } else if let Err(e) = window_manager.create_window(ctx, descriptor) {
+                        tracing::error!("Failed to create window: {}", e);
                     }
+                }
             }
 
             #[cfg(not(all(feature = "render", feature = "winit")))]
@@ -373,7 +382,7 @@ impl ApplicationBuilder {
         if !self.plugins.is_empty() {
             use std::cell::RefCell;
             builder = builder.add_plugins(StoredPlugins {
-                plugins: RefCell::new(self.plugins)
+                plugins: RefCell::new(self.plugins),
             });
         }
         builder.build()
@@ -395,22 +404,19 @@ mod tests {
 
     #[test]
     fn test_application_builder_with_title() {
-        let builder = ApplicationBuilder::new()
-            .with_title("Test Game");
+        let builder = ApplicationBuilder::new().with_title("Test Game");
         assert_eq!(builder.title, "Test Game");
     }
 
     #[test]
     fn test_application_builder_with_size() {
-        let builder = ApplicationBuilder::new()
-            .with_size(1920, 1080);
+        let builder = ApplicationBuilder::new().with_size(1920, 1080);
         assert_eq!(builder.size, (1920, 1080));
     }
 
     #[test]
     fn test_application_builder_without_window() {
-        let builder = ApplicationBuilder::new()
-            .without_window();
+        let builder = ApplicationBuilder::new().without_window();
         assert!(!builder.create_window);
     }
 
@@ -418,8 +424,7 @@ mod tests {
     fn test_application_builder_add_plugin() {
         use crate::FnPlugin;
 
-        let builder = ApplicationBuilder::new()
-            .add_plugin(FnPlugin::new("test", |_| {}));
+        let builder = ApplicationBuilder::new().add_plugin(FnPlugin::new("test", |_| {}));
         assert_eq!(builder.plugins.len(), 1);
     }
 

@@ -4,8 +4,8 @@
 //! It provides a worker-ready abstraction for text shaping that can be executed
 //! synchronously now and moved to worker threads later without API changes.
 
-use crate::cache::ShapeKey;
 use crate::ShapedTextResult as BaseShapedTextResult;
+use crate::cache::ShapeKey;
 use astrelis_core::alloc::HashMap;
 
 use std::sync::Arc;
@@ -120,7 +120,7 @@ impl Default for SyncTextShaper {
 impl SyncTextShaper {
     /// Create a new synchronous text shaper.
     pub fn new() -> Self {
-        Self { }
+        Self {}
     }
 
     /// Shape text using the provided shaping function.

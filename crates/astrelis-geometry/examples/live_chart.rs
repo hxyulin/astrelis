@@ -18,22 +18,20 @@
 //! Run with: cargo run -p astrelis-geometry --features ui-integration --example live_chart
 
 use astrelis_core::logging;
-use astrelis_core::profiling::{init_profiling, new_frame, ProfilingBackend};
+use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_geometry::{
+    GeometryRenderer,
     chart::{
         ChartBuilder, ChartRenderer, DataPoint, InteractiveChartController, LegendPosition, Rect,
         StreamingChart,
     },
-    GeometryRenderer,
 };
-use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
-};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder};
 use astrelis_winit::{
-    app::{run_app, App, AppCtx},
+    FrameTime, WindowId,
+    app::{App, AppCtx, run_app},
     event::{ElementState, Event, EventBatch, HandleStatus, Key, NamedKey},
     window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
-    FrameTime, WindowId,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -47,7 +45,7 @@ const POINTS_PER_UPDATE: usize = 5;
 struct LiveChartApp {
     #[allow(dead_code)]
     graphics: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     geometry: GeometryRenderer,
 
@@ -71,7 +69,8 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -81,12 +80,10 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics.clone(),
-            WindowContextDescriptor::default(),
-        )
-        .expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .with_depth_default()
+            .build(window, graphics.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
         let geometry = GeometryRenderer::new(graphics.clone());
@@ -156,7 +153,9 @@ impl LiveChartApp {
             // Noise: Random walk with mean reversion
             use std::f64::consts::PI;
             let noise_val = 0.3
-                * ((self.time * 0.7).sin() + (self.time * 1.3).cos() + (self.time * 2.7 + PI).sin());
+                * ((self.time * 0.7).sin()
+                    + (self.time * 1.3).cos()
+                    + (self.time * 2.7 + PI).sin());
 
             // Use streaming API with sliding window
             self.streaming
@@ -173,9 +172,11 @@ impl LiveChartApp {
             let window_size = 20.0; // Show last 20 seconds
 
             // Update X axis range
-            if let Some(x_axis) = self.streaming.chart_mut().get_axis_mut(
-                astrelis_geometry::chart::AxisId::X_PRIMARY,
-            ) {
+            if let Some(x_axis) = self
+                .streaming
+                .chart_mut()
+                .get_axis_mut(astrelis_geometry::chart::AxisId::X_PRIMARY)
+            {
                 x_axis.min = Some((latest_x - window_size).max(0.0));
                 x_axis.max = Some(latest_x);
             }
@@ -327,17 +328,19 @@ impl App for LiveChartApp {
         self.draw_chart((size.width, size.height));
 
         // Begin frame and render
-        let mut frame = self.window.begin_drawing();
         let viewport = self.window.viewport();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available
+        };
 
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::from_rgb_u8(18, 18, 22),
-            |pass| {
-                self.geometry.render(pass.wgpu_pass(), viewport);
-            },
-        );
-
-        frame.finish();
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(18, 18, 22))
+                .label("live_chart_pass")
+                .build();
+            self.geometry.render(pass.wgpu_pass(), viewport);
+        }
+        // Frame auto-submits on drop
     }
 }

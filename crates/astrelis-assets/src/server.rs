@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use astrelis_core::profiling::profile_function;
 
+use crate::Asset;
 use crate::error::AssetError;
 use crate::event::{AssetEvent, AssetEventBuffer};
 use crate::handle::{Handle, UntypedHandle};
@@ -14,8 +15,7 @@ use crate::io::{BytesReader, MemoryReader};
 use crate::loader::{AssetLoader, LoaderRegistry};
 use crate::source::AssetSource;
 use crate::state::AssetState;
-use crate::storage::{Assets, AssetStorages};
-use crate::Asset;
+use crate::storage::{AssetStorages, Assets};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::FileReader;
@@ -172,16 +172,13 @@ impl AssetServer {
         storage.set_loading(&handle);
 
         // Queue for loading
-        let extension = source
-            .extension()
-            .map(|s| s.to_string())
-            .or_else(|| {
-                if let AssetSource::Disk { path, .. } = &source {
-                    path.extension().and_then(|e| e.to_str()).map(String::from)
-                } else {
-                    None
-                }
-            });
+        let extension = source.extension().map(|s| s.to_string()).or_else(|| {
+            if let AssetSource::Disk { path, .. } = &source {
+                path.extension().and_then(|e| e.to_str()).map(String::from)
+            } else {
+                None
+            }
+        });
 
         self.pending.push_back(PendingLoad {
             handle: handle.untyped(),
@@ -212,9 +209,10 @@ impl AssetServer {
 
         // Check if already loaded (use canonical key for dedup)
         if let Some(existing) = storage.find_by_source(&source)
-            && storage.is_ready(&existing) {
-                return Ok(existing);
-            }
+            && storage.is_ready(&existing)
+        {
+            return Ok(existing);
+        }
 
         // Reserve a handle
         let handle = storage.reserve(source.clone());
@@ -299,12 +297,13 @@ impl AssetServer {
     /// Remove an asset by handle.
     pub fn remove<T: Asset>(&mut self, handle: &Handle<T>) {
         if let Some(storage) = self.storages.get_mut::<T>()
-            && storage.remove(handle).is_some() {
-                self.events.push(AssetEvent::Removed {
-                    handle_id: handle.id(),
-                    type_id: TypeId::of::<T>(),
-                });
-            }
+            && storage.remove(handle).is_some()
+        {
+            self.events.push(AssetEvent::Removed {
+                handle_id: handle.id(),
+                type_id: TypeId::of::<T>(),
+            });
+        }
     }
 
     /// Drain all events from this frame.
@@ -376,10 +375,7 @@ impl AssetServer {
             Ok(asset) => {
                 // Store the type-erased asset in the appropriate storage
                 if self.storages.set_loaded_erased(&pending.handle, asset) {
-                    let version = self
-                        .storages
-                        .version_erased(&pending.handle)
-                        .unwrap_or(1);
+                    let version = self.storages.version_erased(&pending.handle).unwrap_or(1);
                     self.events.push(AssetEvent::Created {
                         handle: pending.handle,
                         type_id: pending.handle.type_id(),
@@ -478,7 +474,9 @@ impl AssetServer {
     /// This is useful when you only care about events for one type of asset.
     pub fn drain_events_for<T: Asset>(&mut self) -> impl Iterator<Item = AssetEvent> + '_ {
         let target_type = TypeId::of::<T>();
-        self.events.drain().filter(move |e| e.type_id() == target_type)
+        self.events
+            .drain()
+            .filter(move |e| e.type_id() == target_type)
     }
 
     /// Get the asset state for a handle.
@@ -513,8 +511,13 @@ impl AssetServer {
         }
 
         if let Some(watcher) = &mut self.watcher {
-            watcher.watch_directory(&watch_dir).map_err(|e| e.to_string())?;
-            tracing::info!("Hot reload enabled for directory: {}", watch_dir.as_ref().display());
+            watcher
+                .watch_directory(&watch_dir)
+                .map_err(|e| e.to_string())?;
+            tracing::info!(
+                "Hot reload enabled for directory: {}",
+                watch_dir.as_ref().display()
+            );
         }
 
         Ok(())

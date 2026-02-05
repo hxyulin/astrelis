@@ -1,13 +1,13 @@
 //! UI tree structure with Taffy layout integration.
 
-use crate::dirty::{DirtyCounters, DirtyFlags, StyleGuard};
 use crate::constraint_resolver::{ConstraintResolver, ResolveContext};
+use crate::dirty::{DirtyCounters, DirtyFlags, StyleGuard};
+use crate::metrics::{DirtyStats, MetricsTimer, UiMetrics};
+use crate::plugin::registry::WidgetTypeRegistry;
+use crate::style::Style;
+use crate::widgets::Widget;
 #[cfg(feature = "docking")]
 use crate::widgets::docking::{DockSplitter, DockTabs};
-use crate::metrics::{DirtyStats, MetricsTimer, UiMetrics};
-use crate::style::Style;
-use crate::plugin::registry::WidgetTypeRegistry;
-use crate::widgets::Widget;
 use astrelis_core::alloc::HashSet;
 use astrelis_core::math::Vec2;
 use astrelis_core::profiling::{profile_function, profile_scope};
@@ -284,9 +284,9 @@ impl UiTree {
         self.dirty_counters.on_mark(old_flags, flags);
 
         // Notify Taffy of changes
-        if flags.intersects(
-            DirtyFlags::LAYOUT | DirtyFlags::CHILDREN_ORDER | DirtyFlags::TEXT_SHAPING,
-        ) {
+        if flags
+            .intersects(DirtyFlags::LAYOUT | DirtyFlags::CHILDREN_ORDER | DirtyFlags::TEXT_SHAPING)
+        {
             self.taffy.mark_dirty(node.taffy_node).ok();
         }
 
@@ -456,9 +456,7 @@ impl UiTree {
         }
 
         // For propagating flags, mark the root as dirty root since all nodes are dirty
-        if needs_propagation
-            && let Some(root) = self.root
-        {
+        if needs_propagation && let Some(root) = self.root {
             self.dirty_roots.insert(root);
         }
     }
@@ -817,9 +815,8 @@ impl UiTree {
                 })
                 .or_else(|| {
                     node.widget.as_any().downcast_ref::<DockTabs>().map(|tabs| {
-                        let content_padding = tabs
-                            .content_padding
-                            .unwrap_or(self.docking_content_padding);
+                        let content_padding =
+                            tabs.content_padding.unwrap_or(self.docking_content_padding);
                         DockingLayoutInfo::Tabs {
                             children: tabs.children.clone(),
                             active_tab: tabs.active_tab,

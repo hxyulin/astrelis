@@ -17,27 +17,25 @@
 //! Run with: cargo run -p astrelis-geometry --features chart-text --example chart_with_text
 
 use astrelis_core::logging;
-use astrelis_core::profiling::{init_profiling, new_frame, ProfilingBackend};
+use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame};
 use astrelis_geometry::{
-    chart::{ChartBuilder, ChartRenderer, ChartTextRenderer, LegendPosition, Rect},
     GeometryRenderer,
+    chart::{ChartBuilder, ChartRenderer, ChartTextRenderer, LegendPosition, Rect},
 };
-use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
-};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder};
 use astrelis_text::FontSystem;
 use astrelis_winit::{
-    app::{run_app, App, AppCtx},
+    FrameTime, WindowId,
+    app::{App, AppCtx, run_app},
     event::{ElementState, Event, EventBatch, HandleStatus, Key, NamedKey},
     window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
-    FrameTime, WindowId,
 };
 use std::sync::Arc;
 
 struct ChartTextApp {
     #[allow(dead_code)]
     graphics: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     geometry: GeometryRenderer,
     text_renderer: ChartTextRenderer,
@@ -49,7 +47,8 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -59,12 +58,10 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics.clone(),
-            WindowContextDescriptor::default(),
-        )
-        .expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .with_depth_default()
+            .build(window, graphics.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
         let geometry = GeometryRenderer::new(graphics.clone());
@@ -231,20 +228,23 @@ impl App for ChartTextApp {
             .draw_legend(&self.chart, &plot_area, &mut self.geometry);
 
         // Begin frame and render
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available
+        };
 
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::from_rgb_u8(18, 18, 22),
-            |pass| {
-                // Render chart geometry
-                self.geometry.render(pass.wgpu_pass(), viewport);
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(18, 18, 22))
+                .label("chart_with_text_pass")
+                .build();
 
-                // Render text
-                self.text_renderer.render(pass.wgpu_pass());
-            },
-        );
+            // Render chart geometry
+            self.geometry.render(pass.wgpu_pass(), viewport);
 
-        frame.finish();
+            // Render text
+            self.text_renderer.render(pass.wgpu_pass());
+        }
+        // Frame auto-submits on drop
     }
 }

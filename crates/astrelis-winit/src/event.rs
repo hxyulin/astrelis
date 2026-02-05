@@ -342,9 +342,11 @@ impl Event {
             WinitEvent::Touch(touch) => {
                 let force = match touch.force {
                     Some(winit::event::Force::Normalized(f)) => Some(f as f32),
-                    Some(winit::event::Force::Calibrated { force, max_possible_force, .. }) => {
-                        Some((force / max_possible_force) as f32)
-                    }
+                    Some(winit::event::Force::Calibrated {
+                        force,
+                        max_possible_force,
+                        ..
+                    }) => Some((force / max_possible_force) as f32),
                     None => None,
                 };
                 // DeviceId doesn't expose its inner value, so we use a hash for uniqueness
@@ -377,15 +379,13 @@ impl Event {
                     phase: phase.into(),
                 }))
             }
-            WinitEvent::PanGesture { delta, phase, .. } => {
-                Some(Event::PanGesture(PanGesture {
-                    delta: LogicalPosition::new(
-                        delta.x as f64 / scale_factor,
-                        delta.y as f64 / scale_factor,
-                    ),
-                    phase: phase.into(),
-                }))
-            }
+            WinitEvent::PanGesture { delta, phase, .. } => Some(Event::PanGesture(PanGesture {
+                delta: LogicalPosition::new(
+                    delta.x as f64 / scale_factor,
+                    delta.y as f64 / scale_factor,
+                ),
+                phase: phase.into(),
+            })),
             WinitEvent::ThemeChanged(theme) => Some(Event::ThemeChanged(match theme {
                 winit::window::Theme::Light => SystemTheme::Light,
                 winit::window::Theme::Dark => SystemTheme::Dark,

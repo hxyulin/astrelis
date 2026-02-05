@@ -41,7 +41,6 @@ pub struct AsyncRuntimePlugin {
     pub num_threads: Option<usize>,
 }
 
-
 impl AsyncRuntimePlugin {
     /// Create a new async runtime plugin with default thread count.
     pub fn new() -> Self {

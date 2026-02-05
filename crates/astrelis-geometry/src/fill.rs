@@ -64,7 +64,12 @@ impl Fill {
     /// Get the effective color (for solid fills).
     pub fn effective_color(&self) -> Option<Color> {
         match &self.paint {
-            Paint::Solid(color) => Some(Color::rgba(color.r, color.g, color.b, color.a * self.opacity)),
+            Paint::Solid(color) => Some(Color::rgba(
+                color.r,
+                color.g,
+                color.b,
+                color.a * self.opacity,
+            )),
             _ => None,
         }
     }

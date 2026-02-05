@@ -52,13 +52,14 @@ impl OverlayRenderer {
 
         // Create unit quad VBO
         let unit_quad_vertices = QuadVertex::unit_quad();
-        let unit_quad_vbo = context
-            .device()
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Overlay Unit Quad VBO"),
-                contents: bytemuck::cast_slice(&unit_quad_vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        let unit_quad_vbo =
+            context
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Overlay Unit Quad VBO"),
+                    contents: bytemuck::cast_slice(&unit_quad_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
         // Load shaders
         let quad_shader = renderer.create_shader(

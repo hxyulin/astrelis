@@ -12,21 +12,40 @@ pub const FILL_SHADER: &str = include_str!("shaders/fill.wgsl");
 /// Stroke pipeline shader source.
 pub const STROKE_SHADER: &str = include_str!("shaders/stroke.wgsl");
 
-/// Creates the fill render pipeline.
+/// Creates the fill render pipeline with configurable formats.
+///
+/// # Arguments
+///
+/// * `renderer` - The renderer for creating GPU resources
+/// * `projection_bind_group_layout` - Layout for projection uniform
+/// * `surface_format` - Target surface texture format
+/// * `depth_format` - Optional depth format (None disables depth testing)
+/// * `name` - Name prefix for pipeline labels
 pub fn create_fill_pipeline(
     renderer: &Renderer,
     projection_bind_group_layout: &wgpu::BindGroupLayout,
+    surface_format: wgpu::TextureFormat,
+    depth_format: Option<wgpu::TextureFormat>,
+    name: &str,
 ) -> wgpu::RenderPipeline {
-    let shader = renderer.create_shader(Some("Geometry Fill Shader"), FILL_SHADER);
+    let shader = renderer.create_shader(Some(&format!("{} Fill Shader", name)), FILL_SHADER);
 
     let layout = renderer.create_pipeline_layout(
-        Some("Geometry Fill Pipeline Layout"),
+        Some(&format!("{} Fill Pipeline Layout", name)),
         &[projection_bind_group_layout],
         &[],
     );
 
+    let depth_stencil = depth_format.map(|format| wgpu::DepthStencilState {
+        format,
+        depth_write_enabled: true,
+        depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    });
+
     renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("Geometry Fill Pipeline"),
+        label: Some(&format!("{} Fill Pipeline", name)),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shader,
@@ -38,7 +57,7 @@ pub fn create_fill_pipeline(
             module: &shader,
             entry_point: Some("fs_main"),
             targets: &[Some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                format: surface_format,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
@@ -53,7 +72,7 @@ pub fn create_fill_pipeline(
             unclipped_depth: false,
             conservative: false,
         },
-        depth_stencil: None,
+        depth_stencil,
         multisample: wgpu::MultisampleState {
             count: 1,
             mask: !0,
@@ -64,33 +83,55 @@ pub fn create_fill_pipeline(
     })
 }
 
-/// Creates the stroke render pipeline.
+/// Creates the stroke render pipeline with configurable formats.
+///
+/// # Arguments
+///
+/// * `renderer` - The renderer for creating GPU resources
+/// * `projection_bind_group_layout` - Layout for projection uniform
+/// * `surface_format` - Target surface texture format
+/// * `depth_format` - Optional depth format (None disables depth testing)
+/// * `name` - Name prefix for pipeline labels
 pub fn create_stroke_pipeline(
     renderer: &Renderer,
     projection_bind_group_layout: &wgpu::BindGroupLayout,
+    surface_format: wgpu::TextureFormat,
+    depth_format: Option<wgpu::TextureFormat>,
+    name: &str,
 ) -> wgpu::RenderPipeline {
-    let shader = renderer.create_shader(Some("Geometry Stroke Shader"), STROKE_SHADER);
+    let shader = renderer.create_shader(Some(&format!("{} Stroke Shader", name)), STROKE_SHADER);
 
     let layout = renderer.create_pipeline_layout(
-        Some("Geometry Stroke Pipeline Layout"),
+        Some(&format!("{} Stroke Pipeline Layout", name)),
         &[projection_bind_group_layout],
         &[],
     );
 
+    let depth_stencil = depth_format.map(|format| wgpu::DepthStencilState {
+        format,
+        depth_write_enabled: true,
+        depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
+        stencil: wgpu::StencilState::default(),
+        bias: wgpu::DepthBiasState::default(),
+    });
+
     renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("Geometry Stroke Pipeline"),
+        label: Some(&format!("{} Stroke Pipeline", name)),
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &shader,
             entry_point: Some("vs_main"),
-            buffers: &[StrokeVertex::vertex_layout(), StrokeInstance::vertex_layout()],
+            buffers: &[
+                StrokeVertex::vertex_layout(),
+                StrokeInstance::vertex_layout(),
+            ],
             compilation_options: wgpu::PipelineCompilationOptions::default(),
         },
         fragment: Some(wgpu::FragmentState {
             module: &shader,
             entry_point: Some("fs_main"),
             targets: &[Some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Bgra8UnormSrgb,
+                format: surface_format,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
@@ -105,7 +146,7 @@ pub fn create_stroke_pipeline(
             unclipped_depth: false,
             conservative: false,
         },
-        depth_stencil: None,
+        depth_stencil,
         multisample: wgpu::MultisampleState {
             count: 1,
             mask: !0,

@@ -16,22 +16,23 @@
 use std::sync::Arc;
 
 use astrelis_core::logging;
-use astrelis_core::profiling::{init_profiling, new_frame, ProfilingBackend, profile_function, profile_scope};
+use astrelis_core::profiling::{
+    ProfilingBackend, init_profiling, new_frame, profile_function, profile_scope,
+};
 use astrelis_render::{
-    Color, GraphicsContext, GraphicsContextDescriptor, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
+    Color, GraphicsContext, GraphicsContextDescriptor, RenderWindow, RenderWindowBuilder, wgpu,
 };
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
 
 struct ProfilingDemo {
     #[allow(dead_code)]
     context: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     frame_count: u64,
 }
@@ -59,15 +60,11 @@ fn main() {
             .expect("Failed to create window");
 
         #[allow(unused_mut)]
-        let mut window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        )
-        .expect("Failed to create renderable window");
+        let mut window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .with_depth_default()
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
 
@@ -165,19 +162,23 @@ impl App for ProfilingDemo {
         let clear_color = Color::rgb(0.05 + t * 0.1, 0.05, 0.15 + (1.0 - t) * 0.1);
 
         // GPU profiling is now automatic — no special handling needed!
-        // If a profiler is attached, with_pass/clear_and_render auto-create GPU scopes,
-        // and FrameContext::Drop auto-resolves queries and ends the profiler frame.
-        let mut frame = self.window.begin_drawing();
+        // If a profiler is attached, render passes auto-create GPU scopes,
+        // and Frame::Drop auto-resolves queries and ends the profiler frame.
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available
+        };
 
         {
             profile_scope!("render_frame");
-            frame.clear_and_render(RenderTarget::Surface, clear_color, |_pass| {
-                profile_scope!("draw_commands");
-                // In a real app, you would issue draw calls here.
-            });
+            let _pass = frame
+                .render_pass()
+                .clear_color(clear_color)
+                .label("profiling_pass")
+                .build();
+            profile_scope!("draw_commands");
+            // In a real app, you would issue draw calls here.
         }
-
-        frame.finish();
+        // Frame auto-submits on drop
 
         // Simulate some post-render work
         {

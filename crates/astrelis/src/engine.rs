@@ -35,10 +35,18 @@ impl std::fmt::Display for EngineError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             EngineError::CircularDependency { plugin, chain } => {
-                write!(f, "Circular dependency detected involving plugin '{}'. Chain: {:?}", plugin, chain)
+                write!(
+                    f,
+                    "Circular dependency detected involving plugin '{}'. Chain: {:?}",
+                    plugin, chain
+                )
             }
             EngineError::MissingDependency { plugin, dependency } => {
-                write!(f, "Plugin '{}' requires dependency '{}' which was not added", plugin, dependency)
+                write!(
+                    f,
+                    "Plugin '{}' requires dependency '{}' which was not added",
+                    plugin, dependency
+                )
             }
             EngineError::DuplicatePlugin { name } => {
                 write!(f, "Plugin '{}' was added more than once", name)
@@ -277,7 +285,10 @@ impl EngineBuilder {
     }
 
     /// Reorder plugins according to sorted indices
-    fn reorder_plugins(plugins: Vec<Box<dyn PluginDyn>>, sorted_indices: &[usize]) -> Vec<Box<dyn PluginDyn>> {
+    fn reorder_plugins(
+        plugins: Vec<Box<dyn PluginDyn>>,
+        sorted_indices: &[usize],
+    ) -> Vec<Box<dyn PluginDyn>> {
         // Wrap in Option to allow taking elements
         let mut plugins_opt: Vec<Option<Box<dyn PluginDyn>>> =
             plugins.into_iter().map(Some).collect();
@@ -303,7 +314,9 @@ impl EngineBuilder {
         let mut seen_names = HashSet::new();
         for plugin in &self.plugins {
             if !seen_names.insert(plugin.name()) {
-                return Err(EngineError::DuplicatePlugin { name: plugin.name() });
+                return Err(EngineError::DuplicatePlugin {
+                    name: plugin.name(),
+                });
             }
         }
 
@@ -363,7 +376,15 @@ impl EngineBuilder {
 
                 // Visit dependencies first
                 for dep in plugins[idx].dependencies() {
-                    visit(dep, plugins, plugin_map, visited, visiting, visit_stack, sorted)?;
+                    visit(
+                        dep,
+                        plugins,
+                        plugin_map,
+                        visited,
+                        visiting,
+                        visit_stack,
+                        sorted,
+                    )?;
                 }
 
                 visit_stack.pop();
@@ -492,9 +513,18 @@ mod tests {
         let log3 = cleanup_log.clone();
 
         let mut engine = EngineBuilder::new()
-            .add_plugin(TestPlugin { name: "First", log: log1 })
-            .add_plugin(TestPlugin { name: "Second", log: log2 })
-            .add_plugin(TestPlugin { name: "Third", log: log3 })
+            .add_plugin(TestPlugin {
+                name: "First",
+                log: log1,
+            })
+            .add_plugin(TestPlugin {
+                name: "Second",
+                log: log2,
+            })
+            .add_plugin(TestPlugin {
+                name: "Third",
+                log: log3,
+            })
             .build();
 
         // Verify resources were created

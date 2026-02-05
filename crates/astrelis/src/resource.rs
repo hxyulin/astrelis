@@ -69,9 +69,9 @@ impl Resources {
             type_name,
         };
 
-        self.storage.insert(type_id, entry).and_then(|old| {
-            old.data.downcast::<R>().ok().map(|b| *b)
-        })
+        self.storage
+            .insert(type_id, entry)
+            .and_then(|old| old.data.downcast::<R>().ok().map(|b| *b))
     }
 
     /// Get a reference to a resource.
@@ -93,9 +93,9 @@ impl Resources {
     /// Remove a resource and return it.
     pub fn remove<R: Resource>(&mut self) -> Option<R> {
         let type_id = TypeId::of::<R>();
-        self.storage.remove(&type_id).and_then(|entry| {
-            entry.data.downcast::<R>().ok().map(|b| *b)
-        })
+        self.storage
+            .remove(&type_id)
+            .and_then(|entry| entry.data.downcast::<R>().ok().map(|b| *b))
     }
 
     /// Check if a resource exists.

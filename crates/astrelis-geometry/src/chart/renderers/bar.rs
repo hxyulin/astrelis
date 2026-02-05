@@ -4,7 +4,7 @@ use super::super::rect::Rect;
 use super::super::types::Chart;
 use super::line::SeriesGpuState;
 use astrelis_core::profiling::profile_scope;
-use astrelis_render::{wgpu, GraphicsContext, Quad, QuadRenderer, Viewport};
+use astrelis_render::{GraphicsContext, Quad, QuadRenderer, Viewport, wgpu};
 use std::sync::Arc;
 
 /// GPU-accelerated bar renderer for charts.
@@ -94,7 +94,8 @@ impl GpuChartBarRenderer {
 
         for (series_idx, series) in chart.series.iter().enumerate() {
             let (y_min, _) = chart.axis_range(series.y_axis);
-            let data_offset = series_idx as f64 * (data_bar_width + data_gap) - data_total_width * 0.5;
+            let data_offset =
+                series_idx as f64 * (data_bar_width + data_gap) - data_total_width * 0.5;
 
             let color = series.style.color;
 

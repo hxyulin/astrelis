@@ -3,11 +3,11 @@
 //! This plugin owns the scrollbar drag state and handles post-layout content/viewport
 //! size computation for all ScrollContainer widgets in the tree.
 
-use crate::plugin::registry::{WidgetOverflow, WidgetTypeDescriptor, WidgetTypeRegistry};
 use crate::plugin::UiPlugin;
-use crate::widgets::scroll_container::ScrollContainer;
+use crate::plugin::registry::{WidgetOverflow, WidgetTypeDescriptor, WidgetTypeRegistry};
 use crate::style::Overflow;
 use crate::tree::{NodeId, UiTree};
+use crate::widgets::scroll_container::ScrollContainer;
 use astrelis_core::math::Vec2;
 use std::any::Any;
 
@@ -126,11 +126,12 @@ pub fn update_scroll_container_sizes(tree: &mut UiTree) {
 
         // Update the ScrollContainer widget
         if let Some(widget) = tree.get_widget_mut(sc_id)
-            && let Some(sc) = widget.as_any_mut().downcast_mut::<ScrollContainer>() {
-                sc.content_size = content;
-                sc.viewport_size = viewport;
-                sc.clamp_scroll();
-            }
+            && let Some(sc) = widget.as_any_mut().downcast_mut::<ScrollContainer>()
+        {
+            sc.content_size = content;
+            sc.viewport_size = viewport;
+            sc.clamp_scroll();
+        }
     }
 }
 

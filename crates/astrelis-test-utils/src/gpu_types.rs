@@ -25,7 +25,10 @@ pub struct GpuBuffer {
 enum GpuBufferInner {
     Real(wgpu::Buffer),
     #[cfg(feature = "mock")]
-    Mock { id: usize, size: u64 },
+    Mock {
+        id: usize,
+        size: u64,
+    },
 }
 
 impl GpuBuffer {
@@ -53,7 +56,9 @@ impl GpuBuffer {
             GpuBufferInner::Real(buffer) => buffer,
             #[cfg(feature = "mock")]
             GpuBufferInner::Mock { .. } => {
-                panic!("Attempted to get wgpu::Buffer from mock buffer - this is a test-only buffer")
+                panic!(
+                    "Attempted to get wgpu::Buffer from mock buffer - this is a test-only buffer"
+                )
             }
         }
     }
@@ -153,7 +158,9 @@ pub struct GpuShaderModule {
 enum GpuShaderModuleInner {
     Real(wgpu::ShaderModule),
     #[cfg(feature = "mock")]
-    Mock { id: usize },
+    Mock {
+        id: usize,
+    },
 }
 
 impl GpuShaderModule {
@@ -200,7 +207,9 @@ pub struct GpuRenderPipeline {
 enum GpuRenderPipelineInner {
     Real(wgpu::RenderPipeline),
     #[cfg(feature = "mock")]
-    Mock { id: usize },
+    Mock {
+        id: usize,
+    },
 }
 
 impl GpuRenderPipeline {
@@ -247,7 +256,9 @@ pub struct GpuComputePipeline {
 enum GpuComputePipelineInner {
     Real(wgpu::ComputePipeline),
     #[cfg(feature = "mock")]
-    Mock { id: usize },
+    Mock {
+        id: usize,
+    },
 }
 
 impl GpuComputePipeline {
@@ -294,7 +305,9 @@ pub struct GpuBindGroupLayout {
 enum GpuBindGroupLayoutInner {
     Real(wgpu::BindGroupLayout),
     #[cfg(feature = "mock")]
-    Mock { id: usize },
+    Mock {
+        id: usize,
+    },
 }
 
 impl GpuBindGroupLayout {
@@ -341,7 +354,9 @@ pub struct GpuBindGroup {
 enum GpuBindGroupInner {
     Real(wgpu::BindGroup),
     #[cfg(feature = "mock")]
-    Mock { id: usize },
+    Mock {
+        id: usize,
+    },
 }
 
 impl GpuBindGroup {
@@ -388,7 +403,9 @@ pub struct GpuSampler {
 enum GpuSamplerInner {
     Real(wgpu::Sampler),
     #[cfg(feature = "mock")]
-    Mock { id: usize },
+    Mock {
+        id: usize,
+    },
 }
 
 impl GpuSampler {

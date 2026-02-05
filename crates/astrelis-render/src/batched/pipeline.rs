@@ -31,12 +31,30 @@ impl QuadVertex2D {
 
 /// Unit quad vertices: two triangles covering [0,0] to [1,1].
 pub const UNIT_QUAD_VERTICES: &[QuadVertex2D] = &[
-    QuadVertex2D { position: [0.0, 0.0], tex_coords: [0.0, 0.0] },
-    QuadVertex2D { position: [1.0, 0.0], tex_coords: [1.0, 0.0] },
-    QuadVertex2D { position: [0.0, 1.0], tex_coords: [0.0, 1.0] },
-    QuadVertex2D { position: [1.0, 0.0], tex_coords: [1.0, 0.0] },
-    QuadVertex2D { position: [1.0, 1.0], tex_coords: [1.0, 1.0] },
-    QuadVertex2D { position: [0.0, 1.0], tex_coords: [0.0, 1.0] },
+    QuadVertex2D {
+        position: [0.0, 0.0],
+        tex_coords: [0.0, 0.0],
+    },
+    QuadVertex2D {
+        position: [1.0, 0.0],
+        tex_coords: [1.0, 0.0],
+    },
+    QuadVertex2D {
+        position: [0.0, 1.0],
+        tex_coords: [0.0, 1.0],
+    },
+    QuadVertex2D {
+        position: [1.0, 0.0],
+        tex_coords: [1.0, 0.0],
+    },
+    QuadVertex2D {
+        position: [1.0, 1.0],
+        tex_coords: [1.0, 1.0],
+    },
+    QuadVertex2D {
+        position: [0.0, 1.0],
+        tex_coords: [0.0, 1.0],
+    },
 ];
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -97,9 +115,7 @@ pub fn create_projection_bind_group(
 }
 
 /// Create the standard per-texture bind group layout (group 0 for Tier 1 & 2).
-pub fn create_standard_texture_bind_group_layout(
-    device: &wgpu::Device,
-) -> wgpu::BindGroupLayout {
+pub fn create_standard_texture_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("batched_standard_texture_layout"),
         entries: &[

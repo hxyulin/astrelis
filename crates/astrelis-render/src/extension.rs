@@ -26,9 +26,7 @@
 
 use std::sync::Arc;
 
-use crate::{
-    ComputePass, FrameContext, Framebuffer, GraphicsContext, RenderPass, WindowContext,
-};
+use crate::{ComputePass, Framebuffer, GraphicsContext, RenderPass, WindowContext};
 
 // =============================================================================
 // Core Extension Traits
@@ -84,31 +82,21 @@ impl AsWgpu for Arc<GraphicsContext> {
     }
 }
 
-impl AsWgpu for FrameContext {
-    type WgpuType = wgpu::CommandEncoder;
-
-    fn as_wgpu(&self) -> &Self::WgpuType {
-        self.encoder.as_ref().expect("FrameContext encoder already taken - ensure finish() wasn't called early")
-    }
-}
-
-impl AsWgpuMut for FrameContext {
-    fn as_wgpu_mut(&mut self) -> &mut Self::WgpuType {
-        self.encoder.as_mut().expect("FrameContext encoder already taken - ensure finish() wasn't called early")
-    }
-}
+// Note: Frame no longer implements AsWgpu for CommandEncoder because each RenderPass
+// now owns its own encoder. Use `frame.create_encoder()` to get an encoder, or
+// access via RenderPass::encoder()/encoder_mut().
 
 impl<'a> AsWgpu for RenderPass<'a> {
     type WgpuType = wgpu::RenderPass<'static>;
 
     fn as_wgpu(&self) -> &Self::WgpuType {
-        self.pass.as_ref().expect("RenderPass already consumed - ensure it wasn't dropped early")
+        self.wgpu_pass_ref()
     }
 }
 
 impl<'a> AsWgpuMut for RenderPass<'a> {
     fn as_wgpu_mut(&mut self) -> &mut Self::WgpuType {
-        self.pass.as_mut().expect("RenderPass already consumed - ensure it wasn't dropped early")
+        self.wgpu_pass()
     }
 }
 
@@ -116,13 +104,13 @@ impl<'a> AsWgpu for ComputePass<'a> {
     type WgpuType = wgpu::ComputePass<'static>;
 
     fn as_wgpu(&self) -> &Self::WgpuType {
-        self.pass.as_ref().expect("ComputePass already consumed - ensure it wasn't dropped early")
+        self.wgpu_pass_ref()
     }
 }
 
 impl<'a> AsWgpuMut for ComputePass<'a> {
     fn as_wgpu_mut(&mut self) -> &mut Self::WgpuType {
-        self.pass.as_mut().expect("ComputePass already consumed - ensure it wasn't dropped early")
+        self.wgpu_pass()
     }
 }
 

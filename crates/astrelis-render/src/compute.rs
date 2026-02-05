@@ -5,105 +5,120 @@
 
 use astrelis_core::profiling::profile_function;
 
-use crate::frame::FrameContext;
+use crate::context::GraphicsContext;
+use crate::frame::Frame;
 
 /// Builder for creating compute passes.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let mut compute_pass = ComputePassBuilder::new()
+/// let mut compute_pass = frame.compute_pass()
 ///     .label("My Compute Pass")
-///     .build(&mut frame);
+///     .build();
 ///
 /// compute_pass.set_pipeline(&pipeline);
 /// compute_pass.set_bind_group(0, &bind_group, &[]);
 /// compute_pass.dispatch_workgroups(64, 64, 1);
 /// ```
-pub struct ComputePassBuilder<'a> {
-    label: Option<&'a str>,
+pub struct ComputePassBuilder<'f, 'w> {
+    frame: &'f Frame<'w>,
+    label: Option<String>,
 }
 
-impl<'a> ComputePassBuilder<'a> {
+impl<'f, 'w> ComputePassBuilder<'f, 'w> {
     /// Create a new compute pass builder.
-    pub fn new() -> Self {
-        Self { label: None }
+    pub fn new(frame: &'f Frame<'w>) -> Self {
+        Self { frame, label: None }
     }
 
     /// Set a debug label for the compute pass.
-    pub fn label(mut self, label: &'a str) -> Self {
-        self.label = Some(label);
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
         self
     }
 
     /// Build the compute pass.
     ///
-    /// This takes the command encoder from the FrameContext and returns it
+    /// This creates a new command encoder for this compute pass and returns it
     /// when the ComputePass is dropped.
-    pub fn build(self, frame_context: &'a mut FrameContext) -> ComputePass<'a> {
-        let mut encoder = frame_context.encoder.take().unwrap();
+    pub fn build(self) -> ComputePass<'f> {
+        profile_function!();
 
+        let label = self.label.clone();
+        let label_str = label.as_deref();
+
+        // Create encoder for this pass
+        let encoder = self
+            .frame
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: label_str });
+
+        let mut encoder = encoder;
         let compute_pass = encoder
             .begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: self.label,
+                label: label_str,
                 timestamp_writes: None,
             })
             .forget_lifetime();
 
         ComputePass {
-            context: frame_context,
+            frame: self.frame,
             encoder: Some(encoder),
             pass: Some(compute_pass),
         }
     }
 }
 
-impl Default for ComputePassBuilder<'_> {
+impl Default for ComputePassBuilder<'_, '_> {
     fn default() -> Self {
-        Self::new()
+        unimplemented!("ComputePassBuilder requires a Frame reference")
     }
 }
 
-/// A compute pass wrapper that automatically returns the encoder to the frame context.
+/// A compute pass wrapper that automatically returns the command buffer to the frame.
 ///
-/// This struct mirrors `RenderPass` in its lifecycle management - it takes the
-/// encoder from `FrameContext` and returns it when dropped.
-pub struct ComputePass<'a> {
-    pub(crate) context: &'a mut FrameContext,
+/// This struct mirrors `RenderPass` in its lifecycle management - it owns its
+/// encoder and pushes the command buffer to the frame when dropped.
+pub struct ComputePass<'f> {
+    /// Reference to the frame (for pushing command buffer on drop).
+    frame: &'f Frame<'f>,
+    /// The command encoder (owned by this pass).
     pub(crate) encoder: Option<wgpu::CommandEncoder>,
+    /// The active wgpu compute pass.
     pub(crate) pass: Option<wgpu::ComputePass<'static>>,
 }
 
-impl<'a> ComputePass<'a> {
-    /// Get the underlying wgpu compute pass.
+impl<'f> ComputePass<'f> {
+    /// Get the underlying wgpu compute pass (mutable).
     pub fn wgpu_pass(&mut self) -> &mut wgpu::ComputePass<'static> {
-        self.pass.as_mut().unwrap()
+        self.pass.as_mut().expect("ComputePass already consumed")
+    }
+
+    /// Get the underlying wgpu compute pass (immutable).
+    pub fn wgpu_pass_ref(&self) -> &wgpu::ComputePass<'static> {
+        self.pass.as_ref().expect("ComputePass already consumed")
     }
 
     /// Get raw access to the underlying wgpu compute pass.
     ///
     /// This is an alias for [`wgpu_pass()`](Self::wgpu_pass) for consistency with `RenderPass::raw_pass()`.
     pub fn raw_pass(&mut self) -> &mut wgpu::ComputePass<'static> {
-        self.pass.as_mut().unwrap()
+        self.pass.as_mut().expect("ComputePass already consumed")
     }
 
     /// Get the graphics context.
-    pub fn graphics_context(&self) -> &crate::context::GraphicsContext {
-        &self.context.context
+    pub fn graphics(&self) -> &GraphicsContext {
+        self.frame.graphics()
     }
 
     /// Set the compute pipeline to use.
-    pub fn set_pipeline(&mut self, pipeline: &'a wgpu::ComputePipeline) {
+    pub fn set_pipeline(&mut self, pipeline: &wgpu::ComputePipeline) {
         self.wgpu_pass().set_pipeline(pipeline);
     }
 
     /// Set a bind group.
-    pub fn set_bind_group(
-        &mut self,
-        index: u32,
-        bind_group: &'a wgpu::BindGroup,
-        offsets: &[u32],
-    ) {
+    pub fn set_bind_group(&mut self, index: u32, bind_group: &wgpu::BindGroup, offsets: &[u32]) {
         self.wgpu_pass().set_bind_group(index, bind_group, offsets);
     }
 
@@ -143,8 +158,9 @@ impl<'a> ComputePass<'a> {
     ///     z: u32,
     /// }
     /// ```
-    pub fn dispatch_workgroups_indirect(&mut self, buffer: &'a wgpu::Buffer, offset: u64) {
-        self.wgpu_pass().dispatch_workgroups_indirect(buffer, offset);
+    pub fn dispatch_workgroups_indirect(&mut self, buffer: &wgpu::Buffer, offset: u64) {
+        self.wgpu_pass()
+            .dispatch_workgroups_indirect(buffer, offset);
     }
 
     /// Insert a debug marker.
@@ -202,7 +218,7 @@ impl<'a> ComputePass<'a> {
         self.wgpu_pass().set_push_constants(offset, data);
     }
 
-    /// Finish the compute pass, returning the encoder to the frame context.
+    /// Finish the compute pass, pushing the command buffer to the frame.
     pub fn finish(self) {
         drop(self);
     }
@@ -215,8 +231,11 @@ impl Drop for ComputePass<'_> {
         // End the compute pass
         drop(self.pass.take());
 
-        // Return the encoder to the frame context
-        self.context.encoder = self.encoder.take();
+        // Finish encoder and push command buffer to frame
+        if let Some(encoder) = self.encoder.take() {
+            let command_buffer = encoder.finish();
+            self.frame.command_buffers.borrow_mut().push(command_buffer);
+        }
     }
 }
 
@@ -257,18 +276,6 @@ impl DispatchIndirect {
     /// Size of the command in bytes.
     pub const fn size() -> u64 {
         std::mem::size_of::<Self>() as u64
-    }
-}
-
-impl FrameContext {
-    /// Create a compute pass with a label.
-    pub fn compute_pass<'a>(&'a mut self, label: &'a str) -> ComputePass<'a> {
-        ComputePassBuilder::new().label(label).build(self)
-    }
-
-    /// Create a compute pass without a label.
-    pub fn compute_pass_unlabeled(&mut self) -> ComputePass<'_> {
-        ComputePassBuilder::new().build(self)
     }
 }
 

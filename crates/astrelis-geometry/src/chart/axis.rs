@@ -67,7 +67,9 @@ impl ScaleType {
 
     /// Create a natural logarithmic scale.
     pub fn ln() -> Self {
-        Self::Logarithmic { base: std::f64::consts::E }
+        Self::Logarithmic {
+            base: std::f64::consts::E,
+        }
     }
 
     /// Create a symmetric log scale with the given threshold.

@@ -27,9 +27,9 @@
 
 use astrelis_core::profiling::profile_function;
 
+use crate::GraphicsContext;
 use crate::extension::AsWgpu;
 use crate::types::GpuTexture;
-use crate::GraphicsContext;
 use ahash::HashMap;
 use std::sync::Arc;
 
@@ -49,7 +49,12 @@ pub struct AtlasRect {
 impl AtlasRect {
     /// Create a new atlas rectangle.
     pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
 }
 
@@ -110,14 +115,9 @@ impl AtlasEntry {
 #[allow(dead_code)]
 enum PackerNode {
     /// Empty node that can be split.
-    Empty {
-        rect: Rect,
-    },
+    Empty { rect: Rect },
     /// Filled node with an entry.
-    Filled {
-        rect: Rect,
-        key: AtlasKey,
-    },
+    Filled { rect: Rect, key: AtlasKey },
     /// Split node with two children.
     Split {
         rect: Rect,
@@ -294,8 +294,7 @@ impl TextureAtlas {
         self.entries.insert(key, entry);
 
         // Queue upload
-        self.pending_uploads
-            .push((key, image_data.to_vec(), rect));
+        self.pending_uploads.push((key, image_data.to_vec(), rect));
         self.dirty = true;
 
         Some(entry)

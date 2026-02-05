@@ -11,7 +11,7 @@
 mod enabled {
     use std::sync::OnceLock;
 
-    pub use puffin::{profile_function, profile_scope, GlobalProfiler};
+    pub use puffin::{GlobalProfiler, profile_function, profile_scope};
 
     /// Profiling backend options.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,9 +40,7 @@ mod enabled {
                 // Start the puffin server on the default port (8585)
                 match puffin_http::Server::new("0.0.0.0:8585") {
                     Ok(server) => {
-                        tracing::info!(
-                            "Puffin profiler server started on http://0.0.0.0:8585"
-                        );
+                        tracing::info!("Puffin profiler server started on http://0.0.0.0:8585");
                         tracing::info!(
                             "Connect puffin_viewer or open browser to view profiling data"
                         );

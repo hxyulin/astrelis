@@ -326,7 +326,10 @@ impl RenderGraph {
                 // Find passes that write to this resource
                 for (&other_pass_id, other_pass) in &self.passes {
                     if other_pass_id != pass_id && other_pass.outputs.contains(&input_id) {
-                        dependencies.get_mut(&pass_id).unwrap().insert(other_pass_id);
+                        dependencies
+                            .get_mut(&pass_id)
+                            .unwrap()
+                            .insert(other_pass_id);
                         dependents.entry(other_pass_id).or_default().insert(pass_id);
                     }
                 }
@@ -362,9 +365,7 @@ impl RenderGraph {
             return Err(RenderGraphError::CyclicDependency);
         }
 
-        let plan = ExecutionPlan {
-            pass_order: sorted,
-        };
+        let plan = ExecutionPlan { pass_order: sorted };
 
         self.execution_plan = Some(plan.clone());
 
@@ -393,29 +394,36 @@ impl RenderGraph {
                     format,
                     usage,
                 } => {
-                    let texture = context.graphics.device().create_texture(&wgpu::TextureDescriptor {
-                        label: Some(&info.name),
-                        size: wgpu::Extent3d {
-                            width: size.0,
-                            height: size.1,
-                            depth_or_array_layers: size.2,
-                        },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: *format,
-                        usage: *usage,
-                        view_formats: &[],
-                    });
+                    let texture =
+                        context
+                            .graphics
+                            .device()
+                            .create_texture(&wgpu::TextureDescriptor {
+                                label: Some(&info.name),
+                                size: wgpu::Extent3d {
+                                    width: size.0,
+                                    height: size.1,
+                                    depth_or_array_layers: size.2,
+                                },
+                                mip_level_count: 1,
+                                sample_count: 1,
+                                dimension: wgpu::TextureDimension::D2,
+                                format: *format,
+                                usage: *usage,
+                                view_formats: &[],
+                            });
                     context.textures.insert(*id, texture);
                 }
                 ResourceType::Buffer { size, usage } => {
-                    let buffer = context.graphics.device().create_buffer(&wgpu::BufferDescriptor {
-                        label: Some(&info.name),
-                        size: *size,
-                        usage: *usage,
-                        mapped_at_creation: false,
-                    });
+                    let buffer = context
+                        .graphics
+                        .device()
+                        .create_buffer(&wgpu::BufferDescriptor {
+                            label: Some(&info.name),
+                            size: *size,
+                            usage: *usage,
+                            mapped_at_creation: false,
+                        });
                     context.buffers.insert(*id, buffer);
                 }
             }
@@ -481,11 +489,7 @@ mod tests {
     #[test]
     fn test_add_buffer_resource() {
         let mut graph = RenderGraph::new();
-        let buf = graph.add_buffer(
-            "vertex_buffer",
-            1024,
-            wgpu::BufferUsages::VERTEX,
-        );
+        let buf = graph.add_buffer("vertex_buffer", 1024, wgpu::BufferUsages::VERTEX);
         assert_eq!(graph.resource_count(), 1);
         assert_eq!(buf.as_u64(), 0);
     }

@@ -1,12 +1,12 @@
 //! Render, measure, and event handler functions for core widget types.
 //!
-//! These functions are registered via [`CorePlugin`] and dispatched
-//! through the [`WidgetTypeRegistry`] instead of downcast chains.
+//! These functions are registered via [`crate::plugin::CorePlugin`] and dispatched
+//! through the [`crate::plugin::WidgetTypeRegistry`] instead of downcast chains.
 
 use crate::draw_list::{DrawCommand, ImageCommand, QuadCommand, TextCommand};
 use crate::plugin::registry::{EventResponse, WidgetOverflow, WidgetRenderContext};
-use crate::widgets::scroll_container::ScrollContainer;
 use crate::style::Overflow;
+use crate::widgets::scroll_container::ScrollContainer;
 use crate::widgets::{Button, Container, HScrollbar, Image, Text, TextInput, Tooltip, VScrollbar};
 use astrelis_core::math::Vec2;
 use astrelis_winit::event::PhysicalKey;
@@ -36,19 +36,20 @@ pub fn render_container(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
 
     // Border quad
     if container.style.border_width > 0.0
-        && let Some(border_color) = container.style.border_color {
-            commands.push(DrawCommand::Quad(
-                QuadCommand::bordered(
-                    ctx.abs_position,
-                    ctx.layout_size,
-                    border_color,
-                    container.style.border_width,
-                    container.style.border_radius,
-                    0,
-                )
-                .with_clip(ctx.clip_rect),
-            ));
-        }
+        && let Some(border_color) = container.style.border_color
+    {
+        commands.push(DrawCommand::Quad(
+            QuadCommand::bordered(
+                ctx.abs_position,
+                ctx.layout_size,
+                border_color,
+                container.style.border_width,
+                container.style.border_radius,
+                0,
+            )
+            .with_clip(ctx.clip_rect),
+        ));
+    }
 
     commands
 }
@@ -84,13 +85,8 @@ pub fn render_text(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> Vec<D
 
         let text_color = text.color.unwrap_or(ctx.theme_colors.text_primary);
         commands.push(DrawCommand::Text(
-            TextCommand::new(
-                Vec2::new(ctx.abs_position.x, text_y),
-                shaped,
-                text_color,
-                0,
-            )
-            .with_clip(ctx.clip_rect),
+            TextCommand::new(Vec2::new(ctx.abs_position.x, text_y), shaped, text_color, 0)
+                .with_clip(ctx.clip_rect),
         ));
     }
 
@@ -292,19 +288,20 @@ pub fn render_scroll_container(
 
     // Border quad
     if sc.style.border_width > 0.0
-        && let Some(border_color) = sc.style.border_color {
-            commands.push(DrawCommand::Quad(
-                QuadCommand::bordered(
-                    ctx.abs_position,
-                    ctx.layout_size,
-                    border_color,
-                    sc.style.border_width,
-                    sc.style.border_radius,
-                    0,
-                )
-                .with_clip(ctx.clip_rect),
-            ));
-        }
+        && let Some(border_color) = sc.style.border_color
+    {
+        commands.push(DrawCommand::Quad(
+            QuadCommand::bordered(
+                ctx.abs_position,
+                ctx.layout_size,
+                border_color,
+                sc.style.border_width,
+                sc.style.border_radius,
+                0,
+            )
+            .with_clip(ctx.clip_rect),
+        ));
+    }
 
     let abs_layout = crate::tree::LayoutRect {
         x: ctx.abs_position.x,

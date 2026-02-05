@@ -1,8 +1,8 @@
 //! Render capability system for declaring GPU feature/limit requirements.
 //!
 //! Renderers implement [`RenderCapability`] to declare their GPU requirements.
-//! These are collected via [`GraphicsContextDescriptor::require_capability`] and
-//! [`GraphicsContextDescriptor::request_capability`] to configure device creation.
+//! These are collected via [`crate::GraphicsContextDescriptor::require_capability`] and
+//! [`crate::GraphicsContextDescriptor::request_capability`] to configure device creation.
 //!
 //! # Example
 //!
@@ -23,8 +23,8 @@ use crate::features::GpuFeatures;
 /// A trait for renderers to declare their GPU feature and limit requirements.
 ///
 /// Implement this on renderer types (or dedicated marker types) so that
-/// [`GraphicsContextDescriptor::require_capability`] and
-/// [`GraphicsContextDescriptor::request_capability`] can automatically
+/// [`crate::GraphicsContextDescriptor::require_capability`] and
+/// [`crate::GraphicsContextDescriptor::request_capability`] can automatically
 /// gather the necessary GPU configuration.
 pub trait RenderCapability {
     /// GPU requirements (features + limits) for this component.
@@ -123,37 +123,89 @@ impl Default for GpuRequirements {
 /// This ensures the merged limits satisfy both sets of requirements.
 pub fn merge_limits_max(target: &mut wgpu::Limits, other: &wgpu::Limits) {
     // "Maximum" fields: take the larger value
-    target.max_texture_dimension_1d = target.max_texture_dimension_1d.max(other.max_texture_dimension_1d);
-    target.max_texture_dimension_2d = target.max_texture_dimension_2d.max(other.max_texture_dimension_2d);
-    target.max_texture_dimension_3d = target.max_texture_dimension_3d.max(other.max_texture_dimension_3d);
-    target.max_texture_array_layers = target.max_texture_array_layers.max(other.max_texture_array_layers);
+    target.max_texture_dimension_1d = target
+        .max_texture_dimension_1d
+        .max(other.max_texture_dimension_1d);
+    target.max_texture_dimension_2d = target
+        .max_texture_dimension_2d
+        .max(other.max_texture_dimension_2d);
+    target.max_texture_dimension_3d = target
+        .max_texture_dimension_3d
+        .max(other.max_texture_dimension_3d);
+    target.max_texture_array_layers = target
+        .max_texture_array_layers
+        .max(other.max_texture_array_layers);
     target.max_bind_groups = target.max_bind_groups.max(other.max_bind_groups);
-    target.max_bindings_per_bind_group = target.max_bindings_per_bind_group.max(other.max_bindings_per_bind_group);
-    target.max_dynamic_uniform_buffers_per_pipeline_layout = target.max_dynamic_uniform_buffers_per_pipeline_layout.max(other.max_dynamic_uniform_buffers_per_pipeline_layout);
-    target.max_dynamic_storage_buffers_per_pipeline_layout = target.max_dynamic_storage_buffers_per_pipeline_layout.max(other.max_dynamic_storage_buffers_per_pipeline_layout);
-    target.max_sampled_textures_per_shader_stage = target.max_sampled_textures_per_shader_stage.max(other.max_sampled_textures_per_shader_stage);
-    target.max_samplers_per_shader_stage = target.max_samplers_per_shader_stage.max(other.max_samplers_per_shader_stage);
-    target.max_storage_buffers_per_shader_stage = target.max_storage_buffers_per_shader_stage.max(other.max_storage_buffers_per_shader_stage);
-    target.max_storage_textures_per_shader_stage = target.max_storage_textures_per_shader_stage.max(other.max_storage_textures_per_shader_stage);
-    target.max_uniform_buffers_per_shader_stage = target.max_uniform_buffers_per_shader_stage.max(other.max_uniform_buffers_per_shader_stage);
-    target.max_uniform_buffer_binding_size = target.max_uniform_buffer_binding_size.max(other.max_uniform_buffer_binding_size);
-    target.max_storage_buffer_binding_size = target.max_storage_buffer_binding_size.max(other.max_storage_buffer_binding_size);
+    target.max_bindings_per_bind_group = target
+        .max_bindings_per_bind_group
+        .max(other.max_bindings_per_bind_group);
+    target.max_dynamic_uniform_buffers_per_pipeline_layout = target
+        .max_dynamic_uniform_buffers_per_pipeline_layout
+        .max(other.max_dynamic_uniform_buffers_per_pipeline_layout);
+    target.max_dynamic_storage_buffers_per_pipeline_layout = target
+        .max_dynamic_storage_buffers_per_pipeline_layout
+        .max(other.max_dynamic_storage_buffers_per_pipeline_layout);
+    target.max_sampled_textures_per_shader_stage = target
+        .max_sampled_textures_per_shader_stage
+        .max(other.max_sampled_textures_per_shader_stage);
+    target.max_samplers_per_shader_stage = target
+        .max_samplers_per_shader_stage
+        .max(other.max_samplers_per_shader_stage);
+    target.max_storage_buffers_per_shader_stage = target
+        .max_storage_buffers_per_shader_stage
+        .max(other.max_storage_buffers_per_shader_stage);
+    target.max_storage_textures_per_shader_stage = target
+        .max_storage_textures_per_shader_stage
+        .max(other.max_storage_textures_per_shader_stage);
+    target.max_uniform_buffers_per_shader_stage = target
+        .max_uniform_buffers_per_shader_stage
+        .max(other.max_uniform_buffers_per_shader_stage);
+    target.max_uniform_buffer_binding_size = target
+        .max_uniform_buffer_binding_size
+        .max(other.max_uniform_buffer_binding_size);
+    target.max_storage_buffer_binding_size = target
+        .max_storage_buffer_binding_size
+        .max(other.max_storage_buffer_binding_size);
     target.max_vertex_buffers = target.max_vertex_buffers.max(other.max_vertex_buffers);
     target.max_buffer_size = target.max_buffer_size.max(other.max_buffer_size);
-    target.max_vertex_attributes = target.max_vertex_attributes.max(other.max_vertex_attributes);
-    target.max_vertex_buffer_array_stride = target.max_vertex_buffer_array_stride.max(other.max_vertex_buffer_array_stride);
-    target.max_push_constant_size = target.max_push_constant_size.max(other.max_push_constant_size);
-    target.max_compute_workgroup_storage_size = target.max_compute_workgroup_storage_size.max(other.max_compute_workgroup_storage_size);
-    target.max_compute_invocations_per_workgroup = target.max_compute_invocations_per_workgroup.max(other.max_compute_invocations_per_workgroup);
-    target.max_compute_workgroup_size_x = target.max_compute_workgroup_size_x.max(other.max_compute_workgroup_size_x);
-    target.max_compute_workgroup_size_y = target.max_compute_workgroup_size_y.max(other.max_compute_workgroup_size_y);
-    target.max_compute_workgroup_size_z = target.max_compute_workgroup_size_z.max(other.max_compute_workgroup_size_z);
-    target.max_compute_workgroups_per_dimension = target.max_compute_workgroups_per_dimension.max(other.max_compute_workgroups_per_dimension);
-    target.max_binding_array_elements_per_shader_stage = target.max_binding_array_elements_per_shader_stage.max(other.max_binding_array_elements_per_shader_stage);
+    target.max_vertex_attributes = target
+        .max_vertex_attributes
+        .max(other.max_vertex_attributes);
+    target.max_vertex_buffer_array_stride = target
+        .max_vertex_buffer_array_stride
+        .max(other.max_vertex_buffer_array_stride);
+    target.max_push_constant_size = target
+        .max_push_constant_size
+        .max(other.max_push_constant_size);
+    target.max_compute_workgroup_storage_size = target
+        .max_compute_workgroup_storage_size
+        .max(other.max_compute_workgroup_storage_size);
+    target.max_compute_invocations_per_workgroup = target
+        .max_compute_invocations_per_workgroup
+        .max(other.max_compute_invocations_per_workgroup);
+    target.max_compute_workgroup_size_x = target
+        .max_compute_workgroup_size_x
+        .max(other.max_compute_workgroup_size_x);
+    target.max_compute_workgroup_size_y = target
+        .max_compute_workgroup_size_y
+        .max(other.max_compute_workgroup_size_y);
+    target.max_compute_workgroup_size_z = target
+        .max_compute_workgroup_size_z
+        .max(other.max_compute_workgroup_size_z);
+    target.max_compute_workgroups_per_dimension = target
+        .max_compute_workgroups_per_dimension
+        .max(other.max_compute_workgroups_per_dimension);
+    target.max_binding_array_elements_per_shader_stage = target
+        .max_binding_array_elements_per_shader_stage
+        .max(other.max_binding_array_elements_per_shader_stage);
 
     // "Minimum" alignment fields: take the smaller value (stricter alignment)
-    target.min_uniform_buffer_offset_alignment = target.min_uniform_buffer_offset_alignment.min(other.min_uniform_buffer_offset_alignment);
-    target.min_storage_buffer_offset_alignment = target.min_storage_buffer_offset_alignment.min(other.min_storage_buffer_offset_alignment);
+    target.min_uniform_buffer_offset_alignment = target
+        .min_uniform_buffer_offset_alignment
+        .min(other.min_uniform_buffer_offset_alignment);
+    target.min_storage_buffer_offset_alignment = target
+        .min_storage_buffer_offset_alignment
+        .min(other.min_storage_buffer_offset_alignment);
 }
 
 /// Clamp requested limits to what the adapter actually supports.
@@ -165,41 +217,101 @@ pub fn clamp_limits_to_adapter(requested: &wgpu::Limits, adapter: &wgpu::Limits)
     let mut result = requested.clone();
 
     // "Maximum" fields: don't exceed adapter
-    result.max_texture_dimension_1d = result.max_texture_dimension_1d.min(adapter.max_texture_dimension_1d);
-    result.max_texture_dimension_2d = result.max_texture_dimension_2d.min(adapter.max_texture_dimension_2d);
-    result.max_texture_dimension_3d = result.max_texture_dimension_3d.min(adapter.max_texture_dimension_3d);
-    result.max_texture_array_layers = result.max_texture_array_layers.min(adapter.max_texture_array_layers);
+    result.max_texture_dimension_1d = result
+        .max_texture_dimension_1d
+        .min(adapter.max_texture_dimension_1d);
+    result.max_texture_dimension_2d = result
+        .max_texture_dimension_2d
+        .min(adapter.max_texture_dimension_2d);
+    result.max_texture_dimension_3d = result
+        .max_texture_dimension_3d
+        .min(adapter.max_texture_dimension_3d);
+    result.max_texture_array_layers = result
+        .max_texture_array_layers
+        .min(adapter.max_texture_array_layers);
     result.max_bind_groups = result.max_bind_groups.min(adapter.max_bind_groups);
-    result.max_bindings_per_bind_group = result.max_bindings_per_bind_group.min(adapter.max_bindings_per_bind_group);
-    result.max_dynamic_uniform_buffers_per_pipeline_layout = result.max_dynamic_uniform_buffers_per_pipeline_layout.min(adapter.max_dynamic_uniform_buffers_per_pipeline_layout);
-    result.max_dynamic_storage_buffers_per_pipeline_layout = result.max_dynamic_storage_buffers_per_pipeline_layout.min(adapter.max_dynamic_storage_buffers_per_pipeline_layout);
-    result.max_sampled_textures_per_shader_stage = result.max_sampled_textures_per_shader_stage.min(adapter.max_sampled_textures_per_shader_stage);
-    result.max_samplers_per_shader_stage = result.max_samplers_per_shader_stage.min(adapter.max_samplers_per_shader_stage);
-    result.max_storage_buffers_per_shader_stage = result.max_storage_buffers_per_shader_stage.min(adapter.max_storage_buffers_per_shader_stage);
-    result.max_storage_textures_per_shader_stage = result.max_storage_textures_per_shader_stage.min(adapter.max_storage_textures_per_shader_stage);
-    result.max_uniform_buffers_per_shader_stage = result.max_uniform_buffers_per_shader_stage.min(adapter.max_uniform_buffers_per_shader_stage);
-    result.max_uniform_buffer_binding_size = result.max_uniform_buffer_binding_size.min(adapter.max_uniform_buffer_binding_size);
-    result.max_storage_buffer_binding_size = result.max_storage_buffer_binding_size.min(adapter.max_storage_buffer_binding_size);
+    result.max_bindings_per_bind_group = result
+        .max_bindings_per_bind_group
+        .min(adapter.max_bindings_per_bind_group);
+    result.max_dynamic_uniform_buffers_per_pipeline_layout = result
+        .max_dynamic_uniform_buffers_per_pipeline_layout
+        .min(adapter.max_dynamic_uniform_buffers_per_pipeline_layout);
+    result.max_dynamic_storage_buffers_per_pipeline_layout = result
+        .max_dynamic_storage_buffers_per_pipeline_layout
+        .min(adapter.max_dynamic_storage_buffers_per_pipeline_layout);
+    result.max_sampled_textures_per_shader_stage = result
+        .max_sampled_textures_per_shader_stage
+        .min(adapter.max_sampled_textures_per_shader_stage);
+    result.max_samplers_per_shader_stage = result
+        .max_samplers_per_shader_stage
+        .min(adapter.max_samplers_per_shader_stage);
+    result.max_storage_buffers_per_shader_stage = result
+        .max_storage_buffers_per_shader_stage
+        .min(adapter.max_storage_buffers_per_shader_stage);
+    result.max_storage_textures_per_shader_stage = result
+        .max_storage_textures_per_shader_stage
+        .min(adapter.max_storage_textures_per_shader_stage);
+    result.max_uniform_buffers_per_shader_stage = result
+        .max_uniform_buffers_per_shader_stage
+        .min(adapter.max_uniform_buffers_per_shader_stage);
+    result.max_uniform_buffer_binding_size = result
+        .max_uniform_buffer_binding_size
+        .min(adapter.max_uniform_buffer_binding_size);
+    result.max_storage_buffer_binding_size = result
+        .max_storage_buffer_binding_size
+        .min(adapter.max_storage_buffer_binding_size);
     result.max_vertex_buffers = result.max_vertex_buffers.min(adapter.max_vertex_buffers);
     result.max_buffer_size = result.max_buffer_size.min(adapter.max_buffer_size);
-    result.max_vertex_attributes = result.max_vertex_attributes.min(adapter.max_vertex_attributes);
-    result.max_vertex_buffer_array_stride = result.max_vertex_buffer_array_stride.min(adapter.max_vertex_buffer_array_stride);
-    result.max_push_constant_size = result.max_push_constant_size.min(adapter.max_push_constant_size);
-    result.max_compute_workgroup_storage_size = result.max_compute_workgroup_storage_size.min(adapter.max_compute_workgroup_storage_size);
-    result.max_compute_invocations_per_workgroup = result.max_compute_invocations_per_workgroup.min(adapter.max_compute_invocations_per_workgroup);
-    result.max_compute_workgroup_size_x = result.max_compute_workgroup_size_x.min(adapter.max_compute_workgroup_size_x);
-    result.max_compute_workgroup_size_y = result.max_compute_workgroup_size_y.min(adapter.max_compute_workgroup_size_y);
-    result.max_compute_workgroup_size_z = result.max_compute_workgroup_size_z.min(adapter.max_compute_workgroup_size_z);
-    result.max_compute_workgroups_per_dimension = result.max_compute_workgroups_per_dimension.min(adapter.max_compute_workgroups_per_dimension);
-    result.max_binding_array_elements_per_shader_stage = result.max_binding_array_elements_per_shader_stage.min(adapter.max_binding_array_elements_per_shader_stage);
-    result.max_color_attachments = result.max_color_attachments.min(adapter.max_color_attachments);
-    result.max_color_attachment_bytes_per_sample = result.max_color_attachment_bytes_per_sample.min(adapter.max_color_attachment_bytes_per_sample);
-    result.max_inter_stage_shader_components = result.max_inter_stage_shader_components.min(adapter.max_inter_stage_shader_components);
-    result.max_non_sampler_bindings = result.max_non_sampler_bindings.min(adapter.max_non_sampler_bindings);
+    result.max_vertex_attributes = result
+        .max_vertex_attributes
+        .min(adapter.max_vertex_attributes);
+    result.max_vertex_buffer_array_stride = result
+        .max_vertex_buffer_array_stride
+        .min(adapter.max_vertex_buffer_array_stride);
+    result.max_push_constant_size = result
+        .max_push_constant_size
+        .min(adapter.max_push_constant_size);
+    result.max_compute_workgroup_storage_size = result
+        .max_compute_workgroup_storage_size
+        .min(adapter.max_compute_workgroup_storage_size);
+    result.max_compute_invocations_per_workgroup = result
+        .max_compute_invocations_per_workgroup
+        .min(adapter.max_compute_invocations_per_workgroup);
+    result.max_compute_workgroup_size_x = result
+        .max_compute_workgroup_size_x
+        .min(adapter.max_compute_workgroup_size_x);
+    result.max_compute_workgroup_size_y = result
+        .max_compute_workgroup_size_y
+        .min(adapter.max_compute_workgroup_size_y);
+    result.max_compute_workgroup_size_z = result
+        .max_compute_workgroup_size_z
+        .min(adapter.max_compute_workgroup_size_z);
+    result.max_compute_workgroups_per_dimension = result
+        .max_compute_workgroups_per_dimension
+        .min(adapter.max_compute_workgroups_per_dimension);
+    result.max_binding_array_elements_per_shader_stage = result
+        .max_binding_array_elements_per_shader_stage
+        .min(adapter.max_binding_array_elements_per_shader_stage);
+    result.max_color_attachments = result
+        .max_color_attachments
+        .min(adapter.max_color_attachments);
+    result.max_color_attachment_bytes_per_sample = result
+        .max_color_attachment_bytes_per_sample
+        .min(adapter.max_color_attachment_bytes_per_sample);
+    result.max_inter_stage_shader_components = result
+        .max_inter_stage_shader_components
+        .min(adapter.max_inter_stage_shader_components);
+    result.max_non_sampler_bindings = result
+        .max_non_sampler_bindings
+        .min(adapter.max_non_sampler_bindings);
 
     // "Minimum" alignment fields: adapter's value is the floor
-    result.min_uniform_buffer_offset_alignment = result.min_uniform_buffer_offset_alignment.max(adapter.min_uniform_buffer_offset_alignment);
-    result.min_storage_buffer_offset_alignment = result.min_storage_buffer_offset_alignment.max(adapter.min_storage_buffer_offset_alignment);
+    result.min_uniform_buffer_offset_alignment = result
+        .min_uniform_buffer_offset_alignment
+        .max(adapter.min_uniform_buffer_offset_alignment);
+    result.min_storage_buffer_offset_alignment = result
+        .min_storage_buffer_offset_alignment
+        .max(adapter.min_storage_buffer_offset_alignment);
 
     // Subgroup sizes: use adapter values
     result.min_subgroup_size = adapter.min_subgroup_size;
@@ -229,9 +341,18 @@ mod tests {
                 l.max_binding_array_elements_per_shader_stage = 256;
             });
 
-        assert!(req.required_features.contains(GpuFeatures::INDIRECT_FIRST_INSTANCE));
-        assert!(req.requested_features.contains(GpuFeatures::TIMESTAMP_QUERY));
-        assert_eq!(req.min_limits.max_binding_array_elements_per_shader_stage, 256);
+        assert!(
+            req.required_features
+                .contains(GpuFeatures::INDIRECT_FIRST_INSTANCE)
+        );
+        assert!(
+            req.requested_features
+                .contains(GpuFeatures::TIMESTAMP_QUERY)
+        );
+        assert_eq!(
+            req.min_limits.max_binding_array_elements_per_shader_stage,
+            256
+        );
     }
 
     #[test]
@@ -251,10 +372,19 @@ mod tests {
 
         a.merge(&b);
 
-        assert!(a.required_features.contains(GpuFeatures::INDIRECT_FIRST_INSTANCE));
-        assert!(a.required_features.contains(GpuFeatures::TEXTURE_BINDING_ARRAY));
+        assert!(
+            a.required_features
+                .contains(GpuFeatures::INDIRECT_FIRST_INSTANCE)
+        );
+        assert!(
+            a.required_features
+                .contains(GpuFeatures::TEXTURE_BINDING_ARRAY)
+        );
         assert!(a.requested_features.contains(GpuFeatures::TIMESTAMP_QUERY));
-        assert_eq!(a.min_limits.max_binding_array_elements_per_shader_stage, 256);
+        assert_eq!(
+            a.min_limits.max_binding_array_elements_per_shader_stage,
+            256
+        );
     }
 
     #[test]

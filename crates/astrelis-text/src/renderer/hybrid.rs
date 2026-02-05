@@ -63,11 +63,11 @@ use crate::decoration::TextBounds;
 
 use super::bitmap::BitmapBackend;
 use super::sdf::SdfBackend;
-use super::{SDF_DEFAULT_SPREAD, orthographic_projection};
 use super::shared::{
     AtlasEntry, DecorationRenderer, GlyphPlacement, SdfParams, SharedContext, TextBuffer,
     TextRender, TextRendererConfig, TextVertex,
 };
+use super::{SDF_DEFAULT_SPREAD, orthographic_projection};
 
 /// Helper macro to handle RwLock write poisoning gracefully.
 macro_rules! lock_or_recover {
@@ -148,7 +148,8 @@ impl FontRenderer {
         let shared = SharedContext::new(context, font_system.inner());
         let bitmap = BitmapBackend::new(&shared, config.atlas_size);
         let sdf = SdfBackend::new(&shared, config.atlas_size, config.sdf);
-        let decoration = DecorationRenderer::new(&shared.renderer, &shared.uniform_bind_group_layout);
+        let decoration =
+            DecorationRenderer::new(&shared.renderer, &shared.uniform_bind_group_layout);
 
         Self {
             shared,
@@ -358,7 +359,8 @@ impl FontRenderer {
                 metrics.baseline_offset,
             );
 
-            self.decoration.queue_from_text(&bounds, decoration, self.shared.scale_factor());
+            self.decoration
+                .queue_from_text(&bounds, decoration, self.shared.scale_factor());
         }
 
         // Draw the text
@@ -563,7 +565,11 @@ impl FontRenderer {
         );
 
         // 1. Render background decorations first (behind text)
-        self.decoration.render_backgrounds(render_pass, &self.shared.renderer, &self.shared.viewport);
+        self.decoration.render_backgrounds(
+            render_pass,
+            &self.shared.renderer,
+            &self.shared.viewport,
+        );
 
         // 2. Render text glyphs
         if !self.vertices.is_empty() {
@@ -627,7 +633,8 @@ impl FontRenderer {
         }
 
         // 3. Render line decorations (underline, strikethrough - on top of text)
-        self.decoration.render_lines(render_pass, &self.shared.renderer, &self.shared.viewport);
+        self.decoration
+            .render_lines(render_pass, &self.shared.renderer, &self.shared.viewport);
     }
 
     /// Get the font system.

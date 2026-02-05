@@ -50,7 +50,11 @@ impl std::fmt::Display for TextError {
             }
             TextError::InvalidFontData(msg) => write!(f, "Invalid font data: {}", msg),
             TextError::LockPoisoned(msg) => {
-                write!(f, "Lock was poisoned (likely due to panic in another thread): {}", msg)
+                write!(
+                    f,
+                    "Lock was poisoned (likely due to panic in another thread): {}",
+                    msg
+                )
             }
             TextError::ShapingError(msg) => write!(f, "Text shaping failed: {}", msg),
             TextError::BufferAllocationFailed(msg) => {
@@ -67,7 +71,11 @@ impl std::fmt::Display for TextError {
                 requested_width, requested_height, atlas_width, atlas_height
             ),
             TextError::GpuResourceError(msg) => write!(f, "GPU resource error: {}", msg),
-            TextError::InvalidRange { start, end, text_len } => write!(
+            TextError::InvalidRange {
+                start,
+                end,
+                text_len,
+            } => write!(
                 f,
                 "Invalid text range: {}..{} (text length: {})",
                 start, end, text_len

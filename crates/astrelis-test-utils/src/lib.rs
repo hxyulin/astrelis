@@ -8,7 +8,7 @@
 //! The main components are:
 //!
 //! - [`RenderContext`] - Trait abstracting GPU operations
-//! - [`MockRenderContext`] - Mock implementation for testing
+//! - `MockRenderContext` - Mock implementation for testing (requires `mock` feature)
 //! - GPU wrapper types (`GpuBuffer`, `GpuTexture`, etc.) - Can be real or mock
 //!
 //! # Example

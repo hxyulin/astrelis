@@ -16,20 +16,18 @@
 //! Run with: cargo run -p astrelis-geometry --features ui-integration --example interactive_chart
 
 use astrelis_core::logging;
-use astrelis_core::profiling::{init_profiling, new_frame, profile_scope, ProfilingBackend};
+use astrelis_core::profiling::{ProfilingBackend, init_profiling, new_frame, profile_scope};
+use astrelis_geometry::GeometryRenderer;
 use astrelis_geometry::chart::{
     AxisId, AxisOrientation, AxisPosition, ChartBuilder, InteractiveChartController,
     LegendPosition, Rect,
 };
-use astrelis_geometry::GeometryRenderer;
-use astrelis_render::{
-    Color, GraphicsContext, LineRenderer, RenderTarget, RenderableWindow, WindowContextDescriptor,
-};
+use astrelis_render::{Color, GraphicsContext, LineRenderer, RenderWindow, RenderWindowBuilder};
 use astrelis_winit::{
-    app::{run_app, App, AppCtx},
+    FrameTime, WindowId,
+    app::{App, AppCtx, run_app},
     event::{ElementState, Event, EventBatch, HandleStatus, Key, NamedKey},
     window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
-    FrameTime, WindowId,
 };
 use glam::Vec2;
 use std::sync::Arc;
@@ -37,7 +35,7 @@ use std::sync::Arc;
 struct InteractiveChartApp {
     #[allow(dead_code)]
     graphics: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
 
     // Renderers
@@ -58,7 +56,8 @@ fn main() {
     init_profiling(ProfilingBackend::PuffinHttp);
 
     run_app(|ctx| {
-        let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -68,12 +67,10 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics.clone(),
-            WindowContextDescriptor::default(),
-        )
-        .expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .with_depth_default()
+            .build(window, graphics.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
         let surface_format = window.surface_format();
@@ -155,8 +152,11 @@ impl InteractiveChartApp {
         self.controller.set_bounds(bounds);
 
         // Draw background
-        self.geometry
-            .draw_rect(bounds.position(), bounds.size(), self.chart.background_color);
+        self.geometry.draw_rect(
+            bounds.position(),
+            bounds.size(),
+            self.chart.background_color,
+        );
 
         // Draw grid
         {
@@ -342,7 +342,6 @@ impl InteractiveChartApp {
     }
 }
 
-
 impl App for InteractiveChartApp {
     fn update(&mut self, _ctx: &mut AppCtx, _time: &FrameTime) {
         new_frame();
@@ -429,66 +428,63 @@ impl App for InteractiveChartApp {
         // Begin frame and render
         {
             profile_scope!("begin_frame");
-            let mut frame = self.window.begin_drawing();
             let viewport = self.window.viewport();
+            let Some(frame) = self.window.begin_frame() else {
+                return; // Surface not available
+            };
 
             {
-                profile_scope!("clear_and_render");
-                frame.clear_and_render(
-                    RenderTarget::Surface,
-                    Color::from_rgb_u8(18, 18, 22),
-                    |pass| {
-                        profile_scope!("render_pass");
-                        // Draw background
-                        {
-                            profile_scope!("geometry_render");
-                            self.geometry.render(pass.wgpu_pass(), viewport);
-                        }
-                        // Draw grid and axes (screen coordinates)
-                        {
-                            profile_scope!("ui_lines_render");
-                            self.ui_lines.render(pass.wgpu_pass(), viewport);
-                        }
-                        // Draw data series (data coordinates, GPU transforms)
-                        // Use scissor rect to clip to the plot area
-                        {
-                            profile_scope!("data_lines_render");
-                            let scale = viewport.scale_factor.0 as f32;
-                            let pass = pass.wgpu_pass();
+                profile_scope!("render_pass");
+                let mut pass = frame
+                    .render_pass()
+                    .clear_color(Color::from_rgb_u8(18, 18, 22))
+                    .label("interactive_chart_pass")
+                    .build();
 
-                            // Set scissor rect to clip data lines to plot area
-                            pass.set_scissor_rect(
-                                (plot_area.x * scale) as u32,
-                                (plot_area.y * scale) as u32,
-                                (plot_area.width * scale) as u32,
-                                (plot_area.height * scale) as u32,
-                            );
+                // Draw background
+                {
+                    profile_scope!("geometry_render");
+                    self.geometry.render(pass.wgpu_pass(), viewport);
+                }
+                // Draw grid and axes (screen coordinates)
+                {
+                    profile_scope!("ui_lines_render");
+                    self.ui_lines.render(pass.wgpu_pass(), viewport);
+                }
+                // Draw data series (data coordinates, GPU transforms)
+                // Use scissor rect to clip to the plot area
+                {
+                    profile_scope!("data_lines_render");
+                    let scale = viewport.scale_factor.0 as f32;
+                    let wgpu_pass = pass.wgpu_pass();
 
-                            self.data_lines.render_with_data_transform(
-                                pass,
-                                viewport,
-                                plot_area.x,
-                                plot_area.y,
-                                plot_area.width,
-                                plot_area.height,
-                                x_min,
-                                x_max,
-                                y_min,
-                                y_max,
-                            );
+                    // Set scissor rect to clip data lines to plot area
+                    wgpu_pass.set_scissor_rect(
+                        (plot_area.x * scale) as u32,
+                        (plot_area.y * scale) as u32,
+                        (plot_area.width * scale) as u32,
+                        (plot_area.height * scale) as u32,
+                    );
 
-                            // Reset scissor rect to full viewport
-                            let physical = viewport.size;
-                            pass.set_scissor_rect(0, 0, physical.width as u32, physical.height as u32);
-                        }
-                    },
-                );
+                    self.data_lines.render_with_data_transform(
+                        wgpu_pass,
+                        viewport,
+                        plot_area.x,
+                        plot_area.y,
+                        plot_area.width,
+                        plot_area.height,
+                        x_min,
+                        x_max,
+                        y_min,
+                        y_max,
+                    );
+
+                    // Reset scissor rect to full viewport
+                    let physical = viewport.size;
+                    wgpu_pass.set_scissor_rect(0, 0, physical.width as u32, physical.height as u32);
+                }
             }
-
-            {
-                profile_scope!("frame_finish");
-                frame.finish();
-            }
+            // Frame auto-submits on drop
         }
     }
 }

@@ -1,21 +1,22 @@
 //! UI renderer for drawing widgets with WGPU.
 
 use crate::clip::{ClipRect, should_clip};
-#[cfg(feature = "docking")]
-use crate::widgets::docking::plugin::CrossContainerPreview;
-#[cfg(feature = "docking")]
-use crate::widgets::docking::{DEFAULT_TAB_PADDING, DockAnimationState};
 use crate::draw_list::{DrawCommand, DrawList};
 use crate::glyph_atlas::glyphs_to_instances_into;
 use crate::gpu_types::{ImageInstance, QuadInstance, QuadVertex, TextInstance};
 use crate::instance_buffer::InstanceBuffer;
-use crate::plugin::registry::{TraversalBehavior, WidgetTypeRegistry, WidgetRenderContext};
+use crate::plugin::registry::{TraversalBehavior, WidgetRenderContext, WidgetTypeRegistry};
 use crate::theme::ColorPalette;
 use crate::tree::{NodeId, UiTree};
+#[cfg(feature = "docking")]
+use crate::widgets::docking::plugin::CrossContainerPreview;
+#[cfg(feature = "docking")]
+use crate::widgets::docking::{DEFAULT_TAB_PADDING, DockAnimationState};
 use crate::widgets::{Button, ImageTexture, Text};
 use astrelis_core::alloc::HashMap;
 use astrelis_core::math::Vec2;
 use astrelis_core::profiling::{profile_function, profile_scope};
+use astrelis_render::RenderWindow;
 use astrelis_render::wgpu::util::DeviceExt;
 use astrelis_render::{Color, GraphicsContext, Renderer, Viewport, wgpu};
 use astrelis_text::{FontRenderer, FontSystem, TextPipeline};
@@ -71,13 +72,226 @@ struct ImageBindGroupKey {
 }
 
 /// Depth format used for UI depth testing.
+///
+/// **Deprecated:** Use `UiRendererDescriptor::depth_format` instead for explicit configuration.
+/// This constant is kept for backwards compatibility but new code should use
+/// `UiRenderer::from_window()` or `UiRendererBuilder` to configure depth format.
 pub const UI_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+/// Configuration for creating a [`UiRenderer`].
+///
+/// Use [`UiRenderer::builder()`] for a fluent API or create directly.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use astrelis_ui::renderer::UiRendererDescriptor;
+/// # use astrelis_render::wgpu;
+/// // Create descriptor from a window (recommended)
+/// // let desc = UiRendererDescriptor::from_window(&window);
+///
+/// // Or configure manually
+/// let desc = UiRendererDescriptor {
+///     name: "Game HUD".to_string(),
+///     surface_format: wgpu::TextureFormat::Bgra8UnormSrgb,
+///     depth_format: Some(wgpu::TextureFormat::Depth32Float),
+/// };
+/// ```
+#[derive(Clone, Debug)]
+pub struct UiRendererDescriptor {
+    /// Name for the renderer (used in pipeline labels for debugging/profiling).
+    ///
+    /// This name appears in GPU debuggers and profilers as a prefix for
+    /// pipeline labels (e.g., "Game HUD Quad Pipeline").
+    ///
+    /// Default: `"UI"`
+    pub name: String,
+
+    /// Surface texture format. Must match the render target.
+    ///
+    /// Default: `Bgra8UnormSrgb`
+    pub surface_format: wgpu::TextureFormat,
+
+    /// Depth format for z-ordering. `None` disables depth testing.
+    ///
+    /// When `Some`, pipelines are created with depth testing enabled using
+    /// reverse-Z (higher z_index = closer to camera). When `None`, pipelines
+    /// have no depth attachment and z-ordering relies on draw order.
+    ///
+    /// **Important:** This must match the render pass depth attachment:
+    /// - If the render pass has a depth attachment, this must be `Some` with the same format
+    /// - If the render pass has no depth attachment, this must be `None`
+    ///
+    /// Default: `None` (no depth testing)
+    pub depth_format: Option<wgpu::TextureFormat>,
+}
+
+impl Default for UiRendererDescriptor {
+    fn default() -> Self {
+        Self {
+            name: "UI".to_string(),
+            surface_format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            depth_format: None, // No depth by default - explicit opt-in required
+        }
+    }
+}
+
+impl UiRendererDescriptor {
+    /// Create descriptor from a [`RenderWindow`], inheriting its format configuration.
+    ///
+    /// This is the **recommended** way to create a descriptor as it ensures
+    /// pipeline-renderpass format compatibility automatically.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::renderer::UiRendererDescriptor;
+    /// # use astrelis_render::RenderWindow;
+    /// # fn example(window: &RenderWindow) {
+    /// let desc = UiRendererDescriptor::from_window(window);
+    /// // desc.surface_format matches window.surface_format()
+    /// // desc.depth_format matches window.depth_format()
+    /// # }
+    /// ```
+    pub fn from_window(window: &RenderWindow) -> Self {
+        Self {
+            name: "UI".to_string(),
+            surface_format: window.surface_format(),
+            depth_format: window.depth_format(),
+        }
+    }
+
+    /// Set the renderer name (used in pipeline labels).
+    ///
+    /// The name appears in GPU debuggers and profilers.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// Enable depth testing with the specified format.
+    pub fn with_depth(mut self, format: wgpu::TextureFormat) -> Self {
+        self.depth_format = Some(format);
+        self
+    }
+
+    /// Enable depth testing with default format (Depth32Float).
+    pub fn with_depth_default(mut self) -> Self {
+        self.depth_format = Some(wgpu::TextureFormat::Depth32Float);
+        self
+    }
+
+    /// Disable depth testing.
+    pub fn without_depth(mut self) -> Self {
+        self.depth_format = None;
+        self
+    }
+}
+
+/// Builder for creating [`UiRenderer`] with custom configuration.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use astrelis_ui::{UiRenderer, UiRendererBuilder};
+/// # use astrelis_render::{GraphicsContext, RenderWindow};
+/// # use std::sync::Arc;
+/// # fn example(graphics: Arc<GraphicsContext>, window: &RenderWindow) {
+/// // Recommended: inherit formats from window using the static constructor
+/// let renderer = UiRendererBuilder::from_window(window)
+///     .name("Game HUD")
+///     .build(graphics.clone());
+///
+/// // Or configure manually
+/// let renderer = UiRenderer::builder()
+///     .name("Debug Overlay")
+///     .surface_format(astrelis_render::wgpu::TextureFormat::Rgba8UnormSrgb)
+///     .with_depth_default()
+///     .build(graphics);
+/// # }
+/// ```
+pub struct UiRendererBuilder {
+    descriptor: UiRendererDescriptor,
+}
+
+impl Default for UiRendererBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl UiRendererBuilder {
+    /// Create a new builder with default configuration.
+    pub fn new() -> Self {
+        Self {
+            descriptor: UiRendererDescriptor::default(),
+        }
+    }
+
+    /// Initialize from a window, inheriting its format configuration.
+    ///
+    /// This is the **recommended** starting point as it ensures
+    /// pipeline-renderpass format compatibility automatically.
+    pub fn from_window(window: &RenderWindow) -> Self {
+        Self {
+            descriptor: UiRendererDescriptor::from_window(window),
+        }
+    }
+
+    /// Set the renderer name (appears in GPU debugger/profiler).
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.descriptor.name = name.into();
+        self
+    }
+
+    /// Set surface format (should match window surface format).
+    pub fn surface_format(mut self, format: wgpu::TextureFormat) -> Self {
+        self.descriptor.surface_format = format;
+        self
+    }
+
+    /// Enable depth testing with specified format.
+    pub fn with_depth(mut self, format: wgpu::TextureFormat) -> Self {
+        self.descriptor.depth_format = Some(format);
+        self
+    }
+
+    /// Enable depth testing with default Depth32Float format.
+    pub fn with_depth_default(mut self) -> Self {
+        self.descriptor.depth_format = Some(wgpu::TextureFormat::Depth32Float);
+        self
+    }
+
+    /// Disable depth testing.
+    pub fn without_depth(mut self) -> Self {
+        self.descriptor.depth_format = None;
+        self
+    }
+
+    /// Get the current descriptor configuration.
+    pub fn descriptor(&self) -> &UiRendererDescriptor {
+        &self.descriptor
+    }
+
+    /// Build the renderer.
+    pub fn build(self, context: Arc<GraphicsContext>) -> UiRenderer {
+        UiRenderer::with_descriptor(context, self.descriptor)
+    }
+}
 
 /// UI renderer for rendering all widgets.
 pub struct UiRenderer {
     renderer: Renderer,
     font_renderer: FontRenderer,
     context: Arc<GraphicsContext>,
+
+    /// Current configuration (stored for reconfigure and descriptor access).
+    descriptor: UiRendererDescriptor,
+
+    // Bind group layouts (needed for pipeline recreation during reconfigure)
+    projection_bind_group_layout: wgpu::BindGroupLayout,
+    text_atlas_bind_group_layout: wgpu::BindGroupLayout,
+    text_projection_bind_group_layout: wgpu::BindGroupLayout,
 
     quad_instanced_pipeline: wgpu::RenderPipeline,
     text_instanced_pipeline: wgpu::RenderPipeline,
@@ -122,18 +336,79 @@ pub struct UiRenderer {
 
     /// Current theme colors for resolving widget defaults
     theme_colors: ColorPalette,
-
-    /// Depth texture for z-ordering
-    depth_texture: wgpu::Texture,
-    /// Depth texture view for render pass attachment
-    depth_view: wgpu::TextureView,
-    /// Current depth texture size (width, height)
-    depth_size: (u32, u32),
 }
 
 impl UiRenderer {
-    /// Create a new UI renderer.
+    /// Create a builder for configuring the renderer.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::UiRenderer;
+    /// # use astrelis_render::{GraphicsContext, RenderWindow};
+    /// # use std::sync::Arc;
+    /// # fn example(graphics: Arc<GraphicsContext>, window: &RenderWindow) {
+    /// // Configure manually without a window reference
+    /// let renderer = UiRenderer::builder()
+    ///     .name("Debug Overlay")
+    ///     .surface_format(astrelis_render::wgpu::TextureFormat::Bgra8UnormSrgb)
+    ///     .with_depth_default()
+    ///     .build(graphics);
+    /// # }
+    /// ```
+    pub fn builder() -> UiRendererBuilder {
+        UiRendererBuilder::new()
+    }
+
+    /// Create a new UI renderer with default configuration (no depth testing).
+    ///
+    /// **Warning:** This creates a renderer without depth testing. If your render pass
+    /// has a depth attachment, use [`from_window`](Self::from_window) instead to ensure
+    /// pipeline-renderpass compatibility.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::UiRenderer;
+    /// # use astrelis_render::GraphicsContext;
+    /// # use std::sync::Arc;
+    /// # fn example(graphics: Arc<GraphicsContext>) {
+    /// // For simple use without depth testing
+    /// let renderer = UiRenderer::new(graphics);
+    /// # }
+    /// ```
     pub fn new(context: Arc<GraphicsContext>) -> Self {
+        Self::with_descriptor(context, UiRendererDescriptor::default())
+    }
+
+    /// Create renderer from a [`RenderWindow`], matching its format configuration.
+    ///
+    /// This is the **recommended** constructor as it ensures the renderer's pipelines
+    /// are compatible with the window's render pass configuration.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::UiRenderer;
+    /// # use astrelis_render::{GraphicsContext, RenderWindow};
+    /// # use std::sync::Arc;
+    /// # fn example(graphics: Arc<GraphicsContext>, window: &RenderWindow) {
+    /// // Automatically inherits surface_format and depth_format from window
+    /// let renderer = UiRenderer::from_window(graphics, window);
+    /// # }
+    /// ```
+    pub fn from_window(context: Arc<GraphicsContext>, window: &RenderWindow) -> Self {
+        Self::with_descriptor(context, UiRendererDescriptor::from_window(window))
+    }
+
+    /// Create renderer with explicit configuration.
+    ///
+    /// Use this when you need full control over the renderer configuration,
+    /// or when the target is not a `RenderWindow`.
+    pub fn with_descriptor(
+        context: Arc<GraphicsContext>,
+        descriptor: UiRendererDescriptor,
+    ) -> Self {
         let renderer = Renderer::new(context.clone());
 
         // Create font renderer for text
@@ -142,39 +417,26 @@ impl UiRenderer {
 
         // 1. Create unit quad VBO for instanced rendering
         let unit_quad_vertices = QuadVertex::unit_quad();
-        let unit_quad_vbo = context
-            .device()
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Unit Quad VBO"),
-                contents: bytemuck::cast_slice(&unit_quad_vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        let unit_quad_vbo =
+            context
+                .device()
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Unit Quad VBO"),
+                    contents: bytemuck::cast_slice(&unit_quad_vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
-        // 2. Load instanced shaders
-        let quad_instanced_shader = renderer.create_shader(
-            Some("Quad Instanced Shader"),
-            include_str!("../shaders/quad_instanced.wgsl"),
-        );
-        let text_instanced_shader = renderer.create_shader(
-            Some("Text Instanced Shader"),
-            include_str!("../shaders/text_instanced.wgsl"),
-        );
-        let image_instanced_shader = renderer.create_shader(
-            Some("Image Instanced Shader"),
-            include_str!("../shaders/image_instanced.wgsl"),
-        );
-
-        // 3. Create projection uniform buffer
+        // 2. Create projection uniform buffer
         let projection_buffer = context.device().create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Projection Uniform"),
+            label: Some(&format!("{} Projection Uniform", descriptor.name)),
             size: 64, // mat4x4<f32>
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
-        // 4. Create bind group layouts
+        // 3. Create bind group layouts
         let projection_bind_group_layout = renderer.create_bind_group_layout(
-            Some("Projection Bind Group Layout"),
+            Some(&format!("{} Projection Bind Group Layout", descriptor.name)),
             &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX,
@@ -189,7 +451,7 @@ impl UiRenderer {
 
         // Bind group layout for atlas texture and sampler (group 0)
         let text_atlas_bind_group_layout = renderer.create_bind_group_layout(
-            Some("Text Atlas Bind Group Layout"),
+            Some(&format!("{} Text Atlas Bind Group Layout", descriptor.name)),
             &[
                 // Atlas texture
                 wgpu::BindGroupLayoutEntry {
@@ -214,7 +476,10 @@ impl UiRenderer {
 
         // Bind group layout for projection matrix (group 1, shared with quads)
         let text_projection_bind_group_layout = renderer.create_bind_group_layout(
-            Some("Text Projection Bind Group Layout"),
+            Some(&format!(
+                "{} Text Projection Bind Group Layout",
+                descriptor.name
+            )),
             &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX,
@@ -227,9 +492,9 @@ impl UiRenderer {
             }],
         );
 
-        // 5. Create bind groups
+        // 4. Create bind groups
         let projection_bind_group = renderer.create_bind_group(
-            Some("Projection Bind Group"),
+            Some(&format!("{} Projection Bind Group", descriptor.name)),
             &projection_bind_group_layout,
             &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -239,7 +504,7 @@ impl UiRenderer {
 
         // Atlas bind group (group 0 for text shader)
         let text_atlas_bind_group = renderer.create_bind_group(
-            Some("Text Atlas Bind Group"),
+            Some(&format!("{} Text Atlas Bind Group", descriptor.name)),
             &text_atlas_bind_group_layout,
             &[
                 wgpu::BindGroupEntry {
@@ -257,7 +522,7 @@ impl UiRenderer {
 
         // Projection bind group for text (group 1, same as quads)
         let text_projection_bind_group = renderer.create_bind_group(
-            Some("Text Projection Bind Group"),
+            Some(&format!("{} Text Projection Bind Group", descriptor.name)),
             &text_projection_bind_group_layout,
             &[wgpu::BindGroupEntry {
                 binding: 0,
@@ -267,7 +532,10 @@ impl UiRenderer {
 
         // Image texture bind group layout (group 0 for image shader)
         let image_texture_bind_group_layout = renderer.create_bind_group_layout(
-            Some("Image Texture Bind Group Layout"),
+            Some(&format!(
+                "{} Image Texture Bind Group Layout",
+                descriptor.name
+            )),
             &[
                 // Image texture
                 wgpu::BindGroupLayoutEntry {
@@ -293,173 +561,44 @@ impl UiRenderer {
         // Create sampler cache for different sampling modes
         let sampler_cache = astrelis_render::SamplerCache::new();
 
-        // Create depth stencil state for depth testing
-        // Uses reverse-Z for better depth precision (higher z_index = closer to camera)
-        let depth_stencil_state = wgpu::DepthStencilState {
-            format: UI_DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        };
-
-        // 6. Create instanced pipelines
-        let quad_instanced_layout = renderer.create_pipeline_layout(
-            Some("Quad Instanced Pipeline Layout"),
-            &[&projection_bind_group_layout],
-            &[],
-        );
-
-        let quad_instanced_pipeline =
-            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Quad Instanced Pipeline"),
-                layout: Some(&quad_instanced_layout),
-                vertex: wgpu::VertexState {
-                    module: &quad_instanced_shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[QuadVertex::vertex_layout(), QuadInstance::vertex_layout()],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &quad_instanced_shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: Some(depth_stencil_state.clone()),
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            });
-
-        let text_instanced_layout = renderer.create_pipeline_layout(
-            Some("Text Instanced Pipeline Layout"),
-            &[
+        // 5. Create pipelines
+        let (quad_instanced_pipeline, text_instanced_pipeline, image_instanced_pipeline) =
+            Self::create_pipelines(
+                &renderer,
+                &descriptor,
+                &projection_bind_group_layout,
                 &text_atlas_bind_group_layout,
                 &text_projection_bind_group_layout,
-            ],
-            &[],
-        );
-
-        let text_instanced_pipeline =
-            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Text Instanced Pipeline"),
-                layout: Some(&text_instanced_layout),
-                vertex: wgpu::VertexState {
-                    module: &text_instanced_shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[QuadVertex::vertex_layout(), TextInstance::vertex_layout()],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &text_instanced_shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: Some(depth_stencil_state.clone()),
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            });
-
-        // Image instanced pipeline
-        let image_instanced_layout = renderer.create_pipeline_layout(
-            Some("Image Instanced Pipeline Layout"),
-            &[
                 &image_texture_bind_group_layout,
-                &text_projection_bind_group_layout, // Reuse projection layout
-            ],
-            &[],
-        );
+            );
 
-        let image_instanced_pipeline =
-            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Image Instanced Pipeline"),
-                layout: Some(&image_instanced_layout),
-                vertex: wgpu::VertexState {
-                    module: &image_instanced_shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[QuadVertex::vertex_layout(), ImageInstance::vertex_layout()],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &image_instanced_shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Bgra8UnormSrgb,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: Some(depth_stencil_state),
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            });
-
-        // 7. Initialize retained components
+        // 6. Initialize retained components
         let text_pipeline = TextPipeline::new();
         let draw_list = DrawList::new();
-        let quad_instances = InstanceBuffer::new(context.device(), Some("Quad Instances"), 1024);
-        let text_instances = InstanceBuffer::new(context.device(), Some("Text Instances"), 4096);
-        let image_instances = InstanceBuffer::new(context.device(), Some("Image Instances"), 256);
-
-        // 8. Create initial depth texture (1x1 placeholder, will be resized on first viewport set)
-        let (depth_texture, depth_view) = create_ui_depth_texture(context.device(), 1, 1);
+        let quad_instances = InstanceBuffer::new(
+            context.device(),
+            Some(&format!("{} Quad Instances", descriptor.name)),
+            1024,
+        );
+        let text_instances = InstanceBuffer::new(
+            context.device(),
+            Some(&format!("{} Text Instances", descriptor.name)),
+            4096,
+        );
+        let image_instances = InstanceBuffer::new(
+            context.device(),
+            Some(&format!("{} Image Instances", descriptor.name)),
+            256,
+        );
 
         Self {
             renderer,
             font_renderer,
             context,
+            descriptor,
+            projection_bind_group_layout,
+            text_atlas_bind_group_layout,
+            text_projection_bind_group_layout,
             quad_instanced_pipeline,
             text_instanced_pipeline,
             image_instanced_pipeline,
@@ -486,10 +625,274 @@ impl UiRenderer {
             frame_image_instances: Vec::with_capacity(256),
             frame_image_groups: HashMap::new(),
             theme_colors: ColorPalette::dark(),
-            depth_texture,
-            depth_view,
-            depth_size: (1, 1),
         }
+    }
+
+    /// Get the current renderer configuration.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::UiRenderer;
+    /// # use astrelis_render::GraphicsContext;
+    /// # use std::sync::Arc;
+    /// # fn example(renderer: &UiRenderer) {
+    /// let desc = renderer.descriptor();
+    /// println!("Surface format: {:?}", desc.surface_format);
+    /// println!("Depth format: {:?}", desc.depth_format);
+    /// # }
+    /// ```
+    pub fn descriptor(&self) -> &UiRendererDescriptor {
+        &self.descriptor
+    }
+
+    /// Reconfigure the renderer with new format settings.
+    ///
+    /// This recreates all pipelines with the new configuration.
+    /// Buffers and non-format-dependent resources are preserved.
+    ///
+    /// # Use Case
+    ///
+    /// When a window is moved to a different monitor, the surface format
+    /// may change. Call this method to update the renderer to match.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::{UiRenderer, UiRendererDescriptor};
+    /// # use astrelis_render::{GraphicsContext, RenderWindow};
+    /// # fn example(renderer: &mut UiRenderer, window: &RenderWindow) {
+    /// // Window moved to different monitor
+    /// renderer.reconfigure(UiRendererDescriptor::from_window(window));
+    /// # }
+    /// ```
+    pub fn reconfigure(&mut self, descriptor: UiRendererDescriptor) {
+        // Skip if formats haven't changed (optimization)
+        if self.descriptor.surface_format == descriptor.surface_format
+            && self.descriptor.depth_format == descriptor.depth_format
+        {
+            // Only update name if that changed
+            self.descriptor.name = descriptor.name;
+            return;
+        }
+
+        self.descriptor = descriptor;
+
+        // Recreate pipelines with new formats
+        let (quad_pipeline, text_pipeline, image_pipeline) = Self::create_pipelines(
+            &self.renderer,
+            &self.descriptor,
+            &self.projection_bind_group_layout,
+            &self.text_atlas_bind_group_layout,
+            &self.text_projection_bind_group_layout,
+            &self.image_texture_bind_group_layout,
+        );
+
+        self.quad_instanced_pipeline = quad_pipeline;
+        self.text_instanced_pipeline = text_pipeline;
+        self.image_instanced_pipeline = image_pipeline;
+    }
+
+    /// Reconfigure from a window, inheriting its format configuration.
+    ///
+    /// Convenience method equivalent to:
+    /// ```rust,ignore
+    /// renderer.reconfigure(UiRendererDescriptor::from_window(window));
+    /// ```
+    pub fn reconfigure_from_window(&mut self, window: &RenderWindow) {
+        self.reconfigure(
+            UiRendererDescriptor::from_window(window).with_name(self.descriptor.name.clone()),
+        );
+    }
+
+    /// Create all render pipelines with the given configuration.
+    fn create_pipelines(
+        renderer: &Renderer,
+        descriptor: &UiRendererDescriptor,
+        projection_bind_group_layout: &wgpu::BindGroupLayout,
+        text_atlas_bind_group_layout: &wgpu::BindGroupLayout,
+        text_projection_bind_group_layout: &wgpu::BindGroupLayout,
+        image_texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> (
+        wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
+    ) {
+        // Load shaders
+        let quad_instanced_shader = renderer.create_shader(
+            Some(&format!("{} Quad Shader", descriptor.name)),
+            include_str!("../shaders/quad_instanced.wgsl"),
+        );
+        let text_instanced_shader = renderer.create_shader(
+            Some(&format!("{} Text Shader", descriptor.name)),
+            include_str!("../shaders/text_instanced.wgsl"),
+        );
+        let image_instanced_shader = renderer.create_shader(
+            Some(&format!("{} Image Shader", descriptor.name)),
+            include_str!("../shaders/image_instanced.wgsl"),
+        );
+
+        // Create depth stencil state from descriptor (None if no depth format)
+        // Uses reverse-Z for better depth precision (higher z_index = closer to camera)
+        let depth_stencil_state = descriptor
+            .depth_format
+            .map(|format| wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            });
+
+        // Create quad pipeline
+        let quad_instanced_layout = renderer.create_pipeline_layout(
+            Some(&format!("{} Quad Pipeline Layout", descriptor.name)),
+            &[projection_bind_group_layout],
+            &[],
+        );
+
+        let quad_instanced_pipeline =
+            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(&format!("{} Quad Pipeline", descriptor.name)),
+                layout: Some(&quad_instanced_layout),
+                vertex: wgpu::VertexState {
+                    module: &quad_instanced_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[QuadVertex::vertex_layout(), QuadInstance::vertex_layout()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &quad_instanced_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: descriptor.surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: depth_stencil_state.clone(),
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+
+        // Create text pipeline
+        let text_instanced_layout = renderer.create_pipeline_layout(
+            Some(&format!("{} Text Pipeline Layout", descriptor.name)),
+            &[
+                text_atlas_bind_group_layout,
+                text_projection_bind_group_layout,
+            ],
+            &[],
+        );
+
+        let text_instanced_pipeline =
+            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(&format!("{} Text Pipeline", descriptor.name)),
+                layout: Some(&text_instanced_layout),
+                vertex: wgpu::VertexState {
+                    module: &text_instanced_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[QuadVertex::vertex_layout(), TextInstance::vertex_layout()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &text_instanced_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: descriptor.surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: depth_stencil_state.clone(),
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+
+        // Create image pipeline
+        let image_instanced_layout = renderer.create_pipeline_layout(
+            Some(&format!("{} Image Pipeline Layout", descriptor.name)),
+            &[
+                image_texture_bind_group_layout,
+                text_projection_bind_group_layout,
+            ],
+            &[],
+        );
+
+        let image_instanced_pipeline =
+            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(&format!("{} Image Pipeline", descriptor.name)),
+                layout: Some(&image_instanced_layout),
+                vertex: wgpu::VertexState {
+                    module: &image_instanced_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[QuadVertex::vertex_layout(), ImageInstance::vertex_layout()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &image_instanced_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: descriptor.surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    unclipped_depth: false,
+                    conservative: false,
+                },
+                depth_stencil: depth_stencil_state,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                multiview: None,
+                cache: None,
+            });
+
+        (
+            quad_instanced_pipeline,
+            text_instanced_pipeline,
+            image_instanced_pipeline,
+        )
     }
 
     /// Update the theme colors used for resolving widget defaults.
@@ -506,16 +909,6 @@ impl UiRenderer {
         }
         self.scale_factor = viewport.scale_factor.0;
         self.font_renderer.set_viewport(viewport);
-
-        // Resize depth texture if viewport size changed
-        let new_size = (viewport.size.width as u32, viewport.size.height as u32);
-        if self.depth_size != new_size && new_size.0 > 0 && new_size.1 > 0 {
-            let (texture, view) =
-                create_ui_depth_texture(self.context.device(), new_size.0, new_size.1);
-            self.depth_texture = texture;
-            self.depth_view = view;
-            self.depth_size = new_size;
-        }
     }
 
     /// Get reference to the font renderer for text measurement.
@@ -700,7 +1093,12 @@ impl UiRenderer {
     }
 
     /// Request text shaping for all nodes recursively (first pass).
-    fn request_text_shaping_recursive(&mut self, tree: &UiTree, node_id: NodeId, widget_registry: &WidgetTypeRegistry) {
+    fn request_text_shaping_recursive(
+        &mut self,
+        tree: &UiTree,
+        node_id: NodeId,
+        widget_registry: &WidgetTypeRegistry,
+    ) {
         self.request_text_for_node(tree, node_id);
 
         // Recurse to children using registry traversal behavior
@@ -748,8 +1146,18 @@ impl UiRenderer {
     }
 
     /// Build all nodes recursively (for initial render).
-    fn build_all_nodes_recursive(&mut self, tree: &UiTree, node_id: NodeId, widget_registry: &WidgetTypeRegistry) {
-        self.build_all_nodes_recursive_with_clip(tree, node_id, ClipRect::infinite(), widget_registry);
+    fn build_all_nodes_recursive(
+        &mut self,
+        tree: &UiTree,
+        node_id: NodeId,
+        widget_registry: &WidgetTypeRegistry,
+    ) {
+        self.build_all_nodes_recursive_with_clip(
+            tree,
+            node_id,
+            ClipRect::infinite(),
+            widget_registry,
+        );
     }
 
     /// Build all nodes recursively with inherited clip rect.
@@ -761,7 +1169,8 @@ impl UiRenderer {
         widget_registry: &WidgetTypeRegistry,
     ) {
         // Compute this node's clip rect (may modify inherited_clip for children)
-        let (node_clip, child_clip) = self.compute_node_clip(tree, node_id, inherited_clip, widget_registry);
+        let (node_clip, child_clip) =
+            self.compute_node_clip(tree, node_id, inherited_clip, widget_registry);
 
         // Build this node with its clip rect
         self.update_single_node_with_clip(tree, node_id, node_clip, widget_registry);
@@ -777,7 +1186,12 @@ impl UiRenderer {
             match traversal {
                 TraversalBehavior::Normal => {
                     for &child_id in widget.children() {
-                        self.build_all_nodes_recursive_with_clip(tree, child_id, child_clip, widget_registry);
+                        self.build_all_nodes_recursive_with_clip(
+                            tree,
+                            child_id,
+                            child_clip,
+                            widget_registry,
+                        );
                     }
                 }
                 TraversalBehavior::OnlyChild(index) => {
@@ -789,7 +1203,12 @@ impl UiRenderer {
                     }
                     // Only recurse into the active child
                     if let Some(&child_id) = widget.children().get(index) {
-                        self.build_all_nodes_recursive_with_clip(tree, child_id, child_clip, widget_registry);
+                        self.build_all_nodes_recursive_with_clip(
+                            tree,
+                            child_id,
+                            child_clip,
+                            widget_registry,
+                        );
                     }
                 }
                 TraversalBehavior::Skip => {}
@@ -845,11 +1264,12 @@ impl UiRenderer {
                 if let Some(parent_widget) = tree.get_widget(parent_id) {
                     let parent_type_id = parent_widget.as_any().type_id();
                     if let Some(desc) = widget_registry.get(parent_type_id)
-                        && let Some(scroll_offset_fn) = desc.scroll_offset {
-                            let offset = scroll_offset_fn(parent_widget.as_any());
-                            abs_x -= offset.x;
-                            abs_y -= offset.y;
-                        }
+                        && let Some(scroll_offset_fn) = desc.scroll_offset
+                    {
+                        let offset = scroll_offset_fn(parent_widget.as_any());
+                        abs_x -= offset.x;
+                        abs_y -= offset.y;
+                    }
                 }
                 current_parent = tree.get_node(parent_id).and_then(|n| n.parent);
             }
@@ -872,7 +1292,12 @@ impl UiRenderer {
     ///
     /// This is used by the dirty update path to determine the correct clip rect
     /// for a node without rebuilding the entire tree.
-    fn compute_inherited_clip(&self, tree: &UiTree, node_id: NodeId, widget_registry: &WidgetTypeRegistry) -> ClipRect {
+    fn compute_inherited_clip(
+        &self,
+        tree: &UiTree,
+        node_id: NodeId,
+        widget_registry: &WidgetTypeRegistry,
+    ) -> ClipRect {
         let mut clip = ClipRect::infinite();
 
         // Walk up the tree collecting ancestors
@@ -917,7 +1342,8 @@ impl UiRenderer {
         dirty_nodes.push((node_id, inherited_clip));
 
         // Compute clip for children (this node may affect child clips)
-        let (_, child_clip) = self.compute_node_clip(tree, node_id, inherited_clip, widget_registry);
+        let (_, child_clip) =
+            self.compute_node_clip(tree, node_id, inherited_clip, widget_registry);
 
         // Recurse to children using registry traversal behavior
         if let Some(widget) = tree.get_widget(node_id) {
@@ -930,12 +1356,24 @@ impl UiRenderer {
             match traversal {
                 TraversalBehavior::Normal => {
                     for &child_id in widget.children() {
-                        self.collect_dirty_nodes_with_clips(tree, child_id, child_clip, dirty_nodes, widget_registry);
+                        self.collect_dirty_nodes_with_clips(
+                            tree,
+                            child_id,
+                            child_clip,
+                            dirty_nodes,
+                            widget_registry,
+                        );
                     }
                 }
                 TraversalBehavior::OnlyChild(index) => {
                     if let Some(&child_id) = widget.children().get(index) {
-                        self.collect_dirty_nodes_with_clips(tree, child_id, child_clip, dirty_nodes, widget_registry);
+                        self.collect_dirty_nodes_with_clips(
+                            tree,
+                            child_id,
+                            child_clip,
+                            dirty_nodes,
+                            widget_registry,
+                        );
                     }
                 }
                 TraversalBehavior::Skip => {}
@@ -974,9 +1412,10 @@ impl UiRenderer {
             if let Some(parent_widget) = tree.get_widget(parent_id) {
                 let parent_type_id = parent_widget.as_any().type_id();
                 if let Some(desc) = widget_registry.get(parent_type_id)
-                    && let Some(scroll_offset_fn) = desc.scroll_offset {
-                        abs_offset -= scroll_offset_fn(parent_widget.as_any());
-                    }
+                    && let Some(scroll_offset_fn) = desc.scroll_offset
+                {
+                    abs_offset -= scroll_offset_fn(parent_widget.as_any());
+                }
             }
             current_parent = tree.get_node(parent_id).and_then(|n| n.parent);
         }
@@ -990,16 +1429,17 @@ impl UiRenderer {
         {
             let type_id = widget.as_any().type_id();
             if let Some(descriptor) = widget_registry.get(type_id)
-                && let Some(render_fn) = descriptor.render {
-                    let mut render_ctx = WidgetRenderContext {
-                        abs_position: Vec2::new(abs_x, abs_y),
-                        layout_size: Vec2::new(layout.width, layout.height),
-                        clip_rect,
-                        theme_colors: &self.theme_colors,
-                        text_pipeline: &mut self.text_pipeline,
-                    };
-                    commands = render_fn(widget.as_any(), &mut render_ctx);
-                }
+                && let Some(render_fn) = descriptor.render
+            {
+                let mut render_ctx = WidgetRenderContext {
+                    abs_position: Vec2::new(abs_x, abs_y),
+                    layout_size: Vec2::new(layout.width, layout.height),
+                    clip_rect,
+                    theme_colors: &self.theme_colors,
+                    text_pipeline: &mut self.text_pipeline,
+                };
+                commands = render_fn(widget.as_any(), &mut render_ctx);
+            }
         }
 
         // Update commands for this node in the draw list
@@ -1726,77 +2166,6 @@ impl UiRenderer {
         let viewport_height = viewport.size.height as u32;
         render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
     }
-
-    /// Get the depth texture view for render pass attachment.
-    ///
-    /// The depth texture is used for proper z-ordering of UI elements.
-    /// It should be attached to the render pass when calling `render_instanced`.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-    ///     label: Some("UI Pass"),
-    ///     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-    ///         view: &surface_view,
-    ///         resolve_target: None,
-    ///         ops: wgpu::Operations {
-    ///             load: wgpu::LoadOp::Load, // Don't clear, UI overlays on existing content
-    ///             store: wgpu::StoreOp::Store,
-    ///         },
-    ///     })],
-    ///     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-    ///         view: ui_renderer.depth_view(),
-    ///         depth_ops: Some(wgpu::Operations {
-    ///             load: wgpu::LoadOp::Clear(0.0), // Clear to 0.0 for reverse-Z
-    ///             store: wgpu::StoreOp::Store,
-    ///         }),
-    ///         stencil_ops: None,
-    ///     }),
-    ///     ..Default::default()
-    /// });
-    /// ui_renderer.render_instanced(&tree, &mut pass, viewport, &registry);
-    /// ```
-    pub fn depth_view(&self) -> &wgpu::TextureView {
-        &self.depth_view
-    }
-
-    /// Get the current depth texture size.
-    ///
-    /// The depth texture is automatically resized when `set_viewport` is called.
-    pub fn depth_size(&self) -> (u32, u32) {
-        self.depth_size
-    }
-}
-
-/// Create a depth texture for UI depth testing.
-///
-/// Returns the texture and its view. The texture is configured for:
-/// - Depth32Float format for precision
-/// - RENDER_ATTACHMENT usage for depth buffer attachment
-fn create_ui_depth_texture(
-    device: &wgpu::Device,
-    width: u32,
-    height: u32,
-) -> (wgpu::Texture, wgpu::TextureView) {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("UI Depth Texture"),
-        size: wgpu::Extent3d {
-            width: width.max(1),
-            height: height.max(1),
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: UI_DEPTH_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
-    });
-
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-    (texture, view)
 }
 
 /// Create an orthographic projection matrix for 2D rendering.

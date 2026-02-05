@@ -50,11 +50,11 @@ impl VertexFormat {
     /// Get the size of a single vertex in bytes.
     pub fn vertex_size(&self) -> u64 {
         match self {
-            VertexFormat::Position => 12,                    // 3 floats
-            VertexFormat::PositionNormal => 24,              // 6 floats
-            VertexFormat::PositionUv => 20,                  // 5 floats
-            VertexFormat::PositionNormalUv => 32,            // 8 floats
-            VertexFormat::PositionNormalUvColor => 48,       // 12 floats
+            VertexFormat::Position => 12,              // 3 floats
+            VertexFormat::PositionNormal => 24,        // 6 floats
+            VertexFormat::PositionUv => 20,            // 5 floats
+            VertexFormat::PositionNormalUv => 32,      // 8 floats
+            VertexFormat::PositionNormalUvColor => 48, // 12 floats
         }
     }
 

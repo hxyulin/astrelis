@@ -20,22 +20,22 @@ use std::sync::Arc;
 
 use astrelis_core::logging;
 use astrelis_render::batched::{
-    create_batch_renderer_2d, BatchRenderer2D, BestBatchCapability2D, BindlessBatchCapability2D,
-    DirectBatchCapability2D, DrawBatch2D, DrawType2D, IndirectBatchCapability2D, RenderTier,
-    UnifiedInstance2D,
+    BatchRenderer2D, BestBatchCapability2D, BindlessBatchCapability2D, DirectBatchCapability2D,
+    DrawBatch2D, DrawType2D, IndirectBatchCapability2D, RenderTier, UnifiedInstance2D,
+    create_batch_renderer_2d,
 };
 use astrelis_render::{
-    GraphicsContext, GraphicsContextDescriptor, RenderableWindow, WindowContextDescriptor,
+    Color, GraphicsContext, GraphicsContextDescriptor, RenderWindow, RenderWindowBuilder,
 };
+use astrelis_winit::WindowId;
 use astrelis_winit::app::run_app;
 use astrelis_winit::window::{WindowBackend, WindowDescriptor, WinitPhysicalSize};
-use astrelis_winit::WindowId;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 struct App {
     context: Arc<GraphicsContext>,
-    windows: HashMap<WindowId, RenderableWindow>,
+    windows: HashMap<WindowId, RenderWindow>,
     renderer: Box<dyn BatchRenderer2D>,
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
@@ -51,20 +51,23 @@ impl App {
         }
         let w = width.max(1);
         let h = height.max(1);
-        let texture = self.context.device().create_texture(&wgpu::TextureDescriptor {
-            label: Some("example_depth"),
-            size: wgpu::Extent3d {
-                width: w,
-                height: h,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            view_formats: &[],
-        });
+        let texture = self
+            .context
+            .device()
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("example_depth"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         self.depth_texture = texture;
         self.depth_view = view;
@@ -282,14 +285,16 @@ fn main() {
         // For auto-detect, request the best capability (graceful degradation).
         // For a specific tier, require that tier's capability.
         let descriptor = match tier_override {
-            None => GraphicsContextDescriptor::new()
-                .request_capability::<BestBatchCapability2D>(),
-            Some(RenderTier::Direct) => GraphicsContextDescriptor::new()
-                .require_capability::<DirectBatchCapability2D>(),
-            Some(RenderTier::Indirect) => GraphicsContextDescriptor::new()
-                .require_capability::<IndirectBatchCapability2D>(),
-            Some(RenderTier::Bindless) => GraphicsContextDescriptor::new()
-                .require_capability::<BindlessBatchCapability2D>(),
+            None => GraphicsContextDescriptor::new().request_capability::<BestBatchCapability2D>(),
+            Some(RenderTier::Direct) => {
+                GraphicsContextDescriptor::new().require_capability::<DirectBatchCapability2D>()
+            }
+            Some(RenderTier::Indirect) => {
+                GraphicsContextDescriptor::new().require_capability::<IndirectBatchCapability2D>()
+            }
+            Some(RenderTier::Bindless) => {
+                GraphicsContextDescriptor::new().require_capability::<BindlessBatchCapability2D>()
+            }
         };
         let graphics_ctx =
             pollster::block_on(GraphicsContext::new_owned_with_descriptor(descriptor))
@@ -305,23 +310,16 @@ fn main() {
 
         let surface_format = wgpu::TextureFormat::Bgra8UnormSrgb;
 
-        let renderable_window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(surface_format),
-                ..Default::default()
-            },
-        )
-        .expect("Failed to create renderable window");
+        let renderable_window = RenderWindowBuilder::new()
+            .color_format(surface_format)
+            .with_depth_default()
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = renderable_window.id();
 
-        let renderer = create_batch_renderer_2d(
-            graphics_ctx.clone(),
-            surface_format,
-            tier_override,
-        );
+        let renderer =
+            create_batch_renderer_2d(graphics_ctx.clone(), surface_format, tier_override);
 
         tracing::info!("Using render tier: {}", renderer.tier());
 
@@ -427,28 +425,21 @@ impl astrelis_winit::app::App for App {
 
         // Re-borrow window for rendering
         let window = self.windows.get_mut(&window_id).unwrap();
-        let mut frame = window.begin_drawing();
+        let Some(frame) = window.begin_frame() else {
+            return; // Surface not available
+        };
 
-        // Use RenderPassBuilder with depth stencil attachment
-        frame.with_pass(
-            astrelis_render::RenderPassBuilder::new()
-                .label("batched_example_pass")
-                .target(astrelis_render::RenderTarget::Surface)
-                .clear_color(astrelis_render::Color::rgba(0.08, 0.08, 0.1, 1.0))
+        // Create render pass with depth stencil attachment
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::rgba(0.08, 0.08, 0.1, 1.0))
+                .depth_attachment(&self.depth_view)
                 .clear_depth(0.0) // 0.0 = far with GreaterEqual
-                .depth_stencil_attachment(
-                    &self.depth_view,
-                    Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0),
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    None,
-                ),
-            |pass| {
-                self.renderer.render(pass.wgpu_pass());
-            },
-        );
-
-        frame.finish();
+                .label("batched_example_pass")
+                .build();
+            self.renderer.render(pass.wgpu_pass());
+        }
+        // Frame auto-submits on drop
     }
 }

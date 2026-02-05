@@ -5,19 +5,19 @@
 //! (drag management, drop zone detection, animations).
 
 use crate::clip::ClipRect;
-use crate::widgets::docking::tabs::{CHAR_WIDTH_FACTOR, CLOSE_BUTTON_MARGIN};
-use crate::widgets::docking::{
-    DockAnimationState, DockSplitter, DockTabs, DockingContext, DragManager, DropZoneDetector,
-    DEFAULT_CLOSE_BUTTON_SIZE, DEFAULT_TAB_PADDING,
-};
 use crate::draw_list::{DrawCommand, QuadCommand, TextCommand};
+use crate::plugin::UiPlugin;
 use crate::plugin::registry::{
     TraversalBehavior, WidgetOverflow, WidgetRenderContext, WidgetTypeDescriptor,
     WidgetTypeRegistry,
 };
-use crate::plugin::UiPlugin;
 use crate::style::Overflow;
 use crate::tree::{NodeId, UiTree};
+use crate::widgets::docking::tabs::{CHAR_WIDTH_FACTOR, CLOSE_BUTTON_MARGIN};
+use crate::widgets::docking::{
+    DEFAULT_CLOSE_BUTTON_SIZE, DEFAULT_TAB_PADDING, DockAnimationState, DockSplitter, DockTabs,
+    DockingContext, DragManager, DropZoneDetector,
+};
 use astrelis_core::math::Vec2;
 use astrelis_render::Color;
 use std::any::Any;
@@ -270,43 +270,44 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
 
                 // Close button if closable
                 if tabs.theme.closable
-                    && let Some(close_rect) = tabs.close_button_bounds(i, &abs_layout) {
-                        commands.push(DrawCommand::Quad(
-                            QuadCommand::rounded(
-                                Vec2::new(close_rect.x, close_rect.y),
-                                Vec2::new(close_rect.width, close_rect.height),
-                                Color::rgba(1.0, 1.0, 1.0, 0.1),
-                                close_rect.width / 2.0,
-                                0,
+                    && let Some(close_rect) = tabs.close_button_bounds(i, &abs_layout)
+                {
+                    commands.push(DrawCommand::Quad(
+                        QuadCommand::rounded(
+                            Vec2::new(close_rect.x, close_rect.y),
+                            Vec2::new(close_rect.width, close_rect.height),
+                            Color::rgba(1.0, 1.0, 1.0, 0.1),
+                            close_rect.width / 2.0,
+                            0,
+                        )
+                        .with_clip(tab_clip),
+                    ));
+
+                    // Render X for close button
+                    let x_request = ctx.text_pipeline.request_shape(
+                        "×".to_string(),
+                        0,
+                        tabs.theme.tab_font_size * 0.9,
+                        None,
+                    );
+
+                    if let Some(x_shaped) = ctx.text_pipeline.get_completed(x_request) {
+                        let x_width = x_shaped.bounds().0;
+                        let x_height = x_shaped.bounds().1;
+                        let x_x = close_rect.x + (close_rect.width - x_width) * 0.5;
+                        let x_y = close_rect.y + (close_rect.height - x_height) * 0.5;
+
+                        commands.push(DrawCommand::Text(
+                            TextCommand::new(
+                                Vec2::new(x_x, x_y),
+                                x_shaped,
+                                tabs.theme.tab_text_color,
+                                2,
                             )
                             .with_clip(tab_clip),
                         ));
-
-                        // Render X for close button
-                        let x_request = ctx.text_pipeline.request_shape(
-                            "×".to_string(),
-                            0,
-                            tabs.theme.tab_font_size * 0.9,
-                            None,
-                        );
-
-                        if let Some(x_shaped) = ctx.text_pipeline.get_completed(x_request) {
-                            let x_width = x_shaped.bounds().0;
-                            let x_height = x_shaped.bounds().1;
-                            let x_x = close_rect.x + (close_rect.width - x_width) * 0.5;
-                            let x_y = close_rect.y + (close_rect.height - x_height) * 0.5;
-
-                            commands.push(DrawCommand::Text(
-                                TextCommand::new(
-                                    Vec2::new(x_x, x_y),
-                                    x_shaped,
-                                    tabs.theme.tab_text_color,
-                                    2,
-                                )
-                                .with_clip(tab_clip),
-                            ));
-                        }
                     }
+                }
             }
         }
     }
@@ -419,7 +420,8 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
         let ghost_color = Color::from_rgba_u8(80, 100, 140, 180);
 
         commands.push(DrawCommand::Quad(
-            QuadCommand::rounded(ghost_pos, ghost_size, ghost_color, 4.0, 3).with_clip(ctx.clip_rect),
+            QuadCommand::rounded(ghost_pos, ghost_size, ghost_color, 4.0, 3)
+                .with_clip(ctx.clip_rect),
         ));
 
         // Ghost text

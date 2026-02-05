@@ -5,7 +5,7 @@
 mod state;
 
 use astrelis_core::profiling::profile_function;
-use astrelis_render::{FrameContext, RenderableWindow};
+use astrelis_render::{Frame as RenderFrame, RenderWindow};
 use astrelis_winit::event::EventBatch;
 use state::State;
 
@@ -25,7 +25,7 @@ pub struct Egui {
 }
 
 impl Egui {
-    pub fn new(window: &RenderableWindow, graphics_ctx: &astrelis_render::GraphicsContext) -> Self {
+    pub fn new(window: &RenderWindow, graphics_ctx: &astrelis_render::GraphicsContext) -> Self {
         let context = egui::Context::default();
         let id = context.viewport_id();
 
@@ -54,14 +54,16 @@ impl Egui {
     }
 
     /// Begin UI frame and run the GUI closure.
-    pub fn ui(&mut self, window: &RenderableWindow, gui: impl FnMut(&egui::Context)) {
+    pub fn ui(&mut self, window: &RenderWindow, gui: impl FnMut(&egui::Context)) {
         profile_function!();
         let raw_input = self.state.take_input(window);
         self.full_output.replace(self.context.run(raw_input, gui));
     }
 
     /// Render egui to the current frame.
-    pub fn render(&mut self, window: &RenderableWindow, frame: &mut FrameContext) {
+    ///
+    /// This method uses frame information directly without needing the window.
+    pub fn render(&mut self, frame: &RenderFrame<'_>) {
         profile_function!();
 
         if self.full_output.is_none() {
@@ -69,13 +71,11 @@ impl Egui {
         }
 
         let full_output = self.full_output.take().unwrap();
-        self.state
-            .handle_platform_output(window, full_output.platform_output);
+        // Note: platform_output handling (cursor changes, clipboard, etc.) is a TODO
+        let _ = full_output.platform_output;
 
-        // Clone the Arc to avoid borrowing issues
-        let graphics_ctx = frame.graphics_context_arc().clone();
-        let device = graphics_ctx.device();
-        let queue = graphics_ctx.queue();
+        let device = frame.device();
+        let queue = frame.queue();
 
         let tris = self
             .context
@@ -86,21 +86,24 @@ impl Egui {
                 .update_texture(device, queue, *id, image_delta);
         }
 
-        let config = window.context().surface_config();
+        let (width, height) = frame.size();
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
-            size_in_pixels: [config.width, config.height],
+            size_in_pixels: [width, height],
             pixels_per_point: full_output.pixels_per_point,
         };
 
+        // Create encoder for buffer updates
+        let mut encoder = frame.create_encoder(Some("Egui Buffer Update"));
         self.renderer
-            .update_buffers(device, queue, frame.encoder(), &tris, &screen_descriptor);
+            .update_buffers(device, queue, &mut encoder, &tris, &screen_descriptor);
 
+        // Create render pass
         {
-            let (encoder, surface) = frame.encoder_and_surface();
+            let surface_view = frame.surface_view();
             let mut rpass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: surface.view(),
+                        view: surface_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
@@ -118,7 +121,8 @@ impl Egui {
             self.renderer.render(&mut rpass, &tris, &screen_descriptor);
         }
 
-        frame.increment_passes();
+        // Add command buffer to frame
+        frame.add_command_buffer(encoder.finish());
 
         for x in &full_output.textures_delta.free {
             self.renderer.free_texture(x)
@@ -126,7 +130,7 @@ impl Egui {
     }
 
     /// Process events from the event batch.
-    pub fn handle_events(&mut self, window: &RenderableWindow, events: &mut EventBatch) -> bool {
+    pub fn handle_events(&mut self, window: &RenderWindow, events: &mut EventBatch) -> bool {
         profile_function!();
         let mut any_consumed = false;
 

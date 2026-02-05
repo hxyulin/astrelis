@@ -4,21 +4,19 @@
 //! using the Image widget in the UI system.
 
 use astrelis_core::logging;
-use astrelis_render::{
-    GraphicsContext, RenderableWindow, WindowContextDescriptor, wgpu,
-};
+use astrelis_render::{GraphicsContext, RenderWindow, RenderWindowBuilder, wgpu};
 use astrelis_ui::{Color, FlexDirection, ImageFit, ImageTexture, ImageUV, UiSystem};
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    window::{Window, WindowBackend, WindowDescriptor, WinitPhysicalSize},
+    window::{Window, WindowDescriptor, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 use std::sync::Arc;
 
 struct App {
     context: Arc<GraphicsContext>,
-    windows: HashMap<WindowId, RenderableWindow>,
+    windows: HashMap<WindowId, RenderWindow>,
     ui: UiSystem,
     texture: ImageTexture,
 }
@@ -27,7 +25,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut windows = HashMap::new();
 
         let scale = Window::platform_dpi() as f32;
@@ -39,15 +38,11 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let renderable_window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        )
-        .expect("Failed to create renderable window");
+        let renderable_window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .with_depth_default()
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = renderable_window.id();
         windows.insert(window_id, renderable_window);
@@ -55,7 +50,9 @@ fn main() {
         // Create a procedural checkerboard texture
         let texture = create_checkerboard_texture(&graphics_ctx, 256, 256, 32);
 
-        let mut ui = UiSystem::new(graphics_ctx.clone());
+        // Get the first window for from_window
+        let first_window = windows.get(&window_id).expect("Window must exist");
+        let mut ui = UiSystem::from_window(graphics_ctx.clone(), first_window);
 
         // Build the UI with multiple image widgets showing different features
         build_image_demo(&mut ui, texture.clone());
@@ -416,49 +413,21 @@ impl astrelis_winit::app::App for App {
         });
 
         let bg = self.ui.theme().colors.background;
+        let Some(frame) = window.begin_frame() else {
+            return; // Surface not available
+        };
 
-        // Get depth view before starting frame (avoids borrow conflicts)
-        let depth_view = self.ui.depth_view();
-
-        let mut frame = window.begin_drawing();
-
-        // Create render pass with depth attachment for proper z-ordering
         {
-            // SAFETY: We're creating a scope that ensures pass is dropped before we call
-            // frame methods. The raw pointer usage is to work around borrow checker limitations.
-            let surface_view = frame.surface().view() as *const wgpu::TextureView;
-            let encoder = frame.encoder();
+            let mut pass = frame
+                .render_pass()
+                .clear_color(bg)
+                .with_window_depth()
+                .clear_depth(0.0)
+                .label("UI")
+                .build();
 
-            // SAFETY: surface_view pointer is valid for the duration of this scope
-            let surface_view = unsafe { &*surface_view };
-
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("UI Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: surface_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(bg.to_wgpu()),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: depth_view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0), // Clear to 0.0 for reverse-Z
-                        store: wgpu::StoreOp::Store,
-                    }),
-                    stencil_ops: None,
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-
-            self.ui.render(&mut pass);
+            self.ui.render(pass.wgpu_pass());
         }
-
-        frame.increment_passes();
-        frame.finish();
+        // Frame auto-submits on drop
     }
 }

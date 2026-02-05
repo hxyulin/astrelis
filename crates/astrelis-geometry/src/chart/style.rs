@@ -258,8 +258,7 @@ impl MarkerConfig {
 }
 
 /// Fill target for area fills.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum FillTarget {
     /// Fill to a constant Y value.
     ToValue(f64),
@@ -269,12 +268,8 @@ pub enum FillTarget {
     /// Fill to another series.
     ToSeries { series_id: SeriesId },
     /// Fill a band between two series.
-    Band {
-        lower: SeriesId,
-        upper: SeriesId,
-    },
+    Band { lower: SeriesId, upper: SeriesId },
 }
-
 
 /// Gradient definition.
 #[derive(Debug, Clone, PartialEq)]
@@ -688,7 +683,9 @@ impl EnhancedSeriesStyle {
             line_width: self.line.thickness,
             line_style: if self.line.dash.is_solid() {
                 LineStyle::Solid
-            } else if self.line.dash.segments.len() == 2 && self.line.dash.segments[0] == self.line.dash.segments[1] {
+            } else if self.line.dash.segments.len() == 2
+                && self.line.dash.segments[0] == self.line.dash.segments[1]
+            {
                 LineStyle::Dotted
             } else {
                 LineStyle::Dashed

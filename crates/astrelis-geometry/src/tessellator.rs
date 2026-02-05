@@ -3,13 +3,13 @@
 //! Converts paths and shapes into triangle meshes for GPU rendering.
 
 use crate::{
-    vertex::{FillVertex, StrokeVertex, TessellatedMesh},
     FillRule, LineCap, LineJoin, Path, PathCommand, Shape, Stroke,
+    vertex::{FillVertex, StrokeVertex, TessellatedMesh},
 };
 use glam::Vec2;
-use lyon::geom::{Arc, ArcFlags, SvgArc};
 #[allow(unused_imports)]
 use lyon::geom as lyon_geom;
+use lyon::geom::{Arc, ArcFlags, SvgArc};
 use lyon::lyon_tessellation::{
     BuffersBuilder, FillOptions, FillTessellator, FillVertex as LyonFillVertex, StrokeOptions,
     StrokeTessellator, StrokeVertex as LyonStrokeVertex, VertexBuffers,
@@ -156,7 +156,12 @@ impl Tessellator {
     }
 
     /// Tessellate a line segment for stroking.
-    pub fn tessellate_line(&self, start: Vec2, end: Vec2, width: f32) -> TessellatedMesh<FillVertex> {
+    pub fn tessellate_line(
+        &self,
+        start: Vec2,
+        end: Vec2,
+        width: f32,
+    ) -> TessellatedMesh<FillVertex> {
         let dir = (end - start).normalize_or_zero();
         let normal = Vec2::new(-dir.y, dir.x) * (width * 0.5);
 
@@ -380,8 +385,7 @@ mod tests {
     #[test]
     fn test_line_tessellation() {
         let tessellator = Tessellator::new();
-        let mesh =
-            tessellator.tessellate_line(Vec2::ZERO, Vec2::new(100.0, 0.0), 2.0);
+        let mesh = tessellator.tessellate_line(Vec2::ZERO, Vec2::new(100.0, 0.0), 2.0);
 
         assert_eq!(mesh.vertex_count(), 4);
         assert_eq!(mesh.triangle_count(), 2);

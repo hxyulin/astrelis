@@ -1,6 +1,6 @@
 //! Asset plugin for loading and managing assets.
 
-use astrelis_assets::{AssetServer, AssetLoader};
+use astrelis_assets::{AssetLoader, AssetServer};
 
 use crate::plugin::Plugin;
 use crate::resource::Resources;
@@ -41,7 +41,6 @@ pub struct AssetPlugin {
     /// Base path for loading assets from disk.
     pub base_path: Option<String>,
 }
-
 
 impl AssetPlugin {
     /// Create a new asset plugin.

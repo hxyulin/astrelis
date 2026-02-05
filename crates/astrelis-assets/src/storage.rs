@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use astrelis_core::alloc::sparse_set::{IndexSlot, SparseSet};
 
+use crate::Asset;
 use crate::error::AssetError;
 use crate::handle::{Handle, HandleId, UntypedHandle};
-use crate::state::{AssetEntry, AssetState};
 use crate::source::AssetSource;
-use crate::Asset;
+use crate::state::{AssetEntry, AssetState};
 
 /// Per-type asset storage container.
 ///
@@ -146,7 +146,9 @@ impl<T: Asset> Assets<T> {
 
     /// Get the version of an asset.
     pub fn version(&self, handle: &Handle<T>) -> Option<u32> {
-        self.entries.try_get(handle.id().slot).map(|e| e.version.get())
+        self.entries
+            .try_get(handle.id().slot)
+            .map(|e| e.version.get())
     }
 
     /// Find a handle by source.
@@ -314,7 +316,9 @@ impl AssetStorages {
     pub fn get_or_create<T: Asset>(&mut self) -> &mut Assets<T> {
         let type_id = TypeId::of::<T>();
 
-        self.storages.entry(type_id).or_insert_with(|| Box::new(Assets::<T>::new()));
+        self.storages
+            .entry(type_id)
+            .or_insert_with(|| Box::new(Assets::<T>::new()));
 
         self.storages
             .get_mut(&type_id)
@@ -367,10 +371,7 @@ impl AssetStorages {
         asset: Box<dyn Any + Send + Sync>,
     ) -> bool {
         let Some(storage) = self.storages.get_mut(&handle.type_id()) else {
-            tracing::error!(
-                "No storage found for type {:?}",
-                handle.type_id()
-            );
+            tracing::error!("No storage found for type {:?}", handle.type_id());
             return false;
         };
 

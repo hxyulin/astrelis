@@ -42,7 +42,9 @@ impl DirtyCounters {
         if !old_flags.needs_text_shaping() && new_flags.needs_text_shaping() {
             self.text_dirty += 1;
         }
-        if !old_flags.intersects(DirtyFlags::PAINT_GROUP) && new_flags.intersects(DirtyFlags::PAINT_GROUP) {
+        if !old_flags.intersects(DirtyFlags::PAINT_GROUP)
+            && new_flags.intersects(DirtyFlags::PAINT_GROUP)
+        {
             self.paint_dirty += 1;
         }
     }

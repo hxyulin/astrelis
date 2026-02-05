@@ -248,7 +248,9 @@ impl InteractiveChartController {
                 // Extract scroll amounts from delta (X and Y for independent axis zoom)
                 let (scroll_x, scroll_y) = match delta {
                     MouseScrollDelta::LineDelta(x, y) => (*x, *y),
-                    MouseScrollDelta::PixelDelta(pos) => (pos.x as f32 / 100.0, pos.y as f32 / 100.0),
+                    MouseScrollDelta::PixelDelta(pos) => {
+                        (pos.x as f32 / 100.0, pos.y as f32 / 100.0)
+                    }
                 };
 
                 // Use Y scroll for Y-axis zoom, X scroll for X-axis zoom
@@ -361,7 +363,12 @@ impl InteractiveChartController {
 
                 true
             }
-            Event::Touch(TouchEvent { id, position, phase, .. }) => {
+            Event::Touch(TouchEvent {
+                id,
+                position,
+                phase,
+                ..
+            }) => {
                 // Basic touch handling - update mouse position for single touch
                 if *id == 0 {
                     self.mouse_pos = Vec2::new(position.x as f32, position.y as f32);
@@ -426,7 +433,8 @@ impl InteractiveChartController {
             let (y_min, y_max) = chart.axis_range(series.y_axis);
 
             // Convert pixel to data coordinates
-            let data_x = x_min + ((pixel.x - plot_area.x) / plot_area.width) as f64 * (x_max - x_min);
+            let data_x =
+                x_min + ((pixel.x - plot_area.x) / plot_area.width) as f64 * (x_max - x_min);
 
             // Calculate hit test radius in data coordinates
             let data_radius = (self.hit_test_distance / plot_area.width) as f64 * (x_max - x_min);
@@ -436,8 +444,12 @@ impl InteractiveChartController {
             let search_max = data_x + data_radius;
 
             // Find start index using binary search
-            let start_idx = series.data
-                .binary_search_by(|p| p.x.partial_cmp(&search_min).unwrap_or(std::cmp::Ordering::Equal))
+            let start_idx = series
+                .data
+                .binary_search_by(|p| {
+                    p.x.partial_cmp(&search_min)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .unwrap_or_else(|i| i);
 
             // Only iterate over points in the X range
@@ -448,7 +460,8 @@ impl InteractiveChartController {
 
                 let actual_idx = start_idx + point_idx;
 
-                let px = plot_area.x + ((point.x - x_min) / (x_max - x_min)) as f32 * plot_area.width;
+                let px =
+                    plot_area.x + ((point.x - x_min) / (x_max - x_min)) as f32 * plot_area.width;
                 let py = plot_area.y + plot_area.height
                     - ((point.y - y_min) / (y_max - y_min)) as f32 * plot_area.height;
 

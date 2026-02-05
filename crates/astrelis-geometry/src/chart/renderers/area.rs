@@ -4,7 +4,9 @@ use super::super::rect::Rect;
 use super::super::types::Chart;
 use super::line::SeriesGpuState;
 use astrelis_core::profiling::profile_scope;
-use astrelis_render::{wgpu, Color, GraphicsContext, LineRenderer, LineSegment, Quad, QuadRenderer, Viewport};
+use astrelis_render::{
+    Color, GraphicsContext, LineRenderer, LineSegment, Quad, QuadRenderer, Viewport, wgpu,
+};
 use glam::Vec2;
 use std::sync::Arc;
 

@@ -90,7 +90,8 @@ impl astrelis_winit::app::App for DemoApp {
         self.frames = time.frame_count;
 
         if self.frames % 120 == 0 {
-            println!("Running smoothly... Frame {}, {:.1} FPS",
+            println!(
+                "Running smoothly... Frame {}, {:.1} FPS",
                 self.frames,
                 1.0 / time.delta.as_secs_f32()
             );

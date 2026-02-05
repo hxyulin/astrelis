@@ -492,8 +492,12 @@ mod tests {
 
     #[test]
     fn test_quad_instance_creation() {
-        let instance =
-            QuadInstance::filled(Vec2::new(10.0, 20.0), Vec2::new(100.0, 50.0), Color::RED, 0.5);
+        let instance = QuadInstance::filled(
+            Vec2::new(10.0, 20.0),
+            Vec2::new(100.0, 50.0),
+            Color::RED,
+            0.5,
+        );
 
         assert_eq!(instance.position, [10.0, 20.0]);
         assert_eq!(instance.size, [100.0, 50.0]);

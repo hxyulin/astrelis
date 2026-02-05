@@ -112,7 +112,9 @@ impl TextShapeCache {
         if let Some(cached) = self.cache.get_mut(&key) {
             self.hits += 1;
             // Increment render count to track cache effectiveness
-            Arc::get_mut(cached).map(|data| data.render_count += 1);
+            if let Some(data) = Arc::get_mut(cached) {
+                data.render_count += 1;
+            }
             return cached.clone();
         }
 
@@ -125,7 +127,9 @@ impl TextShapeCache {
     /// Get cached data without computing if missing.
     pub fn get(&mut self, key: &ShapeKey) -> Option<Arc<ShapedTextData>> {
         let result = self.cache.get_mut(key).map(|cached| {
-            Arc::get_mut(cached).map(|data| data.render_count += 1);
+            if let Some(data) = Arc::get_mut(cached) {
+                data.render_count += 1;
+            }
             cached.clone()
         });
         if result.is_some() {
@@ -178,11 +182,7 @@ impl TextShapeCache {
 
     /// Get cache statistics as a formatted string.
     pub fn stats_string(&self) -> String {
-        let total_renders: u64 = self
-            .cache
-            .values()
-            .filter_map(|arc| Some(arc.render_count))
-            .sum();
+        let total_renders: u64 = self.cache.values().map(|arc| arc.render_count).sum();
         format!(
             "TextCache: {} entries, {:.1}% hit rate ({} hits, {} misses), {} total renders",
             self.len(),
@@ -198,11 +198,7 @@ impl TextShapeCache {
         if self.cache.is_empty() {
             return 0.0;
         }
-        let total_renders: u64 = self
-            .cache
-            .values()
-            .filter_map(|arc| Some(arc.render_count))
-            .sum();
+        let total_renders: u64 = self.cache.values().map(|arc| arc.render_count).sum();
         total_renders as f32 / self.cache.len() as f32
     }
 }

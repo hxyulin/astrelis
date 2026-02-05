@@ -11,11 +11,11 @@ use astrelis_core::profiling::profile_function;
 use crate::context::GraphicsContext;
 use crate::indirect::{DrawIndirect, IndirectBuffer};
 
+use super::BINDLESS_MAX_TEXTURES;
 use super::pipeline;
 use super::texture_array::BindlessTextureArray;
 use super::traits::BatchRenderer2D;
 use super::types::{BatchRenderStats2D, DrawBatch2D, DrawType2D, RenderTier, UnifiedInstance2D};
-use super::BINDLESS_MAX_TEXTURES;
 
 pub struct BindlessBatchRenderer2D {
     context: Arc<GraphicsContext>,
@@ -94,8 +94,7 @@ impl BindlessBatchRenderer2D {
             pipeline::create_instance_buffer(device, Self::INITIAL_INSTANCE_CAPACITY);
 
         // 2 indirect commands: one for opaque, one for transparent
-        let indirect_buffer =
-            IndirectBuffer::new(&context, Some("batched_bindless_indirect"), 2);
+        let indirect_buffer = IndirectBuffer::new(&context, Some("batched_bindless_indirect"), 2);
 
         let (depth_texture, depth_view) = pipeline::create_depth_texture(device, 1, 1);
 
@@ -220,12 +219,7 @@ impl BatchRenderer2D for BindlessBatchRenderer2D {
         }
 
         // Build 2 indirect commands
-        let opaque_cmd = DrawIndirect::new(
-            6,
-            self.opaque_instances.len() as u32,
-            0,
-            0,
-        );
+        let opaque_cmd = DrawIndirect::new(6, self.opaque_instances.len() as u32, 0, 0);
         let transparent_cmd = DrawIndirect::new(
             6,
             self.transparent_instances.len() as u32,
@@ -236,8 +230,15 @@ impl BatchRenderer2D for BindlessBatchRenderer2D {
             .write(self.context.queue(), &[opaque_cmd, transparent_cmd]);
 
         // Bindless: minimal draw calls
-        stats.draw_calls = if self.opaque_instances.is_empty() { 0 } else { 1 }
-            + if self.transparent_instances.is_empty() { 0 } else { 1 };
+        stats.draw_calls = if self.opaque_instances.is_empty() {
+            0
+        } else {
+            1
+        } + if self.transparent_instances.is_empty() {
+            0
+        } else {
+            1
+        };
         stats.bind_group_switches = 1; // single bindless bind group
         stats.pipeline_switches = 2;
 

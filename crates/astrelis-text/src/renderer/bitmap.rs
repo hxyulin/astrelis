@@ -228,7 +228,11 @@ impl BitmapBackend {
     }
 
     /// Ensure a glyph is in the atlas, rasterizing and uploading if needed.
-    pub fn ensure_glyph(&mut self, shared: &SharedContext, cache_key: CacheKey) -> Option<&AtlasEntry> {
+    pub fn ensure_glyph(
+        &mut self,
+        shared: &SharedContext,
+        cache_key: CacheKey,
+    ) -> Option<&AtlasEntry> {
         // Check if already in atlas
         if self.atlas_entries.contains_key(&cache_key) {
             return self.atlas_entries.get(&cache_key);
@@ -410,7 +414,10 @@ impl BitmapTextRenderer {
         let mut font_system = match self.shared.font_system.write() {
             Ok(guard) => guard,
             Err(e) => {
-                tracing::error!("Font system lock poisoned in prepare: {}. Attempting recovery.", e);
+                tracing::error!(
+                    "Font system lock poisoned in prepare: {}. Attempting recovery.",
+                    e
+                );
                 self.shared.font_system.write().unwrap_or_else(|poisoned| {
                     tracing::warn!("Clearing poisoned lock");
                     poisoned.into_inner()

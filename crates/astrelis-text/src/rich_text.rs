@@ -52,8 +52,7 @@ impl TextSpan {
 }
 
 /// Style attributes for a text span.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct TextSpanStyle {
     /// Font size (None = inherit from parent)
     pub font_size: Option<f32>,
@@ -147,7 +146,6 @@ impl TextSpanStyle {
         self
     }
 }
-
 
 /// Rich text with multiple styled spans.
 #[derive(Debug, Clone)]

@@ -21,13 +21,10 @@
 //! Compare this to `multi_window.rs` to see the boilerplate reduction!
 
 use astrelis_core::logging;
-use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, WindowContextDescriptor, WindowManager,
-};
+use astrelis_render::{Color, GraphicsContext, WindowContextDescriptor, WindowManager};
 use astrelis_winit::{
-    FrameTime,
-    WindowId,
-    app::{run_app, App, AppCtx},
+    FrameTime, WindowId,
+    app::{App, AppCtx, run_app},
     event::EventBatch,
     window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
 };
@@ -42,7 +39,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
         let mut window_manager = WindowManager::new(graphics_ctx);
         let mut window_colors = HashMap::new();
 
@@ -54,18 +52,20 @@ fn main() {
         ];
 
         for (i, color) in colors.iter().enumerate() {
-            let window_id = window_manager.create_window_with_descriptor(
-                ctx,
-                WindowDescriptor {
-                    title: format!("Window {} - WindowManager Demo", i + 1),
-                    size: Some(WinitPhysicalSize::new(400.0, 300.0)),
-                    ..Default::default()
-                },
-                WindowContextDescriptor {
-                    format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                    ..Default::default()
-                },
-            ).expect("Failed to create window");
+            let window_id = window_manager
+                .create_window_with_descriptor(
+                    ctx,
+                    WindowDescriptor {
+                        title: format!("Window {} - WindowManager Demo", i + 1),
+                        size: Some(WinitPhysicalSize::new(400.0, 300.0)),
+                        ..Default::default()
+                    },
+                    WindowContextDescriptor {
+                        format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
+                        ..Default::default()
+                    },
+                )
+                .expect("Failed to create window");
 
             window_colors.insert(window_id, *color);
         }
@@ -99,13 +99,19 @@ impl App for WindowManagerApp {
                 // WindowManager already did that for us
 
                 // Just render!
-                let mut frame = window.begin_drawing();
+                let Some(frame) = window.begin_frame() else {
+                    return; // Surface not available
+                };
 
-                frame.clear_and_render(RenderTarget::Surface, color, |_pass| {
+                {
+                    let _pass = frame
+                        .render_pass()
+                        .clear_color(color)
+                        .label("window_manager_pass")
+                        .build();
                     // Additional rendering would go here
-                });
-
-                frame.finish();
+                }
+                // Frame auto-submits on drop
             });
     }
 }

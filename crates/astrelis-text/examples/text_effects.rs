@@ -14,24 +14,19 @@
 //!
 //! This is an API reference example - visual rendering coming soon!
 
-use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_core::math::Vec2;
-use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
-};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder, wgpu};
 use astrelis_text::{FontRenderer, FontSystem, Text, TextEffect, TextEffects};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 
 struct TextEffectsDemo {
-    _context: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     font_renderer: FontRenderer,
 }
@@ -40,7 +35,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -50,14 +46,10 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        ).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
 
@@ -84,7 +76,6 @@ fn main() {
         tracing::info!("Text effects demo initialized");
 
         Box::new(TextEffectsDemo {
-            _context: graphics_ctx,
             window,
             window_id,
             font_renderer,
@@ -115,10 +106,8 @@ impl App for TextEffectsDemo {
         self.font_renderer.set_viewport(self.window.viewport());
 
         // Example 1: Drop shadow effect
-        let _shadow_effect = TextEffect::shadow(
-            Vec2::new(2.0, 2.0),
-            Color::from_rgba_u8(0, 0, 0, 180)
-        );
+        let _shadow_effect =
+            TextEffect::shadow(Vec2::new(2.0, 2.0), Color::from_rgba_u8(0, 0, 0, 180));
 
         let shadow_text = Text::new("Drop Shadow Text")
             .size(32.0)
@@ -126,11 +115,8 @@ impl App for TextEffectsDemo {
             .bold();
 
         // Example 2: Blurred shadow
-        let _blurred_shadow = TextEffect::shadow_blurred(
-            Vec2::new(3.0, 3.0),
-            5.0,
-            Color::from_rgba_u8(0, 0, 0, 150)
-        );
+        let _blurred_shadow =
+            TextEffect::shadow_blurred(Vec2::new(3.0, 3.0), 5.0, Color::from_rgba_u8(0, 0, 0, 150));
 
         let blurred_text = Text::new("Blurred Shadow")
             .size(32.0)
@@ -138,10 +124,7 @@ impl App for TextEffectsDemo {
             .bold();
 
         // Example 3: Outline effect
-        let _outline_effect = TextEffect::outline(
-            2.0,
-            Color::BLACK
-        );
+        let _outline_effect = TextEffect::outline(2.0, Color::BLACK);
 
         let outline_text = Text::new("Outlined Text")
             .size(32.0)
@@ -149,11 +132,7 @@ impl App for TextEffectsDemo {
             .bold();
 
         // Example 4: Glow effect
-        let _glow_effect = TextEffect::glow(
-            8.0,
-            Color::from_rgb_u8(0, 150, 255),
-            0.8
-        );
+        let _glow_effect = TextEffect::glow(8.0, Color::from_rgb_u8(0, 150, 255), 0.8);
 
         let glow_text = Text::new("Glowing Text")
             .size(32.0)
@@ -161,11 +140,8 @@ impl App for TextEffectsDemo {
             .bold();
 
         // Example 5: Inner shadow
-        let _inner_shadow = TextEffect::inner_shadow(
-            Vec2::new(0.0, 2.0),
-            3.0,
-            Color::from_rgba_u8(0, 0, 0, 100)
-        );
+        let _inner_shadow =
+            TextEffect::inner_shadow(Vec2::new(0.0, 2.0), 3.0, Color::from_rgba_u8(0, 0, 0, 100));
 
         let inner_text = Text::new("Inner Shadow")
             .size(32.0)
@@ -176,17 +152,10 @@ impl App for TextEffectsDemo {
         let mut _combined_effects = TextEffects::new();
         _combined_effects.add(TextEffect::shadow(
             Vec2::new(3.0, 3.0),
-            Color::from_rgba_u8(0, 0, 0, 200)
+            Color::from_rgba_u8(0, 0, 0, 200),
         ));
-        _combined_effects.add(TextEffect::outline(
-            2.0,
-            Color::BLACK
-        ));
-        _combined_effects.add(TextEffect::glow(
-            6.0,
-            Color::from_rgb_u8(255, 200, 0),
-            0.6
-        ));
+        _combined_effects.add(TextEffect::outline(2.0, Color::BLACK));
+        _combined_effects.add(TextEffect::glow(6.0, Color::from_rgb_u8(255, 200, 0), 0.6));
 
         let combined_text = Text::new("Combined Effects!")
             .size(36.0)
@@ -210,12 +179,30 @@ impl App for TextEffectsDemo {
 
         // Description texts
         let descriptions = [
-            ("Shadow: offset=(2,2), hard edge", Color::from_rgb_u8(180, 180, 180)),
-            ("Shadow: offset=(3,3), blur=5px", Color::from_rgb_u8(180, 180, 180)),
-            ("Outline: width=2px, black", Color::from_rgb_u8(180, 180, 180)),
-            ("Glow: radius=8px, intensity=0.8", Color::from_rgb_u8(180, 180, 180)),
-            ("Inner Shadow: offset=(0,2), blur=3px", Color::from_rgb_u8(180, 180, 180)),
-            ("Multiple: shadow + outline + glow", Color::from_rgb_u8(180, 180, 180)),
+            (
+                "Shadow: offset=(2,2), hard edge",
+                Color::from_rgb_u8(180, 180, 180),
+            ),
+            (
+                "Shadow: offset=(3,3), blur=5px",
+                Color::from_rgb_u8(180, 180, 180),
+            ),
+            (
+                "Outline: width=2px, black",
+                Color::from_rgb_u8(180, 180, 180),
+            ),
+            (
+                "Glow: radius=8px, intensity=0.8",
+                Color::from_rgb_u8(180, 180, 180),
+            ),
+            (
+                "Inner Shadow: offset=(0,2), blur=3px",
+                Color::from_rgb_u8(180, 180, 180),
+            ),
+            (
+                "Multiple: shadow + outline + glow",
+                Color::from_rgb_u8(180, 180, 180),
+            ),
         ];
 
         let mut desc_buffers: Vec<_> = descriptions
@@ -229,7 +216,8 @@ impl App for TextEffectsDemo {
         // Draw all text
         let mut y = 50.0;
 
-        self.font_renderer.draw_text(&mut info_buffer, Vec2::new(50.0, y));
+        self.font_renderer
+            .draw_text(&mut info_buffer, Vec2::new(50.0, y));
         y += 50.0;
 
         // Draw effects with descriptions
@@ -243,35 +231,40 @@ impl App for TextEffectsDemo {
         ];
 
         for i in 0..text_buffers.len() {
-            self.font_renderer.draw_text(&mut text_buffers[i], Vec2::new(50.0, y));
+            self.font_renderer
+                .draw_text(&mut text_buffers[i], Vec2::new(50.0, y));
             y += 45.0;
-            self.font_renderer.draw_text(&mut desc_buffers[i], Vec2::new(70.0, y));
+            self.font_renderer
+                .draw_text(&mut desc_buffers[i], Vec2::new(70.0, y));
             y += 35.0;
         }
 
         // Render note
         let note = Text::new(
             "Note: Full effect rendering requires SDF text (in development). \
-             This demo showcases the effects API structure."
+             This demo showcases the effects API structure.",
         )
         .size(11.0)
         .color(Color::from_rgb_u8(150, 150, 100))
         .max_width(self.window.logical_size_f32().width - 100.0);
 
         let mut note_buffer = self.font_renderer.prepare(&note);
-        self.font_renderer.draw_text(&mut note_buffer, Vec2::new(50.0, y + 30.0));
+        self.font_renderer
+            .draw_text(&mut note_buffer, Vec2::new(50.0, y + 30.0));
 
         // Begin frame
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available (minimized, etc.)
+        };
 
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::from_rgb_u8(20, 20, 30),
-            |pass| {
-                self.font_renderer.render(pass.wgpu_pass());
-            },
-        );
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(20, 20, 30))
+                .build();
 
-        frame.finish();
+            self.font_renderer.render(pass.wgpu_pass());
+        }
+        // Frame auto-submits on drop
     }
 }

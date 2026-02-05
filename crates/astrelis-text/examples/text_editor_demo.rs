@@ -17,24 +17,19 @@
 //!
 //! This demonstrates the text editing primitives needed for text input widgets.
 
-use std::sync::Arc;
 use astrelis_core::logging;
 use astrelis_core::math::Vec2;
-use astrelis_render::{
-    Color, GraphicsContext, RenderTarget, RenderableWindow,
-    WindowContextDescriptor, wgpu,
-};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder, wgpu};
 use astrelis_text::{FontRenderer, FontSystem, Text, TextEditor};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
-    event::{EventBatch, Event, HandleStatus, Key, NamedKey},
-    window::{WinitPhysicalSize, WindowBackend, WindowDescriptor},
+    event::{Event, EventBatch, HandleStatus, Key, NamedKey},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 
 struct TextEditorDemo {
-    _context: Arc<GraphicsContext>,
-    window: RenderableWindow,
+    window: RenderWindow,
     window_id: WindowId,
     font_renderer: FontRenderer,
     editor: TextEditor,
@@ -44,7 +39,8 @@ fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let window = ctx
             .create_window(WindowDescriptor {
@@ -54,14 +50,10 @@ fn main() {
             })
             .expect("Failed to create window");
 
-        let window = RenderableWindow::new_with_descriptor(
-            window,
-            graphics_ctx.clone(),
-            WindowContextDescriptor {
-                format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                ..Default::default()
-            },
-        ).expect("Failed to create renderable window");
+        let window = RenderWindowBuilder::new()
+            .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+            .build(window, graphics_ctx.clone())
+            .expect("Failed to create render window");
 
         let window_id = window.id();
 
@@ -89,7 +81,6 @@ fn main() {
         tracing::info!("Text editor demo initialized");
 
         Box::new(TextEditorDemo {
-            _context: graphics_ctx,
             window,
             window_id,
             font_renderer,
@@ -199,7 +190,12 @@ impl App for TextEditorDemo {
         // Selection info
         let selection_info = if let Some(sel) = self.editor.selection() {
             let (start, end) = sel.range();
-            format!("Selection: {}..{} (length: {} bytes)", start, end, sel.len())
+            format!(
+                "Selection: {}..{} (length: {} bytes)",
+                start,
+                end,
+                sel.len()
+            )
         } else {
             "No selection".to_string()
         };
@@ -217,7 +213,7 @@ impl App for TextEditorDemo {
              • select(start, end) - set selection range\n\
              • delete_selection() - remove selected text\n\
              • cursor() -> TextCursor - get cursor state\n\
-             • selection() -> Option<TextSelection> - get selection"
+             • selection() -> Option<TextSelection> - get selection",
         )
         .size(13.0)
         .color(Color::from_rgb_u8(200, 200, 150))
@@ -228,7 +224,7 @@ impl App for TextEditorDemo {
         // Note
         let note = Text::new(
             "Note: This demo shows the TextEditor API structure. Full integration \
-             with UI text input widgets (visual cursor, selection rectangles) is in development."
+             with UI text input widgets (visual cursor, selection rectangles) is in development.",
         )
         .size(11.0)
         .color(Color::from_rgb_u8(150, 150, 100))
@@ -239,7 +235,8 @@ impl App for TextEditorDemo {
         // Draw all text
         let mut y = 50.0;
 
-        self.font_renderer.draw_text(&mut title_buffer, Vec2::new(50.0, y));
+        self.font_renderer
+            .draw_text(&mut title_buffer, Vec2::new(50.0, y));
         y += 60.0;
 
         // Editor box label
@@ -248,34 +245,42 @@ impl App for TextEditorDemo {
             .color(Color::from_rgb_u8(150, 180, 255))
             .bold();
         let mut label_buffer = self.font_renderer.prepare(&label);
-        self.font_renderer.draw_text(&mut label_buffer, Vec2::new(50.0, y));
+        self.font_renderer
+            .draw_text(&mut label_buffer, Vec2::new(50.0, y));
         y += 35.0;
 
-        self.font_renderer.draw_text(&mut editor_buffer, Vec2::new(70.0, y));
+        self.font_renderer
+            .draw_text(&mut editor_buffer, Vec2::new(70.0, y));
         y += 60.0;
 
-        self.font_renderer.draw_text(&mut cursor_buffer, Vec2::new(50.0, y));
+        self.font_renderer
+            .draw_text(&mut cursor_buffer, Vec2::new(50.0, y));
         y += 30.0;
 
-        self.font_renderer.draw_text(&mut selection_buffer, Vec2::new(50.0, y));
+        self.font_renderer
+            .draw_text(&mut selection_buffer, Vec2::new(50.0, y));
         y += 50.0;
 
-        self.font_renderer.draw_text(&mut api_buffer, Vec2::new(50.0, y));
+        self.font_renderer
+            .draw_text(&mut api_buffer, Vec2::new(50.0, y));
         y += 200.0;
 
-        self.font_renderer.draw_text(&mut note_buffer, Vec2::new(50.0, y));
+        self.font_renderer
+            .draw_text(&mut note_buffer, Vec2::new(50.0, y));
 
         // Begin frame
-        let mut frame = self.window.begin_drawing();
+        let Some(frame) = self.window.begin_frame() else {
+            return; // Surface not available (minimized, etc.)
+        };
 
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::from_rgb_u8(20, 20, 30),
-            |pass| {
-                self.font_renderer.render(pass.wgpu_pass());
-            },
-        );
+        {
+            let mut pass = frame
+                .render_pass()
+                .clear_color(Color::from_rgb_u8(20, 20, 30))
+                .build();
 
-        frame.finish();
+            self.font_renderer.render(pass.wgpu_pass());
+        }
+        // Frame auto-submits on drop
     }
 }

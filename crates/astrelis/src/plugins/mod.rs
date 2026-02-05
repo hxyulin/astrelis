@@ -81,10 +81,8 @@ pub struct DefaultPlugins;
 
 impl PluginGroup for DefaultPlugins {
     fn plugins(&self) -> Vec<Box<dyn PluginDyn>> {
-        let mut plugins: Vec<Box<dyn PluginDyn>> = vec![
-            Box::new(AssetPlugin::default()),
-            Box::new(TimePlugin),
-        ];
+        let mut plugins: Vec<Box<dyn PluginDyn>> =
+            vec![Box::new(AssetPlugin::default()), Box::new(TimePlugin)];
 
         #[cfg(feature = "input")]
         plugins.push(Box::new(InputPlugin));

@@ -171,14 +171,9 @@ mod tests {
     fn test_multiple_tasks() {
         let pool = TaskPool::new(4);
 
-        let tasks: Vec<_> = (0..10)
-            .map(|i| pool.spawn(async move { i * 2 }))
-            .collect();
+        let tasks: Vec<_> = (0..10).map(|i| pool.spawn(async move { i * 2 })).collect();
 
-        let results: Vec<_> = tasks
-            .into_iter()
-            .map(|t| pollster::block_on(t))
-            .collect();
+        let results: Vec<_> = tasks.into_iter().map(|t| pollster::block_on(t)).collect();
 
         assert_eq!(results, vec![0, 2, 4, 6, 8, 10, 12, 14, 16, 18]);
     }

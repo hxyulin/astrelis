@@ -51,12 +51,15 @@ impl Renderer {
         data: &[T],
     ) -> wgpu::Buffer {
         profile_function!();
-        let buffer = self.context.device().create_buffer(&wgpu::BufferDescriptor {
-            label,
-            size: std::mem::size_of_val(data) as u64,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let buffer = self
+            .context
+            .device()
+            .create_buffer(&wgpu::BufferDescriptor {
+                label,
+                size: std::mem::size_of_val(data) as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
 
         self.context
             .queue()
@@ -72,12 +75,15 @@ impl Renderer {
         data: &[T],
     ) -> wgpu::Buffer {
         profile_function!();
-        let buffer = self.context.device().create_buffer(&wgpu::BufferDescriptor {
-            label,
-            size: std::mem::size_of_val(data) as u64,
-            usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let buffer = self
+            .context
+            .device()
+            .create_buffer(&wgpu::BufferDescriptor {
+                label,
+                size: std::mem::size_of_val(data) as u64,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
 
         self.context
             .queue()
@@ -93,12 +99,15 @@ impl Renderer {
         data: &T,
     ) -> wgpu::Buffer {
         profile_function!();
-        let buffer = self.context.device().create_buffer(&wgpu::BufferDescriptor {
-            label,
-            size: std::mem::size_of::<T>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let buffer = self
+            .context
+            .device()
+            .create_buffer(&wgpu::BufferDescriptor {
+                label,
+                size: std::mem::size_of::<T>() as u64,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
 
         self.context.queue().write_buffer(
             &buffer,
@@ -141,12 +150,14 @@ impl Renderer {
                 | wgpu::BufferUsages::COPY_SRC
         };
 
-        self.context.device().create_buffer(&wgpu::BufferDescriptor {
-            label,
-            size,
-            usage,
-            mapped_at_creation: false,
-        })
+        self.context
+            .device()
+            .create_buffer(&wgpu::BufferDescriptor {
+                label,
+                size,
+                usage,
+                mapped_at_creation: false,
+            })
     }
 
     /// Create a storage buffer initialized with data.
@@ -171,12 +182,15 @@ impl Renderer {
                 | wgpu::BufferUsages::COPY_SRC
         };
 
-        let buffer = self.context.device().create_buffer(&wgpu::BufferDescriptor {
-            label,
-            size: std::mem::size_of_val(data) as u64,
-            usage,
-            mapped_at_creation: false,
-        });
+        let buffer = self
+            .context
+            .device()
+            .create_buffer(&wgpu::BufferDescriptor {
+                label,
+                size: std::mem::size_of_val(data) as u64,
+                usage,
+                mapped_at_creation: false,
+            });
 
         self.context
             .queue()

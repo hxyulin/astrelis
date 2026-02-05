@@ -108,7 +108,11 @@ impl fmt::Display for AssetError {
                 write!(f, "Asset not ready: {}", path)
             }
             AssetError::LockPoisoned { message } => {
-                write!(f, "Lock poisoned (likely due to panic in another thread): {}", message)
+                write!(
+                    f,
+                    "Lock poisoned (likely due to panic in another thread): {}",
+                    message
+                )
             }
             AssetError::Other { message } => {
                 write!(f, "Asset error: {}", message)

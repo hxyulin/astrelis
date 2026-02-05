@@ -133,15 +133,19 @@ pub use constraint_resolver::{ConstraintResolver, ResolveContext};
 pub use metrics::UiMetrics;
 pub use viewport_context::ViewportContext;
 pub use widget_id::{WidgetId, WidgetIdRegistry};
-pub use widgets::{ScrollAxis, ScrollContainer, ScrollbarVisibility};
 pub use widgets::{HScrollbar, ScrollbarOrientation, ScrollbarTheme, VScrollbar};
 pub use widgets::{Image, ImageFit, ImageTexture, ImageUV};
+pub use widgets::{ScrollAxis, ScrollContainer, ScrollbarVisibility};
 
 // Re-export main types
 pub use builder::{
-    ContainerNodeBuilder, IntoNodeBuilder, LeafNodeBuilder, UiBuilder, WidgetBuilder,
+    ContainerNodeBuilder,
     // Legacy aliases
     ImageBuilder,
+    IntoNodeBuilder,
+    LeafNodeBuilder,
+    UiBuilder,
+    WidgetBuilder,
 };
 #[cfg(feature = "docking")]
 pub use builder::{DockSplitterNodeBuilder, DockTabsNodeBuilder};
@@ -200,8 +204,11 @@ pub use taffy::{
 };
 
 use astrelis_core::profiling::profile_function;
-use astrelis_render::{GraphicsContext, Viewport};
+use astrelis_render::{GraphicsContext, RenderWindow, Viewport};
 use astrelis_winit::event::EventBatch;
+
+// Re-export renderer descriptor for advanced configuration
+pub use renderer::{UiRendererBuilder, UiRendererDescriptor};
 
 /// Render-agnostic UI core managing tree, layout, and logic.
 ///
@@ -291,7 +298,10 @@ impl UiCore {
             .compute_layout(self.viewport_size, None, widget_registry);
         // Invalidate docking cache so stale layout coordinates are refreshed
         #[cfg(feature = "docking")]
-        if let Some(dp) = self.plugin_manager.get_mut::<widgets::docking::plugin::DockingPlugin>() {
+        if let Some(dp) = self
+            .plugin_manager
+            .get_mut::<widgets::docking::plugin::DockingPlugin>()
+        {
             dp.invalidate_cache();
         }
     }
@@ -307,11 +317,14 @@ impl UiCore {
     /// Compute layout with instrumentation for performance metrics.
     pub fn compute_layout_instrumented(&mut self) -> UiMetrics {
         let widget_registry = self.plugin_manager.widget_registry();
-        let metrics = self
-            .tree
-            .compute_layout_instrumented(self.viewport_size, None, widget_registry);
+        let metrics =
+            self.tree
+                .compute_layout_instrumented(self.viewport_size, None, widget_registry);
         #[cfg(feature = "docking")]
-        if let Some(dp) = self.plugin_manager.get_mut::<widgets::docking::plugin::DockingPlugin>() {
+        if let Some(dp) = self
+            .plugin_manager
+            .get_mut::<widgets::docking::plugin::DockingPlugin>()
+        {
             dp.invalidate_cache();
         }
         metrics
@@ -493,8 +506,11 @@ impl UiCore {
 
     /// Handle events from the event batch.
     pub fn handle_events(&mut self, events: &mut EventBatch) {
-        self.event_system
-            .handle_events_with_plugins(events, &mut self.tree, &mut self.plugin_manager);
+        self.event_system.handle_events_with_plugins(
+            events,
+            &mut self.tree,
+            &mut self.plugin_manager,
+        );
     }
 }
 
@@ -513,12 +529,90 @@ pub struct UiSystem {
 }
 
 impl UiSystem {
-    /// Create a new UI system with rendering support.
+    /// Create a new UI system with default configuration (no depth testing).
+    ///
+    /// **Warning:** This creates a renderer without depth testing. If your render pass
+    /// has a depth attachment, use [`from_window`](Self::from_window) instead to ensure
+    /// pipeline-renderpass compatibility.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::UiSystem;
+    /// # use astrelis_render::GraphicsContext;
+    /// // For simple use without depth testing
+    /// let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+    /// let ui = UiSystem::new(graphics);
+    /// ```
     pub fn new(context: Arc<GraphicsContext>) -> Self {
         profile_function!();
         Self {
             core: UiCore::new(),
             renderer: UiRenderer::new(context),
+        }
+    }
+
+    /// Create a new UI system configured for a specific window.
+    ///
+    /// This is the **recommended** constructor as it ensures the renderer's pipelines
+    /// are compatible with the window's render pass configuration (surface format
+    /// and depth format).
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::UiSystem;
+    /// # use astrelis_render::{GraphicsContext, RenderWindow, RenderWindowBuilder};
+    /// # use astrelis_winit::window::Window;
+    /// # fn example(winit_window: Window) {
+    /// let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+    ///
+    /// // Create window with depth buffer
+    /// let window = RenderWindowBuilder::new()
+    ///     .with_depth_default()
+    ///     .build(winit_window, graphics.clone())
+    ///     .expect("Failed to create window");
+    ///
+    /// // UI automatically uses matching formats
+    /// let ui = UiSystem::from_window(graphics, &window);
+    /// # }
+    /// ```
+    pub fn from_window(context: Arc<GraphicsContext>, window: &RenderWindow) -> Self {
+        profile_function!();
+        Self {
+            core: UiCore::new(),
+            renderer: UiRenderer::from_window(context, window),
+        }
+    }
+
+    /// Create a new UI system with explicit configuration.
+    ///
+    /// Use this when you need full control over the renderer configuration,
+    /// or when the target is not a `RenderWindow`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::{UiSystem, UiRendererDescriptor};
+    /// # use astrelis_render::{GraphicsContext, wgpu};
+    /// let graphics = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+    ///
+    /// let desc = UiRendererDescriptor {
+    ///     name: "Game HUD".to_string(),
+    ///     surface_format: wgpu::TextureFormat::Bgra8UnormSrgb,
+    ///     depth_format: Some(wgpu::TextureFormat::Depth32Float),
+    /// };
+    ///
+    /// let ui = UiSystem::with_descriptor(graphics, desc);
+    /// ```
+    pub fn with_descriptor(
+        context: Arc<GraphicsContext>,
+        descriptor: UiRendererDescriptor,
+    ) -> Self {
+        profile_function!();
+        Self {
+            core: UiCore::new(),
+            renderer: UiRenderer::with_descriptor(context, descriptor),
         }
     }
 
@@ -723,12 +817,7 @@ impl UiSystem {
                 .core
                 .plugin_manager
                 .get::<widgets::docking::plugin::DockingPlugin>()
-                .map(|dp| {
-                    (
-                        dp.cross_container_preview,
-                        &dp.dock_animations,
-                    )
-                })
+                .map(|dp| (dp.cross_container_preview, &dp.dock_animations))
                 .unzip();
             let widget_registry = self.core.plugin_manager.widget_registry();
 
@@ -745,8 +834,12 @@ impl UiSystem {
         #[cfg(not(feature = "docking"))]
         {
             let widget_registry = self.core.plugin_manager.widget_registry();
-            self.renderer
-                .render_instanced(self.core.tree(), render_pass, self.core.viewport, widget_registry);
+            self.renderer.render_instanced(
+                self.core.tree(),
+                render_pass,
+                self.core.viewport,
+                widget_registry,
+            );
         }
 
         // Clear all dirty flags after rendering
@@ -791,8 +884,12 @@ impl UiSystem {
 
         // Render using retained mode (processes paint-only dirty flags)
         let widget_registry = self.core.plugin_manager.widget_registry();
-        self.renderer
-            .render_instanced(self.core.tree(), render_pass, self.core.viewport, widget_registry);
+        self.renderer.render_instanced(
+            self.core.tree(),
+            render_pass,
+            self.core.viewport,
+            widget_registry,
+        );
 
         // Clear dirty flags unless we're in a frozen state
         if clear_dirty_flags {
@@ -828,28 +925,6 @@ impl UiSystem {
     /// Get reference to the font renderer.
     pub fn font_renderer(&self) -> &astrelis_text::FontRenderer {
         self.renderer.font_renderer()
-    }
-
-    /// Get the depth texture view for render pass attachment.
-    ///
-    /// This should be used when creating render passes that will render UI.
-    /// The depth buffer is used for proper z-ordering of UI elements.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// frame.clear_and_render_with_depth(
-    ///     RenderTarget::Surface,
-    ///     Color::BLACK,
-    ///     ui.depth_view(),
-    ///     0.0, // Clear to 0.0 for reverse-Z depth testing
-    ///     |pass| {
-    ///         ui.render(pass.wgpu_pass());
-    ///     },
-    /// );
-    /// ```
-    pub fn depth_view(&self) -> &astrelis_render::wgpu::TextureView {
-        self.renderer.depth_view()
     }
 
     /// Set the theme, marking all widget colors dirty.
@@ -907,5 +982,62 @@ impl UiSystem {
     /// Get a reference to the plugin manager.
     pub fn plugin_manager(&self) -> &PluginManager {
         self.core.plugin_manager()
+    }
+
+    /// Get the current renderer configuration.
+    ///
+    /// Returns the descriptor used to create the renderer, including surface format
+    /// and depth format settings.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::UiSystem;
+    /// # use astrelis_render::GraphicsContext;
+    /// # fn example(ui: &UiSystem) {
+    /// let desc = ui.renderer_descriptor();
+    /// println!("Surface format: {:?}", desc.surface_format);
+    /// # }
+    /// ```
+    pub fn renderer_descriptor(&self) -> &UiRendererDescriptor {
+        self.renderer.descriptor()
+    }
+
+    /// Reconfigure the renderer with new format settings.
+    ///
+    /// Call this when the target surface format changes (e.g., window moved
+    /// to a different monitor).
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::{UiSystem, UiRendererDescriptor};
+    /// # use astrelis_render::{GraphicsContext, RenderWindow};
+    /// # fn example(ui: &mut UiSystem, window: &RenderWindow) {
+    /// // Window moved to different monitor - surface format may have changed
+    /// ui.reconfigure(UiRendererDescriptor::from_window(window));
+    /// # }
+    /// ```
+    pub fn reconfigure(&mut self, descriptor: UiRendererDescriptor) {
+        self.renderer.reconfigure(descriptor);
+    }
+
+    /// Reconfigure from a window, inheriting its format configuration.
+    ///
+    /// Convenience method for updating the renderer when a window's surface
+    /// format changes (e.g., when moved to a different monitor).
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use astrelis_ui::UiSystem;
+    /// # use astrelis_render::{GraphicsContext, RenderWindow};
+    /// # fn example(ui: &mut UiSystem, window: &RenderWindow) {
+    /// // Handle surface format change after window moved
+    /// ui.reconfigure_from_window(window);
+    /// # }
+    /// ```
+    pub fn reconfigure_from_window(&mut self, window: &RenderWindow) {
+        self.renderer.reconfigure_from_window(window);
     }
 }

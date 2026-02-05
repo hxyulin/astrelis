@@ -10,25 +10,26 @@
 //!
 //! All tiers share a unified [`UnifiedInstance2D`] format and a single shader pipeline.
 
-mod types;
-mod traits;
 #[allow(dead_code)]
-mod pipeline;
-#[allow(dead_code)]
-mod texture_array;
+mod bindless;
+pub mod capability;
 #[allow(dead_code)]
 mod direct;
 #[allow(dead_code)]
 mod indirect;
 #[allow(dead_code)]
-mod bindless;
-pub mod capability;
+mod pipeline;
+#[allow(dead_code)]
+mod texture_array;
+mod traits;
+mod types;
 
-pub use types::*;
-pub use traits::*;
 pub use capability::{
-    BestBatchCapability2D, BindlessBatchCapability2D, DirectBatchCapability2D, IndirectBatchCapability2D,
+    BestBatchCapability2D, BindlessBatchCapability2D, DirectBatchCapability2D,
+    IndirectBatchCapability2D,
 };
+pub use traits::*;
+pub use types::*;
 
 use std::sync::Arc;
 
@@ -63,7 +64,7 @@ pub fn required_features_for_tier(tier: RenderTier) -> GpuFeatures {
 /// Returns device limits that must be raised for the given render tier.
 ///
 /// Merges the returned limits with your existing limits using [`wgpu::Limits`] field
-/// assignment before passing to [`GraphicsContextDescriptor::limits`].
+/// assignment before passing to [`crate::GraphicsContextDescriptor::limits()`].
 ///
 /// **Deprecated:** Prefer using the capability API instead.
 #[deprecated(
@@ -86,9 +87,8 @@ pub fn detect_render_tier(context: &GraphicsContext) -> RenderTier {
     let has_indirect_first_instance = features.contains(GpuFeatures::INDIRECT_FIRST_INSTANCE);
     let has_texture_binding_array = features.contains(GpuFeatures::TEXTURE_BINDING_ARRAY);
     let has_partially_bound = features.contains(GpuFeatures::PARTIALLY_BOUND_BINDING_ARRAY);
-    let has_non_uniform_indexing = features.contains(
-        GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING,
-    );
+    let has_non_uniform_indexing = features
+        .contains(GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING);
 
     if has_indirect_first_instance
         && has_texture_binding_array
@@ -117,10 +117,7 @@ pub fn create_batch_renderer_2d(
     tracing::info!("Creating batch renderer 2D: {tier}");
 
     match tier {
-        RenderTier::Direct => Box::new(direct::DirectBatchRenderer2D::new(
-            context,
-            surface_format,
-        )),
+        RenderTier::Direct => Box::new(direct::DirectBatchRenderer2D::new(context, surface_format)),
         RenderTier::Indirect => Box::new(indirect::IndirectBatchRenderer2D::new(
             context,
             surface_format,

@@ -30,7 +30,7 @@
 //! ```
 
 use super::grid::{DashPattern, GridConfig, GridLevel, GridSpacing};
-use super::style::{palette_color, FillStyle, LineStyle, PointStyle, SeriesStyle};
+use super::style::{FillStyle, LineStyle, PointStyle, SeriesStyle, palette_color};
 use super::types::{
     Axis, AxisId, AxisOrientation, AxisPosition, BarConfig, Chart, ChartTitle, ChartType,
     DataPoint, FillRegion, LegendConfig, LegendPosition, LineAnnotation, Series, TextAnnotation,
@@ -192,10 +192,8 @@ impl ChartBuilder {
             axis.max = Some(max);
         } else {
             // Create the axis if it doesn't exist
-            self.chart.set_axis(
-                Axis::y_secondary()
-                    .with_range(min, max),
-            );
+            self.chart
+                .set_axis(Axis::y_secondary().with_range(min, max));
         }
         self
     }
@@ -551,9 +549,7 @@ impl ChartBuilder {
         F: FnOnce(SeriesBuilder) -> SeriesBuilder,
     {
         let color = palette_color(self.series_count);
-        let builder = SeriesBuilder::new(name)
-            .color(color)
-            .streaming(capacity);
+        let builder = SeriesBuilder::new(name).color(color).streaming(capacity);
         let configured = f(builder);
         self.chart.series.push(configured.build());
         self.series_count += 1;
@@ -1032,7 +1028,10 @@ mod tests {
             .build();
 
         assert_eq!(chart.chart_type, ChartType::Line);
-        assert_eq!(chart.title.as_ref().map(|t| t.text.as_str()), Some("Test Chart"));
+        assert_eq!(
+            chart.title.as_ref().map(|t| t.text.as_str()),
+            Some("Test Chart")
+        );
         assert_eq!(chart.series.len(), 1);
     }
 

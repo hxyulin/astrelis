@@ -9,9 +9,7 @@
 //! using the RenderPassBuilder API.
 
 use astrelis_core::logging;
-use astrelis_render::{
-    GraphicsContext, RenderTarget, RenderableWindow, WindowContextDescriptor,
-};
+use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder};
 use astrelis_winit::{
     WindowId,
     app::run_app,
@@ -20,15 +18,16 @@ use astrelis_winit::{
 use std::collections::HashMap;
 
 struct App {
-    // Each window gets its own RenderableWindow (owns a wgpu::Surface) plus a clear color.
-    windows: HashMap<WindowId, (RenderableWindow, wgpu::Color)>,
+    // Each window gets its own RenderWindow (owns a wgpu::Surface) plus a clear color.
+    windows: HashMap<WindowId, (RenderWindow, wgpu::Color)>,
 }
 
 fn main() {
     logging::init();
 
     run_app(|ctx| {
-        let graphics_ctx = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics_ctx =
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
 
         let mut windows = HashMap::new();
 
@@ -63,27 +62,26 @@ fn main() {
                 })
                 .expect("Failed to create window");
 
-            let renderable_window = RenderableWindow::new_with_descriptor(
-                window,
-                graphics_ctx.clone(),
-                WindowContextDescriptor {
-                    format: Some(wgpu::TextureFormat::Bgra8UnormSrgb),
-                    ..Default::default()
-                },
-            ).expect("Failed to create renderable window");
+            let renderable_window = RenderWindowBuilder::new()
+                .color_format(wgpu::TextureFormat::Bgra8UnormSrgb)
+                .with_depth_default()
+                .build(window, graphics_ctx.clone())
+                .expect("Failed to create render window");
 
             let window_id = renderable_window.id();
             windows.insert(window_id, (renderable_window, *color));
         }
 
-        Box::new(App {
-            windows,
-        })
+        Box::new(App { windows })
     });
 }
 
 impl astrelis_winit::app::App for App {
-    fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, _time: &astrelis_winit::FrameTime) {
+    fn update(
+        &mut self,
+        _ctx: &mut astrelis_winit::app::AppCtx,
+        _time: &astrelis_winit::FrameTime,
+    ) {
         // Global logic - called once per frame
         // (none needed for this example)
     }
@@ -110,17 +108,23 @@ impl astrelis_winit::app::App for App {
         });
 
         // Render this specific window
-        let mut frame = window.begin_drawing();
+        let Some(frame) = window.begin_frame() else {
+            return; // Surface not available
+        };
 
-        // Render with automatic scoping (no manual {} block needed)
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            astrelis_render::Color::rgba(color.r as f32, color.g as f32, color.b as f32, color.a as f32),
-            |_pass| {
-                // Just clearing - no rendering commands needed
-            },
-        );
-
-        frame.finish();
+        {
+            let _pass = frame
+                .render_pass()
+                .clear_color(Color::rgba(
+                    color.r as f32,
+                    color.g as f32,
+                    color.b as f32,
+                    color.a as f32,
+                ))
+                .label("multi_window_pass")
+                .build();
+            // Just clearing - no rendering commands needed
+        }
+        // Frame auto-submits on drop
     }
 }

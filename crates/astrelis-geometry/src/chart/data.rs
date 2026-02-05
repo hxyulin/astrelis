@@ -151,11 +151,7 @@ impl<T: Clone + Default> RingBuffer<T> {
     /// Get the oldest item.
     #[inline]
     pub fn first(&self) -> Option<&T> {
-        if self.len == 0 {
-            None
-        } else {
-            self.get(0)
-        }
+        if self.len == 0 { None } else { self.get(0) }
     }
 
     /// Get the current number of elements.
@@ -750,7 +746,8 @@ mod tests {
 
     #[test]
     fn test_series_data_vec() {
-        let mut data = SeriesData::from_vec(vec![DataPoint::new(0.0, 1.0), DataPoint::new(1.0, 2.0)]);
+        let mut data =
+            SeriesData::from_vec(vec![DataPoint::new(0.0, 1.0), DataPoint::new(1.0, 2.0)]);
 
         assert_eq!(data.len(), 2);
         data.push(DataPoint::new(2.0, 3.0));

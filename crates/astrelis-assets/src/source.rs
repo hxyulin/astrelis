@@ -135,7 +135,9 @@ impl AssetSource {
             }
             AssetSource::Bytes { id, .. } => {
                 // Try to extract extension from bytes ID
-                id.rsplit('.').next().filter(|e| !e.contains('/') && !e.contains(':'))
+                id.rsplit('.')
+                    .next()
+                    .filter(|e| !e.contains('/') && !e.contains(':'))
             }
         }
     }

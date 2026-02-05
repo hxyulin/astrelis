@@ -1,9 +1,9 @@
 //! Benchmarks for text measurement operations
 
-use std::sync::Arc;
 use astrelis_render::GraphicsContext;
 use astrelis_text::{FontRenderer, FontSystem, Text};
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use std::sync::Arc;
 
 fn setup() -> (Arc<GraphicsContext>, FontRenderer) {
     let context = GraphicsContext::new_owned_sync().expect("Failed to create graphics context");

@@ -1,5 +1,5 @@
 use astrelis_core::profiling::profile_function;
-use astrelis_render::RenderableWindow;
+use astrelis_render::RenderWindow;
 use astrelis_winit::event::{ElementState, Event, KeyEvent, MouseButton, MouseScrollDelta};
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -57,7 +57,7 @@ impl State {
         slf
     }
 
-    pub fn take_input(&mut self, window: &RenderableWindow) -> egui::RawInput {
+    pub fn take_input(&mut self, window: &RenderWindow) -> egui::RawInput {
         profile_function!();
         let screen_size_in_pixels = screen_size_in_pixels(window);
         let screen_size_in_points = screen_size_in_pixels / pixels_per_point(&self.context, window);
@@ -78,13 +78,13 @@ impl State {
 
     pub fn handle_platform_output(
         &mut self,
-        _window: &RenderableWindow,
+        _window: &RenderWindow,
         _output: egui::PlatformOutput,
     ) {
         // TODO: Handle cursor changes, clipboard copies, opening links in browsers
     }
 
-    pub fn on_event(&mut self, window: &RenderableWindow, event: &Event) -> EventResponse {
+    pub fn on_event(&mut self, window: &RenderWindow, event: &Event) -> EventResponse {
         profile_function!();
         match event {
             Event::ScaleFactorChanged(scale_factor) => {
@@ -182,23 +182,24 @@ impl State {
 
     fn on_mouse_button_input(&mut self, state: ElementState, button: MouseButton) {
         if let Some(pos) = self.pointer_pos_in_points
-            && let Some(button) = translate_mouse_button(button) {
-                let pressed = state == ElementState::Pressed;
+            && let Some(button) = translate_mouse_button(button)
+        {
+            let pressed = state == ElementState::Pressed;
 
-                self.input.events.push(egui::Event::PointerButton {
-                    pos,
-                    button,
-                    pressed,
-                    modifiers: self.input.modifiers,
-                });
+            self.input.events.push(egui::Event::PointerButton {
+                pos,
+                button,
+                pressed,
+                modifiers: self.input.modifiers,
+            });
 
-                self.any_pointer_button_down = pressed;
-            }
+            self.any_pointer_button_down = pressed;
+        }
     }
 
     fn on_cursor_moved(
         &mut self,
-        window: &RenderableWindow,
+        window: &RenderWindow,
         pos_in_logical: astrelis_core::geometry::LogicalPosition<f64>,
     ) {
         // Input is in logical pixels, convert to physical pixels first
@@ -207,7 +208,7 @@ impl State {
             pos_in_logical.x as f32 * scale_factor,
             pos_in_logical.y as f32 * scale_factor,
         );
-        
+
         // Then convert physical pixels to egui points
         let pixels_per_point = pixels_per_point(&self.context, window);
         let pos_in_points = egui::pos2(
@@ -221,7 +222,7 @@ impl State {
             .push(egui::Event::PointerMoved(pos_in_points));
     }
 
-    fn on_mouse_wheel(&mut self, window: &RenderableWindow, delta: MouseScrollDelta) {
+    fn on_mouse_wheel(&mut self, window: &RenderWindow, delta: MouseScrollDelta) {
         let pixels_per_point = pixels_per_point(&self.context, window);
 
         let (unit, delta) = match delta {
@@ -285,23 +286,25 @@ impl State {
         }
 
         if let Some(text) = &text
-            && !text.is_empty() && text.chars().all(is_printable_char) {
-                let is_cmd = self.input.modifiers.ctrl
-                    || self.input.modifiers.command
-                    || self.input.modifiers.mac_cmd;
-                if pressed && !is_cmd {
-                    self.input.events.push(egui::Event::Text(text.to_string()));
-                }
+            && !text.is_empty()
+            && text.chars().all(is_printable_char)
+        {
+            let is_cmd = self.input.modifiers.ctrl
+                || self.input.modifiers.command
+                || self.input.modifiers.mac_cmd;
+            if pressed && !is_cmd {
+                self.input.events.push(egui::Event::Text(text.to_string()));
             }
+        }
     }
 }
 
-pub fn screen_size_in_pixels(window: &RenderableWindow) -> egui::Vec2 {
+pub fn screen_size_in_pixels(window: &RenderWindow) -> egui::Vec2 {
     let size = window.window().window.inner_size();
     egui::vec2(size.width as f32, size.height as f32)
 }
 
-pub fn pixels_per_point(context: &egui::Context, window: &RenderableWindow) -> f32 {
+pub fn pixels_per_point(context: &egui::Context, window: &RenderWindow) -> f32 {
     let native_pixels_per_point = window.window().window.scale_factor() as f32;
     let egui_zoom_factor = context.zoom_factor();
     egui_zoom_factor * native_pixels_per_point
