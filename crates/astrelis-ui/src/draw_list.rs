@@ -16,6 +16,21 @@ use astrelis_text::PipelineShapedTextResult as ShapedTextResult;
 use astrelis_text::{TextEffects, TextRenderMode};
 use std::sync::Arc;
 
+/// Render layer for controlling which rendering pass a command belongs to.
+///
+/// Overlays, tooltips, and modals use `Overlay(n)` to escape parent clip bounds
+/// and render above base content. The sub-order `u8` determines relative
+/// ordering among overlay layers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum RenderLayer {
+    /// Normal UI content, subject to parent clip bounds.
+    #[default]
+    Base,
+    /// Overlay content that escapes parent clipping.
+    /// The `u8` sub-order determines relative ordering among overlays.
+    Overlay(u8),
+}
+
 /// High-level draw command for a UI element.
 #[derive(Debug, Clone)]
 pub enum DrawCommand {
@@ -66,6 +81,15 @@ impl DrawCommand {
         }
     }
 
+    /// Get the render layer for this command.
+    pub fn render_layer(&self) -> RenderLayer {
+        match self {
+            DrawCommand::Quad(q) => q.render_layer,
+            DrawCommand::Text(t) => t.render_layer,
+            DrawCommand::Image(i) => i.render_layer,
+        }
+    }
+
     /// Get the clip rectangle for this command.
     pub fn clip_rect(&self) -> &ClipRect {
         match self {
@@ -104,6 +128,8 @@ pub struct QuadCommand {
     pub z_index: u16,
     /// Clip rectangle for scissor clipping
     pub clip_rect: ClipRect,
+    /// Render layer for overlay support
+    pub render_layer: RenderLayer,
 }
 
 impl QuadCommand {
@@ -118,6 +144,7 @@ impl QuadCommand {
             border_thickness: 0.0,
             z_index,
             clip_rect: ClipRect::infinite(),
+            render_layer: RenderLayer::Base,
         }
     }
 
@@ -138,6 +165,7 @@ impl QuadCommand {
             border_thickness: 0.0,
             z_index,
             clip_rect: ClipRect::infinite(),
+            render_layer: RenderLayer::Base,
         }
     }
 
@@ -159,6 +187,7 @@ impl QuadCommand {
             border_thickness,
             z_index,
             clip_rect: ClipRect::infinite(),
+            render_layer: RenderLayer::Base,
         }
     }
 
@@ -188,6 +217,8 @@ pub struct TextCommand {
     pub render_mode: TextRenderMode,
     /// Clip rectangle for scissor clipping
     pub clip_rect: ClipRect,
+    /// Render layer for overlay support
+    pub render_layer: RenderLayer,
 }
 
 impl TextCommand {
@@ -207,6 +238,7 @@ impl TextCommand {
             effects: None,
             render_mode: TextRenderMode::Bitmap,
             clip_rect: ClipRect::infinite(),
+            render_layer: RenderLayer::Base,
         }
     }
 
@@ -259,6 +291,7 @@ impl TextCommand {
             effects: Some(effects),
             render_mode: TextRenderMode::SDF { spread: 4.0 },
             clip_rect: ClipRect::infinite(),
+            render_layer: RenderLayer::Base,
         }
     }
 
@@ -313,6 +346,8 @@ pub struct ImageCommand {
     pub z_index: u16,
     /// Clip rectangle for scissor clipping
     pub clip_rect: ClipRect,
+    /// Render layer for overlay support
+    pub render_layer: RenderLayer,
 }
 
 impl std::fmt::Debug for ImageCommand {
@@ -355,6 +390,7 @@ impl ImageCommand {
             sampling,
             z_index,
             clip_rect: ClipRect::infinite(),
+            render_layer: RenderLayer::Base,
         }
     }
 
@@ -395,6 +431,8 @@ pub struct DrawList {
     needs_sort: bool,
     /// Total number of updates since creation
     update_count: u64,
+    /// Index where overlay commands begin (base commands are [0..split), overlay are [split..len))
+    overlay_split_index: usize,
 }
 
 impl DrawList {
@@ -406,6 +444,7 @@ impl DrawList {
             dirty_ranges: DirtyRanges::new(),
             needs_sort: false,
             update_count: 0,
+            overlay_split_index: 0,
         }
     }
 
@@ -417,6 +456,7 @@ impl DrawList {
             dirty_ranges: DirtyRanges::new(),
             needs_sort: false,
             update_count: 0,
+            overlay_split_index: 0,
         }
     }
 
@@ -514,9 +554,14 @@ impl DrawList {
         // Compact: remove invalidated commands
         self.compact();
 
-        // Sort by z-index (stable sort preserves order for same z-index)
+        // Sort by render layer, then z-index (stable sort preserves order for same z-index)
         self.commands
-            .sort_by_key(|cmd| (cmd.z_index(), !cmd.is_opaque()));
+            .sort_by_key(|cmd| (cmd.render_layer(), cmd.z_index(), !cmd.is_opaque()));
+
+        // Compute the split point between Base and Overlay commands
+        self.overlay_split_index = self
+            .commands
+            .partition_point(|cmd| cmd.render_layer() == RenderLayer::Base);
 
         // Rebuild node mapping
         self.rebuild_node_mapping();
@@ -576,6 +621,16 @@ impl DrawList {
         &self.commands
     }
 
+    /// Get base-layer commands (everything before the overlay split).
+    pub fn base_commands(&self) -> &[DrawCommand] {
+        &self.commands[..self.overlay_split_index]
+    }
+
+    /// Get overlay-layer commands (everything from the overlay split onward).
+    pub fn overlay_commands(&self) -> &[DrawCommand] {
+        &self.commands[self.overlay_split_index..]
+    }
+
     /// Get dirty ranges for partial GPU updates.
     pub fn dirty_ranges(&self) -> &DirtyRanges {
         &self.dirty_ranges
@@ -592,6 +647,7 @@ impl DrawList {
         self.node_to_commands.clear();
         self.dirty_ranges.clear();
         self.needs_sort = false;
+        self.overlay_split_index = 0;
     }
 
     /// Get the number of commands in the list.

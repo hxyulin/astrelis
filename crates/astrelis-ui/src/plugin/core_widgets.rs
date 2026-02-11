@@ -20,7 +20,7 @@ pub fn render_container(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
     let container = widget.downcast_ref::<Container>().unwrap();
     let mut commands = Vec::new();
 
-    // Background quad
+    // Background quad at container's depth
     if let Some(bg_color) = container.style.background_color {
         commands.push(DrawCommand::Quad(
             QuadCommand::rounded(
@@ -28,13 +28,13 @@ pub fn render_container(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                 ctx.layout_size,
                 bg_color,
                 container.style.border_radius,
-                0,
+                ctx.parent_z_index,
             )
             .with_clip(ctx.clip_rect),
         ));
     }
 
-    // Border quad
+    // Border quad at same depth
     if container.style.border_width > 0.0
         && let Some(border_color) = container.style.border_color
     {
@@ -45,7 +45,7 @@ pub fn render_container(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                 border_color,
                 container.style.border_width,
                 container.style.border_radius,
-                0,
+                ctx.parent_z_index,
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -85,8 +85,13 @@ pub fn render_text(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> Vec<D
 
         let text_color = text.color.unwrap_or(ctx.theme_colors.text_primary);
         commands.push(DrawCommand::Text(
-            TextCommand::new(Vec2::new(ctx.abs_position.x, text_y), shaped, text_color, 0)
-                .with_clip(ctx.clip_rect),
+            TextCommand::new(
+                Vec2::new(ctx.abs_position.x, text_y),
+                shaped,
+                text_color,
+                ctx.parent_z_index,
+            )
+            .with_clip(ctx.clip_rect),
         ));
     }
 
@@ -103,13 +108,19 @@ pub fn render_button(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> Vec
 
     let bg_color = button.current_bg_color_themed(ctx.theme_colors.primary, None, None);
 
-    // Background
+    // Background at button's depth
     commands.push(DrawCommand::Quad(
-        QuadCommand::rounded(ctx.abs_position, ctx.layout_size, bg_color, 4.0, 0)
-            .with_clip(ctx.clip_rect),
+        QuadCommand::rounded(
+            ctx.abs_position,
+            ctx.layout_size,
+            bg_color,
+            4.0,
+            ctx.parent_z_index,
+        )
+        .with_clip(ctx.clip_rect),
     ));
 
-    // Text label
+    // Text label one layer above background
     let request_id = ctx.text_pipeline.request_shape(
         button.label.clone(),
         button.font_id,
@@ -124,8 +135,13 @@ pub fn render_button(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> Vec
 
         let btn_text_color = button.text_color.unwrap_or(ctx.theme_colors.text_primary);
         commands.push(DrawCommand::Text(
-            TextCommand::new(Vec2::new(text_x, text_y), shaped, btn_text_color, 1)
-                .with_clip(ctx.clip_rect),
+            TextCommand::new(
+                Vec2::new(text_x, text_y),
+                shaped,
+                btn_text_color,
+                ctx.parent_z_index.saturating_add(1),
+            )
+            .with_clip(ctx.clip_rect),
         ));
     }
 
@@ -150,7 +166,7 @@ pub fn render_image(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> Vec<
                 image.tint,
                 image.border_radius,
                 image.sampling,
-                0,
+                ctx.parent_z_index,
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -185,19 +201,19 @@ pub fn render_hscrollbar(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) ->
             height: ctx.layout_size.y,
         };
 
-        // Track background
+        // Track background at scrollbar's depth
         commands.push(DrawCommand::Quad(
             QuadCommand::rounded(
                 ctx.abs_position,
                 ctx.layout_size,
                 scrollbar.theme.track_color,
                 scrollbar.theme.thumb_border_radius,
-                0,
+                ctx.parent_z_index,
             )
             .with_clip(ctx.clip_rect),
         ));
 
-        // Thumb
+        // Thumb one layer above track
         let thumb = scrollbar.thumb_bounds(&track_rect);
         let thumb_color = scrollbar.current_thumb_color();
         commands.push(DrawCommand::Quad(
@@ -206,7 +222,7 @@ pub fn render_hscrollbar(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) ->
                 Vec2::new(thumb.width, thumb.height),
                 thumb_color,
                 scrollbar.theme.thumb_border_radius,
-                1,
+                ctx.parent_z_index.saturating_add(1),
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -231,19 +247,19 @@ pub fn render_vscrollbar(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) ->
             height: ctx.layout_size.y,
         };
 
-        // Track background
+        // Track background at scrollbar's depth
         commands.push(DrawCommand::Quad(
             QuadCommand::rounded(
                 ctx.abs_position,
                 ctx.layout_size,
                 scrollbar.theme.track_color,
                 scrollbar.theme.thumb_border_radius,
-                0,
+                ctx.parent_z_index,
             )
             .with_clip(ctx.clip_rect),
         ));
 
-        // Thumb
+        // Thumb one layer above track
         let thumb = scrollbar.thumb_bounds(&track_rect);
         let thumb_color = scrollbar.current_thumb_color();
         commands.push(DrawCommand::Quad(
@@ -252,7 +268,7 @@ pub fn render_vscrollbar(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) ->
                 Vec2::new(thumb.width, thumb.height),
                 thumb_color,
                 scrollbar.theme.thumb_border_radius,
-                1,
+                ctx.parent_z_index.saturating_add(1),
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -272,7 +288,7 @@ pub fn render_scroll_container(
     let sc = widget.downcast_ref::<ScrollContainer>().unwrap();
     let mut commands = Vec::new();
 
-    // Background quad
+    // Background quad at container's depth
     if let Some(bg_color) = sc.style.background_color {
         commands.push(DrawCommand::Quad(
             QuadCommand::rounded(
@@ -280,13 +296,13 @@ pub fn render_scroll_container(
                 ctx.layout_size,
                 bg_color,
                 sc.style.border_radius,
-                0,
+                ctx.parent_z_index,
             )
             .with_clip(ctx.clip_rect),
         ));
     }
 
-    // Border quad
+    // Border quad at same depth
     if sc.style.border_width > 0.0
         && let Some(border_color) = sc.style.border_color
     {
@@ -297,7 +313,7 @@ pub fn render_scroll_container(
                 border_color,
                 sc.style.border_width,
                 sc.style.border_radius,
-                0,
+                ctx.parent_z_index,
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -310,7 +326,7 @@ pub fn render_scroll_container(
         height: ctx.layout_size.y,
     };
 
-    // Vertical scrollbar
+    // Vertical scrollbar (track at +2, thumb at +3)
     if sc.should_show_v_scrollbar() {
         let track = sc.v_scrollbar_track(&abs_layout);
         commands.push(DrawCommand::Quad(
@@ -319,7 +335,7 @@ pub fn render_scroll_container(
                 Vec2::new(track.width, track.height),
                 sc.scrollbar_theme.track_color,
                 sc.scrollbar_theme.thumb_border_radius,
-                2,
+                ctx.parent_z_index.saturating_add(2),
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -330,13 +346,13 @@ pub fn render_scroll_container(
                 Vec2::new(thumb.width, thumb.height),
                 sc.v_thumb_color(),
                 sc.scrollbar_theme.thumb_border_radius,
-                3,
+                ctx.parent_z_index.saturating_add(3),
             )
             .with_clip(ctx.clip_rect),
         ));
     }
 
-    // Horizontal scrollbar
+    // Horizontal scrollbar (track at +2, thumb at +3)
     if sc.should_show_h_scrollbar() {
         let track = sc.h_scrollbar_track(&abs_layout);
         commands.push(DrawCommand::Quad(
@@ -345,7 +361,7 @@ pub fn render_scroll_container(
                 Vec2::new(track.width, track.height),
                 sc.scrollbar_theme.track_color,
                 sc.scrollbar_theme.thumb_border_radius,
-                2,
+                ctx.parent_z_index.saturating_add(2),
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -356,7 +372,7 @@ pub fn render_scroll_container(
                 Vec2::new(thumb.width, thumb.height),
                 sc.h_thumb_color(),
                 sc.scrollbar_theme.thumb_border_radius,
-                3,
+                ctx.parent_z_index.saturating_add(3),
             )
             .with_clip(ctx.clip_rect),
         ));

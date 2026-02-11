@@ -5,6 +5,34 @@ All notable changes to the Astrelis Game Engine will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-02-11
+
+### Fixed
+
+- **Z-index hit testing** (`astrelis-ui`) — Hit testing now respects z-index ordering. Previously, overlapping widgets at different z-levels used tree order for click dispatch, causing lower-z elements to incorrectly receive clicks when overlapped by higher-z elements. Children are now sorted by `(render_layer, computed_z_index)` descending before hit testing.
+
+- **Accumulated z-index propagation** (`astrelis-ui`) — Widget z-index values now accumulate through the tree hierarchy. Each node stores a `computed_z_index` (sum of all ancestor z-index offsets) computed during layout traversal. Core widget renderers use `ctx.parent_z_index` instead of hardcoded values (0, 1, etc.).
+
+- **Docking dirty flags** (`astrelis-ui`) — Docking operations (container collapse, tab group merge) now also mark `GEOMETRY` dirty, ensuring proper repainting after structural changes.
+
+### Added
+
+- **`RenderLayer` enum** (`astrelis-ui`) — Two-tier render layer system (`Base` / `Overlay(u8)`) enabling overlay content (tooltips, modals, drag previews) to escape parent clip bounds and render above base content. Draw list sorts by `(render_layer, z_index, opacity)`.
+
+- **`Z_INDEX` dirty flag** (`astrelis-ui`) — New dirty flag (bit 12) that propagates downward to children when a node's z_index changes, triggering recomputation of `computed_z_index` for all descendants.
+
+- **Opaque/transparent pipeline split** (`astrelis-ui`) — Renderer now uses 5 pipelines (up from 3): separate opaque (depth write ON) and transparent (depth write OFF) pipelines for quads and images, plus a transparent-only text pipeline. Correct alpha blending with depth testing.
+
+- **`Style::z_index()` / `Style::render_layer()`** (`astrelis-ui`) — Builder methods for setting z-index offset and render layer on widget styles.
+
+- **`z_index_demo` example** (`astrelis-ui`) — Interactive demo with three overlapping panes at different z-levels and a status panel proving hit testing respects z-order.
+
+### Changed
+
+- **Default depth format** (`astrelis-ui`) — `UiRendererDescriptor` now defaults to `Some(Depth32Float)` instead of `None`, enabling depth testing out of the box.
+
+---
+
 ## [0.2.2] - 2026-02-05
 
 ### Added
@@ -1037,6 +1065,7 @@ let window_id = match window_manager.create_window(ctx, descriptor) {
 ```
 ---
 
+[0.2.3]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.3
 [0.2.2]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.2
 [0.2.1]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.1
 [0.2.0]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.0

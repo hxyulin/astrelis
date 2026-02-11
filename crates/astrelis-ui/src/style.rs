@@ -16,6 +16,7 @@
 //! automatically using the current viewport context.
 
 use crate::constraint::Constraint;
+use crate::draw_list::RenderLayer;
 use astrelis_render::Color;
 use taffy::{
     AlignContent, AlignItems, Dimension, Display, FlexDirection, FlexWrap, JustifyContent,
@@ -171,6 +172,16 @@ pub struct Style {
     /// Consolidated constraint storage for viewport-relative units.
     /// Boxed and optional to reduce memory overhead (~8 bytes vs ~80+ bytes).
     pub constraints: Option<Box<ConstraintSet>>,
+
+    /// Z-index offset for depth ordering. Higher values render on top.
+    /// This value is ADDED to parent's accumulated z_index.
+    /// Default: 0 (inherit parent depth exactly)
+    pub z_index: u16,
+
+    /// Render layer for overlay support.
+    /// Overlay layers escape parent clip bounds and render above base content.
+    /// Default: `RenderLayer::Base`
+    pub render_layer: RenderLayer,
 }
 
 impl Default for Style {
@@ -184,6 +195,8 @@ impl Default for Style {
             overflow_x: Overflow::default(),
             overflow_y: Overflow::default(),
             constraints: None,
+            z_index: 0,
+            render_layer: RenderLayer::Base,
         }
     }
 }
@@ -673,6 +686,39 @@ impl Style {
             .as_ref()
             .is_some_and(|c| c.needs_resolution())
     }
+
+    /// Set z-index offset for depth ordering.
+    ///
+    /// This value is added to the parent's accumulated depth. Higher values render on top.
+    /// Use this to create stacking contexts or control the layering of widgets.
+    ///
+    /// # Examples
+    /// ```
+    /// use astrelis_ui::Style;
+    ///
+    /// let style = Style::new()
+    ///     .z_index(10);  // This widget renders 10 layers above its parent
+    /// ```
+    pub fn z_index(mut self, z_index: u16) -> Self {
+        self.z_index = z_index;
+        self
+    }
+
+    /// Set the render layer for overlay support.
+    ///
+    /// Overlay layers escape parent clip bounds and render above base content.
+    ///
+    /// # Examples
+    /// ```
+    /// use astrelis_ui::{Style, draw_list::RenderLayer};
+    ///
+    /// let style = Style::new()
+    ///     .render_layer(RenderLayer::Overlay(3));  // Render in overlay layer 3
+    /// ```
+    pub fn render_layer(mut self, layer: RenderLayer) -> Self {
+        self.render_layer = layer;
+        self
+    }
 }
 
 // ── Helper functions for constraint conversion ───────────────────────────────
@@ -1117,6 +1163,16 @@ impl Style {
     /// Clear aspect ratio in place.
     pub fn clear_aspect_ratio_mut(&mut self) {
         self.layout.aspect_ratio = None;
+    }
+
+    /// Set z-index in place.
+    pub fn set_z_index(&mut self, z_index: u16) {
+        self.z_index = z_index;
+    }
+
+    /// Set render layer in place.
+    pub fn set_render_layer(&mut self, layer: RenderLayer) {
+        self.render_layer = layer;
     }
 }
 

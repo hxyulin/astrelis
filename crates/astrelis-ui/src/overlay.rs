@@ -51,6 +51,7 @@ use astrelis_core::alloc::HashMap;
 use astrelis_core::math::Vec2;
 use astrelis_render::Color;
 
+use crate::draw_list::RenderLayer;
 use crate::tree::{NodeId, UiTree};
 
 /// Global counter for generating unique overlay IDs.
@@ -117,6 +118,29 @@ impl ZLayer {
     /// Check if this layer is above another.
     pub fn is_above(&self, other: &ZLayer) -> bool {
         self.z_index() > other.z_index()
+    }
+
+    /// Convert this Z-layer to a render layer.
+    ///
+    /// Base maps to `RenderLayer::Base`, all other layers map to
+    /// `RenderLayer::Overlay(n)` with increasing sub-order values.
+    pub fn render_layer(&self) -> RenderLayer {
+        match self {
+            ZLayer::Base => RenderLayer::Base,
+            ZLayer::Tooltip => RenderLayer::Overlay(1),
+            ZLayer::Dropdown => RenderLayer::Overlay(2),
+            ZLayer::Modal => RenderLayer::Overlay(3),
+            ZLayer::Popover => RenderLayer::Overlay(4),
+            ZLayer::Debug => RenderLayer::Overlay(5),
+            ZLayer::Custom(z) => {
+                let order = (*z / 1000).min(255) as u8;
+                if order == 0 {
+                    RenderLayer::Base
+                } else {
+                    RenderLayer::Overlay(order)
+                }
+            }
+        }
     }
 }
 

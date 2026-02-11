@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "astrelis"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "ahash",
  "astrelis-assets",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "astrelis-assets"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "astrelis-core",
  "futures-lite",
@@ -167,11 +167,11 @@ dependencies = [
 
 [[package]]
 name = "astrelis-audio"
-version = "0.2.2"
+version = "0.2.3"
 
 [[package]]
 name = "astrelis-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -188,11 +188,11 @@ dependencies = [
 
 [[package]]
 name = "astrelis-ecs"
-version = "0.2.2"
+version = "0.2.3"
 
 [[package]]
 name = "astrelis-egui"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "astrelis-core",
  "astrelis-render",
@@ -207,7 +207,7 @@ dependencies = [
 
 [[package]]
 name = "astrelis-geometry"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "ahash",
  "astrelis-core",
@@ -227,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "astrelis-input"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "astrelis-core",
  "astrelis-winit",
@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "astrelis-render"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "ahash",
  "astrelis-core",
@@ -254,11 +254,11 @@ dependencies = [
 
 [[package]]
 name = "astrelis-scene"
-version = "0.2.2"
+version = "0.2.3"
 
 [[package]]
 name = "astrelis-test-utils"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "parking_lot",
  "wgpu",
@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "astrelis-text"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "astrelis-assets",
  "astrelis-core",
@@ -284,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "astrelis-ui"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "ahash",
  "astrelis-core",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "astrelis-winit"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "astrelis-core",
  "bitflags 2.10.0",

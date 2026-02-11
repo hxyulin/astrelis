@@ -63,7 +63,14 @@ bitflags! {
         /// Scroll offset changed.
         const SCROLL            = 1 << 11;
 
-        // Reserved bits 12-15 for future use
+        // Z-index (bit 12)
+
+        /// Z-index changed on this node or an ancestor.
+        /// Requires recomputation of computed_z_index for all descendants.
+        /// Propagates DOWN to children (not up to parent).
+        const Z_INDEX           = 1 << 12;
+
+        // Reserved bits 13-15 for future use
     }
 }
 
@@ -115,7 +122,8 @@ impl DirtyFlags {
                 | Self::TEXT_SHAPING
                 | Self::CHILDREN_ORDER
                 | Self::TRANSFORM
-                | Self::VISIBILITY,
+                | Self::VISIBILITY
+                | Self::Z_INDEX,
         )
     }
 
@@ -201,6 +209,7 @@ mod tests {
         assert!(DirtyFlags::TEXT_SHAPING.needs_geometry_rebuild());
         assert!(DirtyFlags::TRANSFORM.needs_geometry_rebuild());
         assert!(DirtyFlags::VISIBILITY.needs_geometry_rebuild());
+        assert!(DirtyFlags::Z_INDEX.needs_geometry_rebuild());
         assert!(!DirtyFlags::COLOR.needs_geometry_rebuild());
         assert!(!DirtyFlags::OPACITY.needs_geometry_rebuild());
     }

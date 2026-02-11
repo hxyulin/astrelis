@@ -1558,13 +1558,41 @@ impl UiEventSystem {
             abs_offset -= sc.scroll_offset;
         }
 
-        // Check children first (front to back)
+        // Check children front-to-back, sorted by z-index (highest first)
         if let Some(widget) = tree.get_widget(node_id) {
             let children = widget.children();
-            // Reverse iteration to check front-most children first
-            for &child_id in children.iter().rev() {
-                if let Some(hit) = self.hit_test_node(tree, child_id, point, abs_offset) {
-                    return Some(hit);
+
+            if children.len() <= 1 {
+                // Fast path: 0-1 children, no sorting needed
+                for &child_id in children.iter().rev() {
+                    if let Some(hit) = self.hit_test_node(tree, child_id, point, abs_offset) {
+                        return Some(hit);
+                    }
+                }
+            } else {
+                // Collect (child_id, render_layer, computed_z_index) and sort by
+                // render_layer descending then z_index descending.
+                // Overlay nodes are tested before base nodes; within each layer,
+                // higher z-index nodes are tested first.
+                // Stable sort preserves tree order for equal values (last child = frontmost).
+                let mut sorted: Vec<(NodeId, crate::draw_list::RenderLayer, u16)> = children
+                    .iter()
+                    .filter_map(|&cid| {
+                        let node = tree.get_node(cid)?;
+                        let rl = tree
+                            .get_widget(cid)
+                            .map(|w| w.style().render_layer)
+                            .unwrap_or_default();
+                        Some((cid, rl, node.computed_z_index))
+                    })
+                    .collect();
+
+                sorted.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)));
+
+                for (child_id, _, _) in sorted {
+                    if let Some(hit) = self.hit_test_node(tree, child_id, point, abs_offset) {
+                        return Some(hit);
+                    }
                 }
             }
         }

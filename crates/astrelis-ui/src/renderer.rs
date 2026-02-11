@@ -1,7 +1,7 @@
 //! UI renderer for drawing widgets with WGPU.
 
 use crate::clip::{ClipRect, should_clip};
-use crate::draw_list::{DrawCommand, DrawList};
+use crate::draw_list::{DrawCommand, DrawList, RenderLayer};
 use crate::glyph_atlas::glyphs_to_instances_into;
 use crate::gpu_types::{ImageInstance, QuadInstance, QuadVertex, TextInstance};
 use crate::instance_buffer::InstanceBuffer;
@@ -13,7 +13,7 @@ use crate::widgets::docking::plugin::CrossContainerPreview;
 #[cfg(feature = "docking")]
 use crate::widgets::docking::{DEFAULT_TAB_PADDING, DockAnimationState};
 use crate::widgets::{Button, ImageTexture, Text};
-use astrelis_core::alloc::HashMap;
+use astrelis_core::alloc::{HashMap, HashSet};
 use astrelis_core::math::Vec2;
 use astrelis_core::profiling::{profile_function, profile_scope};
 use astrelis_render::RenderWindow;
@@ -55,10 +55,27 @@ struct ImageBatch {
 struct ClipBatch {
     /// The clip rect for this batch
     clip_rect: ClipRect,
-    /// Quad instance range (start, count)
-    quad_range: (u32, u32),
-    /// Text instance range (start, count)
+    /// Opaque quad instance range (start, count) - rendered with depth write ON
+    opaque_quad_range: (u32, u32),
+    /// Transparent quad instance range (start, count) - rendered with depth write OFF
+    transparent_quad_range: (u32, u32),
+    /// Text instance range (start, count) - always transparent
     text_range: (u32, u32),
+    /// Image clip groups for this batch (grouped by texture)
+    image_groups: Vec<ImageClipGroup>,
+}
+
+/// Image rendering data for a texture within a clip batch.
+#[derive(Clone)]
+struct ImageClipGroup {
+    /// The bind group key for this texture
+    bind_group_key: ImageBindGroupKey,
+    /// The texture being rendered
+    texture: ImageTexture,
+    /// Opaque image instance range (start, count)
+    opaque_range: (u32, u32),
+    /// Transparent image instance range (start, count)
+    transparent_range: (u32, u32),
 }
 
 /// Composite key for image bind group caching.
@@ -131,7 +148,7 @@ impl Default for UiRendererDescriptor {
         Self {
             name: "UI".to_string(),
             surface_format: wgpu::TextureFormat::Bgra8UnormSrgb,
-            depth_format: None, // No depth by default - explicit opt-in required
+            depth_format: Some(wgpu::TextureFormat::Depth32Float),
         }
     }
 }
@@ -293,9 +310,13 @@ pub struct UiRenderer {
     text_atlas_bind_group_layout: wgpu::BindGroupLayout,
     text_projection_bind_group_layout: wgpu::BindGroupLayout,
 
-    quad_instanced_pipeline: wgpu::RenderPipeline,
-    text_instanced_pipeline: wgpu::RenderPipeline,
-    image_instanced_pipeline: wgpu::RenderPipeline,
+    // Opaque pipelines (depth write ON, depth test ON)
+    quad_opaque_pipeline: wgpu::RenderPipeline,
+    image_opaque_pipeline: wgpu::RenderPipeline,
+    // Transparent pipelines (depth write OFF, depth test ON)
+    quad_transparent_pipeline: wgpu::RenderPipeline,
+    text_pipeline_render: wgpu::RenderPipeline, // text is always transparent
+    image_transparent_pipeline: wgpu::RenderPipeline,
 
     unit_quad_vbo: wgpu::Buffer,
 
@@ -320,6 +341,8 @@ pub struct UiRenderer {
     image_batches: Vec<ImageBatch>,
     /// Current frame's clip batches (for scissor rect rendering)
     clip_batches: Vec<ClipBatch>,
+    /// Overlay batch rendered after all regular clip batches (for docking previews, ghost tabs, etc.)
+    overlay_batch: Option<ClipBatch>,
     /// Whether any non-infinite clip rects exist (enables scissor rendering)
     has_clipping: bool,
     scale_factor: f64,
@@ -331,8 +354,6 @@ pub struct UiRenderer {
     frame_text_instances: Vec<TextInstance>,
     /// Reusable image instance buffer
     frame_image_instances: Vec<ImageInstance>,
-    /// Reusable image groups map
-    frame_image_groups: HashMap<ImageBindGroupKey, (ImageTexture, Vec<ImageInstance>)>,
 
     /// Current theme colors for resolving widget defaults
     theme_colors: ColorPalette,
@@ -561,16 +582,21 @@ impl UiRenderer {
         // Create sampler cache for different sampling modes
         let sampler_cache = astrelis_render::SamplerCache::new();
 
-        // 5. Create pipelines
-        let (quad_instanced_pipeline, text_instanced_pipeline, image_instanced_pipeline) =
-            Self::create_pipelines(
-                &renderer,
-                &descriptor,
-                &projection_bind_group_layout,
-                &text_atlas_bind_group_layout,
-                &text_projection_bind_group_layout,
-                &image_texture_bind_group_layout,
-            );
+        // 5. Create pipelines (5 total: opaque/transparent for quads and images, transparent-only for text)
+        let (
+            quad_opaque_pipeline,
+            quad_transparent_pipeline,
+            text_pipeline_render,
+            image_opaque_pipeline,
+            image_transparent_pipeline,
+        ) = Self::create_pipelines(
+            &renderer,
+            &descriptor,
+            &projection_bind_group_layout,
+            &text_atlas_bind_group_layout,
+            &text_projection_bind_group_layout,
+            &image_texture_bind_group_layout,
+        );
 
         // 6. Initialize retained components
         let text_pipeline = TextPipeline::new();
@@ -599,9 +625,11 @@ impl UiRenderer {
             projection_bind_group_layout,
             text_atlas_bind_group_layout,
             text_projection_bind_group_layout,
-            quad_instanced_pipeline,
-            text_instanced_pipeline,
-            image_instanced_pipeline,
+            quad_opaque_pipeline,
+            quad_transparent_pipeline,
+            text_pipeline_render,
+            image_opaque_pipeline,
+            image_transparent_pipeline,
             unit_quad_vbo,
             projection_bind_group,
             projection_buffer,
@@ -617,13 +645,13 @@ impl UiRenderer {
             image_instances,
             image_batches: Vec::new(),
             clip_batches: Vec::new(),
+            overlay_batch: None,
             has_clipping: false,
             scale_factor: 1.0,
             // Pre-allocate persistent frame buffers
             frame_quad_instances: Vec::with_capacity(1024),
             frame_text_instances: Vec::with_capacity(4096),
             frame_image_instances: Vec::with_capacity(256),
-            frame_image_groups: HashMap::new(),
             theme_colors: ColorPalette::dark(),
         }
     }
@@ -679,18 +707,21 @@ impl UiRenderer {
         self.descriptor = descriptor;
 
         // Recreate pipelines with new formats
-        let (quad_pipeline, text_pipeline, image_pipeline) = Self::create_pipelines(
-            &self.renderer,
-            &self.descriptor,
-            &self.projection_bind_group_layout,
-            &self.text_atlas_bind_group_layout,
-            &self.text_projection_bind_group_layout,
-            &self.image_texture_bind_group_layout,
-        );
+        let (quad_opaque, quad_transparent, text, image_opaque, image_transparent) =
+            Self::create_pipelines(
+                &self.renderer,
+                &self.descriptor,
+                &self.projection_bind_group_layout,
+                &self.text_atlas_bind_group_layout,
+                &self.text_projection_bind_group_layout,
+                &self.image_texture_bind_group_layout,
+            );
 
-        self.quad_instanced_pipeline = quad_pipeline;
-        self.text_instanced_pipeline = text_pipeline;
-        self.image_instanced_pipeline = image_pipeline;
+        self.quad_opaque_pipeline = quad_opaque;
+        self.quad_transparent_pipeline = quad_transparent;
+        self.text_pipeline_render = text;
+        self.image_opaque_pipeline = image_opaque;
+        self.image_transparent_pipeline = image_transparent;
     }
 
     /// Reconfigure from a window, inheriting its format configuration.
@@ -706,6 +737,11 @@ impl UiRenderer {
     }
 
     /// Create all render pipelines with the given configuration.
+    ///
+    /// Returns 5 pipelines: (quad_opaque, quad_transparent, text, image_opaque, image_transparent)
+    /// - Opaque pipelines: depth write ON, depth test ON
+    /// - Transparent pipelines: depth write OFF, depth test ON
+    /// - Text pipeline: always uses transparent depth stencil (glyphs are alpha-blended)
     fn create_pipelines(
         renderer: &Renderer,
         descriptor: &UiRendererDescriptor,
@@ -714,6 +750,8 @@ impl UiRenderer {
         text_projection_bind_group_layout: &wgpu::BindGroupLayout,
         image_texture_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> (
+        wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
         wgpu::RenderPipeline,
         wgpu::RenderPipeline,
         wgpu::RenderPipeline,
@@ -732,9 +770,10 @@ impl UiRenderer {
             include_str!("../shaders/image_instanced.wgsl"),
         );
 
-        // Create depth stencil state from descriptor (None if no depth format)
+        // Create depth stencil states from descriptor
         // Uses reverse-Z for better depth precision (higher z_index = closer to camera)
-        let depth_stencil_state = descriptor
+        // Opaque: depth write ON, depth test ON
+        let depth_stencil_opaque = descriptor
             .depth_format
             .map(|format| wgpu::DepthStencilState {
                 format,
@@ -744,17 +783,51 @@ impl UiRenderer {
                 bias: wgpu::DepthBiasState::default(),
             });
 
-        // Create quad pipeline
-        let quad_instanced_layout = renderer.create_pipeline_layout(
+        // Transparent: depth write OFF, depth test ON
+        let depth_stencil_transparent =
+            descriptor
+                .depth_format
+                .map(|format| wgpu::DepthStencilState {
+                    format,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                });
+
+        let common_primitive = wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            unclipped_depth: false,
+            conservative: false,
+        };
+
+        let common_multisample = wgpu::MultisampleState {
+            count: 1,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        };
+
+        // --- Quad pipelines (opaque + transparent) ---
+        let quad_layout = renderer.create_pipeline_layout(
             Some(&format!("{} Quad Pipeline Layout", descriptor.name)),
             &[projection_bind_group_layout],
             &[],
         );
 
-        let quad_instanced_pipeline =
+        let quad_color_target = [Some(wgpu::ColorTargetState {
+            format: descriptor.surface_format,
+            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+
+        let quad_opaque_pipeline =
             renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(&format!("{} Quad Pipeline", descriptor.name)),
-                layout: Some(&quad_instanced_layout),
+                label: Some(&format!("{} Quad Opaque Pipeline", descriptor.name)),
+                layout: Some(&quad_layout),
                 vertex: wgpu::VertexState {
                     module: &quad_instanced_shader,
                     entry_point: Some("vs_main"),
@@ -764,34 +837,41 @@ impl UiRenderer {
                 fragment: Some(wgpu::FragmentState {
                     module: &quad_instanced_shader,
                     entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: descriptor.surface_format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
+                    targets: &quad_color_target,
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: depth_stencil_state.clone(),
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
+                primitive: common_primitive,
+                depth_stencil: depth_stencil_opaque.clone(),
+                multisample: common_multisample,
                 multiview: None,
                 cache: None,
             });
 
-        // Create text pipeline
-        let text_instanced_layout = renderer.create_pipeline_layout(
+        let quad_transparent_pipeline =
+            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(&format!("{} Quad Transparent Pipeline", descriptor.name)),
+                layout: Some(&quad_layout),
+                vertex: wgpu::VertexState {
+                    module: &quad_instanced_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[QuadVertex::vertex_layout(), QuadInstance::vertex_layout()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &quad_instanced_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &quad_color_target,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: common_primitive,
+                depth_stencil: depth_stencil_transparent.clone(),
+                multisample: common_multisample,
+                multiview: None,
+                cache: None,
+            });
+
+        // --- Text pipeline (always transparent) ---
+        let text_layout = renderer.create_pipeline_layout(
             Some(&format!("{} Text Pipeline Layout", descriptor.name)),
             &[
                 text_atlas_bind_group_layout,
@@ -800,47 +880,34 @@ impl UiRenderer {
             &[],
         );
 
-        let text_instanced_pipeline =
-            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(&format!("{} Text Pipeline", descriptor.name)),
-                layout: Some(&text_instanced_layout),
-                vertex: wgpu::VertexState {
-                    module: &text_instanced_shader,
-                    entry_point: Some("vs_main"),
-                    buffers: &[QuadVertex::vertex_layout(), TextInstance::vertex_layout()],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &text_instanced_shader,
-                    entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: descriptor.surface_format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
-                },
-                depth_stencil: depth_stencil_state.clone(),
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
-                multiview: None,
-                cache: None,
-            });
+        let text_pipeline = renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(&format!("{} Text Pipeline", descriptor.name)),
+            layout: Some(&text_layout),
+            vertex: wgpu::VertexState {
+                module: &text_instanced_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[QuadVertex::vertex_layout(), TextInstance::vertex_layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &text_instanced_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: descriptor.surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: common_primitive,
+            depth_stencil: depth_stencil_transparent.clone(),
+            multisample: common_multisample,
+            multiview: None,
+            cache: None,
+        });
 
-        // Create image pipeline
-        let image_instanced_layout = renderer.create_pipeline_layout(
+        // --- Image pipelines (opaque + transparent) ---
+        let image_layout = renderer.create_pipeline_layout(
             Some(&format!("{} Image Pipeline Layout", descriptor.name)),
             &[
                 image_texture_bind_group_layout,
@@ -849,10 +916,16 @@ impl UiRenderer {
             &[],
         );
 
-        let image_instanced_pipeline =
+        let image_color_target = [Some(wgpu::ColorTargetState {
+            format: descriptor.surface_format,
+            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+            write_mask: wgpu::ColorWrites::ALL,
+        })];
+
+        let image_opaque_pipeline =
             renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(&format!("{} Image Pipeline", descriptor.name)),
-                layout: Some(&image_instanced_layout),
+                label: Some(&format!("{} Image Opaque Pipeline", descriptor.name)),
+                layout: Some(&image_layout),
                 vertex: wgpu::VertexState {
                     module: &image_instanced_shader,
                     entry_point: Some("vs_main"),
@@ -862,36 +935,45 @@ impl UiRenderer {
                 fragment: Some(wgpu::FragmentState {
                     module: &image_instanced_shader,
                     entry_point: Some("fs_main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: descriptor.surface_format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
+                    targets: &image_color_target,
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                 }),
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    unclipped_depth: false,
-                    conservative: false,
+                primitive: common_primitive,
+                depth_stencil: depth_stencil_opaque,
+                multisample: common_multisample,
+                multiview: None,
+                cache: None,
+            });
+
+        let image_transparent_pipeline =
+            renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(&format!("{} Image Transparent Pipeline", descriptor.name)),
+                layout: Some(&image_layout),
+                vertex: wgpu::VertexState {
+                    module: &image_instanced_shader,
+                    entry_point: Some("vs_main"),
+                    buffers: &[QuadVertex::vertex_layout(), ImageInstance::vertex_layout()],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                 },
-                depth_stencil: depth_stencil_state,
-                multisample: wgpu::MultisampleState {
-                    count: 1,
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &image_instanced_shader,
+                    entry_point: Some("fs_main"),
+                    targets: &image_color_target,
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                primitive: common_primitive,
+                depth_stencil: depth_stencil_transparent,
+                multisample: common_multisample,
                 multiview: None,
                 cache: None,
             });
 
         (
-            quad_instanced_pipeline,
-            text_instanced_pipeline,
-            image_instanced_pipeline,
+            quad_opaque_pipeline,
+            quad_transparent_pipeline,
+            text_pipeline,
+            image_opaque_pipeline,
+            image_transparent_pipeline,
         )
     }
 
@@ -1325,7 +1407,7 @@ impl UiRenderer {
     /// - Computes child clips incrementally as it traverses down
     /// - Avoids redundant walks up the tree for each dirty node
     fn collect_dirty_nodes_with_clips(
-        &self,
+        &mut self,
         tree: &UiTree,
         node_id: NodeId,
         inherited_clip: ClipRect,
@@ -1366,6 +1448,14 @@ impl UiRenderer {
                     }
                 }
                 TraversalBehavior::OnlyChild(index) => {
+                    // Clear draw commands for inactive children so stale content
+                    // from reparented nodes (e.g. tab merge) doesn't overlap.
+                    for (i, &child_id) in widget.children().iter().enumerate() {
+                        if i != index {
+                            self.clear_node_recursive(tree, child_id);
+                        }
+                    }
+                    // Only recurse into the active child
                     if let Some(&child_id) = widget.children().get(index) {
                         self.collect_dirty_nodes_with_clips(
                             tree,
@@ -1437,8 +1527,24 @@ impl UiRenderer {
                     clip_rect,
                     theme_colors: &self.theme_colors,
                     text_pipeline: &mut self.text_pipeline,
+                    parent_z_index: tree
+                        .get_node(node_id)
+                        .map(|n| n.computed_z_index)
+                        .unwrap_or(0),
                 };
                 commands = render_fn(widget.as_any(), &mut render_ctx);
+            }
+        }
+
+        // Apply render layer from widget's style to all commands
+        let render_layer = widget.style().render_layer;
+        if render_layer != crate::draw_list::RenderLayer::Base {
+            for cmd in &mut commands {
+                match cmd {
+                    DrawCommand::Quad(q) => q.render_layer = render_layer,
+                    DrawCommand::Text(t) => t.render_layer = render_layer,
+                    DrawCommand::Image(i) => i.render_layer = render_layer,
+                }
             }
         }
 
@@ -1459,6 +1565,11 @@ impl UiRenderer {
     #[cfg(feature = "docking")]
     const GHOST_GROUP_OVERLAY_NODE: NodeId = NodeId(usize::MAX - 3);
 
+    /// Render layer used for docking overlay elements (previews, ghost tabs).
+    #[cfg(feature = "docking")]
+    const DOCKING_OVERLAY_LAYER: crate::draw_list::RenderLayer =
+        crate::draw_list::RenderLayer::Overlay(6);
+
     /// Update the cross-container drop preview overlay.
     ///
     /// Renders a semi-transparent rectangle showing where a tab will be dropped
@@ -1471,31 +1582,26 @@ impl UiRenderer {
                 let fill_color = Color::from_rgba_u8(100, 150, 255, 60);
                 let border_color = Color::from_rgba_u8(100, 150, 255, 180);
 
-                let commands = vec![
-                    // Semi-transparent fill
-                    DrawCommand::Quad(
-                        crate::draw_list::QuadCommand::rounded(
-                            Vec2::new(bounds.x, bounds.y),
-                            Vec2::new(bounds.width, bounds.height),
-                            fill_color,
-                            4.0,
-                            10, // High Z to render on top of everything
-                        )
-                        .with_clip(ClipRect::infinite()),
-                    ),
-                    // Border outline
-                    DrawCommand::Quad(
-                        crate::draw_list::QuadCommand::bordered(
-                            Vec2::new(bounds.x, bounds.y),
-                            Vec2::new(bounds.width, bounds.height),
-                            border_color,
-                            2.0,
-                            4.0,
-                            11, // Even higher Z for border
-                        )
-                        .with_clip(ClipRect::infinite()),
-                    ),
-                ];
+                let mut fill_cmd = crate::draw_list::QuadCommand::rounded(
+                    Vec2::new(bounds.x, bounds.y),
+                    Vec2::new(bounds.width, bounds.height),
+                    fill_color,
+                    4.0,
+                    10, // High Z to render on top of everything
+                );
+                fill_cmd.render_layer = Self::DOCKING_OVERLAY_LAYER;
+
+                let mut border_cmd = crate::draw_list::QuadCommand::bordered(
+                    Vec2::new(bounds.x, bounds.y),
+                    Vec2::new(bounds.width, bounds.height),
+                    border_color,
+                    2.0,
+                    4.0,
+                    11, // Even higher Z for border
+                );
+                border_cmd.render_layer = Self::DOCKING_OVERLAY_LAYER;
+
+                let commands = vec![DrawCommand::Quad(fill_cmd), DrawCommand::Quad(border_cmd)];
 
                 self.draw_list
                     .update_node(Self::PREVIEW_OVERLAY_NODE, commands);
@@ -1520,16 +1626,15 @@ impl UiRenderer {
                 let alpha = (ghost.opacity * 255.0) as u8;
 
                 // Background quad for the ghost group
-                commands.push(DrawCommand::Quad(
-                    crate::draw_list::QuadCommand::rounded(
-                        ghost.position,
-                        ghost.size,
-                        Color::from_rgba_u8(60, 80, 120, alpha),
-                        4.0,
-                        12, // High Z-index above everything
-                    )
-                    .with_clip(ClipRect::infinite()),
-                ));
+                let mut bg_cmd = crate::draw_list::QuadCommand::rounded(
+                    ghost.position,
+                    ghost.size,
+                    Color::from_rgba_u8(60, 80, 120, alpha),
+                    4.0,
+                    12, // High Z-index above everything
+                );
+                bg_cmd.render_layer = Self::DOCKING_OVERLAY_LAYER;
+                commands.push(DrawCommand::Quad(bg_cmd));
 
                 // Render each tab label in the ghost group
                 let tab_height = ghost.size.y;
@@ -1548,15 +1653,14 @@ impl UiRenderer {
                         let text_y = ghost.position.y + (tab_height - text_height) * 0.5;
 
                         let text_alpha = (ghost.opacity * 200.0) as u8;
-                        commands.push(DrawCommand::Text(
-                            crate::draw_list::TextCommand::new(
-                                Vec2::new(text_x, text_y),
-                                shaped.clone(),
-                                Color::from_rgba_u8(220, 220, 220, text_alpha),
-                                13,
-                            )
-                            .with_clip(ClipRect::infinite()),
-                        ));
+                        let mut text_cmd = crate::draw_list::TextCommand::new(
+                            Vec2::new(text_x, text_y),
+                            shaped.clone(),
+                            Color::from_rgba_u8(220, 220, 220, text_alpha),
+                            13,
+                        );
+                        text_cmd.render_layer = Self::DOCKING_OVERLAY_LAYER;
+                        commands.push(DrawCommand::Text(text_cmd));
 
                         // Advance x for next tab label (text width + padding + separator gap)
                         let text_width = shaped.bounds().0;
@@ -1579,16 +1683,15 @@ impl UiRenderer {
                 let alpha = (ghost.opacity * 255.0) as u8;
 
                 // Background quad for the ghost tab
-                commands.push(DrawCommand::Quad(
-                    crate::draw_list::QuadCommand::rounded(
-                        ghost.position,
-                        ghost.size,
-                        Color::from_rgba_u8(60, 80, 120, alpha),
-                        4.0,
-                        12,
-                    )
-                    .with_clip(ClipRect::infinite()),
-                ));
+                let mut tab_bg_cmd = crate::draw_list::QuadCommand::rounded(
+                    ghost.position,
+                    ghost.size,
+                    Color::from_rgba_u8(60, 80, 120, alpha),
+                    4.0,
+                    12,
+                );
+                tab_bg_cmd.render_layer = Self::DOCKING_OVERLAY_LAYER;
+                commands.push(DrawCommand::Quad(tab_bg_cmd));
 
                 // Tab label text
                 let request_id =
@@ -1601,15 +1704,14 @@ impl UiRenderer {
                     let text_y = ghost.position.y + (ghost.size.y - text_height) * 0.5;
 
                     let text_alpha = (ghost.opacity * 200.0) as u8;
-                    commands.push(DrawCommand::Text(
-                        crate::draw_list::TextCommand::new(
-                            Vec2::new(text_x, text_y),
-                            shaped,
-                            Color::from_rgba_u8(220, 220, 220, text_alpha),
-                            13,
-                        )
-                        .with_clip(ClipRect::infinite()),
-                    ));
+                    let mut tab_text_cmd = crate::draw_list::TextCommand::new(
+                        Vec2::new(text_x, text_y),
+                        shaped,
+                        Color::from_rgba_u8(220, 220, 220, text_alpha),
+                        13,
+                    );
+                    tab_text_cmd.render_layer = Self::DOCKING_OVERLAY_LAYER;
+                    commands.push(DrawCommand::Text(tab_text_cmd));
                 }
 
                 self.draw_list
@@ -1636,10 +1738,8 @@ impl UiRenderer {
 
     /// Encode draw list commands into GPU instance buffers.
     ///
-    /// Groups instances by clip rect to ensure contiguous ranges for scissor batching.
-    /// Uses a two-phase approach:
-    /// 1. Collect unique clip rects
-    /// 2. Process commands grouped by clip rect (ensures contiguous instance ranges)
+    /// Uses single-pass bucketing for base commands (O(n)) and a simple
+    /// two-pass encode for overlay commands (typically 2-20 commands).
     fn encode_instances(&mut self) {
         profile_function!();
 
@@ -1647,203 +1747,208 @@ impl UiRenderer {
         self.frame_quad_instances.clear();
         self.frame_text_instances.clear();
         self.frame_image_instances.clear();
-        // Clear values but keep keys/capacity for image groups
-        for (_, (_, instances)) in self.frame_image_groups.iter_mut() {
-            instances.clear();
-        }
 
         self.has_clipping = false;
         self.clip_batches.clear();
+        self.overlay_batch = None;
+        self.image_batches.clear();
 
-        // Phase 1: Collect unique clip rects in order of first appearance
-        let mut clip_rects: Vec<ClipRect> = Vec::new();
-        for cmd in self.draw_list.commands() {
+        // --- Step A: Single pass over base_commands() to bucket by clip rect ---
+        // Each bucket stores (opaque_indices, transparent_indices) into the base commands slice.
+        let base_cmds = self.draw_list.base_commands();
+        let mut clip_rect_to_bucket: HashMap<ClipRect, usize> = HashMap::new();
+        // (clip_rect, opaque_cmd_indices, transparent_cmd_indices)
+        let mut buckets: Vec<(ClipRect, Vec<usize>, Vec<usize>)> = Vec::new();
+
+        for (i, cmd) in base_cmds.iter().enumerate() {
             let clip = *cmd.clip_rect();
             if !clip.is_infinite() {
                 self.has_clipping = true;
             }
-            if !clip_rects.contains(&clip) {
-                clip_rects.push(clip);
+
+            let bucket_idx = match clip_rect_to_bucket.get(&clip) {
+                Some(&idx) => idx,
+                None => {
+                    let idx = buckets.len();
+                    clip_rect_to_bucket.insert(clip, idx);
+                    buckets.push((clip, Vec::new(), Vec::new()));
+                    idx
+                }
+            };
+
+            if cmd.is_opaque() && !matches!(cmd, DrawCommand::Text(_)) {
+                buckets[bucket_idx].1.push(i);
+            } else {
+                buckets[bucket_idx].2.push(i);
             }
         }
 
-        // Ensure infinite clip is processed first (for proper draw order)
-        if let Some(pos) = clip_rects.iter().position(|c| c.is_infinite()) {
-            if pos != 0 {
-                clip_rects.swap(0, pos);
-            }
-        } else if !clip_rects.is_empty() {
-            // No infinite clip rect exists, insert at beginning
-            clip_rects.insert(0, ClipRect::infinite());
+        // Ensure infinite clip bucket is first (for proper draw order)
+        if let Some(&inf_idx) = clip_rect_to_bucket.get(&ClipRect::infinite())
+            && inf_idx != 0
+        {
+            buckets.swap(0, inf_idx);
+            // Fix up the index map after swap
+            let swapped_clip = buckets[inf_idx].0;
+            clip_rect_to_bucket.insert(ClipRect::infinite(), 0);
+            clip_rect_to_bucket.insert(swapped_clip, inf_idx);
         }
 
-        // Phase 2: Process commands grouped by clip rect
-        // This ensures instances for each clip rect are contiguous in the buffers
-        for clip_rect in &clip_rects {
-            let quad_start = self.frame_quad_instances.len() as u32;
+        // --- Step B: Encode each bucket into contiguous GPU buffer ranges ---
+        for (clip_rect, opaque_indices, transparent_indices) in &buckets {
+            let opaque_quad_start = self.frame_quad_instances.len() as u32;
+            let mut opaque_image_groups: HashMap<
+                ImageBindGroupKey,
+                (ImageTexture, Vec<ImageInstance>),
+            > = HashMap::new();
+
+            for &idx in opaque_indices {
+                encode_command(
+                    &base_cmds[idx],
+                    &mut self.frame_quad_instances,
+                    &mut self.frame_text_instances,
+                    &mut opaque_image_groups,
+                    &mut self.font_renderer,
+                );
+            }
+            let opaque_quad_count = self.frame_quad_instances.len() as u32 - opaque_quad_start;
+
+            let transparent_quad_start = self.frame_quad_instances.len() as u32;
             let text_start = self.frame_text_instances.len() as u32;
+            let mut transparent_image_groups: HashMap<
+                ImageBindGroupKey,
+                (ImageTexture, Vec<ImageInstance>),
+            > = HashMap::new();
 
-            for cmd in self.draw_list.commands() {
-                if cmd.clip_rect() != clip_rect {
-                    continue;
-                }
-
-                // Skip overlay sentinel commands — they are rendered in a final
-                // pass after all clip batches so they always appear on top.
-                #[cfg(feature = "docking")]
-                {
-                    let node_id = cmd.node_id();
-                    if node_id == Self::PREVIEW_OVERLAY_NODE
-                        || node_id == Self::GHOST_TAB_OVERLAY_NODE
-                        || node_id == Self::GHOST_GROUP_OVERLAY_NODE
-                    {
-                        continue;
-                    }
-                }
-
-                match cmd {
-                    DrawCommand::Quad(q) => {
-                        self.frame_quad_instances.push(QuadInstance {
-                            position: [q.position.x, q.position.y],
-                            size: [q.size.x, q.size.y],
-                            color: [q.color.r, q.color.g, q.color.b, q.color.a],
-                            border_radius: q.border_radius,
-                            border_thickness: q.border_thickness,
-                            z_depth: z_index_to_depth(q.z_index),
-                            _padding: 0.0,
-                        });
-                    }
-                    DrawCommand::Text(t) => {
-                        glyphs_to_instances_into(
-                            &mut self.font_renderer,
-                            &t.shaped_text.inner.glyphs,
-                            t.position,
-                            t.color,
-                            z_index_to_depth(t.z_index),
-                            &mut self.frame_text_instances,
-                        );
-                    }
-                    DrawCommand::Image(i) => {
-                        // Use texture pointer + sampling mode as composite key for grouping
-                        let bind_group_key = ImageBindGroupKey {
-                            texture_ptr: std::sync::Arc::as_ptr(&i.texture) as usize,
-                            sampling: i.sampling,
-                        };
-
-                        let instance = ImageInstance {
-                            position: [i.position.x, i.position.y],
-                            size: [i.size.x, i.size.y],
-                            uv_min: [i.uv.u_min, i.uv.v_min],
-                            uv_max: [i.uv.u_max, i.uv.v_max],
-                            tint: [i.tint.r, i.tint.g, i.tint.b, i.tint.a],
-                            border_radius: i.border_radius,
-                            texture_index: 0, // Not used for now
-                            z_depth: z_index_to_depth(i.z_index),
-                            _padding: 0.0,
-                        };
-
-                        self.frame_image_groups
-                            .entry(bind_group_key)
-                            .or_insert_with(|| (i.texture.clone(), Vec::new()))
-                            .1
-                            .push(instance);
-                    }
-                }
+            for &idx in transparent_indices {
+                encode_command(
+                    &base_cmds[idx],
+                    &mut self.frame_quad_instances,
+                    &mut self.frame_text_instances,
+                    &mut transparent_image_groups,
+                    &mut self.font_renderer,
+                );
             }
-
-            let quad_count = self.frame_quad_instances.len() as u32 - quad_start;
+            let transparent_quad_count =
+                self.frame_quad_instances.len() as u32 - transparent_quad_start;
             let text_count = self.frame_text_instances.len() as u32 - text_start;
 
-            if quad_count > 0 || text_count > 0 {
+            let image_groups = finalize_image_groups(
+                opaque_image_groups,
+                transparent_image_groups,
+                &mut self.frame_image_instances,
+            );
+
+            let has_content = opaque_quad_count > 0
+                || transparent_quad_count > 0
+                || text_count > 0
+                || !image_groups.is_empty();
+
+            if has_content {
                 self.clip_batches.push(ClipBatch {
                     clip_rect: *clip_rect,
-                    quad_range: (quad_start, quad_count),
+                    opaque_quad_range: (opaque_quad_start, opaque_quad_count),
+                    transparent_quad_range: (transparent_quad_start, transparent_quad_count),
                     text_range: (text_start, text_count),
+                    image_groups,
                 });
             }
         }
 
-        // Encode overlay commands as a final clip batch so they render on top
-        // of all regular content, regardless of which clip batch the content belongs to.
-        #[cfg(feature = "docking")]
-        {
-            let overlay_quad_start = self.frame_quad_instances.len() as u32;
-            let overlay_text_start = self.frame_text_instances.len() as u32;
+        // --- Step C: Overlay pass (typically 2-20 commands) ---
+        let overlay_cmds = self.draw_list.overlay_commands();
+        if !overlay_cmds.is_empty() {
+            let overlay_opaque_quad_start = self.frame_quad_instances.len() as u32;
+            let mut overlay_opaque_image_groups: HashMap<
+                ImageBindGroupKey,
+                (ImageTexture, Vec<ImageInstance>),
+            > = HashMap::new();
 
-            for cmd in self.draw_list.commands() {
-                let node_id = cmd.node_id();
-                if node_id != Self::PREVIEW_OVERLAY_NODE
-                    && node_id != Self::GHOST_TAB_OVERLAY_NODE
-                    && node_id != Self::GHOST_GROUP_OVERLAY_NODE
-                {
-                    continue;
-                }
-
-                match cmd {
-                    DrawCommand::Quad(q) => {
-                        self.frame_quad_instances.push(QuadInstance {
-                            position: [q.position.x, q.position.y],
-                            size: [q.size.x, q.size.y],
-                            color: [q.color.r, q.color.g, q.color.b, q.color.a],
-                            border_radius: q.border_radius,
-                            border_thickness: q.border_thickness,
-                            z_depth: z_index_to_depth(q.z_index),
-                            _padding: 0.0,
-                        });
-                    }
-                    DrawCommand::Text(t) => {
-                        glyphs_to_instances_into(
-                            &mut self.font_renderer,
-                            &t.shaped_text.inner.glyphs,
-                            t.position,
-                            t.color,
-                            z_index_to_depth(t.z_index),
-                            &mut self.frame_text_instances,
-                        );
-                    }
-                    DrawCommand::Image(_) => {} // Overlays don't use images
+            // Opaque overlay commands (text is always transparent — glyph atlas uses alpha)
+            for cmd in overlay_cmds {
+                if cmd.is_opaque() && !matches!(cmd, DrawCommand::Text(_)) {
+                    encode_command(
+                        cmd,
+                        &mut self.frame_quad_instances,
+                        &mut self.frame_text_instances,
+                        &mut overlay_opaque_image_groups,
+                        &mut self.font_renderer,
+                    );
                 }
             }
+            let overlay_opaque_quad_count =
+                self.frame_quad_instances.len() as u32 - overlay_opaque_quad_start;
 
-            let overlay_quad_count = self.frame_quad_instances.len() as u32 - overlay_quad_start;
+            // Transparent overlay commands
+            let overlay_transparent_quad_start = self.frame_quad_instances.len() as u32;
+            let overlay_text_start = self.frame_text_instances.len() as u32;
+            let mut overlay_transparent_image_groups: HashMap<
+                ImageBindGroupKey,
+                (ImageTexture, Vec<ImageInstance>),
+            > = HashMap::new();
+
+            for cmd in overlay_cmds {
+                if !cmd.is_opaque() || matches!(cmd, DrawCommand::Text(_)) {
+                    encode_command(
+                        cmd,
+                        &mut self.frame_quad_instances,
+                        &mut self.frame_text_instances,
+                        &mut overlay_transparent_image_groups,
+                        &mut self.font_renderer,
+                    );
+                }
+            }
+            let overlay_transparent_quad_count =
+                self.frame_quad_instances.len() as u32 - overlay_transparent_quad_start;
             let overlay_text_count = self.frame_text_instances.len() as u32 - overlay_text_start;
 
-            if overlay_quad_count > 0 || overlay_text_count > 0 {
-                self.clip_batches.push(ClipBatch {
+            let overlay_image_groups = finalize_image_groups(
+                overlay_opaque_image_groups,
+                overlay_transparent_image_groups,
+                &mut self.frame_image_instances,
+            );
+
+            let has_overlay_content = overlay_opaque_quad_count > 0
+                || overlay_transparent_quad_count > 0
+                || overlay_text_count > 0
+                || !overlay_image_groups.is_empty();
+
+            if has_overlay_content {
+                self.overlay_batch = Some(ClipBatch {
                     clip_rect: ClipRect::infinite(),
-                    quad_range: (overlay_quad_start, overlay_quad_count),
+                    opaque_quad_range: (overlay_opaque_quad_start, overlay_opaque_quad_count),
+                    transparent_quad_range: (
+                        overlay_transparent_quad_start,
+                        overlay_transparent_quad_count,
+                    ),
                     text_range: (overlay_text_start, overlay_text_count),
+                    image_groups: overlay_image_groups,
                 });
             }
         }
 
-        // Build image batches with bind groups (images don't support clipping yet)
-        // First, collect the data we need to avoid borrow conflicts
-        let image_group_data: Vec<(ImageBindGroupKey, ImageTexture, Vec<ImageInstance>)> = self
-            .frame_image_groups
-            .iter()
-            .filter(|(_, (_, instances))| !instances.is_empty())
-            .map(|(key, (texture, instances))| (*key, texture.clone(), instances.clone()))
-            .collect();
+        // Ensure bind groups exist for all image textures
+        {
+            let mut image_keys: Vec<(ImageBindGroupKey, ImageTexture)> = self
+                .clip_batches
+                .iter()
+                .flat_map(|batch| {
+                    batch
+                        .image_groups
+                        .iter()
+                        .map(|group| (group.bind_group_key, group.texture.clone()))
+                })
+                .collect();
 
-        self.image_batches.clear();
-        self.frame_image_instances.clear();
+            if let Some(ref overlay) = self.overlay_batch {
+                for group in &overlay.image_groups {
+                    image_keys.push((group.bind_group_key, group.texture.clone()));
+                }
+            }
 
-        for (bind_group_key, texture, instances) in image_group_data {
-            let start_index = self.frame_image_instances.len() as u32;
-            let count = instances.len() as u32;
-
-            // Get or create bind group for this texture + sampling mode combination
-            let bind_group = self.get_or_create_image_bind_group(bind_group_key, &texture);
-
-            self.image_batches.push(ImageBatch {
-                texture,
-                bind_group,
-                start_index,
-                count,
-            });
-
-            self.frame_image_instances.extend(instances);
+            for (key, texture) in image_keys {
+                self.get_or_create_image_bind_group(key, &texture);
+            }
         }
 
         // Upload to GPU instance buffers
@@ -1934,61 +2039,12 @@ impl UiRenderer {
         let viewport_width = viewport.size.width as u32;
         let viewport_height = viewport.size.height as u32;
 
-        // Render with clip batches (handles scissor rects)
-        for batch in &self.clip_batches {
-            // Set scissor rect for this batch
-            if batch.clip_rect.is_infinite() {
-                render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
-            } else {
-                let physical = batch.clip_rect.to_physical(viewport.scale_factor.0);
-                let clamped = physical.clamp_to_viewport(viewport_width, viewport_height);
-                if clamped.width == 0 || clamped.height == 0 {
-                    continue; // Skip empty clip rects
-                }
-                render_pass.set_scissor_rect(clamped.x, clamped.y, clamped.width, clamped.height);
-            }
-
-            // Render quads for this clip batch
-            if batch.quad_range.1 > 0 {
-                render_pass.set_pipeline(&self.quad_instanced_pipeline);
-                render_pass.set_bind_group(0, &self.projection_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
-                render_pass.set_vertex_buffer(1, self.quad_instances.buffer().slice(..));
-                render_pass.draw(
-                    0..6,
-                    batch.quad_range.0..(batch.quad_range.0 + batch.quad_range.1),
-                );
-            }
-
-            // Render text for this clip batch
-            if batch.text_range.1 > 0 {
-                render_pass.set_pipeline(&self.text_instanced_pipeline);
-                render_pass.set_bind_group(0, &self.text_atlas_bind_group, &[]);
-                render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
-                render_pass.set_vertex_buffer(1, self.text_instances.buffer().slice(..));
-                render_pass.draw(
-                    0..6,
-                    batch.text_range.0..(batch.text_range.0 + batch.text_range.1),
-                );
-            }
-        }
-
-        // Reset scissor rect for images (they don't support clipping yet)
-        render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
-
-        // Render images (batched by texture)
-        if !self.image_batches.is_empty() {
-            render_pass.set_pipeline(&self.image_instanced_pipeline);
-            render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]); // Reuse projection
-            render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
-            render_pass.set_vertex_buffer(1, self.image_instances.buffer().slice(..));
-
-            for batch in &self.image_batches {
-                render_pass.set_bind_group(0, &batch.bind_group, &[]);
-                render_pass.draw(0..6, batch.start_index..(batch.start_index + batch.count));
-            }
-        }
+        self.render_clip_batches(
+            render_pass,
+            viewport_width,
+            viewport_height,
+            viewport.scale_factor.0,
+        );
     }
 
     /// Render using retained mode instanced rendering with optional cross-container preview.
@@ -2019,60 +2075,108 @@ impl UiRenderer {
         let viewport_width = viewport.size.width as u32;
         let viewport_height = viewport.size.height as u32;
 
-        // Render with clip batches (handles scissor rects)
+        self.render_clip_batches(
+            render_pass,
+            viewport_width,
+            viewport_height,
+            viewport.scale_factor.0,
+        );
+    }
+
+    /// Shared rendering logic: draw clip batches with opaque-then-transparent ordering.
+    fn render_clip_batches(
+        &self,
+        render_pass: &mut wgpu::RenderPass,
+        viewport_width: u32,
+        viewport_height: u32,
+        scale_factor: f64,
+    ) {
+        profile_scope!("render_clip_batches");
+
         for batch in &self.clip_batches {
             // Set scissor rect for this batch
             if batch.clip_rect.is_infinite() {
                 render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
             } else {
-                let physical = batch.clip_rect.to_physical(viewport.scale_factor.0);
+                let physical = batch.clip_rect.to_physical(scale_factor);
                 let clamped = physical.clamp_to_viewport(viewport_width, viewport_height);
                 if clamped.width == 0 || clamped.height == 0 {
-                    continue; // Skip empty clip rects
+                    continue;
                 }
                 render_pass.set_scissor_rect(clamped.x, clamped.y, clamped.width, clamped.height);
             }
 
-            // Render quads for this clip batch
-            if batch.quad_range.1 > 0 {
-                render_pass.set_pipeline(&self.quad_instanced_pipeline);
-                render_pass.set_bind_group(0, &self.projection_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
-                render_pass.set_vertex_buffer(1, self.quad_instances.buffer().slice(..));
-                render_pass.draw(
-                    0..6,
-                    batch.quad_range.0..(batch.quad_range.0 + batch.quad_range.1),
-                );
-            }
+            self.render_batch(render_pass, batch);
+        }
 
-            // Render text for this clip batch
-            if batch.text_range.1 > 0 {
-                render_pass.set_pipeline(&self.text_instanced_pipeline);
-                render_pass.set_bind_group(0, &self.text_atlas_bind_group, &[]);
+        // Overlay pass: render AFTER all regular clip batches so overlays appear on top
+        if let Some(ref overlay) = self.overlay_batch {
+            render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
+            self.render_batch(render_pass, overlay);
+        }
+    }
+
+    /// Render a single clip batch: opaque quads/images, then transparent quads/images, then text.
+    fn render_batch(&self, render_pass: &mut wgpu::RenderPass, batch: &ClipBatch) {
+        // Pass 1: Opaque quads (depth write ON)
+        if batch.opaque_quad_range.1 > 0 {
+            render_pass.set_pipeline(&self.quad_opaque_pipeline);
+            render_pass.set_bind_group(0, &self.projection_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
+            render_pass.set_vertex_buffer(1, self.quad_instances.buffer().slice(..));
+            let (start, count) = batch.opaque_quad_range;
+            render_pass.draw(0..6, start..(start + count));
+        }
+
+        // Pass 1b: Opaque images per texture (depth write ON)
+        for group in &batch.image_groups {
+            if group.opaque_range.1 > 0 {
+                render_pass.set_pipeline(&self.image_opaque_pipeline);
                 render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]);
                 render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
-                render_pass.set_vertex_buffer(1, self.text_instances.buffer().slice(..));
-                render_pass.draw(
-                    0..6,
-                    batch.text_range.0..(batch.text_range.0 + batch.text_range.1),
-                );
+                render_pass.set_vertex_buffer(1, self.image_instances.buffer().slice(..));
+                if let Some(bind_group) = self.image_bind_group_cache.get(&group.bind_group_key) {
+                    render_pass.set_bind_group(0, bind_group, &[]);
+                    let (start, count) = group.opaque_range;
+                    render_pass.draw(0..6, start..(start + count));
+                }
             }
         }
 
-        // Reset scissor rect for images (they don't support clipping yet)
-        render_pass.set_scissor_rect(0, 0, viewport_width, viewport_height);
-
-        // Render images (batched by texture)
-        if !self.image_batches.is_empty() {
-            render_pass.set_pipeline(&self.image_instanced_pipeline);
-            render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]); // Reuse projection
+        // Pass 2: Transparent quads (depth write OFF, depth test ON)
+        if batch.transparent_quad_range.1 > 0 {
+            render_pass.set_pipeline(&self.quad_transparent_pipeline);
+            render_pass.set_bind_group(0, &self.projection_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
-            render_pass.set_vertex_buffer(1, self.image_instances.buffer().slice(..));
+            render_pass.set_vertex_buffer(1, self.quad_instances.buffer().slice(..));
+            let (start, count) = batch.transparent_quad_range;
+            render_pass.draw(0..6, start..(start + count));
+        }
 
-            for batch in &self.image_batches {
-                render_pass.set_bind_group(0, &batch.bind_group, &[]);
-                render_pass.draw(0..6, batch.start_index..(batch.start_index + batch.count));
+        // Pass 2b: Transparent images per texture (depth write OFF, depth test ON)
+        for group in &batch.image_groups {
+            if group.transparent_range.1 > 0 {
+                render_pass.set_pipeline(&self.image_transparent_pipeline);
+                render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
+                render_pass.set_vertex_buffer(1, self.image_instances.buffer().slice(..));
+                if let Some(bind_group) = self.image_bind_group_cache.get(&group.bind_group_key) {
+                    render_pass.set_bind_group(0, bind_group, &[]);
+                    let (start, count) = group.transparent_range;
+                    render_pass.draw(0..6, start..(start + count));
+                }
             }
+        }
+
+        // Pass 3: Text (always transparent)
+        if batch.text_range.1 > 0 {
+            render_pass.set_pipeline(&self.text_pipeline_render);
+            render_pass.set_bind_group(0, &self.text_atlas_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.text_projection_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.unit_quad_vbo.slice(..));
+            render_pass.set_vertex_buffer(1, self.text_instances.buffer().slice(..));
+            let (start, count) = batch.text_range;
+            render_pass.draw(0..6, start..(start + count));
         }
     }
 
@@ -2168,6 +2272,119 @@ impl UiRenderer {
     }
 }
 
+/// Encode a single draw command into the appropriate GPU instance buffers.
+///
+/// Converts `DrawCommand` variants into `QuadInstance`, `TextInstance`, or `ImageInstance`
+/// and appends them to the corresponding buffers.
+fn encode_command(
+    cmd: &DrawCommand,
+    quad_instances: &mut Vec<QuadInstance>,
+    text_instances: &mut Vec<TextInstance>,
+    image_groups: &mut HashMap<ImageBindGroupKey, (ImageTexture, Vec<ImageInstance>)>,
+    font_renderer: &mut FontRenderer,
+) {
+    match cmd {
+        DrawCommand::Quad(q) => {
+            quad_instances.push(QuadInstance {
+                position: [q.position.x, q.position.y],
+                size: [q.size.x, q.size.y],
+                color: [q.color.r, q.color.g, q.color.b, q.color.a],
+                border_radius: q.border_radius,
+                border_thickness: q.border_thickness,
+                z_depth: z_index_to_depth(q.z_index, q.render_layer),
+                _padding: 0.0,
+            });
+        }
+        DrawCommand::Text(t) => {
+            glyphs_to_instances_into(
+                font_renderer,
+                &t.shaped_text.inner.glyphs,
+                t.position,
+                t.color,
+                z_index_to_depth(t.z_index, t.render_layer),
+                text_instances,
+            );
+        }
+        DrawCommand::Image(i) => {
+            let bind_group_key = ImageBindGroupKey {
+                texture_ptr: std::sync::Arc::as_ptr(&i.texture) as usize,
+                sampling: i.sampling,
+            };
+
+            image_groups
+                .entry(bind_group_key)
+                .or_insert_with(|| (i.texture.clone(), Vec::new()))
+                .1
+                .push(ImageInstance {
+                    position: [i.position.x, i.position.y],
+                    size: [i.size.x, i.size.y],
+                    uv_min: [i.uv.u_min, i.uv.v_min],
+                    uv_max: [i.uv.u_max, i.uv.v_max],
+                    tint: [i.tint.r, i.tint.g, i.tint.b, i.tint.a],
+                    border_radius: i.border_radius,
+                    texture_index: 0,
+                    z_depth: z_index_to_depth(i.z_index, i.render_layer),
+                    _padding: 0.0,
+                });
+        }
+    }
+}
+
+/// Merge opaque and transparent image groups into contiguous GPU buffer ranges.
+///
+/// For each unique texture key, appends opaque instances then transparent instances
+/// to the shared image instance buffer and returns `ImageClipGroup` entries with
+/// the resulting ranges.
+fn finalize_image_groups(
+    mut opaque: HashMap<ImageBindGroupKey, (ImageTexture, Vec<ImageInstance>)>,
+    mut transparent: HashMap<ImageBindGroupKey, (ImageTexture, Vec<ImageInstance>)>,
+    image_instances: &mut Vec<ImageInstance>,
+) -> Vec<ImageClipGroup> {
+    // Collect all unique texture keys from both passes
+    let all_keys: Vec<ImageBindGroupKey> = opaque
+        .keys()
+        .chain(transparent.keys())
+        .copied()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let mut groups = Vec::with_capacity(all_keys.len());
+
+    for key in all_keys {
+        let opaque_start = image_instances.len() as u32;
+        let mut texture = None;
+
+        if let Some((tex, instances)) = opaque.remove(&key) {
+            texture = Some(tex);
+            image_instances.extend(instances);
+        }
+        let opaque_count = image_instances.len() as u32 - opaque_start;
+
+        let transparent_start = image_instances.len() as u32;
+        if let Some((tex, instances)) = transparent.remove(&key) {
+            if texture.is_none() {
+                texture = Some(tex);
+            }
+            image_instances.extend(instances);
+        }
+        let transparent_count = image_instances.len() as u32 - transparent_start;
+
+        if let Some(texture) = texture
+            && (opaque_count > 0 || transparent_count > 0)
+        {
+            groups.push(ImageClipGroup {
+                bind_group_key: key,
+                texture,
+                opaque_range: (opaque_start, opaque_count),
+                transparent_range: (transparent_start, transparent_count),
+            });
+        }
+    }
+
+    groups
+}
+
 /// Create an orthographic projection matrix for 2D rendering.
 fn orthographic_projection(width: f32, height: f32) -> [[f32; 4]; 4] {
     [
@@ -2188,7 +2405,16 @@ fn orthographic_projection(width: f32, height: f32) -> [[f32; 4]; 4] {
 /// - z_index 0 → depth ≈ 0.000015 (furthest from camera)
 /// - z_index 65535 → depth = 1.0 (nearest to camera)
 #[inline]
-fn z_index_to_depth(z_index: u16) -> f32 {
-    // Add 1 to avoid depth = 0 which can cause issues with some depth tests
-    (z_index as f32 + 1.0) / 65536.0
+fn z_index_to_depth(z_index: u16, render_layer: RenderLayer) -> f32 {
+    match render_layer {
+        RenderLayer::Base => {
+            // Base layer: depth range [~0, 0.5)
+            (z_index as f32 + 1.0) / 131072.0
+        }
+        RenderLayer::Overlay(n) => {
+            // Overlay layers: depth range [0.5, ~1.0)
+            // Each overlay sub-layer gets a 256-wide z_index band
+            0.5 + (n as f32 * 256.0 + z_index.min(255) as f32 + 1.0) / 131072.0
+        }
+    }
 }

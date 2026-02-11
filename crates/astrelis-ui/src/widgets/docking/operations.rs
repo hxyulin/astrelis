@@ -649,7 +649,9 @@ pub fn collapse_empty_container(tree: &mut UiTree, container_id: NodeId) -> Dock
 
         tree.mark_dirty_flags(
             gp_id,
-            crate::dirty::DirtyFlags::LAYOUT | crate::dirty::DirtyFlags::CHILDREN_ORDER,
+            crate::dirty::DirtyFlags::LAYOUT
+                | crate::dirty::DirtyFlags::CHILDREN_ORDER
+                | crate::dirty::DirtyFlags::GEOMETRY,
         );
     } else {
         // Splitter was root — make remaining child the new root
@@ -786,7 +788,9 @@ impl DockOperation for MergeTabGroupOperation {
         );
         tree.mark_dirty_flags(
             self.target_container,
-            crate::dirty::DirtyFlags::LAYOUT | crate::dirty::DirtyFlags::CHILDREN_ORDER,
+            crate::dirty::DirtyFlags::LAYOUT
+                | crate::dirty::DirtyFlags::CHILDREN_ORDER
+                | crate::dirty::DirtyFlags::GEOMETRY,
         );
 
         Ok(())

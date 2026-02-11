@@ -82,6 +82,9 @@ pub struct UiNode {
     pub paint_version: u32,
     /// Cached shaped text data (Phase 3)
     pub text_cache: Option<Arc<ShapedTextData>>,
+    /// Accumulated z_index from all parent containers.
+    /// Computed during layout traversal.
+    pub computed_z_index: u16,
 }
 
 impl UiNode {
@@ -186,6 +189,7 @@ impl UiTree {
             text_version: 0,
             paint_version: 0,
             text_cache: None,
+            computed_z_index: 0,
         };
 
         self.nodes.insert(node_id, ui_node);
@@ -307,7 +311,8 @@ impl UiTree {
                 | DirtyFlags::GEOMETRY
                 | DirtyFlags::IMAGE
                 | DirtyFlags::FOCUS
-                | DirtyFlags::SCROLL,
+                | DirtyFlags::SCROLL
+                | DirtyFlags::Z_INDEX,
         ) {
             node.paint_version = node.paint_version.wrapping_add(1);
         }
@@ -446,7 +451,8 @@ impl UiTree {
                     | DirtyFlags::GEOMETRY
                     | DirtyFlags::IMAGE
                     | DirtyFlags::FOCUS
-                    | DirtyFlags::SCROLL,
+                    | DirtyFlags::SCROLL
+                    | DirtyFlags::Z_INDEX,
             ) {
                 node.paint_version = node.paint_version.wrapping_add(1);
             }
@@ -1168,16 +1174,21 @@ impl UiTree {
 
     /// Update layout for a specific subtree from Taffy results.
     fn update_subtree_layout(&mut self, root_id: NodeId) {
-        let mut stack = vec![root_id];
-        while let Some(node_id) = stack.pop() {
-            // Get children first to avoid holding borrow
-            let children = if let Some(node) = self.nodes.get(&node_id) {
-                node.children.clone()
+        // Use a stack with (node_id, parent_z_index) for depth-first traversal
+        let mut stack = vec![(root_id, 0u16)];
+        while let Some((node_id, parent_z_index)) = stack.pop() {
+            // Get node's z_index offset and children before any mutable borrows
+            let (z_offset, children) = if let Some(node) = self.nodes.get(&node_id) {
+                let z_offset = node.widget.style().z_index;
+                (z_offset, node.children.clone())
             } else {
-                Vec::new()
+                continue;
             };
 
-            // Update this node
+            // Compute accumulated z-index (saturating to prevent overflow)
+            let computed_z = parent_z_index.saturating_add(z_offset);
+
+            // Update this node's layout and computed z-index
             if let Some(node) = self.nodes.get_mut(&node_id)
                 && let Ok(layout) = self.taffy.layout(node.taffy_node)
             {
@@ -1187,9 +1198,32 @@ impl UiTree {
                     width: layout.size.width,
                     height: layout.size.height,
                 };
+                node.computed_z_index = computed_z;
             }
 
-            stack.extend(children);
+            // Push children with accumulated z-index
+            for child_id in children {
+                stack.push((child_id, computed_z));
+            }
+        }
+    }
+
+    /// Mark a node and all its descendants with the Z_INDEX dirty flag.
+    ///
+    /// Z_INDEX propagates DOWN to children (unlike LAYOUT flags which propagate up).
+    /// This is called when a node's z_index style property changes, since the
+    /// computed_z_index of all descendants depends on ancestor z_index values.
+    pub fn mark_z_index_dirty(&mut self, node_id: NodeId) {
+        let mut stack = vec![node_id];
+        while let Some(id) = stack.pop() {
+            self.dirty_nodes.insert(id);
+            if let Some(node) = self.nodes.get_mut(&id) {
+                let old_flags = node.dirty_flags;
+                node.dirty_flags |= DirtyFlags::Z_INDEX;
+                self.dirty_counters.on_mark(old_flags, DirtyFlags::Z_INDEX);
+                node.paint_version = node.paint_version.wrapping_add(1);
+                stack.extend(node.children.iter().copied());
+            }
         }
     }
 

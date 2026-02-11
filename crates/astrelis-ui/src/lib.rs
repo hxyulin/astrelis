@@ -116,7 +116,7 @@ use astrelis_core::geometry::Size;
 pub use clip::{ClipRect, PhysicalClipRect};
 pub use debug::DebugOverlay;
 pub use dirty::{DirtyFlags, DirtyRanges, Versioned};
-pub use draw_list::{DrawCommand, DrawList, ImageCommand, QuadCommand, TextCommand};
+pub use draw_list::{DrawCommand, DrawList, ImageCommand, QuadCommand, RenderLayer, TextCommand};
 pub use glyph_atlas::{
     GlyphBatch, atlas_entry_uv_coords, create_glyph_batches, glyph_to_instance, glyphs_to_instances,
 };

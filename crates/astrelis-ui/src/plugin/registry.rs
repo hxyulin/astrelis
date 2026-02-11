@@ -37,6 +37,9 @@ pub struct WidgetRenderContext<'a> {
     pub theme_colors: &'a ColorPalette,
     /// Text shaping pipeline (mutable for caching).
     pub text_pipeline: &'a mut TextPipeline,
+    /// Accumulated z_index from all parent containers.
+    /// Widgets should ADD their relative offset to this value.
+    pub parent_z_index: u16,
 }
 
 /// Overflow behavior for a widget (used by clipping system).

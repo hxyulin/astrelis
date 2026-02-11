@@ -179,7 +179,7 @@ pub fn render_dock_splitter(
             Vec2::new(sep_bounds.x, sep_bounds.y),
             Vec2::new(sep_bounds.width, sep_bounds.height),
             sep_color,
-            0,
+            ctx.parent_z_index,
         )
         .with_clip(ctx.clip_rect),
     ));
@@ -202,14 +202,14 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
         height: ctx.layout_size.y,
     };
 
-    // Tab bar background
+    // Tab bar background at tabs' depth
     let bar_bounds = tabs.tab_bar_bounds(&abs_layout);
     commands.push(DrawCommand::Quad(
         QuadCommand::filled(
             Vec2::new(bar_bounds.x, bar_bounds.y),
             Vec2::new(bar_bounds.width, bar_bounds.height),
             tabs.theme.tab_bar_color,
-            0,
+            ctx.parent_z_index,
         )
         .with_clip(ctx.clip_rect),
     ));
@@ -238,12 +238,12 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                     Vec2::new(tab_rect.width, tab_rect.height),
                     tab_color,
                     4.0,
-                    0,
+                    ctx.parent_z_index,
                 )
                 .with_clip(tab_clip),
             ));
 
-            // Tab label text
+            // Tab label text (one layer above background)
             if let Some(label) = tabs.tab_label(i) {
                 let request_id = ctx.text_pipeline.request_shape(
                     label.to_string(),
@@ -262,7 +262,7 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                             Vec2::new(text_x, text_y),
                             shaped,
                             tabs.theme.tab_text_color,
-                            1,
+                            ctx.parent_z_index.saturating_add(1),
                         )
                         .with_clip(tab_clip),
                     ));
@@ -278,12 +278,12 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                             Vec2::new(close_rect.width, close_rect.height),
                             Color::rgba(1.0, 1.0, 1.0, 0.1),
                             close_rect.width / 2.0,
-                            0,
+                            ctx.parent_z_index,
                         )
                         .with_clip(tab_clip),
                     ));
 
-                    // Render X for close button
+                    // Render X for close button (two layers above background)
                     let x_request = ctx.text_pipeline.request_shape(
                         "×".to_string(),
                         0,
@@ -302,7 +302,7 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                                 Vec2::new(x_x, x_y),
                                 x_shaped,
                                 tabs.theme.tab_text_color,
-                                2,
+                                ctx.parent_z_index.saturating_add(2),
                             )
                             .with_clip(tab_clip),
                         ));
@@ -320,7 +320,7 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                 Vec2::new(track.x, track.y),
                 Vec2::new(track.width, track.height),
                 tabs.theme.scrollbar_theme.track_color,
-                2,
+                ctx.parent_z_index.saturating_add(2),
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -333,7 +333,7 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                 Vec2::new(thumb.width, thumb.height),
                 thumb_color,
                 tabs.theme.scrollbar_theme.thumb_border_radius,
-                3,
+                ctx.parent_z_index.saturating_add(3),
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -358,8 +358,13 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                 let ax = arrow_row.x + 2.0;
                 let ay = arrow_row.y + (arrow_row.height - arrow_h) * 0.5;
                 commands.push(DrawCommand::Text(
-                    TextCommand::new(Vec2::new(ax, ay), shaped, arrow_color, 3)
-                        .with_clip(ctx.clip_rect),
+                    TextCommand::new(
+                        Vec2::new(ax, ay),
+                        shaped,
+                        arrow_color,
+                        ctx.parent_z_index.saturating_add(3),
+                    )
+                    .with_clip(ctx.clip_rect),
                 ));
             }
         }
@@ -379,8 +384,13 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                 let ax = arrow_row.x + arrow_row.width - arrow_w - 2.0;
                 let ay = arrow_row.y + (arrow_row.height - arrow_h) * 0.5;
                 commands.push(DrawCommand::Text(
-                    TextCommand::new(Vec2::new(ax, ay), shaped, arrow_color, 3)
-                        .with_clip(ctx.clip_rect),
+                    TextCommand::new(
+                        Vec2::new(ax, ay),
+                        shaped,
+                        arrow_color,
+                        ctx.parent_z_index.saturating_add(3),
+                    )
+                    .with_clip(ctx.clip_rect),
                 ));
             }
         }
@@ -394,7 +404,7 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
                 Vec2::new(indicator_bounds.x, indicator_bounds.y),
                 Vec2::new(indicator_bounds.width, indicator_bounds.height),
                 indicator_color,
-                3,
+                ctx.parent_z_index.saturating_add(3),
             )
             .with_clip(ctx.clip_rect),
         ));
@@ -420,8 +430,14 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
         let ghost_color = Color::from_rgba_u8(80, 100, 140, 180);
 
         commands.push(DrawCommand::Quad(
-            QuadCommand::rounded(ghost_pos, ghost_size, ghost_color, 4.0, 3)
-                .with_clip(ctx.clip_rect),
+            QuadCommand::rounded(
+                ghost_pos,
+                ghost_size,
+                ghost_color,
+                4.0,
+                ctx.parent_z_index.saturating_add(3),
+            )
+            .with_clip(ctx.clip_rect),
         ));
 
         // Ghost text
@@ -439,8 +455,13 @@ pub fn render_dock_tabs(widget: &dyn Any, ctx: &mut WidgetRenderContext<'_>) -> 
             let ghost_text_color = Color::from_rgba_u8(200, 200, 200, 180);
 
             commands.push(DrawCommand::Text(
-                TextCommand::new(Vec2::new(text_x, text_y), shaped, ghost_text_color, 4)
-                    .with_clip(ctx.clip_rect),
+                TextCommand::new(
+                    Vec2::new(text_x, text_y),
+                    shaped,
+                    ghost_text_color,
+                    ctx.parent_z_index.saturating_add(4),
+                )
+                .with_clip(ctx.clip_rect),
             ));
         }
     }
