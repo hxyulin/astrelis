@@ -12,6 +12,13 @@ use astrelis_core::math::Vec2;
 use astrelis_text::TextPipeline;
 use std::any::TypeId;
 
+/// Function type for widget rendering: takes the widget and render context, returns draw commands.
+type WidgetRenderFn =
+    for<'a> fn(&dyn std::any::Any, &mut WidgetRenderContext<'a>) -> Vec<DrawCommand>;
+
+/// Function type for widget measurement: takes the widget, available space, and optional font renderer.
+type WidgetMeasureFn = fn(&dyn std::any::Any, Vec2, Option<&astrelis_text::FontRenderer>) -> Vec2;
+
 /// How a tree traversal should proceed for a widget's children.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TraversalBehavior {
@@ -73,12 +80,11 @@ pub struct WidgetTypeDescriptor {
 
     /// Render the widget into draw commands.
     /// Arguments: (widget, render_context)
-    pub render:
-        Option<for<'a> fn(&dyn std::any::Any, &mut WidgetRenderContext<'a>) -> Vec<DrawCommand>>,
+    pub render: Option<WidgetRenderFn>,
 
     /// Measure intrinsic content size.
     /// Arguments: (widget, available_space, font_renderer)
-    pub measure: Option<fn(&dyn std::any::Any, Vec2, Option<&astrelis_text::FontRenderer>) -> Vec2>,
+    pub measure: Option<WidgetMeasureFn>,
 
     /// Determine tree traversal behavior for this widget.
     pub traversal: Option<fn(&dyn std::any::Any) -> TraversalBehavior>,
@@ -136,19 +142,13 @@ impl WidgetTypeDescriptor {
     }
 
     /// Set the render function.
-    pub fn with_render(
-        mut self,
-        f: for<'a> fn(&dyn std::any::Any, &mut WidgetRenderContext<'a>) -> Vec<DrawCommand>,
-    ) -> Self {
+    pub fn with_render(mut self, f: WidgetRenderFn) -> Self {
         self.render = Some(f);
         self
     }
 
     /// Set the measure function.
-    pub fn with_measure(
-        mut self,
-        f: fn(&dyn std::any::Any, Vec2, Option<&astrelis_text::FontRenderer>) -> Vec2,
-    ) -> Self {
+    pub fn with_measure(mut self, f: WidgetMeasureFn) -> Self {
         self.measure = Some(f);
         self
     }

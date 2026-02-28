@@ -343,37 +343,37 @@ impl App for FocusNavigationApp {
         // Handle keyboard navigation
         let mut focus_changed = false;
         events.dispatch(|event| {
-            if let Event::KeyInput(key) = event {
-                if key.state == astrelis_winit::event::ElementState::Pressed {
-                    match key.logical_key {
-                        Key::Named(NamedKey::Tab) => {
-                            // Check if Shift is pressed (for backward navigation)
-                            // For this demo, we'll just go forward
-                            self.focused_index = match self.focused_index {
-                                None => Some(0),
-                                Some(idx) => Some((idx + 1) % self.button_ids.len()),
-                            };
-                            focus_changed = true;
-                            println!(
-                                "  ⌨️  Focus moved to Button {}",
-                                self.focused_index.unwrap() + 1
-                            );
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(ref c) if c.as_str() == "f" || c.as_str() == "F" => {
-                            self.focused_index = Some(0);
-                            focus_changed = true;
-                            println!("  🎯 Focus set to Button 1");
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(ref c) if c.as_str() == "c" || c.as_str() == "C" => {
-                            self.focused_index = None;
-                            focus_changed = true;
-                            println!("  ❌ Focus cleared");
-                            return HandleStatus::consumed();
-                        }
-                        _ => {}
+            if let Event::KeyInput(key) = event
+                && key.state == astrelis_winit::event::ElementState::Pressed
+            {
+                match key.logical_key {
+                    Key::Named(NamedKey::Tab) => {
+                        // Check if Shift is pressed (for backward navigation)
+                        // For this demo, we'll just go forward
+                        self.focused_index = match self.focused_index {
+                            None => Some(0),
+                            Some(idx) => Some((idx + 1) % self.button_ids.len()),
+                        };
+                        focus_changed = true;
+                        println!(
+                            "  ⌨️  Focus moved to Button {}",
+                            self.focused_index.unwrap() + 1
+                        );
+                        return HandleStatus::consumed();
                     }
+                    Key::Character(ref c) if c.as_str() == "f" || c.as_str() == "F" => {
+                        self.focused_index = Some(0);
+                        focus_changed = true;
+                        println!("  🎯 Focus set to Button 1");
+                        return HandleStatus::consumed();
+                    }
+                    Key::Character(ref c) if c.as_str() == "c" || c.as_str() == "C" => {
+                        self.focused_index = None;
+                        focus_changed = true;
+                        println!("  ❌ Focus cleared");
+                        return HandleStatus::consumed();
+                    }
+                    _ => {}
                 }
             }
             HandleStatus::ignored()

@@ -182,7 +182,7 @@ impl App for DemoApp {
 
                     ui.separator();
                     ui.label(RichText::new("Stats").strong());
-                    ui.label(format!("FPS: ~60"));
+                    ui.label("FPS: ~60");
                 });
 
             // Central panel

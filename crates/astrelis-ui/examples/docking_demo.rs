@@ -587,16 +587,13 @@ impl App for DockingApp {
                     theme_changed = true;
                     return HandleStatus::consumed();
                 }
-                Event::KeyInput(key) => {
-                    if key.state == astrelis_winit::event::ElementState::Pressed {
-                        if let Key::Character(ref c) = key.logical_key {
-                            if c.as_str() == "t" || c.as_str() == "T" {
-                                self.is_dark = !self.is_dark;
-                                theme_changed = true;
-                                return HandleStatus::consumed();
-                            }
-                        }
-                    }
+                Event::KeyInput(key)
+                    if key.state == astrelis_winit::event::ElementState::Pressed
+                        && matches!(&key.logical_key, Key::Character(c) if c.as_str() == "t" || c.as_str() == "T") =>
+                {
+                    self.is_dark = !self.is_dark;
+                    theme_changed = true;
+                    return HandleStatus::consumed();
                 }
                 _ => {}
             }

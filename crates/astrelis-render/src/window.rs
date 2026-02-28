@@ -165,12 +165,6 @@ impl PendingReconfigure {
     }
 }
 
-/// Internal surface management for a window.
-struct WindowSurface {
-    surface: wgpu::Surface<'static>,
-    config: wgpu::SurfaceConfiguration,
-}
-
 /// Manages a wgpu [`Surface`](wgpu::Surface) and its configuration for a single window.
 ///
 /// Handles surface creation, reconfiguration on resize, and frame acquisition.
@@ -795,11 +789,3 @@ impl WindowBackend for RenderWindow {
         )
     }
 }
-
-// ============================================================================
-// Backwards Compatibility Aliases
-// ============================================================================
-
-/// Deprecated alias for [`RenderWindow`].
-#[deprecated(since = "0.2.0", note = "Use RenderWindow instead")]
-pub type RenderableWindow = RenderWindow;

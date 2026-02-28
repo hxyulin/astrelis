@@ -8,7 +8,7 @@
 //!
 //! # Automatic Integration
 //!
-//! The recommended usage is to attach the profiler to a [`RenderableWindow`](crate::RenderableWindow):
+//! The recommended usage is to attach the profiler to a [`RenderWindow`](crate::RenderWindow):
 //!
 //! ```ignore
 //! // At init:
@@ -21,9 +21,13 @@
 //!
 //! // Each frame — GPU profiling is fully automatic:
 //! let mut frame = window.begin_drawing();
-//! frame.clear_and_render(RenderTarget::Surface, Color::BLACK, |pass| {
+//! {
+//!     let mut pass = frame.render_pass()
+//!         .target(RenderTarget::Surface)
+//!         .clear_color(Color::BLACK)
+//!         .build();
 //!     // GPU scope "main_pass" is automatically active
-//! });
+//! }
 //! frame.finish(); // auto: resolve_queries -> submit -> end_frame
 //! ```
 //!
@@ -76,13 +80,13 @@ mod enabled {
     /// GPU frame profiler wrapping `wgpu_profiler::GpuProfiler`.
     ///
     /// All methods take `&self` using interior mutability (`Mutex`), making it
-    /// easy to share the profiler between `RenderableWindow` and `FrameContext`
+    /// easy to share the profiler between `RenderWindow` and `Frame`
     /// via `Arc<GpuFrameProfiler>`.
     ///
     /// Create one per application. The profiler is automatically driven each frame
-    /// when attached to a `RenderableWindow` via [`set_gpu_profiler`]:
-    /// - GPU scopes are created around render passes in `with_pass()` / `clear_and_render()`
-    /// - Queries are resolved and the frame is ended in `FrameContext::Drop`
+    /// when attached to a `RenderWindow` via [`set_gpu_profiler`]:
+    /// - GPU scopes are created around render passes
+    /// - Queries are resolved and the frame is ended in `Frame::Drop`
     ///
     /// For manual use:
     /// 1. Open GPU scopes with [`scope`](Self::scope) on command encoders or render passes.
@@ -184,7 +188,7 @@ mod enabled {
             // 2. GpuProfiler::scope() only needs &self (immutable borrow)
             // 3. The caller must drop the scope before calling resolve_queries/end_frame
             //    (which is guaranteed by the frame lifecycle: scopes live within render passes,
-            //    resolve/end happen in FrameContext::Drop after all passes are done)
+            //    resolve/end happen in Frame::Drop after all passes are done)
             let profiler_ptr = &*profiler as *const wgpu_profiler::GpuProfiler;
             let profiler_ref: &'a wgpu_profiler::GpuProfiler = unsafe { &*profiler_ptr };
             let scope = profiler_ref.scope(label, encoder_or_pass);

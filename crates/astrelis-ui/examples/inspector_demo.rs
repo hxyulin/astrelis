@@ -452,28 +452,28 @@ impl App for InspectorDemoApp {
 
         // Handle keyboard events through middleware system
         events.dispatch(|event| {
-            if let Event::KeyInput(key) = event {
-                if key.state == ElementState::Pressed {
-                    // Convert physical key to KeyCode
-                    if let PhysicalKey::Code(code) = key.physical_key {
-                        // Create middleware context for keybind handling
-                        let ctx = MiddlewareContext::new(
-                            self.ui.tree(),
-                            self.ui.core().events(),
-                            self.ui.core().widget_registry(),
-                            self.window.viewport(),
-                        )
-                        .with_delta_time(self.delta_time)
-                        .with_frame_number(self.frame_count);
+            if let Event::KeyInput(key) = event
+                && key.state == ElementState::Pressed
+            {
+                // Convert physical key to KeyCode
+                if let PhysicalKey::Code(code) = key.physical_key {
+                    // Create middleware context for keybind handling
+                    let ctx = MiddlewareContext::new(
+                        self.ui.tree(),
+                        self.ui.core().events(),
+                        self.ui.core().widget_registry(),
+                        self.window.viewport(),
+                    )
+                    .with_delta_time(self.delta_time)
+                    .with_frame_number(self.frame_count);
 
-                        // Let middlewares handle the key event
-                        let modifiers = astrelis_ui::Modifiers::NONE;
-                        if self
-                            .middlewares
-                            .handle_key_event(code, modifiers, true, &ctx)
-                        {
-                            return HandleStatus::consumed();
-                        }
+                    // Let middlewares handle the key event
+                    let modifiers = astrelis_ui::Modifiers::NONE;
+                    if self
+                        .middlewares
+                        .handle_key_event(code, modifiers, true, &ctx)
+                    {
+                        return HandleStatus::consumed();
                     }
                 }
             }
@@ -594,16 +594,16 @@ impl App for InspectorDemoApp {
         if self.middlewares.has_middlewares() {
             let now = Instant::now();
             if now.duration_since(self.last_metrics_log).as_secs_f32() >= 2.0 {
-                if let Some(inspector) = self.middlewares.get("inspector") {
-                    if inspector.is_enabled() {
-                        let is_frozen = self.middlewares.is_layout_frozen();
-                        tracing::info!(
-                            "Inspector (frame {}, frozen={}): {} middlewares active",
-                            self.frame_count,
-                            is_frozen,
-                            self.middlewares.middleware_count()
-                        );
-                    }
+                if let Some(inspector) = self.middlewares.get("inspector")
+                    && inspector.is_enabled()
+                {
+                    let is_frozen = self.middlewares.is_layout_frozen();
+                    tracing::info!(
+                        "Inspector (frame {}, frozen={}): {} middlewares active",
+                        self.frame_count,
+                        is_frozen,
+                        self.middlewares.middleware_count()
+                    );
                 }
                 self.last_metrics_log = now;
             }

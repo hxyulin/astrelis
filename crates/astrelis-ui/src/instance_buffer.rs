@@ -326,7 +326,7 @@ mod tests {
     #[test]
     fn test_instance_tracking() {
         // We can test the CPU-side logic without GPU
-        let instances = vec![
+        let instances = [
             TestInstance::new(0.0, 0.0, 1.0, 0.0, 0.0, 1.0),
             TestInstance::new(10.0, 10.0, 0.0, 1.0, 0.0, 1.0),
         ];

@@ -54,7 +54,7 @@ fn main() {
         .collect();
 
     // Wait for all tasks to complete
-    let results: Vec<_> = tasks.into_iter().map(|t| pollster::block_on(t)).collect();
+    let results: Vec<_> = tasks.into_iter().map(pollster::block_on).collect();
 
     let elapsed = start.elapsed();
     println!("\nAll tasks completed in {:?}", elapsed);
@@ -96,8 +96,7 @@ fn main() {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs()
-            % 2
-            == 0
+            .is_multiple_of(2)
         {
             Ok::<i32, &'static str>(100)
         } else {

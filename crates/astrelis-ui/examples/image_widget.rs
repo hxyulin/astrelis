@@ -15,10 +15,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 struct App {
-    context: Arc<GraphicsContext>,
+    _context: Arc<GraphicsContext>,
     windows: HashMap<WindowId, RenderWindow>,
     ui: UiSystem,
-    texture: ImageTexture,
+    _texture: ImageTexture,
 }
 
 fn main() {
@@ -58,10 +58,10 @@ fn main() {
         build_image_demo(&mut ui, texture.clone());
 
         Box::new(App {
-            context: graphics_ctx,
+            _context: graphics_ctx,
             windows,
             ui,
-            texture,
+            _texture: texture,
         })
     });
 }
@@ -80,7 +80,7 @@ fn create_checkerboard_texture(
         for x in 0..width {
             let cell_x = x / cell_size;
             let cell_y = y / cell_size;
-            let is_white = (cell_x + cell_y) % 2 == 0;
+            let is_white = (cell_x + cell_y).is_multiple_of(2);
 
             let idx = ((y * width + x) * 4) as usize;
             if is_white {

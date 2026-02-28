@@ -5,6 +5,34 @@ All notable changes to the Astrelis Game Engine will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-02-28
+
+### Removed (Breaking)
+
+- **`FrameContext` type alias** (`astrelis-render`) — Removed deprecated alias. Use `Frame` directly.
+- **`RenderableWindow` type alias** (`astrelis-render`) — Removed deprecated alias. Use `RenderWindow` directly.
+- **`clear_and_render` / `clear_and_render_with_depth`** (`astrelis-render`) — Removed deprecated methods. Use `frame.render_pass().clear_color().build()` builder pattern instead.
+- **`render_with_data_transform`** (`astrelis-render`) — Removed from `LineRenderer`, `PointRenderer`, `QuadRenderer`. Use `render_transformed` with `DataTransform::from_data_range()` instead.
+- **`DataRangeParams::new()`** (`astrelis-render`) — Removed constructor with too many arguments. Use struct literal syntax instead.
+- **`required_features_for_tier` / `required_limits_for_tier`** (`astrelis-render`) — Removed deprecated functions. Use the `RenderCapability` trait API instead (`BestBatchCapability2D`, etc.).
+- **`scroll_container_with` / `hsplit_with` / `vsplit_with` / `dock_tabs_with`** (`astrelis-ui`) — Removed deprecated plugin-handle builder methods. Use `scroll_container()`, `hsplit()`, `vsplit()`, `dock_tabs()` directly.
+
+### Changed (Breaking)
+
+- **`LineBreakConfig`** (`astrelis-text`) — Replaced `_uax14_reserved: ()` field with `#[non_exhaustive]` attribute. Struct literal construction without `..Default::default()` will no longer compile.
+
+### Fixed
+
+- Resolved ~40 clippy warnings across the workspace (dead code removal, type complexity, pattern cleanup)
+- Removed dead code: `WindowSurface` struct, `atomic_stats` method, unused methods in geometry crate
+- Fixed `needless_range_loop` warnings in chart data processing
+- Fixed `wildcard_in_or_patterns` in chart grid rendering
+- Added type aliases to reduce `type_complexity` warnings in plugin registry and application builder
+- Cleaned up all example files: removed unused `WindowBackend` imports, fixed dead struct fields
+- Updated all doc comments referencing removed deprecated APIs
+
+---
+
 ## [0.2.3] - 2026-02-11
 
 ### Fixed
@@ -1065,6 +1093,7 @@ let window_id = match window_manager.create_window(ctx, descriptor) {
 ```
 ---
 
+[0.2.4]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.4
 [0.2.3]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.3
 [0.2.2]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.2
 [0.2.1]: https://github.com/hxyulin/astrelis/releases/tag/v0.2.1

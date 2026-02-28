@@ -39,7 +39,7 @@ use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::{ElementState, Event, EventBatch, HandleStatus, Key, NamedKey},
-    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 use std::sync::Arc;
 use std::time::Instant;

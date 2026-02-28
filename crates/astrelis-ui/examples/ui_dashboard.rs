@@ -246,20 +246,16 @@ impl astrelis_winit::app::App for App {
 
         // Handle F12 key for inspector toggle
         events.dispatch(|event| {
-            if let Event::KeyInput(key) = event {
-                if key.state == astrelis_winit::event::ElementState::Pressed {
-                    match &key.logical_key {
-                        Key::Named(NamedKey::F12) => {
-                            self.inspector_enabled = !self.inspector_enabled;
-                            println!(
-                                "Inspector: {}",
-                                if self.inspector_enabled { "ON" } else { "OFF" }
-                            );
-                            return HandleStatus::consumed();
-                        }
-                        _ => {}
-                    }
-                }
+            if let Event::KeyInput(key) = event
+                && key.state == astrelis_winit::event::ElementState::Pressed
+                && matches!(&key.logical_key, Key::Named(NamedKey::F12))
+            {
+                self.inspector_enabled = !self.inspector_enabled;
+                println!(
+                    "Inspector: {}",
+                    if self.inspector_enabled { "ON" } else { "OFF" }
+                );
+                return HandleStatus::consumed();
             }
             HandleStatus::ignored()
         });

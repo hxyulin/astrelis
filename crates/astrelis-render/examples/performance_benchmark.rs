@@ -16,7 +16,7 @@ use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::{Event, EventBatch, HandleStatus, Key, NamedKey},
-    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -114,26 +114,26 @@ impl App for PerformanceBenchmark {
 
         // Handle keyboard input
         events.dispatch(|event| {
-            if let Event::KeyInput(key) = event {
-                if key.state == astrelis_winit::event::ElementState::Pressed {
-                    match &key.logical_key {
-                        Key::Named(NamedKey::Space) => {
-                            self.rendering = !self.rendering;
-                            println!("Rendering: {}", self.rendering);
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(c) if c == "+" || c == "=" => {
-                            self.object_count = (self.object_count + 500).min(50000);
-                            println!("Object count: {}", self.object_count);
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(c) if c == "-" => {
-                            self.object_count = self.object_count.saturating_sub(500).max(100);
-                            println!("Object count: {}", self.object_count);
-                            return HandleStatus::consumed();
-                        }
-                        _ => {}
+            if let Event::KeyInput(key) = event
+                && key.state == astrelis_winit::event::ElementState::Pressed
+            {
+                match &key.logical_key {
+                    Key::Named(NamedKey::Space) => {
+                        self.rendering = !self.rendering;
+                        println!("Rendering: {}", self.rendering);
+                        return HandleStatus::consumed();
                     }
+                    Key::Character(c) if c == "+" || c == "=" => {
+                        self.object_count = (self.object_count + 500).min(50000);
+                        println!("Object count: {}", self.object_count);
+                        return HandleStatus::consumed();
+                    }
+                    Key::Character(c) if c == "-" => {
+                        self.object_count = self.object_count.saturating_sub(500).max(100);
+                        println!("Object count: {}", self.object_count);
+                        return HandleStatus::consumed();
+                    }
+                    _ => {}
                 }
             }
             HandleStatus::ignored()

@@ -553,39 +553,39 @@ impl App for ThemeSwitcherApp {
 
         // Handle keyboard events for theme switching
         events.dispatch(|event| {
-            if let Event::KeyInput(key) = event {
-                if key.state == astrelis_winit::event::ElementState::Pressed {
-                    match key.logical_key {
-                        Key::Character(ref c) if c.as_str() == "t" || c.as_str() == "T" => {
-                            // Toggle between dark and light
-                            self.is_dark = !self.is_dark;
-                            self.current_theme = if self.is_dark {
-                                ThemeMode::Dark
-                            } else {
-                                ThemeMode::Light
-                            };
-                            theme_changed = true;
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(ref c) if c.as_str() == "1" => {
-                            self.current_theme = ThemeMode::Dark;
-                            self.is_dark = true;
-                            theme_changed = true;
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(ref c) if c.as_str() == "2" => {
-                            self.current_theme = ThemeMode::Light;
-                            self.is_dark = false;
-                            theme_changed = true;
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(ref c) if c.as_str() == "3" => {
-                            self.current_theme = ThemeMode::Custom;
-                            theme_changed = true;
-                            return HandleStatus::consumed();
-                        }
-                        _ => {}
+            if let Event::KeyInput(key) = event
+                && key.state == astrelis_winit::event::ElementState::Pressed
+            {
+                match key.logical_key {
+                    Key::Character(ref c) if c.as_str() == "t" || c.as_str() == "T" => {
+                        // Toggle between dark and light
+                        self.is_dark = !self.is_dark;
+                        self.current_theme = if self.is_dark {
+                            ThemeMode::Dark
+                        } else {
+                            ThemeMode::Light
+                        };
+                        theme_changed = true;
+                        return HandleStatus::consumed();
                     }
+                    Key::Character(ref c) if c.as_str() == "1" => {
+                        self.current_theme = ThemeMode::Dark;
+                        self.is_dark = true;
+                        theme_changed = true;
+                        return HandleStatus::consumed();
+                    }
+                    Key::Character(ref c) if c.as_str() == "2" => {
+                        self.current_theme = ThemeMode::Light;
+                        self.is_dark = false;
+                        theme_changed = true;
+                        return HandleStatus::consumed();
+                    }
+                    Key::Character(ref c) if c.as_str() == "3" => {
+                        self.current_theme = ThemeMode::Custom;
+                        theme_changed = true;
+                        return HandleStatus::consumed();
+                    }
+                    _ => {}
                 }
             }
             HandleStatus::ignored()

@@ -69,19 +69,9 @@ impl DirtyRanges {
         self.ranges.is_empty()
     }
 
-    /// Get the number of dirty ranges.
-    pub fn len(&self) -> usize {
-        self.ranges.len()
-    }
-
     /// Iterate over dirty ranges.
     pub fn iter(&self) -> impl Iterator<Item = &Range<usize>> {
         self.ranges.iter()
-    }
-
-    /// Get total number of dirty elements.
-    pub fn total_dirty_count(&self) -> usize {
-        self.ranges.iter().map(|r| r.end - r.start).sum()
     }
 }
 

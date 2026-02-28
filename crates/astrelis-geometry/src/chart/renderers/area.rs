@@ -5,7 +5,8 @@ use super::super::types::Chart;
 use super::line::SeriesGpuState;
 use astrelis_core::profiling::profile_scope;
 use astrelis_render::{
-    Color, GraphicsContext, LineRenderer, LineSegment, Quad, QuadRenderer, Viewport, wgpu,
+    Color, DataRangeParams, DataTransform, GraphicsContext, LineRenderer, LineSegment, Quad,
+    QuadRenderer, Viewport, wgpu,
 };
 use glam::Vec2;
 use std::sync::Arc;
@@ -212,36 +213,28 @@ impl GpuChartAreaRenderer {
         let (x_min, x_max) = chart.x_range();
         let (y_min, y_max) = chart.y_range();
 
+        let transform = DataTransform::from_data_range(
+            viewport,
+            DataRangeParams {
+                plot_x: plot_area.x,
+                plot_y: plot_area.y,
+                plot_width: plot_area.width,
+                plot_height: plot_area.height,
+                data_x_min: x_min,
+                data_x_max: x_max,
+                data_y_min: y_min,
+                data_y_max: y_max,
+            },
+        );
+
         // Render fill first (behind the line)
         if self.quad_renderer.quad_count() > 0 {
-            self.quad_renderer.render_with_data_transform(
-                pass,
-                viewport,
-                plot_area.x,
-                plot_area.y,
-                plot_area.width,
-                plot_area.height,
-                x_min,
-                x_max,
-                y_min,
-                y_max,
-            );
+            self.quad_renderer.render_transformed(pass, &transform);
         }
 
         // Render outline on top
         if self.line_renderer.segment_count() > 0 {
-            self.line_renderer.render_with_data_transform(
-                pass,
-                viewport,
-                plot_area.x,
-                plot_area.y,
-                plot_area.width,
-                plot_area.height,
-                x_min,
-                x_max,
-                y_min,
-                y_max,
-            );
+            self.line_renderer.render_transformed(pass, &transform);
         }
     }
 

@@ -44,31 +44,6 @@ pub struct DataRangeParams {
     pub data_y_max: f64,
 }
 
-impl DataRangeParams {
-    /// Create new data range parameters.
-    pub fn new(
-        plot_x: f32,
-        plot_y: f32,
-        plot_width: f32,
-        plot_height: f32,
-        data_x_min: f64,
-        data_x_max: f64,
-        data_y_min: f64,
-        data_y_max: f64,
-    ) -> Self {
-        Self {
-            plot_x,
-            plot_y,
-            plot_width,
-            plot_height,
-            data_x_min,
-            data_x_max,
-            data_y_min,
-            data_y_max,
-        }
-    }
-}
-
 /// High-level data-to-screen transform.
 ///
 /// Combines a viewport (for the projection matrix) with an optional data range
@@ -236,12 +211,16 @@ mod tests {
 
     #[test]
     fn test_data_range_transform() {
-        let params = DataRangeParams::new(
-            100.0, 50.0, // plot origin
-            600.0, 400.0, // plot size
-            0.0, 10.0, // data x range
-            0.0, 100.0, // data y range
-        );
+        let params = DataRangeParams {
+            plot_x: 100.0,
+            plot_y: 50.0,
+            plot_width: 600.0,
+            plot_height: 400.0,
+            data_x_min: 0.0,
+            data_x_max: 10.0,
+            data_y_min: 0.0,
+            data_y_max: 100.0,
+        };
         let transform = DataTransform::from_data_range(test_viewport(), params);
         let u = transform.uniform();
 

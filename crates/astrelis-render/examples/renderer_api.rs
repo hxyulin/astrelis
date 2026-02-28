@@ -15,13 +15,13 @@ use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 use std::sync::Arc;
 
 struct RendererApp {
-    context: Arc<GraphicsContext>,
-    renderer: Renderer,
+    _context: Arc<GraphicsContext>,
+    _renderer: Renderer,
     window: RenderWindow,
     window_id: WindowId,
     pipeline: wgpu::RenderPipeline,
@@ -260,8 +260,8 @@ fn main() {
         tracing::info!("Device: {:?}", renderer.context().info());
 
         Box::new(RendererApp {
-            context: graphics_ctx,
-            renderer,
+            _context: graphics_ctx,
+            _renderer: renderer,
             window,
             window_id,
             pipeline,

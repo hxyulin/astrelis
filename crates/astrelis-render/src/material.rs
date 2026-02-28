@@ -295,7 +295,7 @@ impl Material {
         let mut binding = 0u32;
 
         // Add uniform buffer binding if present
-        if self.uniform_buffer.is_some() {
+        if let Some(buf) = &self.uniform_buffer {
             layout_entries.push(wgpu::BindGroupLayoutEntry {
                 binding,
                 visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -309,7 +309,7 @@ impl Material {
 
             bind_entries.push(wgpu::BindGroupEntry {
                 binding,
-                resource: self.uniform_buffer.as_ref().unwrap().as_entire_binding(),
+                resource: buf.as_entire_binding(),
             });
 
             binding += 1;

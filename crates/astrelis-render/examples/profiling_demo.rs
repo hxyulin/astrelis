@@ -26,7 +26,7 @@ use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::EventBatch,
-    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 
 struct ProfilingDemo {
@@ -135,7 +135,7 @@ impl App for ProfilingDemo {
         }
 
         self.frame_count += 1;
-        if self.frame_count % 300 == 0 {
+        if self.frame_count.is_multiple_of(300) {
             tracing::info!("Frame {}", self.frame_count);
         }
     }

@@ -77,7 +77,7 @@ fn bench_text_sizes(c: &mut Criterion) {
 }
 
 fn bench_text_measurement(c: &mut Criterion) {
-    let (_context, mut renderer) = setup();
+    let (_context, renderer) = setup();
     let mut group = c.benchmark_group("text_measurement");
 
     let very_long_text = "Lorem ipsum dolor sit amet. ".repeat(10);

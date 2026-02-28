@@ -89,7 +89,7 @@ impl astrelis_winit::app::App for DemoApp {
     fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, time: &astrelis_winit::FrameTime) {
         self.frames = time.frame_count;
 
-        if self.frames % 120 == 0 {
+        if self.frames.is_multiple_of(120) {
             println!(
                 "Running smoothly... Frame {}, {:.1} FPS",
                 self.frames,

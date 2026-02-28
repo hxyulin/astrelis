@@ -311,35 +311,35 @@ impl App for CounterApp {
 
         // Handle keyboard events for theme toggle
         events.dispatch(|event| {
-            if let Event::KeyInput(key) = event {
-                if key.state == astrelis_winit::event::ElementState::Pressed {
-                    match &key.logical_key {
-                        Key::Character(c) if c == "t" || c == "T" => {
-                            self.is_dark = !self.is_dark;
-                            let new_theme = if self.is_dark {
-                                astrelis_ui::Theme::dark()
-                            } else {
-                                astrelis_ui::Theme::light()
-                            };
-                            tracing::info!(
-                                "Theme toggled to: {}",
-                                if self.is_dark { "Dark" } else { "Light" }
-                            );
-                            self.ui.set_theme(new_theme);
+            if let Event::KeyInput(key) = event
+                && key.state == astrelis_winit::event::ElementState::Pressed
+            {
+                match &key.logical_key {
+                    Key::Character(c) if c == "t" || c == "T" => {
+                        self.is_dark = !self.is_dark;
+                        let new_theme = if self.is_dark {
+                            astrelis_ui::Theme::dark()
+                        } else {
+                            astrelis_ui::Theme::light()
+                        };
+                        tracing::info!(
+                            "Theme toggled to: {}",
+                            if self.is_dark { "Dark" } else { "Light" }
+                        );
+                        self.ui.set_theme(new_theme);
 
-                            // Rebuild UI with new theme using logical size (matches viewport)
-                            let size = self.window.logical_size_f32();
-                            self.counter_text_id = build_counter_ui_with_callbacks(
-                                &mut self.ui,
-                                &self.state,
-                                size.width,
-                                size.height,
-                            );
+                        // Rebuild UI with new theme using logical size (matches viewport)
+                        let size = self.window.logical_size_f32();
+                        self.counter_text_id = build_counter_ui_with_callbacks(
+                            &mut self.ui,
+                            &self.state,
+                            size.width,
+                            size.height,
+                        );
 
-                            return HandleStatus::consumed();
-                        }
-                        _ => {}
+                        return HandleStatus::consumed();
                     }
+                    _ => {}
                 }
             }
             HandleStatus::ignored()

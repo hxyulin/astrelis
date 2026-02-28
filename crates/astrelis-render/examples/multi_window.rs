@@ -13,7 +13,7 @@ use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder}
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 

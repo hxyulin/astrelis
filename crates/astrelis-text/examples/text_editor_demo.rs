@@ -111,50 +111,50 @@ impl App for TextEditorDemo {
 
         // Handle keyboard input for editing
         events.dispatch(|event| {
-            if let Event::KeyInput(key) = event {
-                if key.state == astrelis_winit::event::ElementState::Pressed {
-                    match &key.logical_key {
-                        Key::Named(NamedKey::ArrowLeft) => {
-                            self.editor.move_cursor_left();
-                            return HandleStatus::consumed();
-                        }
-                        Key::Named(NamedKey::ArrowRight) => {
-                            self.editor.move_cursor_right();
-                            return HandleStatus::consumed();
-                        }
-                        Key::Named(NamedKey::Home) => {
-                            self.editor.move_cursor_start();
-                            return HandleStatus::consumed();
-                        }
-                        Key::Named(NamedKey::End) => {
-                            self.editor.move_cursor_end();
-                            return HandleStatus::consumed();
-                        }
-                        Key::Named(NamedKey::Backspace) => {
-                            self.editor.delete_char();
-                            return HandleStatus::consumed();
-                        }
-                        Key::Named(NamedKey::Delete) => {
-                            self.editor.delete_char_forward();
-                            return HandleStatus::consumed();
-                        }
-                        Key::Named(NamedKey::Enter) => {
-                            self.editor.insert_char('\n');
-                            return HandleStatus::consumed();
-                        }
-                        Key::Named(NamedKey::Space) => {
-                            self.editor.insert_char(' ');
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(c) => {
-                            // Insert all characters from the string
-                            for ch in c.chars() {
-                                self.editor.insert_char(ch);
-                            }
-                            return HandleStatus::consumed();
-                        }
-                        _ => {}
+            if let Event::KeyInput(key) = event
+                && key.state == astrelis_winit::event::ElementState::Pressed
+            {
+                match &key.logical_key {
+                    Key::Named(NamedKey::ArrowLeft) => {
+                        self.editor.move_cursor_left();
+                        return HandleStatus::consumed();
                     }
+                    Key::Named(NamedKey::ArrowRight) => {
+                        self.editor.move_cursor_right();
+                        return HandleStatus::consumed();
+                    }
+                    Key::Named(NamedKey::Home) => {
+                        self.editor.move_cursor_start();
+                        return HandleStatus::consumed();
+                    }
+                    Key::Named(NamedKey::End) => {
+                        self.editor.move_cursor_end();
+                        return HandleStatus::consumed();
+                    }
+                    Key::Named(NamedKey::Backspace) => {
+                        self.editor.delete_char();
+                        return HandleStatus::consumed();
+                    }
+                    Key::Named(NamedKey::Delete) => {
+                        self.editor.delete_char_forward();
+                        return HandleStatus::consumed();
+                    }
+                    Key::Named(NamedKey::Enter) => {
+                        self.editor.insert_char('\n');
+                        return HandleStatus::consumed();
+                    }
+                    Key::Named(NamedKey::Space) => {
+                        self.editor.insert_char(' ');
+                        return HandleStatus::consumed();
+                    }
+                    Key::Character(c) => {
+                        // Insert all characters from the string
+                        for ch in c.chars() {
+                            self.editor.insert_char(ch);
+                        }
+                        return HandleStatus::consumed();
+                    }
+                    _ => {}
                 }
             }
             HandleStatus::ignored()

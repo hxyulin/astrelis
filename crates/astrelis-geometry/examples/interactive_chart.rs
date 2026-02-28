@@ -22,12 +22,15 @@ use astrelis_geometry::chart::{
     AxisId, AxisOrientation, AxisPosition, ChartBuilder, InteractiveChartController,
     LegendPosition, Rect,
 };
-use astrelis_render::{Color, GraphicsContext, LineRenderer, RenderWindow, RenderWindowBuilder};
+use astrelis_render::{
+    Color, DataRangeParams, DataTransform, GraphicsContext, LineRenderer, RenderWindow,
+    RenderWindowBuilder,
+};
 use astrelis_winit::{
     FrameTime, WindowId,
     app::{App, AppCtx, run_app},
     event::{ElementState, Event, EventBatch, HandleStatus, Key, NamedKey},
-    window::{WindowBackend, WindowDescriptor, WinitPhysicalSize},
+    window::{WindowDescriptor, WinitPhysicalSize},
 };
 use glam::Vec2;
 use std::sync::Arc;
@@ -170,7 +173,7 @@ impl InteractiveChartApp {
             self.draw_axes(&plot_area);
         }
 
-        // Note: Line series are rendered separately using render_with_data_transform
+        // Note: Line series are rendered separately using render_transformed
         // which lets the GPU handle the coordinate transformation
     }
 
@@ -466,18 +469,20 @@ impl App for InteractiveChartApp {
                         (plot_area.height * scale) as u32,
                     );
 
-                    self.data_lines.render_with_data_transform(
-                        wgpu_pass,
+                    let transform = DataTransform::from_data_range(
                         viewport,
-                        plot_area.x,
-                        plot_area.y,
-                        plot_area.width,
-                        plot_area.height,
-                        x_min,
-                        x_max,
-                        y_min,
-                        y_max,
+                        DataRangeParams {
+                            plot_x: plot_area.x,
+                            plot_y: plot_area.y,
+                            plot_width: plot_area.width,
+                            plot_height: plot_area.height,
+                            data_x_min: x_min,
+                            data_x_max: x_max,
+                            data_y_min: y_min,
+                            data_y_max: y_max,
+                        },
                     );
+                    self.data_lines.render_transformed(wgpu_pass, &transform);
 
                     // Reset scissor rect to full viewport
                     let physical = viewport.size;

@@ -317,7 +317,7 @@ mod tests {
 
         assert!(time.should_fixed_update());
         let count = time.fixed_update_count();
-        assert!(count >= 1 && count <= 3); // Allow some tolerance
+        assert!((1..=3).contains(&count)); // Allow some tolerance
 
         // Consume one timestep
         time.consume_fixed_timestep();

@@ -7,6 +7,7 @@ use astrelis_core::alloc::{
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 struct EntityData {
     position: (f32, f32, f32),
     velocity: (f32, f32, f32),

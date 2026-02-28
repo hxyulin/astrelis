@@ -65,7 +65,7 @@ fn test_constraint_debug() {
 
 #[test]
 fn test_mixed_constraints() {
-    let constraints = vec![
+    let constraints = [
         Constraint::Px(100.0),
         Constraint::Percent(50.0),
         Constraint::Auto,

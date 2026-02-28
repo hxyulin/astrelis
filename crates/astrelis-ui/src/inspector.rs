@@ -1349,7 +1349,7 @@ mod tests {
 
     #[test]
     fn test_property_value_types() {
-        let float_val = PropertyValue::Float(3.14);
+        let float_val = PropertyValue::Float(3.15);
         let int_val = PropertyValue::Int(42);
         let bool_val = PropertyValue::Bool(true);
         let color_val = PropertyValue::Color(Color::RED);

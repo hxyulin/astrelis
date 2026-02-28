@@ -76,14 +76,6 @@ impl State {
         self.input.take()
     }
 
-    pub fn handle_platform_output(
-        &mut self,
-        _window: &RenderWindow,
-        _output: egui::PlatformOutput,
-    ) {
-        // TODO: Handle cursor changes, clipboard copies, opening links in browsers
-    }
-
     pub fn on_event(&mut self, window: &RenderWindow, event: &Event) -> EventResponse {
         profile_function!();
         match event {
