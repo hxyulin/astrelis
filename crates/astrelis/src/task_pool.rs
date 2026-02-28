@@ -173,7 +173,7 @@ mod tests {
 
         let tasks: Vec<_> = (0..10).map(|i| pool.spawn(async move { i * 2 })).collect();
 
-        let results: Vec<_> = tasks.into_iter().map(|t| pollster::block_on(t)).collect();
+        let results: Vec<_> = tasks.into_iter().map(pollster::block_on).collect();
 
         assert_eq!(results, vec![0, 2, 4, 6, 8, 10, 12, 14, 16, 18]);
     }

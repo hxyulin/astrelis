@@ -22,7 +22,7 @@ pub enum DepthConfig<'a> {
 pub enum RenderTarget<'a> {
     /// Render to the window surface.
     ///
-    /// The surface view is obtained from the FrameContext during render pass creation.
+    /// The surface view is obtained from the [`Frame`] during render pass creation.
     #[default]
     Surface,
 
@@ -35,11 +35,11 @@ pub enum RenderTarget<'a> {
     ///
     /// ```ignore
     /// let depth_view = frame.window_depth_view().expect("Window has depth");
-    /// frame.clear_and_render(
-    ///     RenderTarget::surface_with_depth_clear(&depth_view, 0.0),
-    ///     Color::BLACK,
-    ///     |pass| { /* rendering */ },
-    /// );
+    /// let mut pass = frame.render_pass()
+    ///     .target(RenderTarget::surface_with_depth_clear(&depth_view, 0.0))
+    ///     .clear_color(Color::BLACK)
+    ///     .build();
+    /// // ... rendering ...
     /// ```
     SurfaceWithDepth {
         /// The depth texture view to attach.

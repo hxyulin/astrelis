@@ -494,6 +494,24 @@ impl TextBounds {
     }
 }
 
+/// Parameters for generating line decoration quads.
+struct LineQuadParams {
+    /// Starting X position of the line.
+    x: f32,
+    /// Y position (center) of the line.
+    y: f32,
+    /// Total width of the line.
+    width: f32,
+    /// Line thickness in pixels.
+    thickness: f32,
+    /// Line color.
+    color: Color,
+    /// Line style (Solid, Dashed, Dotted, Wavy).
+    style: LineStyle,
+    /// Type of decoration quad (Underline or Strikethrough).
+    quad_type: DecorationQuadType,
+}
+
 /// Generate line quads for a given line style.
 ///
 /// This helper function generates the appropriate quads for different line styles:
@@ -501,27 +519,18 @@ impl TextBounds {
 /// - Dashed: Multiple rectangular quads with gaps
 /// - Dotted: Multiple small square quads
 /// - Wavy: Multiple rectangular quads forming a sine wave pattern
-///
-/// # Arguments
-///
-/// * `quads` - Output vector to append generated quads to
-/// * `x` - Starting X position of the line
-/// * `y` - Y position (center) of the line
-/// * `width` - Total width of the line
-/// * `thickness` - Line thickness in pixels
-/// * `color` - Line color
-/// * `style` - Line style (Solid, Dashed, Dotted, Wavy)
-/// * `quad_type` - Type of decoration quad (Underline or Strikethrough)
-fn generate_line_quads(
-    quads: &mut Vec<DecorationQuad>,
-    x: f32,
-    y: f32,
-    width: f32,
-    thickness: f32,
-    color: Color,
-    style: LineStyle,
-    quad_type: DecorationQuadType,
-) {
+fn generate_line_quads(quads: &mut Vec<DecorationQuad>, params: &LineQuadParams) {
+    let LineQuadParams {
+        x,
+        y,
+        width,
+        thickness,
+        color,
+        style,
+        quad_type,
+    } = params;
+    let (x, y, width, thickness, color, style, quad_type) =
+        (*x, *y, *width, *thickness, *color, *style, *quad_type);
     match style {
         LineStyle::Solid => {
             // Single solid quad
@@ -676,13 +685,15 @@ pub fn generate_decoration_quads(
 
         generate_line_quads(
             &mut quads,
-            x,
-            y,
-            width,
-            thickness,
-            ul_style.color,
-            ul_style.style,
-            DecorationQuadType::Underline { thickness },
+            &LineQuadParams {
+                x,
+                y,
+                width,
+                thickness,
+                color: ul_style.color,
+                style: ul_style.style,
+                quad_type: DecorationQuadType::Underline { thickness },
+            },
         );
     }
 
@@ -697,13 +708,15 @@ pub fn generate_decoration_quads(
 
         generate_line_quads(
             &mut quads,
-            x,
-            y,
-            width,
-            thickness,
-            st_style.color,
-            st_style.style,
-            DecorationQuadType::Strikethrough { thickness },
+            &LineQuadParams {
+                x,
+                y,
+                width,
+                thickness,
+                color: st_style.color,
+                style: st_style.style,
+                quad_type: DecorationQuadType::Strikethrough { thickness },
+            },
         );
     }
 

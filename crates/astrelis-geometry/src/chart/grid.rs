@@ -442,7 +442,7 @@ impl GridSpacing {
                 let subdivision_values: Vec<f64> = match subdivisions {
                     2 => vec![2.0, 5.0],
                     3 => vec![2.0, 4.0, 6.0, 8.0],
-                    5 | _ => vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+                    _ => vec![2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
                 };
 
                 for &mult in &subdivision_values {
@@ -657,7 +657,7 @@ mod tests {
         // Should have "nice" intervals
         for &pos in &major {
             // Should be at nice positions like 0, 20, 40, 60, 80, 100
-            assert!(pos >= 0.0 && pos <= 100.0);
+            assert!((0.0..=100.0).contains(&pos));
         }
     }
 

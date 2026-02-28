@@ -518,7 +518,6 @@ fn test_concurrent_reads() {
     let mut handles = vec![];
     for _ in 0..4 {
         let server = Arc::clone(&server);
-        let handle = handle;
         handles.push(thread::spawn(move || {
             for _ in 0..100 {
                 let server = server.lock().unwrap();
@@ -552,7 +551,7 @@ fn test_concurrent_loads() {
         handles.push(thread::spawn(move || {
             let handle: Handle<String> = {
                 let mut server = server.lock().unwrap();
-                server.load_sync(&format!("file{}.txt", i)).unwrap()
+                server.load_sync(format!("file{}.txt", i)).unwrap()
             };
 
             let server = server.lock().unwrap();
@@ -634,7 +633,7 @@ fn test_loader_error_handling() {
     let file_path = temp_dir.path().join("invalid.bin");
 
     // Create a file that's too small for the binary loader
-    std::fs::write(&file_path, &[1, 2]).unwrap();
+    std::fs::write(&file_path, [1, 2]).unwrap();
 
     let mut server = create_test_server(temp_dir.path());
     let result: Result<Handle<BinaryData>, _> = server.load_sync("invalid.bin");
@@ -676,7 +675,7 @@ fn test_storage_len() {
     let mut server = create_test_server(temp_dir.path());
 
     for i in 0..5 {
-        let _: Handle<String> = server.load_sync(&format!("file{}.txt", i)).unwrap();
+        let _: Handle<String> = server.load_sync(format!("file{}.txt", i)).unwrap();
     }
 
     let storage = server.assets::<String>().unwrap();
@@ -696,7 +695,7 @@ fn test_storage_iteration() {
     let mut server = create_test_server(temp_dir.path());
 
     for i in 0..3 {
-        let _: Handle<String> = server.load_sync(&format!("item{}.txt", i)).unwrap();
+        let _: Handle<String> = server.load_sync(format!("item{}.txt", i)).unwrap();
     }
 
     let storage = server.assets::<String>().unwrap();

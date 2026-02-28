@@ -15,6 +15,10 @@ use astrelis_winit::{
     window::{WindowDescriptor, WinitPhysicalSize},
 };
 
+/// Factory function type that creates an `App` from application context and engine.
+#[cfg(feature = "winit")]
+type AppFactory = Box<dyn FnOnce(&mut AppCtx, &Engine) -> Box<dyn App>>;
+
 /// Internal plugin group that wraps stored plugins
 struct StoredPlugins {
     plugins: std::cell::RefCell<Vec<Box<dyn PluginDyn>>>,
@@ -284,7 +288,7 @@ impl ApplicationBuilder {
             #[cfg(all(feature = "render", feature = "winit"))]
             window_descriptor: Option<WindowContextDescriptor>,
             create_window: bool,
-            factory: Box<dyn FnOnce(&mut AppCtx, &Engine) -> Box<dyn App>>,
+            factory: AppFactory,
         }
 
         // Store data in thread-local
@@ -314,7 +318,7 @@ impl ApplicationBuilder {
                 #[cfg(all(feature = "render", feature = "winit"))]
                 window_descriptor: Option<WindowContextDescriptor>,
                 create_window: bool,
-                factory: Box<dyn FnOnce(&mut AppCtx, &Engine) -> Box<dyn App>>,
+                factory: AppFactory,
             }
 
             let mut data = APP_BUILDER_DATA

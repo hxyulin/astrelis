@@ -15,7 +15,7 @@ use std::path::PathBuf;
 // Example asset type
 #[derive(Debug, Clone)]
 struct TextAsset {
-    content: String,
+    _content: String,
 }
 
 impl astrelis_assets::Asset for TextAsset {
@@ -25,7 +25,7 @@ impl astrelis_assets::Asset for TextAsset {
 }
 
 struct HotReloadDemo {
-    asset_server: AssetServer,
+    _asset_server: AssetServer,
     watched_asset: Option<Handle<TextAsset>>,
     reload_count: usize,
 }
@@ -50,7 +50,7 @@ impl HotReloadDemo {
         println!("═══════════════════════════════════════════════════════\n");
 
         Self {
-            asset_server,
+            _asset_server: asset_server,
             watched_asset: None,
             reload_count: 0,
         }
@@ -71,7 +71,7 @@ impl HotReloadDemo {
         // self.watched_asset = Some(self.asset_server.load("demo.txt"));
     }
 
-    fn check_reload_events(&mut self) {
+    fn _check_reload_events(&mut self) {
         // In a real implementation, this would check AssetEvent channel
         // For demonstration, we'll show the expected event flow
 

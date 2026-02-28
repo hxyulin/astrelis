@@ -1166,47 +1166,6 @@ impl<'a> UiBuilder<'a> {
         self.add(DockTabs::new())
     }
 
-    // ── Deprecated convenience methods (compile-time plugin proof) ──────
-
-    /// Create a scroll container widget (requires [`ScrollPlugin`](crate::scroll_plugin::ScrollPlugin)).
-    #[deprecated(note = "Use `scroll_container()` or `add(ScrollContainer::new())` instead")]
-    pub fn scroll_container_with(
-        &mut self,
-        _handle: crate::plugin::PluginHandle<crate::scroll_plugin::ScrollPlugin>,
-    ) -> ContainerNodeBuilder<'_, 'a, ScrollContainer> {
-        self.scroll_container()
-    }
-
-    /// Create a horizontal split (left/right panels), requiring [`DockingPlugin`](crate::widgets::docking::plugin::DockingPlugin).
-    #[cfg(feature = "docking")]
-    #[deprecated(note = "Use `hsplit()` or `add(DockSplitter::horizontal())` instead")]
-    pub fn hsplit_with(
-        &mut self,
-        _handle: crate::plugin::PluginHandle<crate::widgets::docking::plugin::DockingPlugin>,
-    ) -> DockSplitterNodeBuilder<'_, 'a> {
-        self.hsplit()
-    }
-
-    /// Create a vertical split (top/bottom panels), requiring [`DockingPlugin`](crate::widgets::docking::plugin::DockingPlugin).
-    #[cfg(feature = "docking")]
-    #[deprecated(note = "Use `vsplit()` or `add(DockSplitter::vertical())` instead")]
-    pub fn vsplit_with(
-        &mut self,
-        _handle: crate::plugin::PluginHandle<crate::widgets::docking::plugin::DockingPlugin>,
-    ) -> DockSplitterNodeBuilder<'_, 'a> {
-        self.vsplit()
-    }
-
-    /// Create a tabbed container, requiring [`DockingPlugin`](crate::widgets::docking::plugin::DockingPlugin).
-    #[cfg(feature = "docking")]
-    #[deprecated(note = "Use `dock_tabs()` or `add(DockTabs::new())` instead")]
-    pub fn dock_tabs_with(
-        &mut self,
-        _handle: crate::plugin::PluginHandle<crate::widgets::docking::plugin::DockingPlugin>,
-    ) -> DockTabsNodeBuilder<'_, 'a> {
-        self.dock_tabs()
-    }
-
     // ── Internal methods ────────────────────────────────────────────────
 
     /// Add a widget to the tree and return its node ID.

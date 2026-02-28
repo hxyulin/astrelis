@@ -167,8 +167,6 @@ fn create_depth_texture(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Note: These tests require a GPU device, so they're typically run
     // as integration tests or with a test harness that provides a device.
 }

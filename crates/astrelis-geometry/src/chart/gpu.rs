@@ -232,10 +232,6 @@ pub struct ChartGpuState {
     transform_bind_group: wgpu::BindGroup,
     /// Per-series GPU buffers
     series_buffers: Vec<SeriesGpuBuffers>,
-    /// Grid line buffer
-    grid_buffer: Option<wgpu::Buffer>,
-    /// Grid vertex count
-    grid_vertex_count: usize,
     /// Current transform data
     current_transform: ChartTransform,
     /// Version counter for tracking changes
@@ -287,8 +283,6 @@ impl ChartGpuState {
             transform_bind_group_layout,
             transform_bind_group,
             series_buffers: Vec::new(),
-            grid_buffer: None,
-            grid_vertex_count: 0,
             current_transform: ChartTransform::default(),
             version: 0,
         }

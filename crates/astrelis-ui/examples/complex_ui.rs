@@ -40,7 +40,7 @@ impl Default for AppStats {
     fn default() -> Self {
         Self {
             active_users: 1247,
-            total_revenue: 45678.90,
+            total_revenue: 45678.9,
             tasks_completed: 328,
             success_rate: 94.5,
         }

@@ -15,7 +15,7 @@ use astrelis_render::{
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    window::{Window, WindowBackend, WindowDescriptor, WinitPhysicalSize},
+    window::{Window, WindowDescriptor, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -143,7 +143,7 @@ struct App {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     vertex_buffer: wgpu::Buffer,
-    uniform_buffer: wgpu::Buffer,
+    _uniform_buffer: wgpu::Buffer,
     sprite_sheet: SpriteSheet,
     animation: SpriteAnimation,
     last_update: Instant,
@@ -363,7 +363,7 @@ fn main() {
             pipeline,
             bind_group,
             vertex_buffer,
-            uniform_buffer,
+            _uniform_buffer: uniform_buffer,
             sprite_sheet,
             animation,
             last_update: Instant::now(),

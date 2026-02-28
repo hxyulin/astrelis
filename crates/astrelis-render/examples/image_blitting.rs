@@ -17,7 +17,7 @@ use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder}
 use astrelis_winit::{
     WindowId,
     app::run_app,
-    window::{Window, WindowBackend, WindowDescriptor, WinitPhysicalSize},
+    window::{Window, WindowDescriptor, WinitPhysicalSize},
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -112,37 +112,35 @@ impl ImageBuffer {
     }
 
     /// Draw a filled rectangle.
-    fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, r: u8, g: u8, b: u8, a: u8) {
+    fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: [u8; 4]) {
         for dy in 0..h {
             for dx in 0..w {
-                self.set_pixel(x + dx, y + dy, r, g, b, a);
+                self.set_pixel(x + dx, y + dy, color[0], color[1], color[2], color[3]);
             }
         }
     }
 
     /// Draw a circle using midpoint algorithm.
-    fn fill_circle(&mut self, cx: i32, cy: i32, radius: i32, r: u8, g: u8, b: u8, a: u8) {
+    fn fill_circle(&mut self, cx: i32, cy: i32, radius: i32, color: [u8; 4]) {
         for y in (cy - radius)..=(cy + radius) {
             for x in (cx - radius)..=(cx + radius) {
                 let dx = x - cx;
                 let dy = y - cy;
-                if dx * dx + dy * dy <= radius * radius {
-                    if x >= 0 && y >= 0 {
-                        self.set_pixel(x as u32, y as u32, r, g, b, a);
-                    }
+                if dx * dx + dy * dy <= radius * radius && x >= 0 && y >= 0 {
+                    self.set_pixel(x as u32, y as u32, color[0], color[1], color[2], color[3]);
                 }
             }
         }
     }
 
     /// Draw a horizontal gradient.
-    fn gradient_h(&mut self, y: u32, h: u32, r1: u8, g1: u8, b1: u8, r2: u8, g2: u8, b2: u8) {
+    fn gradient_h(&mut self, y: u32, h: u32, from: [u8; 3], to: [u8; 3]) {
         for dy in 0..h {
             for x in 0..self.width {
                 let t = x as f32 / self.width as f32;
-                let r = (r1 as f32 * (1.0 - t) + r2 as f32 * t) as u8;
-                let g = (g1 as f32 * (1.0 - t) + g2 as f32 * t) as u8;
-                let b = (b1 as f32 * (1.0 - t) + b2 as f32 * t) as u8;
+                let r = (from[0] as f32 * (1.0 - t) + to[0] as f32 * t) as u8;
+                let g = (from[1] as f32 * (1.0 - t) + to[1] as f32 * t) as u8;
+                let b = (from[2] as f32 * (1.0 - t) + to[2] as f32 * t) as u8;
                 self.set_pixel(x, y + dy, r, g, b, 255);
             }
         }
@@ -153,11 +151,11 @@ struct App {
     context: Arc<GraphicsContext>,
     windows: HashMap<WindowId, RenderWindow>,
     pipeline: wgpu::RenderPipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
+    _bind_group_layout: wgpu::BindGroupLayout,
     vertex_buffer: wgpu::Buffer,
     texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
-    uniform_buffer: wgpu::Buffer,
+    _uniform_buffer: wgpu::Buffer,
     image_buffer: ImageBuffer,
     start_time: Instant,
 }
@@ -413,11 +411,11 @@ fn main() {
             context: graphics_ctx,
             windows,
             pipeline,
-            bind_group_layout,
+            _bind_group_layout: bind_group_layout,
             vertex_buffer,
             texture,
             bind_group,
-            uniform_buffer,
+            _uniform_buffer: uniform_buffer,
             image_buffer,
             start_time: Instant::now(),
         })
@@ -439,7 +437,8 @@ impl astrelis_winit::app::App for App {
         let phase = (time * 0.5).sin() * 0.5 + 0.5;
         let r1 = (50.0 + phase * 50.0) as u8;
         let b1 = (80.0 + (1.0 - phase) * 50.0) as u8;
-        self.image_buffer.gradient_h(0, 256, r1, 40, b1, 40, r1, b1);
+        self.image_buffer
+            .gradient_h(0, 256, [r1, 40, b1], [40, r1, b1]);
 
         // Draw bouncing circles
         for i in 0..5 {
@@ -449,7 +448,7 @@ impl astrelis_winit::app::App for App {
             let hue = (time * 0.5 + offset) % 1.0;
             let (r, g, b) = hsv_to_rgb(hue, 0.8, 1.0);
             self.image_buffer
-                .fill_circle(x as i32, y as i32, 20, r, g, b, 255);
+                .fill_circle(x as i32, y as i32, 20, [r, g, b, 255]);
         }
 
         // Draw animated rectangles
@@ -459,7 +458,7 @@ impl astrelis_winit::app::App for App {
             let w = 30 + (time.sin() * 10.0) as u32;
             let h = 20;
             self.image_buffer
-                .fill_rect(x.saturating_sub(w / 2), y, w, h, 255, 255, 255, 200);
+                .fill_rect(x.saturating_sub(w / 2), y, w, h, [255, 255, 255, 200]);
         }
 
         // Upload to GPU (this is the "blit" operation)

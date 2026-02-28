@@ -89,6 +89,7 @@ impl TextWrap {
 ///     .with_hyphen_breaks(true);
 /// ```
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct LineBreakConfig {
     /// The wrapping mode to use.
     pub wrap: TextWrap,
@@ -96,10 +97,6 @@ pub struct LineBreakConfig {
     /// Whether to allow breaks at hyphens (e.g., "self-aware" can break at "-").
     /// Default: true
     pub break_at_hyphens: bool,
-
-    /// Reserved for future UAX#14 Unicode line breaking customization.
-    /// This field is intentionally private and zero-sized.
-    _uax14_reserved: (),
 }
 
 impl LineBreakConfig {
@@ -120,7 +117,6 @@ impl LineBreakConfig {
         Self {
             wrap,
             break_at_hyphens: true,
-            _uax14_reserved: (),
         }
     }
 

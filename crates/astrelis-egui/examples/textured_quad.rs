@@ -254,7 +254,7 @@ fn main() {
             .device()
             .create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Vertex Buffer"),
-                size: (vertices.len() * std::mem::size_of::<f32>()) as u64,
+                size: std::mem::size_of_val(vertices) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });

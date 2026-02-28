@@ -355,42 +355,6 @@ impl QuadRenderer {
         self.render_with_uniform(pass, transform.uniform());
     }
 
-    /// Render quads with a data-to-screen transformation.
-    ///
-    /// **Deprecated:** Use [`render_transformed`](Self::render_transformed) with a
-    /// [`DataTransform`] instead for a cleaner API.
-    ///
-    /// This is the fast path for charts: data doesn't change on pan/zoom,
-    /// only the transform does.
-    pub fn render_with_data_transform(
-        &self,
-        pass: &mut wgpu::RenderPass,
-        viewport: Viewport,
-        plot_x: f32,
-        plot_y: f32,
-        plot_width: f32,
-        plot_height: f32,
-        data_x_min: f64,
-        data_x_max: f64,
-        data_y_min: f64,
-        data_y_max: f64,
-    ) {
-        let transform = DataTransform::from_data_range(
-            viewport,
-            crate::transform::DataRangeParams::new(
-                plot_x,
-                plot_y,
-                plot_width,
-                plot_height,
-                data_x_min,
-                data_x_max,
-                data_y_min,
-                data_y_max,
-            ),
-        );
-        self.render_transformed(pass, &transform);
-    }
-
     /// Render with a specific transform uniform.
     fn render_with_uniform(&self, pass: &mut wgpu::RenderPass, transform: &TransformUniform) {
         profile_scope!("quad_renderer_render");

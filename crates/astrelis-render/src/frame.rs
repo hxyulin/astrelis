@@ -259,11 +259,6 @@ impl<'w> Frame<'w> {
         self.stats.to_frame_stats()
     }
 
-    /// Get the atomic stats for direct access (used by RenderPass).
-    pub(crate) fn atomic_stats(&self) -> &Arc<AtomicFrameStats> {
-        &self.stats
-    }
-
     /// Get the GPU profiler if attached.
     pub fn gpu_profiler(&self) -> Option<&GpuFrameProfiler> {
         self.gpu_profiler.as_deref()
@@ -339,7 +334,7 @@ impl<'w> Frame<'w> {
         }
 
         // Present surface
-        if let Some(surface) = self.surface.as_ref() {
+        if let Some(_surface) = self.surface.as_ref() {
             profile_scope!("present_surface");
             // Note: We can't take() the surface since self is borrowed, but present
             // doesn't consume it - it just signals we're done with this frame
@@ -351,78 +346,6 @@ impl<'w> Frame<'w> {
         {
             tracing::warn!("GPU profiler end_frame error: {e:?}");
         }
-    }
-
-    // =========================================================================
-    // Backwards Compatibility Methods
-    // =========================================================================
-
-    /// Convenience method to clear to a color and execute rendering commands.
-    ///
-    /// This is the most common pattern - clear the surface and render.
-    ///
-    /// # Deprecated
-    ///
-    /// Prefer using the builder pattern:
-    /// ```ignore
-    /// let mut pass = frame.render_pass()
-    ///     .clear_color(Color::BLACK)
-    ///     .build();
-    /// // render
-    /// ```
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use frame.render_pass().clear_color().build() instead"
-    )]
-    pub fn clear_and_render<F>(&self, target: RenderTarget<'_>, clear_color: Color, f: F)
-    where
-        F: FnOnce(&mut RenderPass<'_>),
-    {
-        profile_scope!("clear_and_render");
-        let mut pass = self
-            .render_pass()
-            .target(target)
-            .clear_color(clear_color)
-            .label("main_pass")
-            .build();
-        f(&mut pass);
-    }
-
-    /// Clear the target and render with depth testing enabled.
-    ///
-    /// # Deprecated
-    ///
-    /// Prefer using the builder pattern:
-    /// ```ignore
-    /// let mut pass = frame.render_pass()
-    ///     .clear_color(Color::BLACK)
-    ///     .clear_depth(0.0)
-    ///     .build();
-    /// ```
-    #[deprecated(
-        since = "0.2.0",
-        note = "Use frame.render_pass().clear_color().clear_depth().build() instead"
-    )]
-    pub fn clear_and_render_with_depth<'a, F>(
-        &'a self,
-        target: RenderTarget<'a>,
-        clear_color: Color,
-        depth_view: &'a wgpu::TextureView,
-        depth_clear_value: f32,
-        f: F,
-    ) where
-        F: FnOnce(&mut RenderPass<'a>),
-    {
-        profile_scope!("clear_and_render_with_depth");
-        let mut pass = self
-            .render_pass()
-            .target(target)
-            .clear_color(clear_color)
-            .depth_attachment(depth_view)
-            .clear_depth(depth_clear_value)
-            .label("main_pass_with_depth")
-            .build();
-        f(&mut pass);
     }
 }
 
@@ -1051,11 +974,3 @@ impl Default for DepthClearOp {
         DepthClearOp::Clear(1.0)
     }
 }
-
-// ============================================================================
-// Legacy Compatibility
-// ============================================================================
-
-/// Deprecated alias for backwards compatibility.
-#[deprecated(since = "0.2.0", note = "Use Frame instead")]
-pub type FrameContext = Frame<'static>;

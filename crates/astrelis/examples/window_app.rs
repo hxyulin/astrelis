@@ -8,14 +8,13 @@
 //! Run with: cargo run -p astrelis --example window_app
 
 use astrelis::prelude::*;
-use astrelis::render::{RenderTarget, RenderableWindow, WindowContextDescriptor};
-use astrelis::winit::window::WindowBackend;
+use astrelis::render::RenderWindow;
 use std::sync::Arc;
 
 struct WindowApp {
     #[allow(dead_code)]
     engine: Engine,
-    renderable: Option<RenderableWindow>,
+    renderable: Option<RenderWindow>,
 }
 
 impl App for WindowApp {
@@ -40,17 +39,20 @@ impl App for WindowApp {
             }
         });
 
-        // Begin drawing
-        let mut frame = renderable.begin_drawing();
+        // Begin frame
+        let Some(frame) = renderable.begin_frame() else {
+            return; // Surface not available
+        };
 
-        // Clear with automatic scoping (no manual {} block needed)
-        frame.clear_and_render(
-            RenderTarget::Surface,
-            Color::rgb(0.1, 0.1, 0.15), // Dark blue-gray
-            |_pass| {
-                // In a real app, you would draw here
-            },
-        );
+        // Clear with render pass builder
+        {
+            let _pass = frame
+                .render_pass()
+                .clear_color(Color::rgb(0.1, 0.1, 0.15)) // Dark blue-gray
+                .label("main_pass")
+                .build();
+            // In a real app, you would draw here
+        }
 
         // Frame is automatically submitted when dropped
     }
@@ -62,7 +64,7 @@ fn main() {
     println!();
     println!("This example demonstrates:");
     println!("  - Creating an Engine with RenderPlugin");
-    println!("  - Using RenderableWindow for window rendering");
+    println!("  - Using RenderWindow for window rendering");
     println!("  - Handling window events (resize, close)");
     println!("  - Rendering a simple clear pass");
     println!();
@@ -86,12 +88,8 @@ fn main() {
         let graphics = engine.get::<Arc<GraphicsContext>>().unwrap();
 
         // Create a renderable window
-        let renderable = RenderableWindow::new_with_descriptor(
-            window,
-            graphics.clone(),
-            WindowContextDescriptor::default(),
-        )
-        .expect("Failed to create renderable window");
+        let renderable = RenderWindow::new(window, graphics.clone())
+            .expect("Failed to create renderable window");
 
         Box::new(WindowApp {
             engine,

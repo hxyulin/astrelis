@@ -39,47 +39,6 @@ use crate::features::GpuFeatures;
 /// Maximum number of textures in the bindless binding array (Tier 3).
 const BINDLESS_MAX_TEXTURES: u32 = 256;
 
-/// Returns the GPU features required by the given render tier.
-///
-/// **Deprecated:** Prefer using the capability API instead:
-/// - [`DirectBatchCapability2D`], [`IndirectBatchCapability2D`], [`BindlessBatchCapability2D`]
-/// - Or [`BestBatchCapability2D`] for auto-detection with graceful degradation
-#[deprecated(
-    since = "0.2.0",
-    note = "Use the RenderCapability trait instead (e.g., BestBatchCapability2D, BindlessBatchCapability2D)"
-)]
-pub fn required_features_for_tier(tier: RenderTier) -> GpuFeatures {
-    match tier {
-        RenderTier::Direct => GpuFeatures::empty(),
-        RenderTier::Indirect => GpuFeatures::INDIRECT_FIRST_INSTANCE,
-        RenderTier::Bindless => {
-            GpuFeatures::INDIRECT_FIRST_INSTANCE
-                | GpuFeatures::TEXTURE_BINDING_ARRAY
-                | GpuFeatures::PARTIALLY_BOUND_BINDING_ARRAY
-                | GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING
-        }
-    }
-}
-
-/// Returns device limits that must be raised for the given render tier.
-///
-/// Merges the returned limits with your existing limits using [`wgpu::Limits`] field
-/// assignment before passing to [`crate::GraphicsContextDescriptor::limits()`].
-///
-/// **Deprecated:** Prefer using the capability API instead.
-#[deprecated(
-    since = "0.2.0",
-    note = "Use the RenderCapability trait instead (e.g., BestBatchCapability2D, BindlessBatchCapability2D)"
-)]
-pub fn required_limits_for_tier(tier: RenderTier) -> wgpu::Limits {
-    let mut limits = wgpu::Limits::default();
-    if tier == RenderTier::Bindless {
-        // The bindless renderer creates a binding array of up to 256 textures.
-        limits.max_binding_array_elements_per_shader_stage = BINDLESS_MAX_TEXTURES;
-    }
-    limits
-}
-
 /// Detect the highest supported render tier for the given context.
 pub fn detect_render_tier(context: &GraphicsContext) -> RenderTier {
     let features = context.gpu_features();

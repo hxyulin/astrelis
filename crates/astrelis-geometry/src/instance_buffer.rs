@@ -43,27 +43,6 @@ impl<T: Pod> InstanceBuffer<T> {
         &self.buffer
     }
 
-    /// Get the current instance data.
-    pub fn instances(&self) -> &[T] {
-        &self.instances
-    }
-
-    /// Get the number of instances.
-    pub fn len(&self) -> usize {
-        self.instances.len()
-    }
-
-    /// Check if the buffer is empty.
-    pub fn is_empty(&self) -> bool {
-        self.instances.is_empty()
-    }
-
-    /// Clear all instances.
-    pub fn clear(&mut self) {
-        self.instances.clear();
-        self.dirty_ranges.clear();
-    }
-
     /// Set instances, replacing all existing data.
     pub fn set_instances(&mut self, device: &wgpu::Device, instances: Vec<T>) {
         let new_len = instances.len();
@@ -77,19 +56,6 @@ impl<T: Pod> InstanceBuffer<T> {
         if !self.instances.is_empty() {
             self.dirty_ranges.mark_dirty(0, self.instances.len());
         }
-    }
-
-    /// Append instances to the buffer.
-    pub fn append(&mut self, device: &wgpu::Device, new_instances: &[T]) {
-        let start_idx = self.instances.len();
-        let new_len = start_idx + new_instances.len();
-
-        if new_len > self.capacity {
-            self.reallocate(device, new_len.next_power_of_two());
-        }
-
-        self.instances.extend_from_slice(new_instances);
-        self.dirty_ranges.mark_dirty(start_idx, new_len);
     }
 
     /// Upload all dirty ranges to the GPU.

@@ -150,6 +150,7 @@ impl UntypedHandle {
     /// This creates a handle with the given index and generation, using
     /// a dummy type ID. Should only be used in tests.
     #[cfg(test)]
+    #[allow(dead_code)] // Used by other modules' tests (e.g., hot_reload)
     pub(crate) fn test_handle(index: u32, generation: u32) -> Self {
         Self {
             id: HandleId::new(IndexSlot::new(index, generation), TypeId::of::<()>()),
@@ -208,6 +209,7 @@ pub struct StrongHandle<T: Asset> {
 
 impl<T: Asset> StrongHandle<T> {
     /// Create a new strong handle.
+    #[cfg(test)]
     pub(crate) fn new(handle: Handle<T>, refcount: Arc<AtomicU32>) -> Self {
         // Use Acquire ordering to ensure we see any previous modifications
         // to data associated with this handle before incrementing.

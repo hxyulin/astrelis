@@ -221,7 +221,7 @@ impl App for TextEffectsDemo {
         y += 50.0;
 
         // Draw effects with descriptions
-        let mut text_buffers = vec![
+        let mut text_buffers = [
             shadow_buffer,
             blurred_buffer,
             outline_buffer,

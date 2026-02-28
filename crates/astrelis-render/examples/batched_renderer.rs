@@ -29,7 +29,7 @@ use astrelis_render::{
 };
 use astrelis_winit::WindowId;
 use astrelis_winit::app::run_app;
-use astrelis_winit::window::{WindowBackend, WindowDescriptor, WinitPhysicalSize};
+use astrelis_winit::window::{WindowDescriptor, WinitPhysicalSize};
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
@@ -254,21 +254,21 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (f32, f32, f32) {
 fn parse_tier() -> Option<RenderTier> {
     let args: Vec<String> = std::env::args().collect();
     for (i, arg) in args.iter().enumerate() {
-        if arg == "--tier" {
-            if let Some(value) = args.get(i + 1) {
-                return match value.as_str() {
-                    "1" | "direct" => Some(RenderTier::Direct),
-                    "2" | "indirect" => Some(RenderTier::Indirect),
-                    "3" | "bindless" => Some(RenderTier::Bindless),
-                    "auto" => None,
-                    other => {
-                        eprintln!(
-                            "Unknown tier '{other}'. Options: 1|direct, 2|indirect, 3|bindless, auto"
-                        );
-                        std::process::exit(1);
-                    }
-                };
-            }
+        if arg == "--tier"
+            && let Some(value) = args.get(i + 1)
+        {
+            return match value.as_str() {
+                "1" | "direct" => Some(RenderTier::Direct),
+                "2" | "indirect" => Some(RenderTier::Indirect),
+                "3" | "bindless" => Some(RenderTier::Bindless),
+                "auto" => None,
+                other => {
+                    eprintln!(
+                        "Unknown tier '{other}'. Options: 1|direct, 2|indirect, 3|bindless, auto"
+                    );
+                    std::process::exit(1);
+                }
+            };
         }
     }
     // Default: auto-detect
@@ -412,7 +412,7 @@ impl astrelis_winit::app::App for App {
         self.renderer.prepare(&batch);
 
         let stats = self.renderer.stats();
-        if self.frame_count % 120 == 0 {
+        if self.frame_count.is_multiple_of(120) {
             tracing::info!(
                 "Frame {}: {} instances ({} opaque, {} transparent), {} draw calls",
                 self.frame_count,

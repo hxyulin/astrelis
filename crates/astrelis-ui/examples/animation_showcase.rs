@@ -382,32 +382,32 @@ impl App for AnimationShowcaseApp {
 
         // Handle keyboard events
         events.dispatch(|event| {
-            if let Event::KeyInput(key) = event {
-                if key.state == astrelis_winit::event::ElementState::Pressed {
-                    match key.logical_key {
-                        Key::Named(NamedKey::Space) => {
-                            self.is_animating = !self.is_animating;
-                            let status = if self.is_animating {
-                                "STARTED"
-                            } else {
-                                "PAUSED"
-                            };
-                            println!(
-                                "  ▶️  Animation {} (time: {:.2}s)",
-                                status, self.animation_time
-                            );
-                            tracing::info!("Animation {}", status);
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(ref c) if c.as_str() == "r" || c.as_str() == "R" => {
-                            self.animation_time = 0.0;
-                            self.is_animating = false;
-                            println!("  🔄 Animation RESET");
-                            tracing::info!("Animation reset");
-                            return HandleStatus::consumed();
-                        }
-                        _ => {}
+            if let Event::KeyInput(key) = event
+                && key.state == astrelis_winit::event::ElementState::Pressed
+            {
+                match key.logical_key {
+                    Key::Named(NamedKey::Space) => {
+                        self.is_animating = !self.is_animating;
+                        let status = if self.is_animating {
+                            "STARTED"
+                        } else {
+                            "PAUSED"
+                        };
+                        println!(
+                            "  ▶️  Animation {} (time: {:.2}s)",
+                            status, self.animation_time
+                        );
+                        tracing::info!("Animation {}", status);
+                        return HandleStatus::consumed();
                     }
+                    Key::Character(ref c) if c.as_str() == "r" || c.as_str() == "R" => {
+                        self.animation_time = 0.0;
+                        self.is_animating = false;
+                        println!("  🔄 Animation RESET");
+                        tracing::info!("Animation reset");
+                        return HandleStatus::consumed();
+                    }
+                    _ => {}
                 }
             }
             HandleStatus::ignored()

@@ -29,7 +29,7 @@
 //!
 //! ### Option Types
 //! - **Optional resources** return `Option<&T>` for possibly-missing values
-//!   - Example: `WindowManager::get_window(id)` returns `Option<&RenderableWindow>`
+//!   - Example: `WindowManager::get_window(id)` returns `Option<&RenderWindow>`
 //! - **Hit testing** returns `Option<T>` for no-hit scenarios
 //!   - Example: `hit_test(point)` returns `Option<WidgetId>`
 //!

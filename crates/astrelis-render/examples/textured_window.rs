@@ -9,11 +9,7 @@
 
 use astrelis_core::logging;
 use astrelis_render::{Color, GraphicsContext, RenderWindow, RenderWindowBuilder};
-use astrelis_winit::{
-    WindowId,
-    app::run_app,
-    window::{WindowBackend, WindowDescriptor},
-};
+use astrelis_winit::{WindowId, app::run_app, window::WindowDescriptor};
 
 struct App {
     window: RenderWindow,
@@ -231,7 +227,7 @@ fn main() {
             .device()
             .create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Vertex Buffer"),
-                size: (vertices.len() * std::mem::size_of::<f32>()) as u64,
+                size: std::mem::size_of_val(vertices) as u64,
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });

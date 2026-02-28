@@ -797,7 +797,7 @@ mod tests {
 
         // Should still be 2 commands (old ones not immediately removed)
         // Compaction happens on sort
-        assert!(draw_list.len() >= 1);
+        assert!(!draw_list.is_empty());
     }
 
     #[test]

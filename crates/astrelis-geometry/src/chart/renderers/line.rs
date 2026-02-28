@@ -3,7 +3,9 @@
 use super::super::rect::Rect;
 use super::super::types::Chart;
 use astrelis_core::profiling::profile_scope;
-use astrelis_render::{GraphicsContext, LineRenderer, LineSegment, Viewport, wgpu};
+use astrelis_render::{
+    DataRangeParams, DataTransform, GraphicsContext, LineRenderer, LineSegment, Viewport, wgpu,
+};
 use glam::Vec2;
 use std::sync::Arc;
 
@@ -208,18 +210,20 @@ impl GpuChartLineRenderer {
         let (x_min, x_max) = chart.x_range();
         let (y_min, y_max) = chart.y_range();
 
-        self.line_renderer.render_with_data_transform(
-            pass,
+        let transform = DataTransform::from_data_range(
             viewport,
-            plot_area.x,
-            plot_area.y,
-            plot_area.width,
-            plot_area.height,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
+            DataRangeParams {
+                plot_x: plot_area.x,
+                plot_y: plot_area.y,
+                plot_width: plot_area.width,
+                plot_height: plot_area.height,
+                data_x_min: x_min,
+                data_x_max: x_max,
+                data_y_min: y_min,
+                data_y_max: y_max,
+            },
         );
+        self.line_renderer.render_transformed(pass, &transform);
     }
 
     /// Render without setting scissor rect (caller is responsible for clipping).
@@ -241,18 +245,20 @@ impl GpuChartLineRenderer {
         let (x_min, x_max) = chart.x_range();
         let (y_min, y_max) = chart.y_range();
 
-        self.line_renderer.render_with_data_transform(
-            pass,
+        let transform = DataTransform::from_data_range(
             viewport,
-            plot_area.x,
-            plot_area.y,
-            plot_area.width,
-            plot_area.height,
-            x_min,
-            x_max,
-            y_min,
-            y_max,
+            DataRangeParams {
+                plot_x: plot_area.x,
+                plot_y: plot_area.y,
+                plot_width: plot_area.width,
+                plot_height: plot_area.height,
+                data_x_min: x_min,
+                data_x_max: x_max,
+                data_y_min: y_min,
+                data_y_max: y_max,
+            },
         );
+        self.line_renderer.render_transformed(pass, &transform);
     }
 
     /// Get the number of line segments.

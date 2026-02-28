@@ -129,7 +129,7 @@ fn build_stress_ui(ui: &mut UiSystem, count: usize, frame: u64) {
                 // Grid of widgets
                 col = col.child(|root| {
                     let cols = 10;
-                    let rows = (count + cols - 1) / cols;
+                    let rows = count.div_ceil(cols);
                     let mut grid_col = root.column().gap(2.0);
 
                     for row in 0..rows {
@@ -213,26 +213,26 @@ impl App for UiStressTest {
         });
 
         events.dispatch(|event| {
-            if let Event::KeyInput(key) = event {
-                if key.state == astrelis_winit::event::ElementState::Pressed {
-                    match key.logical_key {
-                        Key::Named(NamedKey::Space) => {
-                            self.updating = !self.updating;
-                            println!("Updating: {}", self.updating);
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(ref c) if c == "+" || c == "=" => {
-                            self.widget_count = (self.widget_count + 50).min(5000);
-                            build_stress_ui(&mut self.ui, self.widget_count, self.frame_count);
-                            return HandleStatus::consumed();
-                        }
-                        Key::Character(ref c) if c == "-" => {
-                            self.widget_count = self.widget_count.saturating_sub(50).max(10);
-                            build_stress_ui(&mut self.ui, self.widget_count, self.frame_count);
-                            return HandleStatus::consumed();
-                        }
-                        _ => {}
+            if let Event::KeyInput(key) = event
+                && key.state == astrelis_winit::event::ElementState::Pressed
+            {
+                match key.logical_key {
+                    Key::Named(NamedKey::Space) => {
+                        self.updating = !self.updating;
+                        println!("Updating: {}", self.updating);
+                        return HandleStatus::consumed();
                     }
+                    Key::Character(ref c) if c == "+" || c == "=" => {
+                        self.widget_count = (self.widget_count + 50).min(5000);
+                        build_stress_ui(&mut self.ui, self.widget_count, self.frame_count);
+                        return HandleStatus::consumed();
+                    }
+                    Key::Character(ref c) if c == "-" => {
+                        self.widget_count = self.widget_count.saturating_sub(50).max(10);
+                        build_stress_ui(&mut self.ui, self.widget_count, self.frame_count);
+                        return HandleStatus::consumed();
+                    }
+                    _ => {}
                 }
             }
             HandleStatus::ignored()

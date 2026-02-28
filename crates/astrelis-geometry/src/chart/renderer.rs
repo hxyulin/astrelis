@@ -251,11 +251,6 @@ impl<'a> ChartRenderer<'a> {
         Vec2::new(px, py)
     }
 
-    /// Convert data coordinates to pixel coordinates (primary axes).
-    fn data_to_pixel(&self, chart: &Chart, plot_area: &Rect, x: f64, y: f64) -> Vec2 {
-        self.data_to_pixel_with_axes(chart, plot_area, x, y, AxisId::X_PRIMARY, AxisId::Y_PRIMARY)
-    }
-
     /// Convert pixel coordinates to data coordinates.
     pub fn pixel_to_data(&self, chart: &Chart, plot_area: &Rect, pixel: Vec2) -> DataPoint {
         let (x_min, x_max) = chart.x_range();

@@ -632,9 +632,9 @@ pub fn lttb_downsample(data: &[DataPoint], target_count: usize) -> Vec<usize> {
         let count = next_bucket_end - next_bucket_start;
 
         if count > 0 {
-            for j in next_bucket_start..next_bucket_end {
-                avg_x += data[j].x;
-                avg_y += data[j].y;
+            for point in &data[next_bucket_start..next_bucket_end] {
+                avg_x += point.x;
+                avg_y += point.y;
             }
             avg_x /= count as f64;
             avg_y /= count as f64;
@@ -646,9 +646,7 @@ pub fn lttb_downsample(data: &[DataPoint], target_count: usize) -> Vec<usize> {
 
         let point_a = &data[a];
 
-        for j in bucket_start..bucket_end {
-            let point = &data[j];
-
+        for (offset, point) in data[bucket_start..bucket_end].iter().enumerate() {
             // Calculate triangle area using cross product
             let area = ((point_a.x - avg_x) * (point.y - point_a.y)
                 - (point_a.x - point.x) * (avg_y - point_a.y))
@@ -656,7 +654,7 @@ pub fn lttb_downsample(data: &[DataPoint], target_count: usize) -> Vec<usize> {
 
             if area > max_area {
                 max_area = area;
-                max_area_idx = j;
+                max_area_idx = bucket_start + offset;
             }
         }
 

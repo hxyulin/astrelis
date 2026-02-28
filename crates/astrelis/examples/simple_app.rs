@@ -34,7 +34,7 @@ impl astrelis_winit::app::App for SimpleApp {
 
     fn update(&mut self, _ctx: &mut astrelis_winit::app::AppCtx, time: &astrelis_winit::FrameTime) {
         // Application logic here
-        if time.frame_count % 60 == 0 {
+        if time.frame_count.is_multiple_of(60) {
             println!(
                 "Frame {}: {:.1} FPS",
                 time.frame_count,
