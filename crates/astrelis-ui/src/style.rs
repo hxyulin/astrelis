@@ -17,12 +17,23 @@
 
 use crate::constraint::Constraint;
 use crate::draw_list::RenderLayer;
+use astrelis_core::math::Vec2;
 use astrelis_render::Color;
 use taffy::{
     AlignContent, AlignItems, Dimension, Display, FlexDirection, FlexWrap, JustifyContent,
     LengthPercentage as TaffyLengthPercentage, LengthPercentageAuto as TaffyLengthPercentageAuto,
     Position, Rect, Size, style::Style as TaffyStyle,
 };
+
+/// Controls whether a widget and its children receive pointer (mouse/touch) events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PointerEvents {
+    /// Normal pointer event handling (default).
+    #[default]
+    Auto,
+    /// Widget and children are transparent to pointer events (click-through).
+    None,
+}
 
 /// Overflow behavior for content that exceeds widget bounds.
 ///
@@ -182,6 +193,35 @@ pub struct Style {
     /// Overlay layers escape parent clip bounds and render above base content.
     /// Default: `RenderLayer::Base`
     pub render_layer: RenderLayer,
+
+    /// Opacity of this widget and its subtree (0.0 = fully transparent, 1.0 = fully opaque).
+    /// Inherited: `computed_opacity = parent_opacity * node_opacity`.
+    /// Default: 1.0
+    pub opacity: f32,
+
+    /// Visual-only translation offset applied post-layout.
+    /// Does NOT affect Taffy layout computation.
+    /// Inherited: `computed_translate = parent_translate + node_translate`.
+    /// Default: `Vec2::ZERO`
+    pub translate: Vec2,
+
+    /// Visual-only scale applied post-layout around center pivot.
+    /// Does NOT affect Taffy layout computation.
+    /// Inherited: `computed_scale = parent_scale * node_scale`.
+    /// Default: `Vec2::ONE`
+    pub scale: Vec2,
+
+    /// Whether this widget is visible and participates in layout.
+    /// When `false`, the widget acts like `display: none` — collapsed from layout,
+    /// not rendered, and not hit-testable.
+    /// To hide visually but keep layout space, use `opacity(0.0)` instead.
+    /// Default: `true`
+    pub visible: bool,
+
+    /// Controls whether this widget and its children receive pointer events.
+    /// `PointerEvents::None` makes the widget click-through while still rendering.
+    /// Default: `PointerEvents::Auto`
+    pub pointer_events: PointerEvents,
 }
 
 impl Default for Style {
@@ -197,6 +237,11 @@ impl Default for Style {
             constraints: None,
             z_index: 0,
             render_layer: RenderLayer::Base,
+            opacity: 1.0,
+            translate: Vec2::ZERO,
+            scale: Vec2::ONE,
+            visible: true,
+            pointer_events: PointerEvents::default(),
         }
     }
 }
@@ -719,6 +764,137 @@ impl Style {
         self.render_layer = layer;
         self
     }
+
+    /// Set opacity (0.0 = fully transparent, 1.0 = fully opaque).
+    ///
+    /// Opacity is inherited: `computed_opacity = parent_opacity * node_opacity`.
+    /// When `computed_opacity == 0.0`, draw commands are skipped entirely.
+    pub fn opacity(mut self, opacity: f32) -> Self {
+        self.opacity = opacity.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Set visual-only translation offset (does not affect layout).
+    pub fn translate(mut self, translate: Vec2) -> Self {
+        self.translate = translate;
+        self
+    }
+
+    /// Set visual-only X translation offset (does not affect layout).
+    pub fn translate_x(mut self, x: f32) -> Self {
+        self.translate.x = x;
+        self
+    }
+
+    /// Set visual-only Y translation offset (does not affect layout).
+    pub fn translate_y(mut self, y: f32) -> Self {
+        self.translate.y = y;
+        self
+    }
+
+    /// Set visual-only scale around center pivot (does not affect layout).
+    pub fn scale(mut self, scale: Vec2) -> Self {
+        self.scale = scale;
+        self
+    }
+
+    /// Set uniform visual-only scale on both axes (does not affect layout).
+    pub fn uniform_scale(mut self, s: f32) -> Self {
+        self.scale = Vec2::new(s, s);
+        self
+    }
+
+    /// Set visibility. When `false`, collapses from layout (like `display: none`).
+    ///
+    /// To hide visually but keep layout space, use `opacity(0.0)` instead.
+    pub fn visible(mut self, visible: bool) -> Self {
+        self.visible = visible;
+        self
+    }
+
+    /// Set pointer events behavior.
+    ///
+    /// `PointerEvents::None` makes the widget and children transparent to mouse/touch events.
+    pub fn pointer_events(mut self, pointer_events: PointerEvents) -> Self {
+        self.pointer_events = pointer_events;
+        self
+    }
+
+    // ── Padding convenience builders ─────────────────────────────────────
+
+    /// Set horizontal padding (left and right).
+    pub fn padding_x(mut self, value: impl Into<Constraint> + Copy) -> Self {
+        self.set_padding_x(value);
+        self
+    }
+
+    /// Set vertical padding (top and bottom).
+    pub fn padding_y(mut self, value: impl Into<Constraint> + Copy) -> Self {
+        self.set_padding_y(value);
+        self
+    }
+
+    /// Set left padding.
+    pub fn padding_left(mut self, value: impl Into<Constraint>) -> Self {
+        self.set_padding_left(value);
+        self
+    }
+
+    /// Set right padding.
+    pub fn padding_right(mut self, value: impl Into<Constraint>) -> Self {
+        self.set_padding_right(value);
+        self
+    }
+
+    /// Set top padding.
+    pub fn padding_top(mut self, value: impl Into<Constraint>) -> Self {
+        self.set_padding_top(value);
+        self
+    }
+
+    /// Set bottom padding.
+    pub fn padding_bottom(mut self, value: impl Into<Constraint>) -> Self {
+        self.set_padding_bottom(value);
+        self
+    }
+
+    // ── Margin convenience builders ──────────────────────────────────────
+
+    /// Set horizontal margin (left and right).
+    pub fn margin_x(mut self, value: impl Into<Constraint> + Copy) -> Self {
+        self.set_margin_x(value);
+        self
+    }
+
+    /// Set vertical margin (top and bottom).
+    pub fn margin_y(mut self, value: impl Into<Constraint> + Copy) -> Self {
+        self.set_margin_y(value);
+        self
+    }
+
+    /// Set left margin.
+    pub fn margin_left(mut self, value: impl Into<Constraint>) -> Self {
+        self.set_margin_left(value);
+        self
+    }
+
+    /// Set right margin.
+    pub fn margin_right(mut self, value: impl Into<Constraint>) -> Self {
+        self.set_margin_right(value);
+        self
+    }
+
+    /// Set top margin.
+    pub fn margin_top(mut self, value: impl Into<Constraint>) -> Self {
+        self.set_margin_top(value);
+        self
+    }
+
+    /// Set bottom margin.
+    pub fn margin_bottom(mut self, value: impl Into<Constraint>) -> Self {
+        self.set_margin_bottom(value);
+        self
+    }
 }
 
 // ── Helper functions for constraint conversion ───────────────────────────────
@@ -1173,6 +1349,46 @@ impl Style {
     /// Set render layer in place.
     pub fn set_render_layer(&mut self, layer: RenderLayer) {
         self.render_layer = layer;
+    }
+
+    /// Set opacity in place (clamped to 0.0..=1.0).
+    pub fn set_opacity(&mut self, opacity: f32) {
+        self.opacity = opacity.clamp(0.0, 1.0);
+    }
+
+    /// Set visual translation in place.
+    pub fn set_translate(&mut self, translate: Vec2) {
+        self.translate = translate;
+    }
+
+    /// Set visual X translation in place.
+    pub fn set_translate_x(&mut self, x: f32) {
+        self.translate.x = x;
+    }
+
+    /// Set visual Y translation in place.
+    pub fn set_translate_y(&mut self, y: f32) {
+        self.translate.y = y;
+    }
+
+    /// Set visual scale in place.
+    pub fn set_scale(&mut self, scale: Vec2) {
+        self.scale = scale;
+    }
+
+    /// Set uniform visual scale in place.
+    pub fn set_uniform_scale(&mut self, s: f32) {
+        self.scale = Vec2::new(s, s);
+    }
+
+    /// Set visibility in place.
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+
+    /// Set pointer events in place.
+    pub fn set_pointer_events(&mut self, pointer_events: PointerEvents) {
+        self.pointer_events = pointer_events;
     }
 }
 

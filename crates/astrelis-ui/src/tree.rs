@@ -85,6 +85,15 @@ pub struct UiNode {
     /// Accumulated z_index from all parent containers.
     /// Computed during layout traversal.
     pub computed_z_index: u16,
+    /// Accumulated opacity from all parent containers.
+    /// Computed during layout traversal: `parent_opacity * style.opacity`.
+    pub computed_opacity: f32,
+    /// Accumulated visual translation from all parent containers.
+    /// Computed during layout traversal: `parent_translate + style.translate`.
+    pub computed_translate: Vec2,
+    /// Accumulated visual scale from all parent containers.
+    /// Computed during layout traversal: `parent_scale * style.scale` (per-axis).
+    pub computed_scale: Vec2,
 }
 
 impl UiNode {
@@ -101,7 +110,7 @@ impl UiNode {
             // Invalidate text cache when text changes
             self.text_cache = None;
         }
-        if flags.intersects(DirtyFlags::COLOR | DirtyFlags::OPACITY) {
+        if flags.intersects(DirtyFlags::COLOR | DirtyFlags::OPACITY | DirtyFlags::TRANSFORM) {
             self.paint_version = self.paint_version.wrapping_add(1);
         }
     }
@@ -190,6 +199,9 @@ impl UiTree {
             paint_version: 0,
             text_cache: None,
             computed_z_index: 0,
+            computed_opacity: 1.0,
+            computed_translate: Vec2::ZERO,
+            computed_scale: Vec2::ONE,
         };
 
         self.nodes.insert(node_id, ui_node);
@@ -312,7 +324,8 @@ impl UiTree {
                 | DirtyFlags::IMAGE
                 | DirtyFlags::FOCUS
                 | DirtyFlags::SCROLL
-                | DirtyFlags::Z_INDEX,
+                | DirtyFlags::Z_INDEX
+                | DirtyFlags::TRANSFORM,
         ) {
             node.paint_version = node.paint_version.wrapping_add(1);
         }
@@ -613,12 +626,155 @@ impl UiTree {
 
     /// Update opacity with automatic dirty marking.
     ///
-    /// Marks OPACITY flag (doesn't require layout recomputation).
-    pub fn update_opacity(&mut self, node_id: NodeId, _opacity: f32) -> bool {
-        // Store opacity in a future opacity field or as part of color alpha
-        // For now, mark the flag to demonstrate the pattern
-        self.mark_dirty_flags(node_id, DirtyFlags::OPACITY);
-        true
+    /// Marks OPACITY flag and propagates down to descendants.
+    /// Returns true if the value changed.
+    pub fn update_opacity(&mut self, node_id: NodeId, opacity: f32) -> bool {
+        let opacity = opacity.clamp(0.0, 1.0);
+        if let Some(node) = self.nodes.get_mut(&node_id) {
+            let old = node.widget.style().opacity;
+            if (old - opacity).abs() < f32::EPSILON {
+                return false;
+            }
+            node.widget.style_mut().set_opacity(opacity);
+            self.mark_opacity_dirty(node_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Update visual translation with automatic dirty marking.
+    ///
+    /// Returns true if the value changed.
+    pub fn update_translate(&mut self, node_id: NodeId, translate: Vec2) -> bool {
+        if let Some(node) = self.nodes.get_mut(&node_id) {
+            let old = node.widget.style().translate;
+            if old == translate {
+                return false;
+            }
+            node.widget.style_mut().set_translate(translate);
+            self.mark_transform_dirty(node_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Update visual X translation with automatic dirty marking.
+    pub fn update_translate_x(&mut self, node_id: NodeId, x: f32) -> bool {
+        if let Some(node) = self.nodes.get_mut(&node_id) {
+            let old = node.widget.style().translate.x;
+            if (old - x).abs() < f32::EPSILON {
+                return false;
+            }
+            node.widget.style_mut().set_translate_x(x);
+            self.mark_transform_dirty(node_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Update visual Y translation with automatic dirty marking.
+    pub fn update_translate_y(&mut self, node_id: NodeId, y: f32) -> bool {
+        if let Some(node) = self.nodes.get_mut(&node_id) {
+            let old = node.widget.style().translate.y;
+            if (old - y).abs() < f32::EPSILON {
+                return false;
+            }
+            node.widget.style_mut().set_translate_y(y);
+            self.mark_transform_dirty(node_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Update visual scale with automatic dirty marking.
+    pub fn update_scale(&mut self, node_id: NodeId, scale: Vec2) -> bool {
+        if let Some(node) = self.nodes.get_mut(&node_id) {
+            let old = node.widget.style().scale;
+            if old == scale {
+                return false;
+            }
+            node.widget.style_mut().set_scale(scale);
+            self.mark_transform_dirty(node_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Update visual X scale with automatic dirty marking.
+    pub fn update_scale_x(&mut self, node_id: NodeId, x: f32) -> bool {
+        if let Some(node) = self.nodes.get_mut(&node_id) {
+            let old = node.widget.style().scale.x;
+            if (old - x).abs() < f32::EPSILON {
+                return false;
+            }
+            node.widget.style_mut().scale.x = x;
+            self.mark_transform_dirty(node_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Update visual Y scale with automatic dirty marking.
+    pub fn update_scale_y(&mut self, node_id: NodeId, y: f32) -> bool {
+        if let Some(node) = self.nodes.get_mut(&node_id) {
+            let old = node.widget.style().scale.y;
+            if (old - y).abs() < f32::EPSILON {
+                return false;
+            }
+            node.widget.style_mut().scale.y = y;
+            self.mark_transform_dirty(node_id);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Set visibility with automatic dirty marking and Taffy display switching.
+    ///
+    /// When `visible = false`, sets Taffy `display = None` (collapse from layout).
+    /// When `visible = true`, restores the previous display mode.
+    pub fn set_visible(&mut self, node_id: NodeId, visible: bool) -> bool {
+        if let Some(node) = self.nodes.get_mut(&node_id) {
+            let old = node.widget.style().visible;
+            if old == visible {
+                return false;
+            }
+            node.widget.style_mut().set_visible(visible);
+
+            // Switch Taffy display mode
+            if visible {
+                // Restore to Flex (the default layout mode)
+                node.widget.style_mut().layout.display = taffy::Display::Flex;
+            } else {
+                node.widget.style_mut().layout.display = taffy::Display::None;
+            }
+
+            // Sync to Taffy layout node
+            let taffy_node = node.taffy_node;
+            let taffy_style = node.widget.style().layout.clone();
+            self.taffy.set_style(taffy_node, taffy_style).ok();
+
+            self.mark_dirty_flags(node_id, DirtyFlags::LAYOUT | DirtyFlags::VISIBILITY);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Toggle visibility with automatic dirty marking.
+    pub fn toggle_visible(&mut self, node_id: NodeId) -> bool {
+        if let Some(node) = self.nodes.get(&node_id) {
+            let current = node.widget.style().visible;
+            self.set_visible(node_id, !current)
+        } else {
+            false
+        }
     }
 
     /// Compute layout for all nodes.
@@ -1173,22 +1329,40 @@ impl UiTree {
     }
 
     /// Update layout for a specific subtree from Taffy results.
+    ///
+    /// Propagates inherited visual properties (z_index, opacity, translate, scale)
+    /// from parent to children during the traversal.
     fn update_subtree_layout(&mut self, root_id: NodeId) {
-        // Use a stack with (node_id, parent_z_index) for depth-first traversal
-        let mut stack = vec![(root_id, 0u16)];
-        while let Some((node_id, parent_z_index)) = stack.pop() {
-            // Get node's z_index offset and children before any mutable borrows
-            let (z_offset, children) = if let Some(node) = self.nodes.get(&node_id) {
-                let z_offset = node.widget.style().z_index;
-                (z_offset, node.children.clone())
-            } else {
-                continue;
-            };
+        // Stack carries: (node_id, parent_z, parent_opacity, parent_translate, parent_scale)
+        let mut stack: Vec<(NodeId, u16, f32, Vec2, Vec2)> =
+            vec![(root_id, 0, 1.0, Vec2::ZERO, Vec2::ONE)];
 
-            // Compute accumulated z-index (saturating to prevent overflow)
-            let computed_z = parent_z_index.saturating_add(z_offset);
+        while let Some((node_id, parent_z, parent_opacity, parent_translate, parent_scale)) =
+            stack.pop()
+        {
+            // Get node's style offsets and children before any mutable borrows
+            let (z_offset, opacity, translate, node_scale, children) =
+                if let Some(node) = self.nodes.get(&node_id) {
+                    let s = node.widget.style();
+                    (
+                        s.z_index,
+                        s.opacity,
+                        s.translate,
+                        s.scale,
+                        node.children.clone(),
+                    )
+                } else {
+                    continue;
+                };
 
-            // Update this node's layout and computed z-index
+            // Compute accumulated inherited visual properties
+            let computed_z = parent_z.saturating_add(z_offset);
+            let computed_opacity = parent_opacity * opacity;
+            let computed_translate = parent_translate + translate;
+            let computed_scale =
+                Vec2::new(parent_scale.x * node_scale.x, parent_scale.y * node_scale.y);
+
+            // Update this node's layout and computed visuals
             if let Some(node) = self.nodes.get_mut(&node_id)
                 && let Ok(layout) = self.taffy.layout(node.taffy_node)
             {
@@ -1199,11 +1373,20 @@ impl UiTree {
                     height: layout.size.height,
                 };
                 node.computed_z_index = computed_z;
+                node.computed_opacity = computed_opacity;
+                node.computed_translate = computed_translate;
+                node.computed_scale = computed_scale;
             }
 
-            // Push children with accumulated z-index
+            // Push children with accumulated inherited visuals
             for child_id in children {
-                stack.push((child_id, computed_z));
+                stack.push((
+                    child_id,
+                    computed_z,
+                    computed_opacity,
+                    computed_translate,
+                    computed_scale,
+                ));
             }
         }
     }
@@ -1214,13 +1397,36 @@ impl UiTree {
     /// This is called when a node's z_index style property changes, since the
     /// computed_z_index of all descendants depends on ancestor z_index values.
     pub fn mark_z_index_dirty(&mut self, node_id: NodeId) {
+        self.mark_descendants_dirty(node_id, DirtyFlags::Z_INDEX);
+    }
+
+    /// Mark a node and all its descendants with the OPACITY dirty flag.
+    ///
+    /// OPACITY propagates DOWN to children because computed_opacity depends
+    /// on ancestor opacity values.
+    pub fn mark_opacity_dirty(&mut self, node_id: NodeId) {
+        self.mark_descendants_dirty(node_id, DirtyFlags::OPACITY);
+    }
+
+    /// Mark a node and all its descendants with the TRANSFORM dirty flag.
+    ///
+    /// TRANSFORM propagates DOWN to children because computed_translate/scale
+    /// depend on ancestor transform values.
+    pub fn mark_transform_dirty(&mut self, node_id: NodeId) {
+        self.mark_descendants_dirty(node_id, DirtyFlags::TRANSFORM);
+    }
+
+    /// Mark a node and all its descendants with the given dirty flag.
+    ///
+    /// Used for flags that propagate DOWN (z_index, opacity, transform).
+    fn mark_descendants_dirty(&mut self, node_id: NodeId, flag: DirtyFlags) {
         let mut stack = vec![node_id];
         while let Some(id) = stack.pop() {
             self.dirty_nodes.insert(id);
             if let Some(node) = self.nodes.get_mut(&id) {
                 let old_flags = node.dirty_flags;
-                node.dirty_flags |= DirtyFlags::Z_INDEX;
-                self.dirty_counters.on_mark(old_flags, DirtyFlags::Z_INDEX);
+                node.dirty_flags |= flag;
+                self.dirty_counters.on_mark(old_flags, flag);
                 node.paint_version = node.paint_version.wrapping_add(1);
                 stack.extend(node.children.iter().copied());
             }

@@ -1521,6 +1521,17 @@ impl UiEventSystem {
         point: Vec2,
         parent_offset: Vec2,
     ) -> Option<NodeId> {
+        // Skip invisible nodes and their entire subtree
+        let widget = tree.get_widget(node_id)?;
+        if !widget.style().visible {
+            return None;
+        }
+
+        // Skip nodes with pointer_events: None (click-through)
+        if widget.style().pointer_events == crate::style::PointerEvents::None {
+            return None;
+        }
+
         let layout = tree.get_layout(node_id)?;
 
         // Calculate absolute position

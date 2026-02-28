@@ -99,7 +99,7 @@ pub mod plugin;
 pub mod renderer;
 pub mod scroll_plugin;
 pub mod style;
-pub use style::Overflow;
+pub use style::{Overflow, PointerEvents};
 pub mod theme;
 pub mod tooltip;
 pub mod tree;
@@ -110,7 +110,8 @@ pub mod widgets;
 
 pub use animation::{
     AnimatableProperty, Animation, AnimationState, AnimationSystem, EasingFunction,
-    WidgetAnimations, bounce, fade_in, fade_out, scale, slide_in_left, slide_in_top,
+    WidgetAnimations, bounce, fade_in, fade_out, scale, slide_in_left, slide_in_top, translate_x,
+    translate_y,
 };
 use astrelis_core::geometry::Size;
 pub use clip::{ClipRect, PhysicalClipRect};
@@ -400,6 +401,98 @@ impl UiCore {
     pub fn update_color(&mut self, widget_id: WidgetId, color: astrelis_render::Color) -> bool {
         if let Some(node_id) = self.widget_registry.get_node(widget_id) {
             self.tree.update_color(node_id, color)
+        } else {
+            false
+        }
+    }
+
+    /// Update widget opacity by ID with automatic dirty marking.
+    ///
+    /// Opacity is inherited: `computed_opacity = parent_opacity * node_opacity`.
+    /// Returns true if the value changed.
+    pub fn update_opacity(&mut self, widget_id: WidgetId, opacity: f32) -> bool {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
+            self.tree.update_opacity(node_id, opacity)
+        } else {
+            false
+        }
+    }
+
+    /// Update widget visual translation by ID with automatic dirty marking.
+    ///
+    /// Translation is visual-only (does not affect layout).
+    /// Returns true if the value changed.
+    pub fn update_translate(&mut self, widget_id: WidgetId, translate: Vec2) -> bool {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
+            self.tree.update_translate(node_id, translate)
+        } else {
+            false
+        }
+    }
+
+    /// Update widget visual X translation by ID.
+    pub fn update_translate_x(&mut self, widget_id: WidgetId, x: f32) -> bool {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
+            self.tree.update_translate_x(node_id, x)
+        } else {
+            false
+        }
+    }
+
+    /// Update widget visual Y translation by ID.
+    pub fn update_translate_y(&mut self, widget_id: WidgetId, y: f32) -> bool {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
+            self.tree.update_translate_y(node_id, y)
+        } else {
+            false
+        }
+    }
+
+    /// Update widget visual scale by ID.
+    pub fn update_scale(&mut self, widget_id: WidgetId, scale: Vec2) -> bool {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
+            self.tree.update_scale(node_id, scale)
+        } else {
+            false
+        }
+    }
+
+    /// Update widget visual X scale by ID.
+    pub fn update_scale_x(&mut self, widget_id: WidgetId, x: f32) -> bool {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
+            self.tree.update_scale_x(node_id, x)
+        } else {
+            false
+        }
+    }
+
+    /// Update widget visual Y scale by ID.
+    pub fn update_scale_y(&mut self, widget_id: WidgetId, y: f32) -> bool {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
+            self.tree.update_scale_y(node_id, y)
+        } else {
+            false
+        }
+    }
+
+    /// Set widget visibility by ID.
+    ///
+    /// When `false`, collapses from layout (like CSS `display: none`).
+    /// Returns true if the value changed.
+    pub fn set_visible(&mut self, widget_id: WidgetId, visible: bool) -> bool {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
+            self.tree.set_visible(node_id, visible)
+        } else {
+            false
+        }
+    }
+
+    /// Toggle widget visibility by ID.
+    ///
+    /// Returns true if the value changed.
+    pub fn toggle_visible(&mut self, widget_id: WidgetId) -> bool {
+        if let Some(node_id) = self.widget_registry.get_node(widget_id) {
+            self.tree.toggle_visible(node_id)
         } else {
             false
         }
@@ -752,6 +845,51 @@ impl UiSystem {
     /// Returns true if the color changed.
     pub fn update_color(&mut self, widget_id: WidgetId, color: astrelis_render::Color) -> bool {
         self.core.update_color(widget_id, color)
+    }
+
+    /// Update widget opacity by ID with automatic dirty marking.
+    pub fn update_opacity(&mut self, widget_id: WidgetId, opacity: f32) -> bool {
+        self.core.update_opacity(widget_id, opacity)
+    }
+
+    /// Update widget visual translation by ID.
+    pub fn update_translate(&mut self, widget_id: WidgetId, translate: Vec2) -> bool {
+        self.core.update_translate(widget_id, translate)
+    }
+
+    /// Update widget visual X translation by ID.
+    pub fn update_translate_x(&mut self, widget_id: WidgetId, x: f32) -> bool {
+        self.core.update_translate_x(widget_id, x)
+    }
+
+    /// Update widget visual Y translation by ID.
+    pub fn update_translate_y(&mut self, widget_id: WidgetId, y: f32) -> bool {
+        self.core.update_translate_y(widget_id, y)
+    }
+
+    /// Update widget visual scale by ID.
+    pub fn update_scale(&mut self, widget_id: WidgetId, scale: Vec2) -> bool {
+        self.core.update_scale(widget_id, scale)
+    }
+
+    /// Update widget visual X scale by ID.
+    pub fn update_scale_x(&mut self, widget_id: WidgetId, x: f32) -> bool {
+        self.core.update_scale_x(widget_id, x)
+    }
+
+    /// Update widget visual Y scale by ID.
+    pub fn update_scale_y(&mut self, widget_id: WidgetId, y: f32) -> bool {
+        self.core.update_scale_y(widget_id, y)
+    }
+
+    /// Set widget visibility by ID.
+    pub fn set_visible(&mut self, widget_id: WidgetId, visible: bool) -> bool {
+        self.core.set_visible(widget_id, visible)
+    }
+
+    /// Toggle widget visibility by ID.
+    pub fn toggle_visible(&mut self, widget_id: WidgetId) -> bool {
+        self.core.toggle_visible(widget_id)
     }
 
     /// Render the UI using retained mode instanced rendering.

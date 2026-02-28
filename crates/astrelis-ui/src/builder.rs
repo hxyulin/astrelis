@@ -165,6 +165,58 @@ macro_rules! impl_node_style_methods {
             self.widget.style_mut().set_flex_basis(basis);
             self
         }
+
+        /// Set opacity (0.0 = fully transparent, 1.0 = fully opaque).
+        pub fn opacity(mut self, opacity: f32) -> Self {
+            self.widget.style_mut().set_opacity(opacity);
+            self
+        }
+
+        /// Set visibility. When `false`, collapses from layout (like `display: none`).
+        pub fn visible(mut self, visible: bool) -> Self {
+            self.widget.style_mut().set_visible(visible);
+            self
+        }
+
+        /// Set pointer events behavior.
+        pub fn pointer_events(mut self, pointer_events: crate::style::PointerEvents) -> Self {
+            self.widget.style_mut().set_pointer_events(pointer_events);
+            self
+        }
+
+        /// Set visual-only translation offset (does not affect layout).
+        pub fn translate(mut self, x: f32, y: f32) -> Self {
+            self.widget
+                .style_mut()
+                .set_translate(astrelis_core::math::Vec2::new(x, y));
+            self
+        }
+
+        /// Set visual-only X translation offset (does not affect layout).
+        pub fn translate_x(mut self, x: f32) -> Self {
+            self.widget.style_mut().set_translate_x(x);
+            self
+        }
+
+        /// Set visual-only Y translation offset (does not affect layout).
+        pub fn translate_y(mut self, y: f32) -> Self {
+            self.widget.style_mut().set_translate_y(y);
+            self
+        }
+
+        /// Set visual-only scale around center pivot (does not affect layout).
+        pub fn scale(mut self, x: f32, y: f32) -> Self {
+            self.widget
+                .style_mut()
+                .set_scale(astrelis_core::math::Vec2::new(x, y));
+            self
+        }
+
+        /// Set uniform visual-only scale on both axes (does not affect layout).
+        pub fn uniform_scale(mut self, s: f32) -> Self {
+            self.widget.style_mut().set_uniform_scale(s);
+            self
+        }
     };
 }
 

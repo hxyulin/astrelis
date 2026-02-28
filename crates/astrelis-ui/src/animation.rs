@@ -36,9 +36,9 @@ use ahash::HashMap;
 pub enum AnimatableProperty {
     /// Opacity (0.0 to 1.0)
     Opacity,
-    /// X position
+    /// X position (alias for TranslateX for backward compatibility)
     PositionX,
-    /// Y position
+    /// Y position (alias for TranslateY for backward compatibility)
     PositionY,
     /// Width
     Width,
@@ -62,6 +62,10 @@ pub enum AnimatableProperty {
     BorderRadius,
     /// Padding
     Padding,
+    /// Visual-only X translation (does not affect layout)
+    TranslateX,
+    /// Visual-only Y translation (does not affect layout)
+    TranslateY,
 }
 
 /// Easing functions for animations.
@@ -500,6 +504,61 @@ impl AnimationSystem {
     pub fn widget_count(&self) -> usize {
         self.widget_animations.len()
     }
+
+    /// Returns true if any animations are currently running.
+    pub fn has_active(&self) -> bool {
+        !self.widget_animations.is_empty()
+    }
+
+    /// Tick all animations by delta time and apply values to the UI.
+    ///
+    /// This combines `update()` with automatic application of animated values
+    /// to the UI system via `update_opacity`, `update_translate_x/y`, `update_scale_x/y`.
+    ///
+    /// Call once per frame in the update loop:
+    /// ```ignore
+    /// fn update(&mut self, ctx: &mut AppCtx) {
+    ///     let dt = ctx.delta_time();
+    ///     self.animations.tick(dt, &mut self.ui);
+    /// }
+    /// ```
+    pub fn tick(&mut self, delta_time: f32, ui: &mut crate::UiCore) {
+        self.widget_animations.retain(|&widget_id, animations| {
+            animations.update(delta_time);
+
+            // Apply current values to the UI
+            for (prop, value) in animations.values() {
+                match prop {
+                    AnimatableProperty::Opacity => {
+                        ui.update_opacity(widget_id, value);
+                    }
+                    AnimatableProperty::TranslateX | AnimatableProperty::PositionX => {
+                        ui.update_translate_x(widget_id, value);
+                    }
+                    AnimatableProperty::TranslateY | AnimatableProperty::PositionY => {
+                        ui.update_translate_y(widget_id, value);
+                    }
+                    AnimatableProperty::ScaleX => {
+                        ui.update_scale_x(widget_id, value);
+                    }
+                    AnimatableProperty::ScaleY => {
+                        ui.update_scale_y(widget_id, value);
+                    }
+                    // Other properties don't have direct update_ methods yet
+                    _ => {}
+                }
+            }
+
+            !animations.is_empty()
+        });
+    }
+
+    /// Tick all animations by delta time and apply values to the UI system.
+    ///
+    /// Convenience method that works with `UiSystem` instead of `UiCore`.
+    pub fn tick_system(&mut self, delta_time: f32, ui: &mut crate::UiSystem) {
+        self.tick(delta_time, ui.core_mut());
+    }
 }
 
 impl Default for AnimationSystem {
@@ -562,6 +621,24 @@ pub fn bounce(duration: f32) -> Animation {
         .easing(EasingFunction::Bounce)
         .yoyo(true)
         .looping(true)
+}
+
+/// Helper function to create a translate-X animation (visual-only slide).
+pub fn translate_x(from: f32, to: f32, duration: f32) -> Animation {
+    Animation::new(AnimatableProperty::TranslateX)
+        .from(from)
+        .to(to)
+        .duration(duration)
+        .easing(EasingFunction::EaseOut)
+}
+
+/// Helper function to create a translate-Y animation (visual-only slide).
+pub fn translate_y(from: f32, to: f32, duration: f32) -> Animation {
+    Animation::new(AnimatableProperty::TranslateY)
+        .from(from)
+        .to(to)
+        .duration(duration)
+        .easing(EasingFunction::EaseOut)
 }
 
 #[cfg(test)]
@@ -646,5 +723,56 @@ mod tests {
         assert!(!anim.update(1.0));
         assert!((anim.value() - 0.0).abs() < 0.01);
         assert_eq!(anim.state(), AnimationState::Completed);
+    }
+
+    #[test]
+    fn test_translate_animation_helpers() {
+        let anim_x = translate_x(-100.0, 0.0, 0.5);
+        assert_eq!(anim_x.property(), AnimatableProperty::TranslateX);
+        assert_eq!(anim_x.value(), -100.0); // At start
+
+        let anim_y = translate_y(-50.0, 0.0, 0.3);
+        assert_eq!(anim_y.property(), AnimatableProperty::TranslateY);
+        assert_eq!(anim_y.value(), -50.0); // At start
+    }
+
+    #[test]
+    fn test_has_active() {
+        let mut system = AnimationSystem::new();
+        assert!(!system.has_active());
+
+        let widget_id = WidgetId::new("test");
+        system.animate(widget_id, fade_in(1.0));
+        assert!(system.has_active());
+
+        system.update(2.0); // Complete the animation
+        assert!(!system.has_active());
+    }
+
+    #[test]
+    fn test_easing_boundary_values() {
+        // All easing functions should produce 0 at t=0 and 1 at t=1
+        let easings = [
+            EasingFunction::Linear,
+            EasingFunction::EaseIn,
+            EasingFunction::EaseOut,
+            EasingFunction::EaseInOut,
+            EasingFunction::QuadIn,
+            EasingFunction::QuadOut,
+            EasingFunction::QuadInOut,
+            EasingFunction::CubicIn,
+            EasingFunction::CubicOut,
+            EasingFunction::CubicInOut,
+        ];
+        for easing in &easings {
+            assert!(
+                (easing.apply(0.0) - 0.0).abs() < 0.001,
+                "{easing:?} failed at t=0"
+            );
+            assert!(
+                (easing.apply(1.0) - 1.0).abs() < 0.001,
+                "{easing:?} failed at t=1"
+            );
+        }
     }
 }

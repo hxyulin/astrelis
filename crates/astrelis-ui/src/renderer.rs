@@ -1250,6 +1250,14 @@ impl UiRenderer {
         inherited_clip: ClipRect,
         widget_registry: &WidgetTypeRegistry,
     ) {
+        // Skip entire subtree for invisible nodes
+        if let Some(widget) = tree.get_widget(node_id)
+            && !widget.style().visible
+        {
+            self.clear_node_recursive(tree, node_id);
+            return;
+        }
+
         // Compute this node's clip rect (may modify inherited_clip for children)
         let (node_clip, child_clip) =
             self.compute_node_clip(tree, node_id, inherited_clip, widget_registry);
@@ -1489,9 +1497,28 @@ impl UiRenderer {
             return;
         };
 
+        let node = tree.get_node(node_id);
+
+        // Skip invisible nodes: emit empty commands to clear any prior draw state
+        if !widget.style().visible {
+            self.draw_list.update_node(node_id, Vec::new());
+            return;
+        }
+
+        // Skip fully transparent nodes (optimization)
+        let computed_opacity = node.map(|n| n.computed_opacity).unwrap_or(1.0);
+        if computed_opacity <= 0.0 {
+            self.draw_list.update_node(node_id, Vec::new());
+            return;
+        }
+
+        // Get computed transform values
+        let computed_translate = node.map(|n| n.computed_translate).unwrap_or(Vec2::ZERO);
+        let computed_scale = node.map(|n| n.computed_scale).unwrap_or(Vec2::ONE);
+
         // Calculate absolute position by walking up the tree
         let mut abs_offset = Vec2::new(layout.x, layout.y);
-        let mut current_parent = tree.get_node(node_id).and_then(|n| n.parent);
+        let mut current_parent = node.and_then(|n| n.parent);
 
         while let Some(parent_id) = current_parent {
             if let Some(parent_layout) = tree.get_layout(parent_id) {
@@ -1510,8 +1537,12 @@ impl UiRenderer {
             current_parent = tree.get_node(parent_id).and_then(|n| n.parent);
         }
 
-        let abs_x = abs_offset.x;
-        let abs_y = abs_offset.y;
+        // Apply visual transforms (post-layout, does not affect Taffy)
+        let layout_size = Vec2::new(layout.width, layout.height);
+        let transformed_size = layout_size * computed_scale;
+        // Scale around center: offset = (original - scaled) / 2
+        let scale_center_offset = (layout_size - transformed_size) * 0.5;
+        let abs_position = abs_offset + computed_translate + scale_center_offset;
 
         // Generate commands via registry-based dispatch
         let mut commands = Vec::new();
@@ -1522,17 +1553,25 @@ impl UiRenderer {
                 && let Some(render_fn) = descriptor.render
             {
                 let mut render_ctx = WidgetRenderContext {
-                    abs_position: Vec2::new(abs_x, abs_y),
-                    layout_size: Vec2::new(layout.width, layout.height),
+                    abs_position,
+                    layout_size: transformed_size,
                     clip_rect,
                     theme_colors: &self.theme_colors,
                     text_pipeline: &mut self.text_pipeline,
-                    parent_z_index: tree
-                        .get_node(node_id)
-                        .map(|n| n.computed_z_index)
-                        .unwrap_or(0),
+                    parent_z_index: node.map(|n| n.computed_z_index).unwrap_or(0),
                 };
                 commands = render_fn(widget.as_any(), &mut render_ctx);
+            }
+        }
+
+        // Apply computed opacity to all draw command alpha channels
+        if computed_opacity < 1.0 {
+            for cmd in &mut commands {
+                match cmd {
+                    DrawCommand::Quad(q) => q.color.a *= computed_opacity,
+                    DrawCommand::Text(t) => t.color.a *= computed_opacity,
+                    DrawCommand::Image(i) => i.tint.a *= computed_opacity,
+                }
             }
         }
 
