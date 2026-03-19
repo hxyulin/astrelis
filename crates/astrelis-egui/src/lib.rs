@@ -121,8 +121,9 @@ impl Egui {
             self.renderer.render(&mut rpass, &tris, &screen_descriptor);
         }
 
-        // Add command buffer to frame
+        // Add command buffer to frame and record the external pass
         frame.add_command_buffer(encoder.finish());
+        frame.record_external_pass();
 
         for x in &full_output.textures_delta.free {
             self.renderer.free_texture(x)

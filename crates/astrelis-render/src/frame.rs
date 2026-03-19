@@ -285,6 +285,15 @@ impl<'w> Frame<'w> {
         self.command_buffers.borrow_mut().push(buffer);
     }
 
+    /// Notify the frame that a render pass was executed externally.
+    ///
+    /// Call this when you create render passes outside of [`Frame::render_pass()`]
+    /// (e.g., via a custom encoder) so that the frame's pass counter stays accurate
+    /// and the "no render passes" warning is suppressed.
+    pub fn record_external_pass(&self) {
+        self.stats.increment_passes();
+    }
+
     /// Start building a render pass.
     ///
     /// Returns a builder that can be configured with target, clear operations,
