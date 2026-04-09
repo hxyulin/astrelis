@@ -32,14 +32,14 @@ pub fn create_fill_pipeline(
 
     let layout = renderer.create_pipeline_layout(
         Some(&format!("{} Fill Pipeline Layout", name)),
-        &[projection_bind_group_layout],
-        &[],
+        &[Some(projection_bind_group_layout)],
+        0,
     );
 
     let depth_stencil = depth_format.map(|format| wgpu::DepthStencilState {
         format,
-        depth_write_enabled: true,
-        depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
+        depth_write_enabled: Some(true),
+        depth_compare: Some(wgpu::CompareFunction::GreaterEqual), // Reverse-Z
         stencil: wgpu::StencilState::default(),
         bias: wgpu::DepthBiasState::default(),
     });
@@ -78,7 +78,7 @@ pub fn create_fill_pipeline(
             mask: !0,
             alpha_to_coverage_enabled: false,
         },
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }
@@ -103,14 +103,14 @@ pub fn create_stroke_pipeline(
 
     let layout = renderer.create_pipeline_layout(
         Some(&format!("{} Stroke Pipeline Layout", name)),
-        &[projection_bind_group_layout],
-        &[],
+        &[Some(projection_bind_group_layout)],
+        0,
     );
 
     let depth_stencil = depth_format.map(|format| wgpu::DepthStencilState {
         format,
-        depth_write_enabled: true,
-        depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
+        depth_write_enabled: Some(true),
+        depth_compare: Some(wgpu::CompareFunction::GreaterEqual), // Reverse-Z
         stencil: wgpu::StencilState::default(),
         bias: wgpu::DepthBiasState::default(),
     });
@@ -152,7 +152,7 @@ pub fn create_stroke_pipeline(
             mask: !0,
             alpha_to_coverage_enabled: false,
         },
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }

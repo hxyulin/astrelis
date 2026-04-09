@@ -261,9 +261,12 @@ impl GraphicsContext {
     ) -> Result<Self, GraphicsError> {
         profile_function!();
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: descriptor.backends,
-            ..Default::default()
+            flags: wgpu::InstanceFlags::empty(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            backend_options: wgpu::BackendOptions::default(),
+            display: None,
         });
 
         let adapter = {

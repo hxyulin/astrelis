@@ -255,9 +255,9 @@ impl Constraint {
     /// Use `try_to_dimension()` for fallible conversion.
     pub fn to_dimension(&self) -> taffy::Dimension {
         match self {
-            Constraint::Px(v) => taffy::Dimension::Length(*v),
-            Constraint::Percent(v) => taffy::Dimension::Percent(*v / 100.0),
-            Constraint::Auto => taffy::Dimension::Auto,
+            Constraint::Px(v) => taffy::Dimension::length(*v),
+            Constraint::Percent(v) => taffy::Dimension::percent(*v / 100.0),
+            Constraint::Auto => taffy::Dimension::auto(),
             Constraint::Vw(_) | Constraint::Vh(_) | Constraint::Vmin(_) | Constraint::Vmax(_) => {
                 panic!(
                     "Viewport-relative constraints must be resolved to pixels before converting to Taffy dimension. \
@@ -281,9 +281,9 @@ impl Constraint {
     /// Returns `None` for viewport units and complex constraints that need resolution.
     pub fn try_to_dimension(&self) -> Option<taffy::Dimension> {
         match self {
-            Constraint::Px(v) => Some(taffy::Dimension::Length(*v)),
-            Constraint::Percent(v) => Some(taffy::Dimension::Percent(*v / 100.0)),
-            Constraint::Auto => Some(taffy::Dimension::Auto),
+            Constraint::Px(v) => Some(taffy::Dimension::length(*v)),
+            Constraint::Percent(v) => Some(taffy::Dimension::percent(*v / 100.0)),
+            Constraint::Auto => Some(taffy::Dimension::auto()),
             _ => None,
         }
     }
@@ -293,9 +293,9 @@ impl Constraint {
     /// Returns `None` for viewport units and complex constraints that need resolution.
     pub fn try_to_length_percentage_auto(&self) -> Option<taffy::LengthPercentageAuto> {
         match self {
-            Constraint::Px(v) => Some(taffy::LengthPercentageAuto::Length(*v)),
-            Constraint::Percent(v) => Some(taffy::LengthPercentageAuto::Percent(*v / 100.0)),
-            Constraint::Auto => Some(taffy::LengthPercentageAuto::Auto),
+            Constraint::Px(v) => Some(taffy::LengthPercentageAuto::length(*v)),
+            Constraint::Percent(v) => Some(taffy::LengthPercentageAuto::percent(*v / 100.0)),
+            Constraint::Auto => Some(taffy::LengthPercentageAuto::auto()),
             _ => None,
         }
     }
@@ -305,8 +305,8 @@ impl Constraint {
     /// Returns `None` for Auto, viewport units, and complex constraints.
     pub fn try_to_length_percentage(&self) -> Option<taffy::LengthPercentage> {
         match self {
-            Constraint::Px(v) => Some(taffy::LengthPercentage::Length(*v)),
-            Constraint::Percent(v) => Some(taffy::LengthPercentage::Percent(*v / 100.0)),
+            Constraint::Px(v) => Some(taffy::LengthPercentage::length(*v)),
+            Constraint::Percent(v) => Some(taffy::LengthPercentage::percent(*v / 100.0)),
             _ => None,
         }
     }
@@ -317,9 +317,9 @@ impl Constraint {
     /// Panics if called on viewport-relative units or complex constraints.
     pub fn to_length_percentage_auto(&self) -> taffy::LengthPercentageAuto {
         match self {
-            Constraint::Px(v) => taffy::LengthPercentageAuto::Length(*v),
-            Constraint::Percent(v) => taffy::LengthPercentageAuto::Percent(*v / 100.0),
-            Constraint::Auto => taffy::LengthPercentageAuto::Auto,
+            Constraint::Px(v) => taffy::LengthPercentageAuto::length(*v),
+            Constraint::Percent(v) => taffy::LengthPercentageAuto::percent(*v / 100.0),
+            Constraint::Auto => taffy::LengthPercentageAuto::auto(),
             Constraint::Vw(_) | Constraint::Vh(_) | Constraint::Vmin(_) | Constraint::Vmax(_) => {
                 panic!("Viewport-relative constraints must be resolved to pixels first.");
             }
@@ -338,8 +338,8 @@ impl Constraint {
     /// Panics if called on Auto, viewport-relative units, or complex constraints.
     pub fn to_length_percentage(&self) -> taffy::LengthPercentage {
         match self {
-            Constraint::Px(v) => taffy::LengthPercentage::Length(*v),
-            Constraint::Percent(v) => taffy::LengthPercentage::Percent(*v / 100.0),
+            Constraint::Px(v) => taffy::LengthPercentage::length(*v),
+            Constraint::Percent(v) => taffy::LengthPercentage::percent(*v / 100.0),
             Constraint::Auto => panic!("Auto is not valid for LengthPercentage"),
             Constraint::Vw(_) | Constraint::Vh(_) | Constraint::Vmin(_) | Constraint::Vmax(_) => {
                 panic!("Viewport-relative constraints must be resolved to pixels first.");

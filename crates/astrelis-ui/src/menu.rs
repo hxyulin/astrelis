@@ -714,12 +714,12 @@ impl ContextMenu {
         container.style.border_width = self.style.border_width;
         container.style.border_radius = self.style.border_radius;
         container.style.layout.flex_direction = taffy::FlexDirection::Column;
-        container.style.layout.min_size.width = taffy::Dimension::Length(self.style.min_width);
+        container.style.layout.min_size.width = taffy::Dimension::length(self.style.min_width);
 
-        let padding_y = taffy::LengthPercentage::Length(self.style.padding_y);
+        let padding_y = taffy::LengthPercentage::length(self.style.padding_y);
         container.style.layout.padding = taffy::Rect {
-            left: taffy::LengthPercentage::Length(0.0),
-            right: taffy::LengthPercentage::Length(0.0),
+            left: taffy::LengthPercentage::length(0.0),
+            right: taffy::LengthPercentage::length(0.0),
             top: padding_y,
             bottom: padding_y,
         };
@@ -744,13 +744,13 @@ impl ContextMenu {
                 // Separator is a simple horizontal line
                 let mut sep = Container::new();
                 sep.style.background_color = Some(self.style.separator_color);
-                sep.style.layout.size.height = taffy::Dimension::Length(1.0);
-                sep.style.layout.size.width = taffy::Dimension::Percent(1.0);
+                sep.style.layout.size.height = taffy::Dimension::length(1.0);
+                sep.style.layout.size.width = taffy::Dimension::percent(1.0);
                 sep.style.layout.margin = taffy::Rect {
-                    left: taffy::LengthPercentageAuto::Length(self.style.padding_x),
-                    right: taffy::LengthPercentageAuto::Length(self.style.padding_x),
-                    top: taffy::LengthPercentageAuto::Length(4.0),
-                    bottom: taffy::LengthPercentageAuto::Length(4.0),
+                    left: taffy::LengthPercentageAuto::length(self.style.padding_x),
+                    right: taffy::LengthPercentageAuto::length(self.style.padding_x),
+                    top: taffy::LengthPercentageAuto::length(4.0),
+                    bottom: taffy::LengthPercentageAuto::length(4.0),
                 };
                 tree.add_widget(Box::new(sep))
             }
@@ -821,15 +821,15 @@ impl ContextMenu {
         item_container.style.layout.flex_direction = taffy::FlexDirection::Row;
         item_container.style.layout.align_items = Some(taffy::AlignItems::Center);
         item_container.style.layout.justify_content = Some(taffy::JustifyContent::SpaceBetween);
-        item_container.style.layout.size.height = taffy::Dimension::Length(self.style.item_height);
-        item_container.style.layout.size.width = taffy::Dimension::Percent(1.0);
+        item_container.style.layout.size.height = taffy::Dimension::length(self.style.item_height);
+        item_container.style.layout.size.width = taffy::Dimension::percent(1.0);
 
-        let padding = taffy::LengthPercentage::Length(self.style.padding_x);
+        let padding = taffy::LengthPercentage::length(self.style.padding_x);
         item_container.style.layout.padding = taffy::Rect {
             left: padding,
             right: padding,
-            top: taffy::LengthPercentage::Length(0.0),
-            bottom: taffy::LengthPercentage::Length(0.0),
+            top: taffy::LengthPercentage::length(0.0),
+            bottom: taffy::LengthPercentage::length(0.0),
         };
 
         let container_id = tree.add_widget(Box::new(item_container));
@@ -839,8 +839,8 @@ impl ContextMenu {
         left_container.style.layout.flex_direction = taffy::FlexDirection::Row;
         left_container.style.layout.align_items = Some(taffy::AlignItems::Center);
         left_container.style.layout.gap = taffy::Size {
-            width: taffy::LengthPercentage::Length(self.style.icon_gap),
-            height: taffy::LengthPercentage::Length(0.0),
+            width: taffy::LengthPercentage::length(self.style.icon_gap),
+            height: taffy::LengthPercentage::length(0.0),
         };
         let left_id = tree.add_widget(Box::new(left_container));
 

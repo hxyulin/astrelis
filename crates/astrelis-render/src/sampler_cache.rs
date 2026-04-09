@@ -24,7 +24,7 @@ pub struct SamplerKey {
     /// Minification filter
     pub min_filter: wgpu::FilterMode,
     /// Mipmap filter
-    pub mipmap_filter: wgpu::FilterMode,
+    pub mipmap_filter: wgpu::MipmapFilterMode,
     /// Minimum LOD clamp
     pub lod_min_clamp: u32, // f32 bits
     /// Maximum LOD clamp
@@ -62,7 +62,7 @@ impl SamplerKey {
             address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             lod_min_clamp: 0.0f32.to_bits(),
             lod_max_clamp: f32::MAX.to_bits(),
             compare: None,
@@ -79,7 +79,7 @@ impl SamplerKey {
             address_mode_w: wgpu::AddressMode::MirrorRepeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             lod_min_clamp: 0.0f32.to_bits(),
             lod_max_clamp: f32::MAX.to_bits(),
             compare: None,
@@ -96,7 +96,7 @@ impl SamplerKey {
             address_mode_w: wgpu::AddressMode::MirrorRepeat,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             lod_min_clamp: 0.0f32.to_bits(),
             lod_max_clamp: f32::MAX.to_bits(),
             compare: None,
@@ -148,7 +148,7 @@ impl SamplerKey {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             lod_min_clamp: 0.0f32.to_bits(),
             lod_max_clamp: f32::MAX.to_bits(),
             compare: None,
@@ -165,7 +165,7 @@ impl SamplerKey {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             lod_min_clamp: 0.0f32.to_bits(),
             lod_max_clamp: f32::MAX.to_bits(),
             compare: None,
@@ -182,7 +182,7 @@ impl SamplerKey {
             address_mode_w: wgpu::AddressMode::Repeat,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             lod_min_clamp: 0.0f32.to_bits(),
             lod_max_clamp: f32::MAX.to_bits(),
             compare: None,

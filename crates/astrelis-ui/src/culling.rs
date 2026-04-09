@@ -638,13 +638,13 @@ mod tests {
 
         // Create a simple tree
         let mut root_container = crate::widgets::Container::new();
-        root_container.style.layout.size.width = taffy::Dimension::Length(800.0);
-        root_container.style.layout.size.height = taffy::Dimension::Length(600.0);
+        root_container.style.layout.size.width = taffy::Dimension::length(800.0);
+        root_container.style.layout.size.height = taffy::Dimension::length(600.0);
         let root = tree.add_widget(Box::new(root_container));
 
         let mut child1 = crate::widgets::Container::new();
-        child1.style.layout.size.width = taffy::Dimension::Length(100.0);
-        child1.style.layout.size.height = taffy::Dimension::Length(100.0);
+        child1.style.layout.size.width = taffy::Dimension::length(100.0);
+        child1.style.layout.size.height = taffy::Dimension::length(100.0);
         let child1_id = tree.add_widget(Box::new(child1));
 
         tree.add_child(root, child1_id);
@@ -678,8 +678,8 @@ mod tests {
         let mut tree = UiTree::new();
 
         let mut root_container = crate::widgets::Container::new();
-        root_container.style.layout.size.width = taffy::Dimension::Length(800.0);
-        root_container.style.layout.size.height = taffy::Dimension::Length(600.0);
+        root_container.style.layout.size.width = taffy::Dimension::length(800.0);
+        root_container.style.layout.size.height = taffy::Dimension::length(600.0);
         let root = tree.add_widget(Box::new(root_container));
         tree.set_root(root);
 
@@ -792,8 +792,8 @@ mod tests {
     fn test_culling_tree_get_bounds() {
         let mut tree = UiTree::new();
         let mut container = crate::widgets::Container::new();
-        container.style.layout.size.width = taffy::Dimension::Length(200.0);
-        container.style.layout.size.height = taffy::Dimension::Length(100.0);
+        container.style.layout.size.width = taffy::Dimension::length(200.0);
+        container.style.layout.size.height = taffy::Dimension::length(100.0);
         let root = tree.add_widget(Box::new(container));
         tree.set_root(root);
         let registry = crate::plugin::registry::WidgetTypeRegistry::new();

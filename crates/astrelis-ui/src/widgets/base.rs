@@ -10,6 +10,15 @@ use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
+/// Extract the length value from a LengthPercentage, returning 0.0 for percent values.
+fn lp_to_px(lp: taffy::LengthPercentage) -> f32 {
+    if lp.into_raw().tag() == taffy::CompactLength::LENGTH_TAG {
+        lp.into_raw().value()
+    } else {
+        0.0
+    }
+}
+
 /// Darken a color by a factor (0.0 = no change, 1.0 = black).
 fn darken(color: Color, amount: f32) -> Color {
     let factor = 1.0 - amount;
@@ -437,15 +446,18 @@ impl Text {
                 }
             }
             // If viewport not available but constraint is simple (pixels), use it directly
-            if let Some(taffy::Dimension::Length(width)) = constraint.try_to_dimension() {
-                text = text.max_width(width);
+            if let Some(dim) = constraint.try_to_dimension()
+                && dim.tag() == taffy::CompactLength::LENGTH_TAG
+            {
+                text = text.max_width(dim.value());
                 return text;
             }
         }
 
         // Fallback: Apply max width from style if set
-        if let taffy::Dimension::Length(width) = self.style.layout.size.width {
-            text = text.max_width(width);
+        let width_dim = self.style.layout.size.width;
+        if width_dim.tag() == taffy::CompactLength::LENGTH_TAG {
+            text = text.max_width(width_dim.value());
         }
 
         text
@@ -682,20 +694,10 @@ impl Widget for Button {
             let (text_width, text_height) = renderer.measure_text(&text_style);
 
             // Add padding from style
-            let padding_x = match self.style.layout.padding.left {
-                taffy::LengthPercentage::Length(l) => l,
-                _ => 0.0,
-            } + match self.style.layout.padding.right {
-                taffy::LengthPercentage::Length(r) => r,
-                _ => 0.0,
-            };
-            let padding_y = match self.style.layout.padding.top {
-                taffy::LengthPercentage::Length(t) => t,
-                _ => 0.0,
-            } + match self.style.layout.padding.bottom {
-                taffy::LengthPercentage::Length(b) => b,
-                _ => 0.0,
-            };
+            let padding_x = lp_to_px(self.style.layout.padding.left)
+                + lp_to_px(self.style.layout.padding.right);
+            let padding_y = lp_to_px(self.style.layout.padding.top)
+                + lp_to_px(self.style.layout.padding.bottom);
 
             return Vec2::new(text_width + padding_x, text_height + padding_y);
         }
@@ -936,20 +938,10 @@ impl Widget for TextInput {
                 .color(self.display_color());
             let (text_width, text_height) = renderer.measure_text(&text_style);
 
-            let padding_x = match self.style.layout.padding.left {
-                taffy::LengthPercentage::Length(l) => l,
-                _ => 0.0,
-            } + match self.style.layout.padding.right {
-                taffy::LengthPercentage::Length(r) => r,
-                _ => 0.0,
-            };
-            let padding_y = match self.style.layout.padding.top {
-                taffy::LengthPercentage::Length(t) => t,
-                _ => 0.0,
-            } + match self.style.layout.padding.bottom {
-                taffy::LengthPercentage::Length(b) => b,
-                _ => 0.0,
-            };
+            let padding_x = lp_to_px(self.style.layout.padding.left)
+                + lp_to_px(self.style.layout.padding.right);
+            let padding_y = lp_to_px(self.style.layout.padding.top)
+                + lp_to_px(self.style.layout.padding.bottom);
 
             return Vec2::new(text_width + padding_x + 20.0, text_height + padding_y);
         }
@@ -1029,20 +1021,10 @@ impl Widget for Tooltip {
                 .color(self.text_color.unwrap_or(Color::WHITE));
             let (text_width, text_height) = renderer.measure_text(&text_style);
 
-            let padding_x = match self.style.layout.padding.left {
-                taffy::LengthPercentage::Length(l) => l,
-                _ => 0.0,
-            } + match self.style.layout.padding.right {
-                taffy::LengthPercentage::Length(r) => r,
-                _ => 0.0,
-            };
-            let padding_y = match self.style.layout.padding.top {
-                taffy::LengthPercentage::Length(t) => t,
-                _ => 0.0,
-            } + match self.style.layout.padding.bottom {
-                taffy::LengthPercentage::Length(b) => b,
-                _ => 0.0,
-            };
+            let padding_x = lp_to_px(self.style.layout.padding.left)
+                + lp_to_px(self.style.layout.padding.right);
+            let padding_y = lp_to_px(self.style.layout.padding.top)
+                + lp_to_px(self.style.layout.padding.bottom);
 
             return Vec2::new(text_width + padding_x, text_height + padding_y);
         }

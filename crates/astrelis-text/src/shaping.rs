@@ -81,7 +81,7 @@ pub fn shape_text(
     let mut buffer = Buffer::new(font_system, metrics);
 
     // Set text
-    buffer.set_text(font_system, text, Attrs::new(), Shaping::Advanced);
+    buffer.set_text(font_system, text, &Attrs::new(), Shaping::Advanced, None);
 
     // Set wrap width if specified
     if let Some(width) = wrap_width {
@@ -166,7 +166,7 @@ pub fn measure_text_fast(
     let metrics = Metrics::new(font_size * scale, font_size * scale * 1.2);
     let mut buffer = Buffer::new(font_system, metrics);
 
-    buffer.set_text(font_system, text, Attrs::new(), Shaping::Advanced);
+    buffer.set_text(font_system, text, &Attrs::new(), Shaping::Advanced, None);
 
     if let Some(width) = wrap_width {
         buffer.set_size(font_system, Some(width * scale), None);
@@ -219,7 +219,7 @@ mod tests {
         let metrics = Metrics::new(16.0, 19.2);
         let mut buffer = Buffer::new(&mut font_system, metrics);
 
-        buffer.set_text(&mut font_system, "ABC", Attrs::new(), Shaping::Advanced);
+        buffer.set_text(&mut font_system, "ABC", &Attrs::new(), Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut font_system, false);
 
         let result = extract_glyphs_from_buffer(&buffer, 16.0, 1.0);

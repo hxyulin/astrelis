@@ -107,7 +107,7 @@ impl State {
                 self.on_mouse_button_input(ElementState::Pressed, *button);
                 EventResponse {
                     repaint: true,
-                    consumed: self.context.wants_pointer_input(),
+                    consumed: self.context.egui_wants_pointer_input(),
                 }
             }
 
@@ -115,7 +115,7 @@ impl State {
                 self.on_mouse_button_input(ElementState::Released, *button);
                 EventResponse {
                     repaint: true,
-                    consumed: self.context.wants_pointer_input(),
+                    consumed: self.context.egui_wants_pointer_input(),
                 }
             }
 
@@ -123,7 +123,7 @@ impl State {
                 self.on_mouse_wheel(window, *delta);
                 EventResponse {
                     repaint: true,
-                    consumed: self.context.wants_pointer_input(),
+                    consumed: self.context.egui_wants_pointer_input(),
                 }
             }
 
@@ -131,7 +131,7 @@ impl State {
                 self.on_cursor_moved(window, *pos);
                 EventResponse {
                     repaint: true,
-                    consumed: self.context.is_using_pointer(),
+                    consumed: self.context.egui_is_using_pointer(),
                 }
             }
 
@@ -153,7 +153,7 @@ impl State {
                 } else {
                     self.on_keyboard_input(event);
 
-                    let consumed = self.context.wants_keyboard_input()
+                    let consumed = self.context.egui_wants_keyboard_input()
                         || matches!(
                             event.logical_key,
                             astrelis_winit::event::Key::Named(astrelis_winit::event::NamedKey::Tab)
@@ -228,6 +228,7 @@ impl State {
         self.input.events.push(egui::Event::MouseWheel {
             unit,
             delta,
+            phase: egui::TouchPhase::Move,
             modifiers,
         });
     }

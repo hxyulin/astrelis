@@ -235,8 +235,8 @@ fn abs_style(left_pct: f32, top_pct: f32, w_vw: f32, h_vh: f32, z: u16) -> Style
         .z_index(z)
         .padding(15.0);
     s.layout.inset = taffy::Rect {
-        left: Lpa::Percent(left_pct / 100.0),
-        top: Lpa::Percent(top_pct / 100.0),
+        left: Lpa::percent(left_pct / 100.0),
+        top: Lpa::percent(top_pct / 100.0),
         right: Lpa::ZERO,
         bottom: Lpa::ZERO,
     };

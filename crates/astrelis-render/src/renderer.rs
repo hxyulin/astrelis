@@ -289,7 +289,7 @@ impl Renderer {
                 address_mode_w: wgpu::AddressMode::ClampToEdge,
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
                 ..Default::default()
             })
     }
@@ -305,7 +305,7 @@ impl Renderer {
                 address_mode_w: wgpu::AddressMode::ClampToEdge,
                 mag_filter: wgpu::FilterMode::Nearest,
                 min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
                 ..Default::default()
             })
     }
@@ -343,8 +343,8 @@ impl Renderer {
     pub fn create_pipeline_layout(
         &self,
         label: Option<&str>,
-        bind_group_layouts: &[&wgpu::BindGroupLayout],
-        push_constant_ranges: &[wgpu::PushConstantRange],
+        bind_group_layouts: &[Option<&wgpu::BindGroupLayout>],
+        immediate_size: u32,
     ) -> wgpu::PipelineLayout {
         profile_function!();
         self.context
@@ -352,7 +352,7 @@ impl Renderer {
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label,
                 bind_group_layouts,
-                push_constant_ranges,
+                immediate_size,
             })
     }
 
@@ -623,7 +623,7 @@ impl<'a> RenderPipelineBuilder<'a> {
                 primitive: self.primitive,
                 depth_stencil: self.depth_stencil,
                 multisample: self.multisample,
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             })
     }

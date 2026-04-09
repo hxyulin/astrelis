@@ -312,7 +312,7 @@ impl TextBuffer {
             .color(color_to_cosmic(text.get_color()));
 
         self.buffer
-            .set_text(font_system, text.get_content(), attrs, Shaping::Advanced);
+            .set_text(font_system, text.get_content(), &attrs, Shaping::Advanced, None);
 
         // Set buffer size for wrapping
         self.buffer.set_size(
@@ -650,8 +650,8 @@ impl DecorationRenderer {
         // Create pipeline layout
         let pipeline_layout = renderer.create_pipeline_layout(
             Some("Decoration Pipeline Layout"),
-            &[&decoration_uniform_layout],
-            &[],
+            &[Some(&decoration_uniform_layout)],
+            0,
         );
 
         // Create pipeline
@@ -696,7 +696,7 @@ impl DecorationRenderer {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 

@@ -357,34 +357,32 @@ impl WindowContext {
     fn try_acquire_surface_texture(&mut self) -> Result<wgpu::SurfaceTexture, GraphicsError> {
         // First attempt
         match self.surface.get_current_texture() {
-            Ok(frame) => return Ok(frame),
-            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+            wgpu::CurrentSurfaceTexture::Success(frame)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => return Ok(frame),
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                 // Surface needs reconfiguration - try to recover
                 tracing::debug!("Surface lost/outdated, reconfiguring...");
                 self.surface.configure(self.context.device(), &self.config);
             }
-            Err(wgpu::SurfaceError::OutOfMemory) => {
-                return Err(GraphicsError::SurfaceOutOfMemory);
-            }
-            Err(wgpu::SurfaceError::Timeout) => {
+            wgpu::CurrentSurfaceTexture::Timeout => {
                 return Err(GraphicsError::SurfaceTimeout);
             }
-            Err(e) => {
+            other => {
                 return Err(GraphicsError::SurfaceTextureAcquisitionFailed(
-                    e.to_string(),
+                    format!("{other:?}"),
                 ));
             }
         }
 
         // Second attempt after reconfiguration
         match self.surface.get_current_texture() {
-            Ok(frame) => Ok(frame),
-            Err(wgpu::SurfaceError::Lost) => Err(GraphicsError::SurfaceLost),
-            Err(wgpu::SurfaceError::Outdated) => Err(GraphicsError::SurfaceOutdated),
-            Err(wgpu::SurfaceError::OutOfMemory) => Err(GraphicsError::SurfaceOutOfMemory),
-            Err(wgpu::SurfaceError::Timeout) => Err(GraphicsError::SurfaceTimeout),
-            Err(e) => Err(GraphicsError::SurfaceTextureAcquisitionFailed(
-                e.to_string(),
+            wgpu::CurrentSurfaceTexture::Success(frame)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => Ok(frame),
+            wgpu::CurrentSurfaceTexture::Lost => Err(GraphicsError::SurfaceLost),
+            wgpu::CurrentSurfaceTexture::Outdated => Err(GraphicsError::SurfaceOutdated),
+            wgpu::CurrentSurfaceTexture::Timeout => Err(GraphicsError::SurfaceTimeout),
+            other => Err(GraphicsError::SurfaceTextureAcquisitionFailed(
+                format!("{other:?}"),
             )),
         }
     }

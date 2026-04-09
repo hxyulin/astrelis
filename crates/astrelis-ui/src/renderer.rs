@@ -777,8 +777,8 @@ impl UiRenderer {
             .depth_format
             .map(|format| wgpu::DepthStencilState {
                 format,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::GreaterEqual), // Reverse-Z
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             });
@@ -789,8 +789,8 @@ impl UiRenderer {
                 .depth_format
                 .map(|format| wgpu::DepthStencilState {
                     format,
-                    depth_write_enabled: false,
-                    depth_compare: wgpu::CompareFunction::GreaterEqual, // Reverse-Z
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual), // Reverse-Z
                     stencil: wgpu::StencilState::default(),
                     bias: wgpu::DepthBiasState::default(),
                 });
@@ -814,8 +814,8 @@ impl UiRenderer {
         // --- Quad pipelines (opaque + transparent) ---
         let quad_layout = renderer.create_pipeline_layout(
             Some(&format!("{} Quad Pipeline Layout", descriptor.name)),
-            &[projection_bind_group_layout],
-            &[],
+            &[Some(projection_bind_group_layout)],
+            0,
         );
 
         let quad_color_target = [Some(wgpu::ColorTargetState {
@@ -843,7 +843,7 @@ impl UiRenderer {
                 primitive: common_primitive,
                 depth_stencil: depth_stencil_opaque.clone(),
                 multisample: common_multisample,
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
 
@@ -866,7 +866,7 @@ impl UiRenderer {
                 primitive: common_primitive,
                 depth_stencil: depth_stencil_transparent.clone(),
                 multisample: common_multisample,
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
 
@@ -874,10 +874,10 @@ impl UiRenderer {
         let text_layout = renderer.create_pipeline_layout(
             Some(&format!("{} Text Pipeline Layout", descriptor.name)),
             &[
-                text_atlas_bind_group_layout,
-                text_projection_bind_group_layout,
+                Some(text_atlas_bind_group_layout),
+                Some(text_projection_bind_group_layout),
             ],
-            &[],
+            0,
         );
 
         let text_pipeline = renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -902,7 +902,7 @@ impl UiRenderer {
             primitive: common_primitive,
             depth_stencil: depth_stencil_transparent.clone(),
             multisample: common_multisample,
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -910,10 +910,10 @@ impl UiRenderer {
         let image_layout = renderer.create_pipeline_layout(
             Some(&format!("{} Image Pipeline Layout", descriptor.name)),
             &[
-                image_texture_bind_group_layout,
-                text_projection_bind_group_layout,
+                Some(image_texture_bind_group_layout),
+                Some(text_projection_bind_group_layout),
             ],
-            &[],
+            0,
         );
 
         let image_color_target = [Some(wgpu::ColorTargetState {
@@ -941,7 +941,7 @@ impl UiRenderer {
                 primitive: common_primitive,
                 depth_stencil: depth_stencil_opaque,
                 multisample: common_multisample,
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
 
@@ -964,7 +964,7 @@ impl UiRenderer {
                 primitive: common_primitive,
                 depth_stencil: depth_stencil_transparent,
                 multisample: common_multisample,
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
 

@@ -106,6 +106,16 @@ pub struct TreeSnapshot {
     pub id_to_index: HashMap<NodeId, usize>,
 }
 
+// SAFETY: TreeSnapshot is sent across threads for async layout computation.
+// `taffy::Style` contains `CompactLength` which wraps `*const ()` for calc() support,
+// making it `!Send`. However, we never use calc() values in our styles (all dimensions
+// are Length, Percent, or Auto), so the pointer field is always zeroed/unused and safe
+// to send across threads.
+#[allow(unsafe_code)]
+unsafe impl Send for NodeSnapshot {}
+#[allow(unsafe_code)]
+unsafe impl Send for TreeSnapshot {}
+
 impl TreeSnapshot {
     /// Create a snapshot from a UiTree.
     pub fn from_tree(tree: &UiTree, widget_registry: &WidgetTypeRegistry) -> Self {

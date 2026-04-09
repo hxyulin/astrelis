@@ -155,8 +155,8 @@ impl OverlayRenderer {
         // Create pipelines
         let quad_layout = renderer.create_pipeline_layout(
             Some("Overlay Quad Pipeline Layout"),
-            &[&projection_bind_group_layout],
-            &[],
+            &[Some(&projection_bind_group_layout)],
+            0,
         );
 
         let quad_pipeline = renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -193,14 +193,14 @@ impl OverlayRenderer {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
         let text_layout = renderer.create_pipeline_layout(
             Some("Overlay Text Pipeline Layout"),
-            &[&text_atlas_bind_group_layout, &projection_bind_group_layout],
-            &[],
+            &[Some(&text_atlas_bind_group_layout), Some(&projection_bind_group_layout)],
+            0,
         );
 
         let text_pipeline_gpu = renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -237,7 +237,7 @@ impl OverlayRenderer {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 

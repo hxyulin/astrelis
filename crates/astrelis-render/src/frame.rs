@@ -672,6 +672,7 @@ impl<'f, 'w> RenderPassBuilder<'f, 'w> {
                 depth_stencil_attachment: depth_attachment,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             })
             .forget_lifetime();
 
@@ -907,20 +908,19 @@ impl<'f> RenderPass<'f> {
     // Push Constants
     // =========================================================================
 
-    /// Set push constants.
-    pub fn set_push_constants<T: bytemuck::Pod>(
+    /// Set immediates (formerly push constants).
+    pub fn set_immediates<T: bytemuck::Pod>(
         &mut self,
-        stages: wgpu::ShaderStages,
         offset: u32,
         data: &T,
     ) {
         self.wgpu_pass()
-            .set_push_constants(stages, offset, bytemuck::bytes_of(data));
+            .set_immediates(offset, bytemuck::bytes_of(data));
     }
 
-    /// Set push constants from raw bytes.
-    pub fn set_push_constants_raw(&mut self, stages: wgpu::ShaderStages, offset: u32, data: &[u8]) {
-        self.wgpu_pass().set_push_constants(stages, offset, data);
+    /// Set immediates from raw bytes.
+    pub fn set_immediates_raw(&mut self, offset: u32, data: &[u8]) {
+        self.wgpu_pass().set_immediates(offset, data);
     }
 }
 

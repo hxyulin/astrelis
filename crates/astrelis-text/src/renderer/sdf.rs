@@ -185,11 +185,11 @@ impl SdfBackend {
         let pipeline_layout = renderer.create_pipeline_layout(
             Some("SDF Text Pipeline Layout"),
             &[
-                &bind_group_layout,
-                &shared.uniform_bind_group_layout,
-                &params_bind_group_layout,
+                Some(&bind_group_layout),
+                Some(&shared.uniform_bind_group_layout),
+                Some(&params_bind_group_layout),
             ],
-            &[],
+            0,
         );
 
         // Create SDF pipeline
@@ -235,7 +235,7 @@ impl SdfBackend {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -276,6 +276,7 @@ impl SdfBackend {
             font_size_bits: self.config.base_size.to_bits(),
             x_bin: cache_key.x_bin,
             y_bin: cache_key.y_bin,
+            font_weight: cache_key.font_weight,
             flags: cache_key.flags,
         };
 

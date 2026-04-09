@@ -266,8 +266,8 @@ impl UiTree {
     /// Check if a node is a layout boundary (fixed size).
     fn is_layout_boundary(node: &UiNode) -> bool {
         let style = &node.widget.style().layout;
-        matches!(style.size.width, Dimension::Length(_))
-            && matches!(style.size.height, Dimension::Length(_))
+        !style.size.width.is_auto() && style.size.width.tag() == taffy::CompactLength::LENGTH_TAG
+            && !style.size.height.is_auto() && style.size.height.tag() == taffy::CompactLength::LENGTH_TAG
     }
 
     /// Mark a node with specific dirty flags and propagate to ancestors if needed.
@@ -1164,7 +1164,7 @@ impl UiTree {
                         && constraint.needs_resolution()
                         && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
                     {
-                        style.layout.size.width = taffy::Dimension::Length(px);
+                        style.layout.size.width = taffy::Dimension::length(px);
                         changed = true;
                     }
 
@@ -1173,7 +1173,7 @@ impl UiTree {
                         && constraint.needs_resolution()
                         && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
                     {
-                        style.layout.size.height = taffy::Dimension::Length(px);
+                        style.layout.size.height = taffy::Dimension::length(px);
                         changed = true;
                     }
 
@@ -1182,7 +1182,7 @@ impl UiTree {
                         && constraint.needs_resolution()
                         && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
                     {
-                        style.layout.min_size.width = taffy::Dimension::Length(px);
+                        style.layout.min_size.width = taffy::Dimension::length(px);
                         changed = true;
                     }
 
@@ -1191,7 +1191,7 @@ impl UiTree {
                         && constraint.needs_resolution()
                         && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
                     {
-                        style.layout.min_size.height = taffy::Dimension::Length(px);
+                        style.layout.min_size.height = taffy::Dimension::length(px);
                         changed = true;
                     }
 
@@ -1200,7 +1200,7 @@ impl UiTree {
                         && constraint.needs_resolution()
                         && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
                     {
-                        style.layout.max_size.width = taffy::Dimension::Length(px);
+                        style.layout.max_size.width = taffy::Dimension::length(px);
                         changed = true;
                     }
 
@@ -1209,7 +1209,7 @@ impl UiTree {
                         && constraint.needs_resolution()
                         && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
                     {
-                        style.layout.max_size.height = taffy::Dimension::Length(px);
+                        style.layout.max_size.height = taffy::Dimension::length(px);
                         changed = true;
                     }
 
@@ -1218,19 +1218,19 @@ impl UiTree {
                         && padding.iter().any(|c| c.needs_resolution())
                     {
                         if let Some(px) = ConstraintResolver::resolve(&padding[0], &ctx) {
-                            style.layout.padding.left = taffy::LengthPercentage::Length(px);
+                            style.layout.padding.left = taffy::LengthPercentage::length(px);
                             changed = true;
                         }
                         if let Some(px) = ConstraintResolver::resolve(&padding[1], &ctx) {
-                            style.layout.padding.top = taffy::LengthPercentage::Length(px);
+                            style.layout.padding.top = taffy::LengthPercentage::length(px);
                             changed = true;
                         }
                         if let Some(px) = ConstraintResolver::resolve(&padding[2], &ctx) {
-                            style.layout.padding.right = taffy::LengthPercentage::Length(px);
+                            style.layout.padding.right = taffy::LengthPercentage::length(px);
                             changed = true;
                         }
                         if let Some(px) = ConstraintResolver::resolve(&padding[3], &ctx) {
-                            style.layout.padding.bottom = taffy::LengthPercentage::Length(px);
+                            style.layout.padding.bottom = taffy::LengthPercentage::length(px);
                             changed = true;
                         }
                     }
@@ -1240,19 +1240,19 @@ impl UiTree {
                         && margin.iter().any(|c| c.needs_resolution())
                     {
                         if let Some(px) = ConstraintResolver::resolve(&margin[0], &ctx) {
-                            style.layout.margin.left = taffy::LengthPercentageAuto::Length(px);
+                            style.layout.margin.left = taffy::LengthPercentageAuto::length(px);
                             changed = true;
                         }
                         if let Some(px) = ConstraintResolver::resolve(&margin[1], &ctx) {
-                            style.layout.margin.top = taffy::LengthPercentageAuto::Length(px);
+                            style.layout.margin.top = taffy::LengthPercentageAuto::length(px);
                             changed = true;
                         }
                         if let Some(px) = ConstraintResolver::resolve(&margin[2], &ctx) {
-                            style.layout.margin.right = taffy::LengthPercentageAuto::Length(px);
+                            style.layout.margin.right = taffy::LengthPercentageAuto::length(px);
                             changed = true;
                         }
                         if let Some(px) = ConstraintResolver::resolve(&margin[3], &ctx) {
-                            style.layout.margin.bottom = taffy::LengthPercentageAuto::Length(px);
+                            style.layout.margin.bottom = taffy::LengthPercentageAuto::length(px);
                             changed = true;
                         }
                     }
@@ -1262,8 +1262,8 @@ impl UiTree {
                         && constraint.needs_resolution()
                         && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
                     {
-                        style.layout.gap.width = taffy::LengthPercentage::Length(px);
-                        style.layout.gap.height = taffy::LengthPercentage::Length(px);
+                        style.layout.gap.width = taffy::LengthPercentage::length(px);
+                        style.layout.gap.height = taffy::LengthPercentage::length(px);
                         changed = true;
                     }
 
@@ -1272,7 +1272,7 @@ impl UiTree {
                         && constraint.needs_resolution()
                         && let Some(px) = ConstraintResolver::resolve(constraint, &ctx)
                     {
-                        style.layout.flex_basis = taffy::Dimension::Length(px);
+                        style.layout.flex_basis = taffy::Dimension::length(px);
                         changed = true;
                     }
                 }

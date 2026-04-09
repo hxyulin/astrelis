@@ -57,6 +57,9 @@ impl Egui {
     pub fn ui(&mut self, window: &RenderWindow, gui: impl FnMut(&egui::Context)) {
         profile_function!();
         let raw_input = self.state.take_input(window);
+        // TODO: Migrate to `run_ui` which takes `FnMut(&mut Ui)` instead of `FnMut(&Context)`.
+        // This is a public API change and should be done as a separate migration.
+        #[expect(deprecated)]
         self.full_output.replace(self.context.run(raw_input, gui));
     }
 
@@ -115,6 +118,7 @@ impl Egui {
                     label: Some("Egui Render Pass"),
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 })
                 .forget_lifetime();
 

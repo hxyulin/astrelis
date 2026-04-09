@@ -163,8 +163,8 @@ impl BitmapBackend {
         // Create pipeline layout
         let pipeline_layout = renderer.create_pipeline_layout(
             Some("Text Pipeline Layout"),
-            &[&bind_group_layout, &shared.uniform_bind_group_layout],
-            &[],
+            &[Some(&bind_group_layout), Some(&shared.uniform_bind_group_layout)],
+            0,
         );
 
         // Create pipeline
@@ -210,7 +210,7 @@ impl BitmapBackend {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 

@@ -18,49 +18,23 @@ struct LayoutHash(u64);
 impl LayoutHash {
     /// Hash a Dimension value manually.
     fn hash_dimension(hasher: &mut impl Hasher, dim: &taffy::Dimension) {
-        match dim {
-            taffy::Dimension::Length(v) => {
-                0u8.hash(hasher);
-                v.to_bits().hash(hasher);
-            }
-            taffy::Dimension::Percent(v) => {
-                1u8.hash(hasher);
-                v.to_bits().hash(hasher);
-            }
-            taffy::Dimension::Auto => {
-                2u8.hash(hasher);
-            }
+        dim.tag().hash(hasher);
+        if !dim.is_auto() {
+            dim.value().to_bits().hash(hasher);
         }
     }
 
     /// Hash a LengthPercentage value manually.
     fn hash_length_percentage(hasher: &mut impl Hasher, lp: &taffy::LengthPercentage) {
-        match lp {
-            taffy::LengthPercentage::Length(v) => {
-                0u8.hash(hasher);
-                v.to_bits().hash(hasher);
-            }
-            taffy::LengthPercentage::Percent(v) => {
-                1u8.hash(hasher);
-                v.to_bits().hash(hasher);
-            }
-        }
+        lp.into_raw().tag().hash(hasher);
+        lp.into_raw().value().to_bits().hash(hasher);
     }
 
     /// Hash a LengthPercentageAuto value manually.
     fn hash_length_percentage_auto(hasher: &mut impl Hasher, lpa: &taffy::LengthPercentageAuto) {
-        match lpa {
-            taffy::LengthPercentageAuto::Length(v) => {
-                0u8.hash(hasher);
-                v.to_bits().hash(hasher);
-            }
-            taffy::LengthPercentageAuto::Percent(v) => {
-                1u8.hash(hasher);
-                v.to_bits().hash(hasher);
-            }
-            taffy::LengthPercentageAuto::Auto => {
-                2u8.hash(hasher);
-            }
+        lpa.into_raw().tag().hash(hasher);
+        if !lpa.is_auto() {
+            lpa.into_raw().value().to_bits().hash(hasher);
         }
     }
 
@@ -252,24 +226,24 @@ mod tests {
     fn test_layout_hash() {
         let style1 = taffy::Style {
             size: taffy::Size {
-                width: taffy::Dimension::Length(100.0),
-                height: taffy::Dimension::Length(50.0),
+                width: taffy::Dimension::length(100.0),
+                height: taffy::Dimension::length(50.0),
             },
             ..Default::default()
         };
 
         let style2 = taffy::Style {
             size: taffy::Size {
-                width: taffy::Dimension::Length(100.0),
-                height: taffy::Dimension::Length(50.0),
+                width: taffy::Dimension::length(100.0),
+                height: taffy::Dimension::length(50.0),
             },
             ..Default::default()
         };
 
         let style3 = taffy::Style {
             size: taffy::Size {
-                width: taffy::Dimension::Length(200.0),
-                height: taffy::Dimension::Length(50.0),
+                width: taffy::Dimension::length(200.0),
+                height: taffy::Dimension::length(50.0),
             },
             ..Default::default()
         };

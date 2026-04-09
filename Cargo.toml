@@ -35,7 +35,7 @@ default-members = [
 
 [workspace.package]
 version = "0.2.4"
-rust-version = "1.90.0"
+rust-version = "1.92.0"
 edition = "2024"
 authors = ["hxyulin <hxyulin@proton.me>"]
 license = "MIT"
@@ -61,23 +61,23 @@ astrelis-winit = { path = "crates/astrelis-winit", version = "0.2.4" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
-puffin = "0.19.1"
-puffin_http = "0.16"
+puffin = "0.20"
+puffin_http = "0.17"
 bytemuck = "1.23.1"
-glam = { version = "0.30.9", features = ["mint", "bytemuck"] }
+glam = { version = "0.32", features = ["mint", "bytemuck"] }
 mint = "0.5.9"
 
 # External dependencies
-cosmic-text = "0.12"
-taffy = { version = "0.5", features = ["flexbox", "grid"] }
+cosmic-text = "0.18"
+taffy = { version = "0.10", features = ["flexbox", "grid"] }
 indexmap = "2.0"
 pollster = "0.4.0"
 # wgpu version must match egui-wgpu's requirement (see https://github.com/emilk/egui/blob/master/Cargo.toml)
-wgpu = { version = "=27.0.1", features = ["wgsl"] }
+wgpu = { version = "=29.0.1", features = ["wgsl"] }
 winit = { version = "0.30.12", features = ["rwh_05"] }
 sys-locale = "0.3"
-egui = "0.33.3"
-egui-wgpu = "0.33.3"
+egui = "0.34.1"
+egui-wgpu = "0.34.1"
 
 # Optimized collections
 ahash = "0.8"
@@ -98,7 +98,7 @@ notify = "7.0"
 tempfile = "3.10"
 
 # GPU profiling
-wgpu-profiler = "0.25"
+wgpu-profiler = "0.27"
 
 # Benchmarking
-criterion = { version = "0.5", features = ["html_reports"] }
+criterion = { version = "0.8", features = ["html_reports"] }

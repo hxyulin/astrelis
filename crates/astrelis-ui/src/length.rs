@@ -117,9 +117,9 @@ impl Length {
     /// These must be resolved to pixels first using [`Length::resolve`].
     pub fn to_dimension(self) -> taffy::Dimension {
         match self {
-            Length::Px(v) => taffy::Dimension::Length(v),
-            Length::Percent(v) => taffy::Dimension::Percent(v / 100.0),
-            Length::Auto => taffy::Dimension::Auto,
+            Length::Px(v) => taffy::Dimension::length(v),
+            Length::Percent(v) => taffy::Dimension::percent(v / 100.0),
+            Length::Auto => taffy::Dimension::auto(),
             Length::Vw(_) | Length::Vh(_) | Length::Vmin(_) | Length::Vmax(_) => {
                 panic!(
                     "Viewport-relative units must be resolved to pixels before converting to Taffy dimension. \
@@ -131,10 +131,13 @@ impl Length {
 
     /// Convert from Taffy Dimension.
     pub fn from_dimension(dim: taffy::Dimension) -> Self {
-        match dim {
-            taffy::Dimension::Length(v) => Length::Px(v),
-            taffy::Dimension::Percent(v) => Length::Percent(v * 100.0),
-            taffy::Dimension::Auto => Length::Auto,
+        if dim.is_auto() {
+            Length::Auto
+        } else if dim.tag() == taffy::CompactLength::PERCENT_TAG {
+            Length::Percent(dim.value() * 100.0)
+        } else {
+            // LENGTH_TAG or other
+            Length::Px(dim.value())
         }
     }
 
@@ -269,9 +272,9 @@ impl LengthAuto {
     /// These must be resolved to pixels first using [`LengthAuto::resolve`].
     pub fn to_length_percentage_auto(self) -> taffy::LengthPercentageAuto {
         match self {
-            LengthAuto::Px(v) => taffy::LengthPercentageAuto::Length(v),
-            LengthAuto::Percent(v) => taffy::LengthPercentageAuto::Percent(v / 100.0),
-            LengthAuto::Auto => taffy::LengthPercentageAuto::Auto,
+            LengthAuto::Px(v) => taffy::LengthPercentageAuto::length(v),
+            LengthAuto::Percent(v) => taffy::LengthPercentageAuto::percent(v / 100.0),
+            LengthAuto::Auto => taffy::LengthPercentageAuto::auto(),
             LengthAuto::Vw(_) | LengthAuto::Vh(_) | LengthAuto::Vmin(_) | LengthAuto::Vmax(_) => {
                 panic!(
                     "Viewport-relative units must be resolved to pixels before converting to Taffy dimension. \
@@ -283,10 +286,12 @@ impl LengthAuto {
 
     /// Convert from Taffy LengthPercentageAuto.
     pub fn from_length_percentage_auto(lpa: taffy::LengthPercentageAuto) -> Self {
-        match lpa {
-            taffy::LengthPercentageAuto::Length(v) => LengthAuto::Px(v),
-            taffy::LengthPercentageAuto::Percent(v) => LengthAuto::Percent(v * 100.0),
-            taffy::LengthPercentageAuto::Auto => LengthAuto::Auto,
+        if lpa.is_auto() {
+            LengthAuto::Auto
+        } else if lpa.into_raw().tag() == taffy::CompactLength::PERCENT_TAG {
+            LengthAuto::Percent(lpa.into_raw().value() * 100.0)
+        } else {
+            LengthAuto::Px(lpa.into_raw().value())
         }
     }
 }
@@ -405,8 +410,8 @@ impl LengthPercentage {
     /// These must be resolved to pixels first using [`LengthPercentage::resolve`].
     pub fn to_length_percentage(self) -> taffy::LengthPercentage {
         match self {
-            LengthPercentage::Px(v) => taffy::LengthPercentage::Length(v),
-            LengthPercentage::Percent(v) => taffy::LengthPercentage::Percent(v / 100.0),
+            LengthPercentage::Px(v) => taffy::LengthPercentage::length(v),
+            LengthPercentage::Percent(v) => taffy::LengthPercentage::percent(v / 100.0),
             LengthPercentage::Vw(_)
             | LengthPercentage::Vh(_)
             | LengthPercentage::Vmin(_)
@@ -421,9 +426,10 @@ impl LengthPercentage {
 
     /// Convert from Taffy LengthPercentage.
     pub fn from_length_percentage(lp: taffy::LengthPercentage) -> Self {
-        match lp {
-            taffy::LengthPercentage::Length(v) => LengthPercentage::Px(v),
-            taffy::LengthPercentage::Percent(v) => LengthPercentage::Percent(v * 100.0),
+        if lp.into_raw().tag() == taffy::CompactLength::PERCENT_TAG {
+            LengthPercentage::Percent(lp.into_raw().value() * 100.0)
+        } else {
+            LengthPercentage::Px(lp.into_raw().value())
         }
     }
 }
@@ -455,17 +461,17 @@ impl fmt::Display for LengthPercentage {
 
 /// Helper function to create a Taffy length dimension.
 pub fn length(value: f32) -> taffy::Dimension {
-    taffy::Dimension::Length(value)
+    taffy::Dimension::length(value)
 }
 
 /// Helper function to create a Taffy percent dimension.
 pub fn percent(value: f32) -> taffy::Dimension {
-    taffy::Dimension::Percent(value / 100.0)
+    taffy::Dimension::percent(value / 100.0)
 }
 
 /// Helper function to create auto dimension.
 pub fn auto() -> taffy::Dimension {
-    taffy::Dimension::Auto
+    taffy::Dimension::auto()
 }
 
 /// Helper function to create a viewport width length.
@@ -557,15 +563,15 @@ mod tests {
     fn test_length_to_dimension() {
         let len = Length::Px(100.0);
         let dim = len.to_dimension();
-        assert!(matches!(dim, taffy::Dimension::Length(100.0)));
+        assert_eq!(dim, taffy::Dimension::length(100.0));
 
         let len = Length::Percent(50.0);
         let dim = len.to_dimension();
-        assert!(matches!(dim, taffy::Dimension::Percent(0.5)));
+        assert_eq!(dim, taffy::Dimension::percent(0.5));
 
         let len = Length::Auto;
         let dim = len.to_dimension();
-        assert!(matches!(dim, taffy::Dimension::Auto));
+        assert_eq!(dim, taffy::Dimension::auto());
     }
 
     #[test]
@@ -589,12 +595,12 @@ mod tests {
     #[test]
     fn test_helper_functions() {
         let dim = length(100.0);
-        assert!(matches!(dim, taffy::Dimension::Length(100.0)));
+        assert_eq!(dim, taffy::Dimension::length(100.0));
 
         let dim = percent(50.0);
-        assert!(matches!(dim, taffy::Dimension::Percent(0.5)));
+        assert_eq!(dim, taffy::Dimension::percent(0.5));
 
         let dim = auto();
-        assert!(matches!(dim, taffy::Dimension::Auto));
+        assert_eq!(dim, taffy::Dimension::auto());
     }
 }

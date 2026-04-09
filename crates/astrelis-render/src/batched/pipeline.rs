@@ -171,8 +171,8 @@ pub fn create_bindless_texture_bind_group_layout(
 fn depth_stencil_state(depth_write: bool) -> wgpu::DepthStencilState {
     wgpu::DepthStencilState {
         format: DEPTH_FORMAT,
-        depth_write_enabled: depth_write,
-        depth_compare: wgpu::CompareFunction::GreaterEqual,
+        depth_write_enabled: Some(depth_write),
+        depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
         stencil: wgpu::StencilState::default(),
         bias: wgpu::DepthBiasState::default(),
     }
@@ -231,7 +231,7 @@ pub fn create_batched_pipeline(
         },
         depth_stencil: Some(depth_stencil_state(opaque)),
         multisample: wgpu::MultisampleState::default(),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     })
 }

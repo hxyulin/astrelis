@@ -666,10 +666,10 @@ impl Style {
     pub fn absolute_position(mut self, left: f32, top: f32) -> Self {
         self.layout.position = Position::Absolute;
         self.layout.inset = Rect {
-            left: TaffyLengthPercentageAuto::Length(left),
-            top: TaffyLengthPercentageAuto::Length(top),
-            right: TaffyLengthPercentageAuto::Auto,
-            bottom: TaffyLengthPercentageAuto::Auto,
+            left: TaffyLengthPercentageAuto::length(left),
+            top: TaffyLengthPercentageAuto::length(top),
+            right: TaffyLengthPercentageAuto::auto(),
+            bottom: TaffyLengthPercentageAuto::auto(),
         };
         self
     }
@@ -901,18 +901,23 @@ impl Style {
 
 /// Convert a TaffyLengthPercentage to a Constraint.
 fn constraint_from_length_percentage(lp: TaffyLengthPercentage) -> Constraint {
-    match lp {
-        TaffyLengthPercentage::Length(v) => Constraint::Px(v),
-        TaffyLengthPercentage::Percent(v) => Constraint::Percent(v * 100.0),
+    use taffy::CompactLength;
+    if lp.into_raw().tag() == CompactLength::PERCENT_TAG {
+        Constraint::Percent(lp.into_raw().value() * 100.0)
+    } else {
+        Constraint::Px(lp.into_raw().value())
     }
 }
 
 /// Convert a TaffyLengthPercentageAuto to a Constraint.
 fn constraint_from_length_percentage_auto(lpa: TaffyLengthPercentageAuto) -> Constraint {
-    match lpa {
-        TaffyLengthPercentageAuto::Length(v) => Constraint::Px(v),
-        TaffyLengthPercentageAuto::Percent(v) => Constraint::Percent(v * 100.0),
-        TaffyLengthPercentageAuto::Auto => Constraint::Auto,
+    use taffy::CompactLength;
+    if lpa.is_auto() {
+        Constraint::Auto
+    } else if lpa.into_raw().tag() == CompactLength::PERCENT_TAG {
+        Constraint::Percent(lpa.into_raw().value() * 100.0)
+    } else {
+        Constraint::Px(lpa.into_raw().value())
     }
 }
 
@@ -1324,10 +1329,10 @@ impl Style {
     pub fn set_absolute_position(&mut self, left: f32, top: f32) {
         self.layout.position = Position::Absolute;
         self.layout.inset = Rect {
-            left: TaffyLengthPercentageAuto::Length(left),
-            top: TaffyLengthPercentageAuto::Length(top),
-            right: TaffyLengthPercentageAuto::Auto,
-            bottom: TaffyLengthPercentageAuto::Auto,
+            left: TaffyLengthPercentageAuto::length(left),
+            top: TaffyLengthPercentageAuto::length(top),
+            right: TaffyLengthPercentageAuto::auto(),
+            bottom: TaffyLengthPercentageAuto::auto(),
         };
     }
 
@@ -1395,17 +1400,17 @@ impl Style {
 /// Helper to create a length dimension.
 #[allow(dead_code)]
 fn length(value: f32) -> Dimension {
-    Dimension::Length(value)
+    Dimension::length(value)
 }
 
 /// Helper to create a rect with same length on all sides (for padding).
 #[allow(dead_code)]
 fn length_rect(value: f32) -> Rect<TaffyLengthPercentage> {
     Rect {
-        left: TaffyLengthPercentage::Length(value),
-        top: TaffyLengthPercentage::Length(value),
-        right: TaffyLengthPercentage::Length(value),
-        bottom: TaffyLengthPercentage::Length(value),
+        left: TaffyLengthPercentage::length(value),
+        top: TaffyLengthPercentage::length(value),
+        right: TaffyLengthPercentage::length(value),
+        bottom: TaffyLengthPercentage::length(value),
     }
 }
 
@@ -1413,15 +1418,16 @@ fn length_rect(value: f32) -> Rect<TaffyLengthPercentage> {
 #[allow(dead_code)]
 fn margin_rect(value: f32) -> Rect<TaffyLengthPercentageAuto> {
     Rect {
-        left: TaffyLengthPercentageAuto::Length(value),
-        top: TaffyLengthPercentageAuto::Length(value),
-        right: TaffyLengthPercentageAuto::Length(value),
-        bottom: TaffyLengthPercentageAuto::Length(value),
+        left: TaffyLengthPercentageAuto::length(value),
+        top: TaffyLengthPercentageAuto::length(value),
+        right: TaffyLengthPercentageAuto::length(value),
+        bottom: TaffyLengthPercentageAuto::length(value),
     }
 }
 
 /// Helper to create an auto dimension.
 #[allow(dead_code)]
 fn auto() -> TaffyLengthPercentageAuto {
-    TaffyLengthPercentageAuto::Auto
+    TaffyLengthPercentageAuto::auto()
 }
+

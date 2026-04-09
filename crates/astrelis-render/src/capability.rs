@@ -174,9 +174,6 @@ pub fn merge_limits_max(target: &mut wgpu::Limits, other: &wgpu::Limits) {
     target.max_vertex_buffer_array_stride = target
         .max_vertex_buffer_array_stride
         .max(other.max_vertex_buffer_array_stride);
-    target.max_push_constant_size = target
-        .max_push_constant_size
-        .max(other.max_push_constant_size);
     target.max_compute_workgroup_storage_size = target
         .max_compute_workgroup_storage_size
         .max(other.max_compute_workgroup_storage_size);
@@ -268,9 +265,6 @@ pub fn clamp_limits_to_adapter(requested: &wgpu::Limits, adapter: &wgpu::Limits)
     result.max_vertex_buffer_array_stride = result
         .max_vertex_buffer_array_stride
         .min(adapter.max_vertex_buffer_array_stride);
-    result.max_push_constant_size = result
-        .max_push_constant_size
-        .min(adapter.max_push_constant_size);
     result.max_compute_workgroup_storage_size = result
         .max_compute_workgroup_storage_size
         .min(adapter.max_compute_workgroup_storage_size);
@@ -298,9 +292,6 @@ pub fn clamp_limits_to_adapter(requested: &wgpu::Limits, adapter: &wgpu::Limits)
     result.max_color_attachment_bytes_per_sample = result
         .max_color_attachment_bytes_per_sample
         .min(adapter.max_color_attachment_bytes_per_sample);
-    result.max_inter_stage_shader_components = result
-        .max_inter_stage_shader_components
-        .min(adapter.max_inter_stage_shader_components);
     result.max_non_sampler_bindings = result
         .max_non_sampler_bindings
         .min(adapter.max_non_sampler_bindings);
@@ -312,10 +303,6 @@ pub fn clamp_limits_to_adapter(requested: &wgpu::Limits, adapter: &wgpu::Limits)
     result.min_storage_buffer_offset_alignment = result
         .min_storage_buffer_offset_alignment
         .max(adapter.min_storage_buffer_offset_alignment);
-
-    // Subgroup sizes: use adapter values
-    result.min_subgroup_size = adapter.min_subgroup_size;
-    result.max_subgroup_size = adapter.max_subgroup_size;
 
     result
 }

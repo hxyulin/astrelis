@@ -98,7 +98,7 @@ bitflags! {
         /// Allows `@builtin(primitive_index)` in fragment shaders to identify
         /// which triangle is being rasterized. Useful for per-face color lookup
         /// without vertex duplication. Available on Vulkan, Metal, DX12.
-        /// Maps to `wgpu::Features::SHADER_PRIMITIVE_INDEX`.
+        /// Maps to `wgpu::Features::PRIMITIVE_INDEX`.
         const SHADER_PRIMITIVE_INDEX = 1 << 21;
     }
 }
@@ -115,7 +115,7 @@ impl GpuFeatures {
             features |= wgpu::Features::MULTI_DRAW_INDIRECT_COUNT;
         }
         if self.contains(GpuFeatures::PUSH_CONSTANTS) {
-            features |= wgpu::Features::PUSH_CONSTANTS;
+            features |= wgpu::Features::IMMEDIATES;
         }
         if self.contains(GpuFeatures::TEXTURE_COMPRESSION_BC) {
             features |= wgpu::Features::TEXTURE_COMPRESSION_BC;
@@ -171,7 +171,7 @@ impl GpuFeatures {
                 wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
         }
         if self.contains(GpuFeatures::SHADER_PRIMITIVE_INDEX) {
-            features |= wgpu::Features::SHADER_PRIMITIVE_INDEX;
+            features |= wgpu::Features::PRIMITIVE_INDEX;
         }
 
         features
@@ -189,7 +189,7 @@ impl GpuFeatures {
         if features.contains(wgpu::Features::MULTI_DRAW_INDIRECT_COUNT) {
             gpu_features |= GpuFeatures::MULTI_DRAW_INDIRECT_COUNT;
         }
-        if features.contains(wgpu::Features::PUSH_CONSTANTS) {
+        if features.contains(wgpu::Features::IMMEDIATES) {
             gpu_features |= GpuFeatures::PUSH_CONSTANTS;
         }
         if features.contains(wgpu::Features::TEXTURE_COMPRESSION_BC) {
@@ -246,7 +246,7 @@ impl GpuFeatures {
             gpu_features |=
                 GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
         }
-        if features.contains(wgpu::Features::SHADER_PRIMITIVE_INDEX) {
+        if features.contains(wgpu::Features::PRIMITIVE_INDEX) {
             gpu_features |= GpuFeatures::SHADER_PRIMITIVE_INDEX;
         }
 

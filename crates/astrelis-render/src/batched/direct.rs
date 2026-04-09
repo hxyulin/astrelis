@@ -77,8 +77,8 @@ impl DirectBatchRenderer2D {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("batched_direct_pipeline_layout"),
-            bind_group_layouts: &[texture_array.standard_layout(), &projection_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(texture_array.standard_layout()), Some(&projection_layout)],
+            immediate_size: 0,
         });
 
         let opaque_pipeline = pipeline::create_batched_pipeline(

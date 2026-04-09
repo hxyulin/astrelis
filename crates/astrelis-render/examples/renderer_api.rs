@@ -115,8 +115,8 @@ fn main() {
 
         let pipeline_layout = renderer.create_pipeline_layout(
             Some("Render Pipeline Layout"),
-            &[&bind_group_layout],
-            &[],
+            &[Some(&bind_group_layout)],
+            0,
         );
 
         // Create pipeline using Renderer API with BlendMode
@@ -158,7 +158,7 @@ fn main() {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -223,8 +223,8 @@ fn main() {
 
         let blit_pipeline_layout = renderer.create_pipeline_layout(
             Some("Blit Pipeline Layout"),
-            &[&blit_bind_group_layout],
-            &[],
+            &[Some(&blit_bind_group_layout)],
+            0,
         );
 
         let blit_pipeline = renderer.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -252,7 +252,7 @@ fn main() {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 

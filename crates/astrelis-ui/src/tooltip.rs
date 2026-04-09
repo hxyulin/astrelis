@@ -464,7 +464,7 @@ impl TooltipManager {
                 container.style.border_radius = self.config.border_radius;
 
                 // Set padding via Taffy style
-                let padding = taffy::LengthPercentage::Length(self.config.padding);
+                let padding = taffy::LengthPercentage::length(self.config.padding);
                 container.style.layout.padding = taffy::Rect {
                     left: padding,
                     right: padding,
@@ -494,7 +494,7 @@ impl TooltipManager {
                 container.style.background_color = Some(self.config.background_color);
                 container.style.border_radius = self.config.border_radius;
 
-                let padding = taffy::LengthPercentage::Length(self.config.padding);
+                let padding = taffy::LengthPercentage::length(self.config.padding);
                 container.style.layout.padding = taffy::Rect {
                     left: padding,
                     right: padding,

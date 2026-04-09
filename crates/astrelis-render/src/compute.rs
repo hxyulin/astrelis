@@ -206,16 +206,16 @@ impl<'f> ComputePass<'f> {
     ///
     /// pass.set_push_constants(0, &constants);
     /// ```
-    pub fn set_push_constants<T: bytemuck::Pod>(&mut self, offset: u32, data: &T) {
+    pub fn set_immediates<T: bytemuck::Pod>(&mut self, offset: u32, data: &T) {
         self.wgpu_pass()
-            .set_push_constants(offset, bytemuck::bytes_of(data));
+            .set_immediates(offset, bytemuck::bytes_of(data));
     }
 
-    /// Set push constants from raw bytes.
+    /// Set immediates from raw bytes.
     ///
     /// Use this when you need more control over the data layout.
-    pub fn set_push_constants_raw(&mut self, offset: u32, data: &[u8]) {
-        self.wgpu_pass().set_push_constants(offset, data);
+    pub fn set_immediates_raw(&mut self, offset: u32, data: &[u8]) {
+        self.wgpu_pass().set_immediates(offset, data);
     }
 
     /// Finish the compute pass, pushing the command buffer to the frame.

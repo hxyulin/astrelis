@@ -140,7 +140,7 @@ fn main() {
                 address_mode_w: wgpu::AddressMode::Repeat,
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
                 ..Default::default()
             });
 
@@ -191,8 +191,8 @@ fn main() {
                 .device()
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Render Pipeline Layout"),
-                    bind_group_layouts: &[&bind_group_layout],
-                    push_constant_ranges: &[],
+                    bind_group_layouts: &[Some(&bind_group_layout)],
+                    immediate_size: 0,
                 });
 
         let pipeline =
@@ -236,7 +236,7 @@ fn main() {
                         mask: !0,
                         alpha_to_coverage_enabled: false,
                     },
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 });
 
@@ -405,6 +405,7 @@ impl App for TexturedQuadApp {
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
+                    multiview_mask: None,
                 });
 
                 render_pass.set_pipeline(&self.pipeline);
