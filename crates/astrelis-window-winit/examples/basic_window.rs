@@ -72,10 +72,10 @@ impl AppHandler for App {
 
     fn on_events_cleared(&mut self, ctx: &mut dyn EventLoopContext) {
         // In game mode, request a redraw every frame.
-        if let Some(id) = self.window_id {
-            if let Some(win) = ctx.window(id) {
-                win.request_redraw();
-            }
+        if let Some(id) = self.window_id
+            && let Some(win) = ctx.window(id)
+        {
+            win.request_redraw();
         }
     }
 }
