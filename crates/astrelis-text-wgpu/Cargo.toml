@@ -1,0 +1,28 @@
+[package]
+name = "astrelis-text-wgpu"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "GPU-accelerated text rendering for the Astrelis game engine using wgpu"
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-profiling = { workspace = true }
+astrelis-text = { workspace = true }
+astrelis-gpu-wgpu = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+tracing = { workspace = true }
+fxhash = { workspace = true }
+cosmic-text = { workspace = true }
+
+[dev-dependencies]
+astrelis-gpu = { workspace = true }
+astrelis-window-winit = { workspace = true }
+astrelis-window = { workspace = true }
+pollster = { workspace = true }
+
+[lints]
+workspace = true

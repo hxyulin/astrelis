@@ -1,0 +1,32 @@
+[package]
+name = "astrelis-text"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Text shaping, font management, and text types for the Astrelis game engine"
+
+[features]
+default = ["asset"]
+asset = ["dep:astrelis-assets"]
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-profiling = { workspace = true }
+astrelis-assets = { workspace = true, optional = true }
+
+# Text rendering
+cosmic-text = { workspace = true }
+
+# Utilities
+bytemuck = { workspace = true }
+tracing = { workspace = true }
+sys-locale = { workspace = true }
+fxhash = { workspace = true }
+
+[dev-dependencies]
+astrelis-assets = { workspace = true }
+
+[lints]
+workspace = true
