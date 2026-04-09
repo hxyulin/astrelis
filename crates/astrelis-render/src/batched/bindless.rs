@@ -11,7 +11,7 @@ use astrelis_core::profiling::profile_function;
 use crate::context::GraphicsContext;
 use crate::indirect::{DrawIndirect, IndirectBuffer};
 
-use super::BINDLESS_MAX_TEXTURES;
+use super::DEFAULT_BINDLESS_MAX_TEXTURES;
 use super::pipeline;
 use super::texture_array::BindlessTextureArray;
 use super::traits::BatchRenderer2D;
@@ -47,7 +47,7 @@ pub struct BindlessBatchRenderer2D {
 
 impl BindlessBatchRenderer2D {
     const INITIAL_INSTANCE_CAPACITY: usize = 4096;
-    const MAX_TEXTURES: u32 = BINDLESS_MAX_TEXTURES;
+    const MAX_TEXTURES: u32 = DEFAULT_BINDLESS_MAX_TEXTURES;
 
     pub fn new(context: Arc<GraphicsContext>, surface_format: wgpu::TextureFormat) -> Self {
         profile_function!();

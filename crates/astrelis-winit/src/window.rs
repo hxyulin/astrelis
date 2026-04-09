@@ -12,6 +12,11 @@ pub struct WindowDescriptor {
     pub size: Option<winit::dpi::PhysicalSize<f32>>,
     pub visible: bool,
     pub fullscreen: Option<Fullscreen>,
+    /// Override the platform DPI scale factor.
+    ///
+    /// If `None`, uses the platform default (2.0 on macOS, 1.0 elsewhere).
+    /// Set this to override DPI for HiDPI displays, testing, or custom setups.
+    pub dpi_override: Option<f64>,
 }
 
 impl Default for WindowDescriptor {
@@ -22,6 +27,7 @@ impl Default for WindowDescriptor {
             size: None,
             visible: true,
             fullscreen: None,
+            dpi_override: None,
         }
     }
 }
@@ -60,6 +66,10 @@ impl Window {
         self.window.scale_factor()
     }
 
+    /// Returns the default platform DPI scale factor.
+    ///
+    /// Returns 2.0 on macOS and 1.0 on other platforms. For per-window
+    /// DPI override, use [`WindowDescriptor::dpi_override`].
     pub fn platform_dpi() -> f64 {
         #[cfg(target_os = "macos")]
         return 2.0;

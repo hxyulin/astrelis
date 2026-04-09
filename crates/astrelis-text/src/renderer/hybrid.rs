@@ -67,7 +67,7 @@ use super::shared::{
     AtlasEntry, DecorationRenderer, GlyphPlacement, SdfParams, SharedContext, TextBuffer,
     TextRender, TextRendererConfig, TextVertex,
 };
-use super::{SDF_DEFAULT_SPREAD, orthographic_projection};
+use super::orthographic_projection;
 
 /// Helper macro to handle RwLock write poisoning gracefully.
 macro_rules! lock_or_recover {
@@ -244,12 +244,12 @@ impl FontRenderer {
     pub fn select_render_mode(font_size: f32, has_effects: bool) -> TextRenderMode {
         if has_effects {
             return TextRenderMode::SDF {
-                spread: SDF_DEFAULT_SPREAD,
+                spread: SdfConfig::default().default_spread,
             };
         }
         if font_size >= 24.0 {
             return TextRenderMode::SDF {
-                spread: SDF_DEFAULT_SPREAD,
+                spread: SdfConfig::default().default_spread,
             };
         }
         TextRenderMode::Bitmap
@@ -312,7 +312,7 @@ impl FontRenderer {
         // Always use SDF mode when effects are present
         if effects.has_enabled_effects() && !self.render_mode.is_sdf() {
             self.render_mode = TextRenderMode::SDF {
-                spread: SDF_DEFAULT_SPREAD,
+                spread: SdfConfig::default().default_spread,
             };
         }
 
@@ -770,14 +770,14 @@ mod tests {
     fn test_select_render_mode_large_text_no_effects() {
         let mode = FontRenderer::select_render_mode(32.0, false);
         assert!(mode.is_sdf());
-        assert_eq!(mode.spread(), SDF_DEFAULT_SPREAD);
+        assert_eq!(mode.spread(), SdfConfig::default().default_spread);
     }
 
     #[test]
     fn test_select_render_mode_small_text_with_effects() {
         let mode = FontRenderer::select_render_mode(12.0, true);
         assert!(mode.is_sdf());
-        assert_eq!(mode.spread(), SDF_DEFAULT_SPREAD);
+        assert_eq!(mode.spread(), SdfConfig::default().default_spread);
     }
 
     #[test]

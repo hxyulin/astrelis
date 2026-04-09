@@ -253,6 +253,16 @@ pub struct SdfConfig {
     pub outline_width: f32,
     /// Use smooth SDF generation (slower but higher quality)
     pub smooth: bool,
+    /// Base size for SDF glyph rasterization in pixels.
+    /// Glyphs are rasterized at this size, then scaled via shader.
+    /// Higher values produce better quality but use more atlas space.
+    /// Default: 48.0
+    pub base_size: f32,
+    /// Default SDF spread in pixels.
+    /// Controls the distance field precision around glyph edges.
+    /// Higher values allow thicker outlines/glows but reduce atlas density.
+    /// Default: 4.0
+    pub default_spread: f32,
 }
 
 impl Default for SdfConfig {
@@ -262,6 +272,8 @@ impl Default for SdfConfig {
             edge_softness: 0.05,
             outline_width: 0.0,
             smooth: false,
+            base_size: 48.0,
+            default_spread: 4.0,
         }
     }
 }

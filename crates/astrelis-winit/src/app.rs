@@ -93,6 +93,20 @@ pub trait App {
 
 pub type AppFactory = fn(ctx: &mut AppCtx) -> Box<dyn App>;
 
+/// Configuration for the event loop control flow.
+///
+/// Determines how the event loop behaves between events:
+/// - `Wait`: Sleep until a new event arrives (best for GUI/editor apps, lowest power usage)
+/// - `Poll`: Continuously poll for events (best for games, highest frame rate)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EventLoopMode {
+    /// Sleep until a new event arrives. Best for GUI/editor apps with lowest power usage.
+    #[default]
+    Wait,
+    /// Continuously poll for events. Best for games needing maximum frame rate.
+    Poll,
+}
+
 struct AppProxy {
     factory: AppFactory,
     app: Option<Box<dyn App>>,
@@ -219,11 +233,19 @@ impl winit::application::ApplicationHandler for AppProxy {
     }
 }
 
-/// Run the application with the given factory function.
+/// Run the application with the given factory function and default event loop mode (Wait).
 pub fn run_app(factory: AppFactory) {
+    run_app_with_mode(factory, EventLoopMode::default());
+}
+
+/// Run the application with the given factory function and event loop mode.
+pub fn run_app_with_mode(factory: AppFactory, mode: EventLoopMode) {
     use winit::event_loop::{ControlFlow, EventLoop};
     let event_loop = EventLoop::new().expect("failed to create event loop");
-    event_loop.set_control_flow(ControlFlow::Wait);
+    match mode {
+        EventLoopMode::Wait => event_loop.set_control_flow(ControlFlow::Wait),
+        EventLoopMode::Poll => event_loop.set_control_flow(ControlFlow::Poll),
+    };
     let mut app_proxy = AppProxy {
         factory,
         app: None,

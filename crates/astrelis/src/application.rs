@@ -7,11 +7,11 @@ use crate::plugin::{Plugin, PluginDyn, PluginGroup};
 use crate::{Engine, EngineBuilder};
 
 #[cfg(all(feature = "render", feature = "winit"))]
-use astrelis_render::{WindowContextDescriptor, WindowManager};
+use astrelis_render::{GraphicsContextDescriptor, WindowContextDescriptor, WindowManager};
 
 #[cfg(feature = "winit")]
 use astrelis_winit::{
-    app::{App, AppCtx, run_app},
+    app::{App, AppCtx, EventLoopMode, run_app_with_mode},
     window::{WindowDescriptor, WinitPhysicalSize},
 };
 
@@ -76,6 +76,10 @@ pub struct ApplicationBuilder {
     plugins: Vec<Box<dyn PluginDyn>>,
     #[cfg(all(feature = "render", feature = "winit"))]
     window_descriptor: Option<WindowContextDescriptor>,
+    #[cfg(all(feature = "render", feature = "winit"))]
+    graphics_descriptor: Option<GraphicsContextDescriptor>,
+    #[cfg(feature = "winit")]
+    event_loop_mode: EventLoopMode,
     create_window: bool,
 }
 
@@ -100,6 +104,10 @@ impl ApplicationBuilder {
             plugins: Vec::new(),
             #[cfg(all(feature = "render", feature = "winit"))]
             window_descriptor: None,
+            #[cfg(all(feature = "render", feature = "winit"))]
+            graphics_descriptor: None,
+            #[cfg(feature = "winit")]
+            event_loop_mode: EventLoopMode::default(),
             create_window: true,
         }
     }
@@ -196,6 +204,54 @@ impl ApplicationBuilder {
         self
     }
 
+    /// Sets custom graphics context descriptor for GPU configuration.
+    ///
+    /// This allows configuring GPU backends, power preference, required features,
+    /// device limits, and other low-level graphics settings.
+    ///
+    /// If a `RenderPlugin` is also added, this descriptor takes precedence.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// # use astrelis::ApplicationBuilder;
+    /// # #[cfg(all(feature = "render", feature = "winit"))]
+    /// # {
+    /// use astrelis_render::{GraphicsContextDescriptor, GpuFeatures};
+    ///
+    /// ApplicationBuilder::new()
+    ///     .with_graphics_descriptor(
+    ///         GraphicsContextDescriptor::default()
+    ///             .require_features(GpuFeatures::SHADER_PRIMITIVE_INDEX)
+    ///     );
+    /// # }
+    /// ```
+    #[cfg(all(feature = "render", feature = "winit"))]
+    pub fn with_graphics_descriptor(mut self, descriptor: GraphicsContextDescriptor) -> Self {
+        self.graphics_descriptor = Some(descriptor);
+        self
+    }
+
+    /// Sets the event loop mode.
+    ///
+    /// - `Wait` (default): Sleep until a new event arrives. Best for GUI/editor apps.
+    /// - `Poll`: Continuously poll for events. Best for games needing maximum frame rate.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// # use astrelis::ApplicationBuilder;
+    /// use astrelis_winit::app::EventLoopMode;
+    ///
+    /// ApplicationBuilder::new()
+    ///     .with_event_loop_mode(EventLoopMode::Poll);
+    /// ```
+    #[cfg(feature = "winit")]
+    pub fn with_event_loop_mode(mut self, mode: EventLoopMode) -> Self {
+        self.event_loop_mode = mode;
+        self
+    }
+
     /// Disables automatic window creation.
     ///
     /// By default, ApplicationBuilder creates a window automatically. Use this
@@ -258,16 +314,26 @@ impl ApplicationBuilder {
     {
         let title = self.title;
         let size = self.size;
+        let event_loop_mode = self.event_loop_mode;
         #[cfg(all(feature = "render", feature = "winit"))]
         let window_descriptor = self.window_descriptor;
         let create_window = self.create_window;
 
         // Build engine with plugins using custom plugin group
+        let mut plugins = self.plugins;
+
+        // If a graphics descriptor is provided, automatically add a configured RenderPlugin
+        #[cfg(all(feature = "render", feature = "winit"))]
+        if let Some(desc) = self.graphics_descriptor {
+            use crate::plugins::RenderPlugin;
+            plugins.push(Box::new(RenderPlugin::with_descriptor(desc)));
+        }
+
         let mut builder = EngineBuilder::new();
-        if !self.plugins.is_empty() {
+        if !plugins.is_empty() {
             use std::cell::RefCell;
             builder = builder.add_plugins(StoredPlugins {
-                plugins: RefCell::new(self.plugins),
+                plugins: RefCell::new(plugins),
             });
         }
         let engine = builder.build();
@@ -363,7 +429,7 @@ impl ApplicationBuilder {
             (data.factory)(ctx, &data.engine)
         }
 
-        run_app(app_builder_factory)
+        run_app_with_mode(app_builder_factory, event_loop_mode)
     }
 
     /// Builds the engine without running the application.
@@ -382,11 +448,19 @@ impl ApplicationBuilder {
     /// // Use engine...
     /// ```
     pub fn build_engine(self) -> Engine {
+        let mut plugins = self.plugins;
+
+        #[cfg(all(feature = "render", feature = "winit"))]
+        if let Some(desc) = self.graphics_descriptor {
+            use crate::plugins::RenderPlugin;
+            plugins.push(Box::new(RenderPlugin::with_descriptor(desc)));
+        }
+
         let mut builder = EngineBuilder::new();
-        if !self.plugins.is_empty() {
+        if !plugins.is_empty() {
             use std::cell::RefCell;
             builder = builder.add_plugins(StoredPlugins {
-                plugins: RefCell::new(self.plugins),
+                plugins: RefCell::new(plugins),
             });
         }
         builder.build()

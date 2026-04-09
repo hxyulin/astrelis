@@ -94,6 +94,12 @@ bitflags! {
         /// Required for dynamic indexing into `binding_array<texture_2d<f32>>` with
         /// values that are not uniform across a draw call (e.g., per-instance texture index).
         const SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING = 1 << 18;
+
+        /// Allows `@builtin(primitive_index)` in fragment shaders to identify
+        /// which triangle is being rasterized. Useful for per-face color lookup
+        /// without vertex duplication. Available on Vulkan, Metal, DX12.
+        /// Maps to `wgpu::Features::SHADER_PRIMITIVE_INDEX`.
+        const SHADER_PRIMITIVE_INDEX = 1 << 21;
     }
 }
 
@@ -163,6 +169,9 @@ impl GpuFeatures {
         {
             features |=
                 wgpu::Features::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+        }
+        if self.contains(GpuFeatures::SHADER_PRIMITIVE_INDEX) {
+            features |= wgpu::Features::SHADER_PRIMITIVE_INDEX;
         }
 
         features
@@ -236,6 +245,9 @@ impl GpuFeatures {
         {
             gpu_features |=
                 GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING;
+        }
+        if features.contains(wgpu::Features::SHADER_PRIMITIVE_INDEX) {
+            gpu_features |= GpuFeatures::SHADER_PRIMITIVE_INDEX;
         }
 
         gpu_features

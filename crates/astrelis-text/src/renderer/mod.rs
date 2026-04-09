@@ -102,9 +102,3 @@ pub(crate) fn orthographic_projection(width: f32, height: f32) -> [[f32; 4]; 4] 
     ]
 }
 
-/// Base size for SDF glyph rasterization.
-/// Glyphs are rasterized at this size, then scaled via shader.
-pub(crate) const SDF_BASE_SIZE: f32 = 48.0;
-
-/// Default SDF spread in pixels.
-pub(crate) const SDF_DEFAULT_SPREAD: f32 = 4.0;

@@ -61,7 +61,7 @@ use super::shared::{
     AtlasEntry, AtlasPacker, GlyphPlacement, SdfAtlasEntry, SdfCacheKey, SdfParams, SharedContext,
     TextBuffer, TextRender, TextRendererConfig, TextVertex,
 };
-use super::{SDF_BASE_SIZE, SDF_DEFAULT_SPREAD, orthographic_projection};
+use super::orthographic_projection;
 
 /// SDF text renderer backend.
 ///
@@ -273,7 +273,7 @@ impl SdfBackend {
         let base_cache_key = CacheKey {
             font_id: cache_key.font_id,
             glyph_id: cache_key.glyph_id,
-            font_size_bits: SDF_BASE_SIZE.to_bits(),
+            font_size_bits: self.config.base_size.to_bits(),
             x_bin: cache_key.x_bin,
             y_bin: cache_key.y_bin,
             flags: cache_key.flags,
@@ -306,7 +306,7 @@ impl SdfBackend {
         }
 
         // Generate SDF from the rasterized bitmap
-        let spread = self.config.mode.spread().max(SDF_DEFAULT_SPREAD);
+        let spread = self.config.mode.spread().max(self.config.default_spread);
         let sdf_data = generate_sdf(&image, spread);
 
         if sdf_data.is_empty() {
@@ -351,7 +351,7 @@ impl SdfBackend {
                 height,
             },
             spread,
-            base_size: SDF_BASE_SIZE,
+            base_size: self.config.base_size,
             base_placement,
         };
 

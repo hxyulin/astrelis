@@ -264,7 +264,111 @@ pub trait PluginGroup {
     fn name(&self) -> &'static str {
         std::any::type_name::<Self>()
     }
+
+    /// Creates a [`PluginGroupBuilder`] for customizing this group.
+    ///
+    /// Allows replacing or disabling individual plugins before adding the group.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// Engine::builder()
+    ///     .add_plugins(
+    ///         DefaultPlugins.build()
+    ///             .set(TimePlugin::with_fixed_timestep(Duration::from_millis(16)))
+    ///             .disable::<InputPlugin>()
+    ///     )
+    ///     .build();
+    /// ```
+    fn build(self) -> PluginGroupBuilder
+    where
+        Self: Sized,
+    {
+        PluginGroupBuilder {
+            plugins: std::cell::RefCell::new(Some(self.plugins())),
+            disabled: Vec::new(),
+            overrides: std::cell::RefCell::new(Vec::new()),
+            name: self.name(),
+        }
+    }
 }
+
+/// A builder that allows customizing plugins within a [`PluginGroup`].
+///
+/// Created by calling [`.build()`](PluginGroup::build) on a plugin group.
+/// Supports replacing plugins with configured versions or disabling them entirely.
+///
+/// # Example
+///
+/// ```ignore
+/// use astrelis::{DefaultPlugins, TimePlugin};
+/// use std::time::Duration;
+///
+/// let engine = Engine::builder()
+///     .add_plugins(
+///         DefaultPlugins.build()
+///             .set(TimePlugin::with_fixed_timestep(Duration::from_millis(16)))
+///             .disable::<InputPlugin>()
+///     )
+///     .build();
+/// ```
+pub struct PluginGroupBuilder {
+    plugins: std::cell::RefCell<Option<Vec<Box<dyn PluginDyn>>>>,
+    disabled: Vec<&'static str>,
+    overrides: std::cell::RefCell<Vec<Box<dyn PluginDyn>>>,
+    name: &'static str,
+}
+
+impl PluginGroupBuilder {
+    /// Replace a plugin in the group with a configured version.
+    ///
+    /// The replacement plugin must have the same name as the original.
+    pub fn set<P: Plugin + 'static>(self, plugin: P) -> Self {
+        self.overrides.borrow_mut().push(Box::new(plugin));
+        self
+    }
+
+    /// Disable a plugin in the group, preventing it from being added.
+    pub fn disable<P: Plugin>(mut self) -> Self {
+        self.disabled.push(std::any::type_name::<P>());
+        self
+    }
+}
+
+impl PluginGroup for PluginGroupBuilder {
+    fn name(&self) -> &'static str {
+        self.name
+    }
+
+    fn plugins(&self) -> Vec<Box<dyn PluginDyn>> {
+        let base_plugins = self
+            .plugins
+            .borrow_mut()
+            .take()
+            .expect("PluginGroupBuilder::plugins() called more than once");
+
+        let overrides = self.overrides.borrow_mut().drain(..).collect::<Vec<_>>();
+        let override_names: Vec<&str> = overrides.iter().map(|p| p.name()).collect();
+
+        let mut result: Vec<Box<dyn PluginDyn>> = base_plugins
+            .into_iter()
+            .filter(|p| {
+                !self.disabled.contains(&p.name()) && !override_names.contains(&p.name())
+            })
+            .collect();
+
+        result.extend(overrides);
+        result
+    }
+
+    fn build(self) -> PluginGroupBuilder
+    where
+        Self: Sized,
+    {
+        self
+    }
+}
+
 
 /// Wrapper to make a PluginGroup usable as a single Plugin.
 pub(crate) struct PluginGroupAdapter {

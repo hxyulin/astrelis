@@ -36,8 +36,25 @@ use std::sync::Arc;
 use crate::context::GraphicsContext;
 use crate::features::GpuFeatures;
 
-/// Maximum number of textures in the bindless binding array (Tier 3).
-const BINDLESS_MAX_TEXTURES: u32 = 256;
+/// Default maximum number of textures in the bindless binding array (Tier 3).
+const DEFAULT_BINDLESS_MAX_TEXTURES: u32 = 256;
+
+/// Configuration for the batch renderer.
+#[derive(Debug, Clone)]
+pub struct BatchRendererConfig {
+    /// Maximum number of textures in the bindless binding array (Tier 3).
+    /// Default: 256. Increase for texture-heavy applications.
+    pub max_bindless_textures: u32,
+}
+
+impl Default for BatchRendererConfig {
+    fn default() -> Self {
+        Self {
+            max_bindless_textures: DEFAULT_BINDLESS_MAX_TEXTURES,
+        }
+    }
+}
+
 
 /// Detect the highest supported render tier for the given context.
 pub fn detect_render_tier(context: &GraphicsContext) -> RenderTier {

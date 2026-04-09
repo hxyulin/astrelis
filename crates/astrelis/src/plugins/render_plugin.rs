@@ -160,7 +160,30 @@ impl RenderContexts {
 ///     }
 /// }
 /// ```
-pub struct RenderPlugin;
+pub struct RenderPlugin {
+    descriptor: Option<astrelis_render::GraphicsContextDescriptor>,
+}
+
+impl RenderPlugin {
+    /// Create with default graphics settings.
+    pub fn new() -> Self {
+        Self { descriptor: None }
+    }
+
+    /// Create with a custom graphics context descriptor, allowing the caller
+    /// to request specific GPU features (e.g., `SHADER_PRIMITIVE_INDEX`).
+    pub fn with_descriptor(descriptor: astrelis_render::GraphicsContextDescriptor) -> Self {
+        Self {
+            descriptor: Some(descriptor),
+        }
+    }
+}
+
+impl Default for RenderPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Plugin for RenderPlugin {
     type Dependencies = ();
@@ -170,8 +193,12 @@ impl Plugin for RenderPlugin {
 
     fn build(&self, resources: &mut Resources) {
         // Create graphics context with Arc (no memory leak)
-        let graphics =
-            GraphicsContext::new_owned_sync().expect("Failed to create graphics context");
+        let graphics = if let Some(desc) = self.descriptor.clone() {
+            GraphicsContext::new_owned_with_descriptor_sync(desc)
+                .expect("Failed to create graphics context with custom descriptor")
+        } else {
+            GraphicsContext::new_owned_sync().expect("Failed to create graphics context")
+        };
 
         tracing::info!(
             "RenderPlugin: GraphicsContext created (backend: {:?})",
@@ -199,7 +226,7 @@ mod tests {
         use super::*;
         use crate::EngineBuilder;
 
-        let engine = EngineBuilder::new().add_plugin(RenderPlugin).build();
+        let engine = EngineBuilder::new().add_plugin(RenderPlugin::default()).build();
 
         assert!(engine.get::<&'static GraphicsContext>().is_some());
         assert!(engine.get::<RenderContexts>().is_some());

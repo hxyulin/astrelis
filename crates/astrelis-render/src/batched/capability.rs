@@ -6,7 +6,7 @@
 use crate::capability::{GpuRequirements, RenderCapability};
 use crate::features::GpuFeatures;
 
-use super::BINDLESS_MAX_TEXTURES;
+use super::DEFAULT_BINDLESS_MAX_TEXTURES;
 
 /// Capability for the Direct (Tier 1) batch renderer.
 ///
@@ -54,7 +54,7 @@ impl RenderCapability for BindlessBatchCapability2D {
                     | GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING,
             )
             .with_min_limits(|l| {
-                l.max_binding_array_elements_per_shader_stage = BINDLESS_MAX_TEXTURES;
+                l.max_binding_array_elements_per_shader_stage = DEFAULT_BINDLESS_MAX_TEXTURES;
             })
     }
 
@@ -82,7 +82,7 @@ impl RenderCapability for BestBatchCapability2D {
                     | GpuFeatures::SAMPLED_TEXTURE_AND_STORAGE_BUFFER_ARRAY_NON_UNIFORM_INDEXING,
             )
             .with_min_limits(|l| {
-                l.max_binding_array_elements_per_shader_stage = BINDLESS_MAX_TEXTURES;
+                l.max_binding_array_elements_per_shader_stage = DEFAULT_BINDLESS_MAX_TEXTURES;
             })
     }
 

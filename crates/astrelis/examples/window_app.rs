@@ -82,7 +82,7 @@ fn main() {
             .expect("Failed to create window");
 
         // Create the engine with render plugin
-        let engine = Engine::builder().add_plugin(RenderPlugin).build();
+        let engine = Engine::builder().add_plugin(RenderPlugin::default()).build();
 
         // Get the graphics context from the engine
         let graphics = engine.get::<Arc<GraphicsContext>>().unwrap();

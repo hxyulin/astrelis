@@ -248,6 +248,13 @@ impl GraphicsContext {
         Ok(Arc::new(context))
     }
 
+    /// Synchronous version of [`new_owned_with_descriptor`](Self::new_owned_with_descriptor).
+    pub fn new_owned_with_descriptor_sync(
+        descriptor: GraphicsContextDescriptor,
+    ) -> Result<Arc<Self>, GraphicsError> {
+        pollster::block_on(Self::new_owned_with_descriptor(descriptor))
+    }
+
     /// Internal method to create context without deciding on ownership pattern.
     async fn create_context_internal(
         descriptor: GraphicsContextDescriptor,
@@ -431,6 +438,7 @@ impl GraphicsContext {
 }
 
 /// Descriptor for configuring graphics context creation.
+#[derive(Debug, Clone)]
 pub struct GraphicsContextDescriptor {
     /// GPU backends to use
     pub backends: wgpu::Backends,

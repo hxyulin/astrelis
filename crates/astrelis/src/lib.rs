@@ -104,7 +104,7 @@ pub use astrelis_audio as audio;
 // Re-export engine types
 pub use application::ApplicationBuilder;
 pub use engine::{Engine, EngineBuilder, EngineError};
-pub use plugin::{FnPlugin, Plugin, PluginGroup};
+pub use plugin::{FnPlugin, Plugin, PluginGroup, PluginGroupBuilder};
 pub use resource::{Resource, Resources};
 pub use task_pool::TaskPool;
 pub use time::Time;

@@ -18,10 +18,25 @@ use crate::resource::Resources;
 /// use astrelis::prelude::*;
 ///
 /// let engine = Engine::builder()
-///     .add_plugin(InputPlugin)
+///     .add_plugin(InputPlugin::default())
 ///     .build();
 /// ```
-pub struct InputPlugin;
+pub struct InputPlugin {
+    _private: (),
+}
+
+impl InputPlugin {
+    /// Create a new InputPlugin with default settings.
+    pub fn new() -> Self {
+        Self { _private: () }
+    }
+}
+
+impl Default for InputPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Plugin for InputPlugin {
     type Dependencies = ();
@@ -42,7 +57,9 @@ mod tests {
 
     #[test]
     fn test_input_plugin_registers_state() {
-        let engine = EngineBuilder::new().add_plugin(InputPlugin).build();
+        let engine = EngineBuilder::new()
+            .add_plugin(InputPlugin::default())
+            .build();
 
         assert!(engine.get::<astrelis_input::InputState>().is_some());
     }
