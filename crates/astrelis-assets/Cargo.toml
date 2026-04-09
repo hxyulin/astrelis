@@ -1,0 +1,22 @@
+[package]
+name = "astrelis-assets"
+description = "Type-safe async asset management for the Astrelis engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+hot-reload = ["dep:notify"]
+
+[dependencies]
+astrelis-core = { workspace = true }
+notify = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

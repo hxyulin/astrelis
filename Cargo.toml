@@ -10,6 +10,7 @@ members = [
     "crates/astrelis-gpu-wgpu",
     "crates/astrelis-gpu-wgpu-egui",
     "crates/astrelis-input",
+    "crates/astrelis-assets",
 ]
 
 [workspace.package]
@@ -30,6 +31,7 @@ astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.3.0" }
 astrelis-gpu-wgpu = { path = "crates/astrelis-gpu-wgpu", version = "0.3.0" }
 astrelis-gpu-wgpu-egui = { path = "crates/astrelis-gpu-wgpu-egui", version = "0.3.0" }
 astrelis-input = { path = "crates/astrelis-input", version = "0.3.0" }
+astrelis-assets = { path = "crates/astrelis-assets", version = "0.3.0" }
 
 # Math
 glam = { version = "0.32", features = ["mint", "bytemuck"] }
@@ -51,6 +53,9 @@ egui-wgpu = "0.34"
 # Profiling
 puffin = "0.20"
 puffin_http = "0.17"
+
+# Assets
+notify = "8"
 
 [workspace.lints.rust]
 missing_docs = "warn"
