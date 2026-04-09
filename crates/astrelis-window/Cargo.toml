@@ -1,0 +1,15 @@
+[package]
+name = "astrelis-window"
+description = "Backend-agnostic windowing traits and types for the Astrelis engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+raw-window-handle = { workspace = true }
+
+[lints]
+workspace = true

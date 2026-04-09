@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/astrelis-core", "crates/astrelis-profiling"]
+members = [
+    "crates/astrelis-core",
+    "crates/astrelis-profiling",
+    "crates/astrelis-window",
+    "crates/astrelis-window-winit",
+]
 
 [workspace.package]
 version = "0.3.0"
@@ -13,11 +18,17 @@ repository = "https://github.com/hxyulin/astrelis"
 # Internal crates
 astrelis-core = { path = "crates/astrelis-core", version = "0.3.0" }
 astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.3.0" }
+astrelis-window = { path = "crates/astrelis-window", version = "0.3.0" }
+astrelis-window-winit = { path = "crates/astrelis-window-winit", version = "0.3.0" }
 
 # Math
 glam = { version = "0.32", features = ["mint", "bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 mint = "0.5"
+
+# Windowing
+winit = "0.30"
+raw-window-handle = "0.6"
 
 # Profiling
 puffin = "0.20"
