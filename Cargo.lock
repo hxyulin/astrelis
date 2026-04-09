@@ -106,6 +106,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-window-test"
+version = "0.3.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-window",
+ "raw-window-handle",
+]
+
+[[package]]
 name = "astrelis-window-winit"
 version = "0.3.0"
 dependencies = [
