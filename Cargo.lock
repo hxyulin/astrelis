@@ -161,6 +161,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-input"
+version = "0.3.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-window",
+]
+
+[[package]]
 name = "astrelis-profiling"
 version = "0.3.0"
 dependencies = [

@@ -9,6 +9,7 @@ members = [
     "crates/astrelis-gpu",
     "crates/astrelis-gpu-wgpu",
     "crates/astrelis-gpu-wgpu-egui",
+    "crates/astrelis-input",
 ]
 
 [workspace.package]
@@ -28,6 +29,7 @@ astrelis-window-test = { path = "crates/astrelis-window-test", version = "0.3.0"
 astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.3.0" }
 astrelis-gpu-wgpu = { path = "crates/astrelis-gpu-wgpu", version = "0.3.0" }
 astrelis-gpu-wgpu-egui = { path = "crates/astrelis-gpu-wgpu-egui", version = "0.3.0" }
+astrelis-input = { path = "crates/astrelis-input", version = "0.3.0" }
 
 # Math
 glam = { version = "0.32", features = ["mint", "bytemuck"] }

@@ -1,0 +1,15 @@
+[package]
+name = "astrelis-input"
+description = "Polling-style input state tracking for the Astrelis engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-window = { workspace = true }
+
+[lints]
+workspace = true
