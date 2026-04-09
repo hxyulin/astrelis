@@ -1,0 +1,18 @@
+[package]
+name = "astrelis-profiling"
+description = "Backend-agnostic profiling macros for the Astrelis engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+puffin = ["dep:puffin", "dep:puffin_http"]
+
+[dependencies]
+puffin = { workspace = true, optional = true }
+puffin_http = { workspace = true, optional = true }
+
+[lints]
+workspace = true

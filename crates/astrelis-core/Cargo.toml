@@ -1,0 +1,16 @@
+[package]
+name = "astrelis-core"
+description = "Core types and math for the Astrelis engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+glam = { workspace = true }
+bytemuck = { workspace = true }
+mint = { workspace = true }
+
+[lints]
+workspace = true
