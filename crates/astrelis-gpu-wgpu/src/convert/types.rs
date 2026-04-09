@@ -2,7 +2,8 @@
 
 use astrelis_gpu::types::*;
 
-pub(crate) fn texture_format(f: TextureFormat) -> wgpu::TextureFormat {
+/// Converts an [`astrelis_gpu::types::TextureFormat`] to a [`wgpu::TextureFormat`].
+pub fn texture_format(f: TextureFormat) -> wgpu::TextureFormat {
     match f {
         TextureFormat::R8Unorm => wgpu::TextureFormat::R8Unorm,
         TextureFormat::R8Snorm => wgpu::TextureFormat::R8Snorm,

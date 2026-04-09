@@ -8,6 +8,7 @@ members = [
     "crates/astrelis-window-test",
     "crates/astrelis-gpu",
     "crates/astrelis-gpu-wgpu",
+    "crates/astrelis-gpu-wgpu-egui",
 ]
 
 [workspace.package]
@@ -26,6 +27,7 @@ astrelis-window-winit = { path = "crates/astrelis-window-winit", version = "0.3.
 astrelis-window-test = { path = "crates/astrelis-window-test", version = "0.3.0" }
 astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.3.0" }
 astrelis-gpu-wgpu = { path = "crates/astrelis-gpu-wgpu", version = "0.3.0" }
+astrelis-gpu-wgpu-egui = { path = "crates/astrelis-gpu-wgpu-egui", version = "0.3.0" }
 
 # Math
 glam = { version = "0.32", features = ["mint", "bytemuck"] }
@@ -39,6 +41,10 @@ raw-window-handle = "0.6"
 # GPU
 wgpu = "29"
 pollster = "0.4"
+
+# egui
+egui = "0.34"
+egui-wgpu = "0.34"
 
 # Profiling
 puffin = "0.20"

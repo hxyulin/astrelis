@@ -22,7 +22,8 @@
 
 mod backend;
 mod compute_pass;
-mod convert;
+/// Type conversion utilities between `astrelis-gpu` and `wgpu` types.
+pub mod convert;
 mod device;
 mod encoder;
 mod queue;
@@ -31,3 +32,4 @@ mod resources;
 mod surface;
 
 pub use backend::WgpuBackend;
+pub use device::{TextureViewReadGuard, WgpuDevice};

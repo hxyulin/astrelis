@@ -1,5 +1,6 @@
 //! wgpu device implementation.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use astrelis_gpu::bind_group::{BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor};
@@ -78,6 +79,47 @@ impl WgpuDevice {
             .expect("self_ref not initialized")
             .upgrade()
             .expect("WgpuDevice dropped while still in use")
+    }
+
+    /// Returns a reference to the underlying [`wgpu::Device`].
+    ///
+    /// This is an escape hatch for advanced use cases (e.g., egui integration,
+    /// custom compute passes) that need direct access to the raw wgpu device.
+    pub fn wgpu_device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// Returns a reference to the underlying [`wgpu::Queue`].
+    ///
+    /// This is an escape hatch for advanced use cases that need direct access
+    /// to the raw wgpu queue.
+    pub fn wgpu_queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Returns a read guard providing access to raw [`wgpu::TextureView`]s by ID.
+    ///
+    /// This is an escape hatch for advanced use cases (e.g., egui integration)
+    /// that need direct access to wgpu texture views managed by this device.
+    pub fn texture_views(&self) -> TextureViewReadGuard<'_> {
+        TextureViewReadGuard {
+            guard: self.texture_views.read_guard(),
+        }
+    }
+}
+
+/// A read guard providing access to raw [`wgpu::TextureView`]s by their
+/// [`TextureViewId`].
+///
+/// Obtained via [`WgpuDevice::texture_views()`].
+pub struct TextureViewReadGuard<'a> {
+    guard: std::sync::RwLockReadGuard<'a, HashMap<u64, wgpu::TextureView>>,
+}
+
+impl TextureViewReadGuard<'_> {
+    /// Looks up a texture view by its ID.
+    pub fn get(&self, id: TextureViewId) -> Option<&wgpu::TextureView> {
+        self.guard.get(&id.raw())
     }
 }
 
