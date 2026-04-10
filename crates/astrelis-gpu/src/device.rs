@@ -1,18 +1,24 @@
-//! GPU device trait and related types.
+//! GPU device — creates and manages GPU resources.
 
-use crate::bind_group::{BindGroupDescriptor, BindGroupLayoutDescriptor};
+use crate::bind_group::{BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor};
 use crate::buffer::{BufferDescriptor, BufferInitDescriptor};
-use crate::command::{BufferCopyView, CommandEncoder, TextureCopyView};
+use crate::command::{CommandEncoder, TextureCopyView};
+use crate::convert::{bind_group as conv_bg, buffer as conv_buf, pipeline as conv_pl, texture as conv_tex, types as conv};
 use crate::error::GpuError;
-use crate::id::{
-    BindGroupId, BindGroupLayoutId, BufferId, ComputePipelineId, PipelineLayoutId,
-    RenderPipelineId, SamplerId, ShaderModuleId, TextureId, TextureViewId,
-};
 use crate::pipeline::{
     ComputePipelineDescriptor, PipelineLayoutDescriptor, RenderPipelineDescriptor,
 };
-use crate::shader::ShaderModuleDescriptor;
+use crate::profiling::{GpuProfilingTier, GpuTimestampProfiler};
+use crate::resources::*;
+use crate::shader::{ShaderModuleDescriptor, ShaderSource};
 use crate::texture::{Extent3d, SamplerDescriptor, TextureDescriptor, TextureViewDescriptor};
+
+fn mipmap_filter_mode(f: crate::types::FilterMode) -> wgpu::MipmapFilterMode {
+    match f {
+        crate::types::FilterMode::Nearest => wgpu::MipmapFilterMode::Nearest,
+        crate::types::FilterMode::Linear => wgpu::MipmapFilterMode::Linear,
+    }
+}
 
 /// Information about the GPU adapter.
 #[derive(Clone, Debug)]
@@ -55,129 +61,410 @@ pub enum DeviceType {
     Other,
 }
 
-/// The main GPU device trait for creating and managing resources.
+/// The concrete GPU device. Creates and manages GPU resources.
 ///
-/// All resource creation methods return typed handles ([`BufferId`],
-/// [`TextureId`], etc.). The backend owns the actual GPU objects;
-/// handles are lightweight IDs.
-///
-/// Methods take `&self` — backends use interior mutability for thread safety.
-pub trait GpuDevice {
-    /// The command encoder type for this backend.
-    type Encoder: CommandEncoder;
+/// All resource creation methods return newtype wrappers that own the
+/// underlying wgpu resource. Dropping the wrapper releases the resource.
+pub struct GpuDevice {
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
+    pub(crate) adapter_info: AdapterInfo,
+    pub(crate) gpu_profiler: std::sync::Mutex<GpuTimestampProfiler>,
+}
+
+impl GpuDevice {
+    pub(crate) fn new(
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        adapter_info: AdapterInfo,
+        profiling_tier: GpuProfilingTier,
+        timestamp_period_ns: f32,
+    ) -> Self {
+        astrelis_profiling::profile_function!();
+        let gpu_profiler = GpuTimestampProfiler::new(
+            device.clone(),
+            profiling_tier,
+            timestamp_period_ns,
+        );
+
+        Self {
+            device,
+            queue,
+            adapter_info,
+            gpu_profiler: std::sync::Mutex::new(gpu_profiler),
+        }
+    }
 
     /// Returns information about the GPU adapter.
-    fn adapter_info(&self) -> &AdapterInfo;
+    pub fn adapter_info(&self) -> &AdapterInfo {
+        &self.adapter_info
+    }
+
+    /// Returns a reference to the underlying [`wgpu::Device`].
+    ///
+    /// This is an escape hatch for advanced use cases (e.g., egui integration,
+    /// custom compute passes) that need direct access to the raw wgpu device.
+    pub fn raw_device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// Returns a reference to the underlying [`wgpu::Queue`].
+    ///
+    /// This is an escape hatch for advanced use cases that need direct access
+    /// to the raw wgpu queue.
+    pub fn raw_queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// Processes finished GPU profiling frames and reports results to the
+    /// active profiling backend.
+    ///
+    /// Call this once per frame (typically before [`astrelis_profiling::new_frame`])
+    /// to resolve GPU timestamp queries from previous frames. Results arrive
+    /// 1-3 frames late due to GPU buffering.
+    pub fn process_gpu_profiling_frames(&self) {
+        astrelis_profiling::profile_function!();
+        let mut profiler = self.gpu_profiler.lock().unwrap();
+        profiler.process_finished_frames();
+    }
 
     // --- Buffer ---
 
     /// Creates a GPU buffer.
-    fn create_buffer(&self, desc: &BufferDescriptor<'_>) -> Result<BufferId, GpuError>;
+    pub fn create_buffer(&self, desc: &BufferDescriptor<'_>) -> Buffer {
+        astrelis_profiling::profile_function!();
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: desc.label,
+            size: desc.size,
+            usage: conv_buf::buffer_usages(desc.usage),
+            mapped_at_creation: desc.mapped_at_creation,
+        });
+        Buffer(buffer)
+    }
 
     /// Creates a GPU buffer with initial data.
-    fn create_buffer_init(&self, desc: &BufferInitDescriptor<'_>) -> Result<BufferId, GpuError>;
-
-    /// Destroys a buffer, releasing its GPU memory.
-    fn destroy_buffer(&self, id: BufferId);
+    pub fn create_buffer_init(&self, desc: &BufferInitDescriptor<'_>) -> Buffer {
+        astrelis_profiling::profile_function!();
+        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: desc.label,
+            size: desc.contents.len() as u64,
+            usage: conv_buf::buffer_usages(desc.usage) | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: true,
+        });
+        buffer.slice(..).get_mapped_range_mut().copy_from_slice(desc.contents);
+        buffer.unmap();
+        Buffer(buffer)
+    }
 
     /// Writes data to a buffer at the given byte offset.
-    fn write_buffer(&self, buffer: BufferId, offset: u64, data: &[u8]);
+    pub fn write_buffer(&self, buffer: &Buffer, offset: u64, data: &[u8]) {
+        self.queue.write_buffer(&buffer.0, offset, data);
+    }
 
     // --- Texture ---
 
     /// Creates a GPU texture.
-    fn create_texture(&self, desc: &TextureDescriptor<'_>) -> Result<TextureId, GpuError>;
+    pub fn create_texture(&self, desc: &TextureDescriptor<'_>) -> Texture {
+        astrelis_profiling::profile_function!();
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: desc.label,
+            size: conv_tex::extent3d(desc.size),
+            mip_level_count: desc.mip_level_count,
+            sample_count: desc.sample_count,
+            dimension: conv::texture_dimension(desc.dimension),
+            format: conv::texture_format(desc.format),
+            usage: conv_tex::texture_usages(desc.usage),
+            view_formats: &[],
+        });
+        Texture(texture)
+    }
 
     /// Creates a view into a texture.
-    fn create_texture_view(
+    pub fn create_texture_view(
         &self,
-        texture: TextureId,
+        texture: &Texture,
         desc: &TextureViewDescriptor<'_>,
-    ) -> Result<TextureViewId, GpuError>;
+    ) -> TextureView {
+        astrelis_profiling::profile_function!();
+        let view = texture.0.create_view(&wgpu::TextureViewDescriptor {
+            label: desc.label,
+            format: desc.format.map(conv::texture_format),
+            dimension: desc.dimension.map(conv::texture_view_dimension),
+            base_mip_level: desc.base_mip_level,
+            mip_level_count: desc.mip_level_count,
+            base_array_layer: desc.base_array_layer,
+            array_layer_count: desc.array_layer_count,
+            ..Default::default()
+        });
+        TextureView(view)
+    }
 
     /// Creates a texture sampler.
-    fn create_sampler(&self, desc: &SamplerDescriptor<'_>) -> Result<SamplerId, GpuError>;
-
-    /// Destroys a texture.
-    fn destroy_texture(&self, id: TextureId);
-
-    /// Destroys a texture view.
-    fn destroy_texture_view(&self, id: TextureViewId);
-
-    /// Destroys a sampler.
-    fn destroy_sampler(&self, id: SamplerId);
+    pub fn create_sampler(&self, desc: &SamplerDescriptor<'_>) -> Sampler {
+        astrelis_profiling::profile_function!();
+        let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+            label: desc.label,
+            address_mode_u: conv::address_mode(desc.address_mode_u),
+            address_mode_v: conv::address_mode(desc.address_mode_v),
+            address_mode_w: conv::address_mode(desc.address_mode_w),
+            mag_filter: conv::filter_mode(desc.mag_filter),
+            min_filter: conv::filter_mode(desc.min_filter),
+            mipmap_filter: mipmap_filter_mode(desc.mipmap_filter),
+            lod_min_clamp: desc.lod_min_clamp,
+            lod_max_clamp: desc.lod_max_clamp,
+            compare: desc.compare.map(conv::compare_function),
+            anisotropy_clamp: desc.anisotropy_clamp,
+            ..Default::default()
+        });
+        Sampler(sampler)
+    }
 
     /// Writes data to a texture.
-    fn write_texture(
+    pub fn write_texture(
         &self,
-        dst: TextureCopyView,
+        dst: TextureCopyView<'_>,
         data: &[u8],
-        layout: BufferCopyView,
+        layout: crate::command::BufferCopyView<'_>,
         size: Extent3d,
-    );
+    ) {
+        astrelis_profiling::profile_function!();
+        self.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture: &dst.texture.0,
+                mip_level: dst.mip_level,
+                origin: wgpu::Origin3d {
+                    x: dst.origin.x,
+                    y: dst.origin.y,
+                    z: dst.origin.z,
+                },
+                aspect: wgpu::TextureAspect::All,
+            },
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: layout.offset,
+                bytes_per_row: layout.bytes_per_row,
+                rows_per_image: layout.rows_per_image,
+            },
+            conv_tex::extent3d(size),
+        );
+    }
 
     // --- Shader ---
 
     /// Creates a shader module from source code.
-    fn create_shader_module(
+    pub fn create_shader_module(
         &self,
         desc: &ShaderModuleDescriptor<'_>,
-    ) -> Result<ShaderModuleId, GpuError>;
-
-    /// Destroys a shader module.
-    fn destroy_shader_module(&self, id: ShaderModuleId);
+    ) -> Result<ShaderModule, GpuError> {
+        astrelis_profiling::profile_function!();
+        let source = match desc.source {
+            ShaderSource::Wgsl(src) => wgpu::ShaderSource::Wgsl(src.into()),
+            ShaderSource::SpirV(_) => {
+                return Err(GpuError::ShaderError(
+                    "SPIR-V shaders are not supported by the wgpu backend".into(),
+                ));
+            }
+        };
+        let module = self
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: desc.label,
+                source,
+            });
+        Ok(ShaderModule(module))
+    }
 
     // --- Bind group ---
 
     /// Creates a bind group layout.
-    fn create_bind_group_layout(
+    pub fn create_bind_group_layout(
         &self,
         desc: &BindGroupLayoutDescriptor<'_>,
-    ) -> Result<BindGroupLayoutId, GpuError>;
+    ) -> BindGroupLayout {
+        astrelis_profiling::profile_function!();
+        let entries: Vec<wgpu::BindGroupLayoutEntry> = desc
+            .entries
+            .iter()
+            .map(|e| wgpu::BindGroupLayoutEntry {
+                binding: e.binding,
+                visibility: conv_bg::shader_stages(e.visibility),
+                ty: conv_bg::binding_type(&e.ty),
+                count: e.count.and_then(std::num::NonZeroU32::new),
+            })
+            .collect();
+        let layout = self
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: desc.label,
+                entries: &entries,
+            });
+        BindGroupLayout(layout)
+    }
 
     /// Creates a bind group.
-    fn create_bind_group(
+    pub fn create_bind_group(
         &self,
         desc: &BindGroupDescriptor<'_>,
-    ) -> Result<BindGroupId, GpuError>;
+    ) -> BindGroup {
+        astrelis_profiling::profile_function!();
+        let wgpu_entries: Vec<wgpu::BindGroupEntry<'_>> = desc
+            .entries
+            .iter()
+            .map(|entry| match entry {
+                BindGroupEntry::Buffer {
+                    binding,
+                    buffer,
+                    offset,
+                    size,
+                } => {
+                    wgpu::BindGroupEntry {
+                        binding: *binding,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &buffer.0,
+                            offset: *offset,
+                            size: size.and_then(std::num::NonZeroU64::new),
+                        }),
+                    }
+                }
+                BindGroupEntry::TextureView { binding, view } => {
+                    wgpu::BindGroupEntry {
+                        binding: *binding,
+                        resource: wgpu::BindingResource::TextureView(&view.0),
+                    }
+                }
+                BindGroupEntry::Sampler { binding, sampler } => {
+                    wgpu::BindGroupEntry {
+                        binding: *binding,
+                        resource: wgpu::BindingResource::Sampler(&sampler.0),
+                    }
+                }
+            })
+            .collect();
 
-    /// Destroys a bind group layout.
-    fn destroy_bind_group_layout(&self, id: BindGroupLayoutId);
-
-    /// Destroys a bind group.
-    fn destroy_bind_group(&self, id: BindGroupId);
+        let bind_group = self
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: desc.label,
+                layout: &desc.layout.0,
+                entries: &wgpu_entries,
+            });
+        BindGroup(bind_group)
+    }
 
     // --- Pipeline ---
 
     /// Creates a pipeline layout.
-    fn create_pipeline_layout(
+    pub fn create_pipeline_layout(
         &self,
         desc: &PipelineLayoutDescriptor<'_>,
-    ) -> Result<PipelineLayoutId, GpuError>;
+    ) -> PipelineLayout {
+        astrelis_profiling::profile_function!();
+        let bind_group_layout_opts: Vec<Option<&wgpu::BindGroupLayout>> = desc
+            .bind_group_layouts
+            .iter()
+            .map(|l| Some(&l.0))
+            .collect();
+
+        let layout = self
+            .device
+            .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: desc.label,
+                bind_group_layouts: &bind_group_layout_opts,
+                ..Default::default()
+            });
+        PipelineLayout(layout)
+    }
 
     /// Creates a render pipeline.
-    fn create_render_pipeline(
+    pub fn create_render_pipeline(
         &self,
         desc: &RenderPipelineDescriptor<'_>,
-    ) -> Result<RenderPipelineId, GpuError>;
+    ) -> RenderPipeline {
+        astrelis_profiling::profile_function!();
+
+        let vertex_attrs: Vec<Vec<wgpu::VertexAttribute>> = desc
+            .vertex
+            .buffers
+            .iter()
+            .map(|buf| buf.attributes.iter().map(conv_pl::vertex_attribute).collect())
+            .collect();
+
+        let vertex_buffer_layouts: Vec<wgpu::VertexBufferLayout<'_>> = desc
+            .vertex
+            .buffers
+            .iter()
+            .zip(vertex_attrs.iter())
+            .map(|(buf, attrs)| wgpu::VertexBufferLayout {
+                array_stride: buf.array_stride,
+                step_mode: conv::vertex_step_mode(buf.step_mode),
+                attributes: attrs,
+            })
+            .collect();
+
+        let color_targets: Vec<Option<wgpu::ColorTargetState>> = desc
+            .fragment
+            .as_ref()
+            .map(|f| f.targets.iter().map(|t| Some(conv_pl::color_target_state(t))).collect())
+            .unwrap_or_default();
+
+        let fragment_state = desc.fragment.as_ref().map(|f| {
+            wgpu::FragmentState {
+                module: &f.module.0,
+                entry_point: Some(f.entry_point),
+                targets: &color_targets,
+                compilation_options: Default::default(),
+            }
+        });
+
+        let pipeline =
+            self.device
+                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: desc.label,
+                    layout: desc.layout.as_ref().map(|l| &l.0),
+                    vertex: wgpu::VertexState {
+                        module: &desc.vertex.module.0,
+                        entry_point: Some(desc.vertex.entry_point),
+                        buffers: &vertex_buffer_layouts,
+                        compilation_options: Default::default(),
+                    },
+                    primitive: conv_pl::primitive_state(&desc.primitive),
+                    depth_stencil: desc.depth_stencil.as_ref().map(conv_pl::depth_stencil_state),
+                    multisample: conv_pl::multisample_state(&desc.multisample),
+                    fragment: fragment_state,
+                    multiview_mask: None,
+                    cache: None,
+                });
+        RenderPipeline(pipeline)
+    }
 
     /// Creates a compute pipeline.
-    fn create_compute_pipeline(
+    pub fn create_compute_pipeline(
         &self,
         desc: &ComputePipelineDescriptor<'_>,
-    ) -> Result<ComputePipelineId, GpuError>;
+    ) -> ComputePipeline {
+        astrelis_profiling::profile_function!();
 
-    /// Destroys a pipeline layout.
-    fn destroy_pipeline_layout(&self, id: PipelineLayoutId);
-
-    /// Destroys a render pipeline.
-    fn destroy_render_pipeline(&self, id: RenderPipelineId);
-
-    /// Destroys a compute pipeline.
-    fn destroy_compute_pipeline(&self, id: ComputePipelineId);
+        let pipeline =
+            self.device
+                .create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: desc.label,
+                    layout: desc.layout.as_ref().map(|l| &l.0),
+                    module: &desc.module.0,
+                    entry_point: Some(desc.entry_point),
+                    compilation_options: Default::default(),
+                    cache: None,
+                });
+        ComputePipeline(pipeline)
+    }
 
     // --- Command ---
 
     /// Creates a new command encoder for recording GPU commands.
-    fn create_command_encoder(&self, label: Option<&str>) -> Self::Encoder;
+    pub fn create_command_encoder(&self, label: Option<&str>) -> CommandEncoder<'_> {
+        astrelis_profiling::profile_function!();
+        let encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+        CommandEncoder::new(encoder, self)
+    }
 }

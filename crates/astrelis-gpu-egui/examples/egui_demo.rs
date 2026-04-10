@@ -1,38 +1,30 @@
-//! Text rendering demo.
+//! Demonstrates egui integration with the astrelis windowing and GPU backends.
 //!
-//! Renders plain text at various sizes, colors, and alignments using
-//! the bitmap text renderer.
-//!
-//! Run with:
-//! ```sh
-//! cargo run -p astrelis-text-wgpu --example text_demo
-//! ```
+//! Opens a window and renders an egui demo UI with interactive widgets.
 
-use astrelis_core::color::Color;
 use astrelis_gpu::{Gpu, GpuConfig};
-use astrelis_gpu::GpuError;
+use astrelis_gpu::convert::types::texture_format;
 use astrelis_gpu::surface::SurfaceConfiguration;
-use astrelis_gpu::types::{PresentMode, TextureFormat};
-
-
-use astrelis_text::{FontSystem, Text};
-use astrelis_text_wgpu::{BitmapTextRenderer, TextRendererConfig};
+use astrelis_gpu::types::PresentMode;
+use astrelis_gpu_egui::EguiIntegration;
 use astrelis_window::backend::{AppHandler, EventLoopContext};
 use astrelis_window::control_flow::ControlFlow;
 use astrelis_window::event::WindowEvent;
 use astrelis_window::lifecycle::AppLifecycle;
 use astrelis_window::types::LogicalInnerSize;
 use astrelis_window::window_id::WindowId;
-use astrelis_window::WindowBuilder;
 
 struct App {
     window_id: Option<WindowId>,
     gpu: Option<Gpu>,
     surface: Option<astrelis_gpu::Surface<'static>>,
-    renderer: Option<BitmapTextRenderer>,
-    surface_format: TextureFormat,
-    width: u32,
-    height: u32,
+    egui: Option<EguiIntegration>,
+
+    // Demo state
+    name: String,
+    counter: i32,
+    slider_value: f32,
+    checkbox: bool,
 }
 
 impl AppHandler for App {
@@ -40,9 +32,9 @@ impl AppHandler for App {
         astrelis_profiling::profile_function!();
         match state {
             AppLifecycle::Resumed => {
-                let attrs = WindowBuilder::new()
-                    .with_title("Astrelis — Text Demo")
-                    .with_inner_size(LogicalInnerSize::new(800.0, 600.0))
+                let attrs = astrelis_window::WindowBuilder::new()
+                    .with_title("Astrelis — egui Demo")
+                    .with_inner_size(LogicalInnerSize::new(1024.0, 768.0))
                     .build();
                 let win_id = ctx.create_window(attrs).expect("failed to create window");
                 self.window_id = Some(win_id);
@@ -51,39 +43,31 @@ impl AppHandler for App {
                     Gpu::new(&GpuConfig::default()).expect("failed to create GPU backend");
 
                 let window = ctx.window(win_id).expect("window not found");
-                let mut surface = gpu.create_surface(window).expect("failed to create surface");
+                let mut surface = gpu
+                    .create_surface(window)
+                    .expect("failed to create surface");
 
                 let size = window.inner_size().physical();
-                self.surface_format = surface.preferred_format();
-                self.width = size.width as u32;
-                self.height = size.height as u32;
-
+                let format = surface.preferred_format();
                 surface.configure(&SurfaceConfiguration {
-                    format: self.surface_format,
-                    width: self.width,
-                    height: self.height,
+                    format,
+                    width: size.width as u32,
+                    height: size.height as u32,
                     present_mode: PresentMode::AutoVsync,
                     desired_maximum_frame_latency: 2,
                 });
 
-                // Create text renderer
-                let font_system = FontSystem::with_system_fonts();
-                let config = TextRendererConfig::new()
-                    .with_surface_format(
-                        astrelis_gpu::convert::types::texture_format(self.surface_format),
-                    );
-                let renderer = BitmapTextRenderer::new(&gpu, font_system, config);
+                let egui = EguiIntegration::new(&gpu, texture_format(format));
 
                 // SAFETY: surface lifetime is managed alongside gpu lifetime
                 let surface: astrelis_gpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
 
                 self.gpu = Some(gpu);
                 self.surface = Some(surface);
-                self.renderer = Some(renderer);
+                self.egui = Some(egui);
                 ctx.set_control_flow(ControlFlow::Wait);
             }
-            AppLifecycle::Suspended => {}
-            AppLifecycle::Exiting => {}
+            AppLifecycle::Suspended | AppLifecycle::Exiting => {}
         }
     }
 
@@ -94,18 +78,25 @@ impl AppHandler for App {
         event: WindowEvent,
     ) {
         astrelis_profiling::profile_function!();
+        if let Some(egui) = &mut self.egui {
+            let consumed = egui.handle_window_event(&event);
+            if consumed {
+                return;
+            }
+        }
+
         match event {
             WindowEvent::CloseRequested => ctx.exit(),
             WindowEvent::Resized(size) => {
-                let phys = size.physical();
-                self.width = phys.width as u32;
-                self.height = phys.height as u32;
-                if self.width > 0 && self.height > 0 {
-                    if let Some(surface) = &mut self.surface {
+                if let Some(surface) = &mut self.surface {
+                    let phys = size.physical();
+                    let w = phys.width as u32;
+                    let h = phys.height as u32;
+                    if w > 0 && h > 0 {
                         surface.configure(&SurfaceConfiguration {
-                            format: self.surface_format,
-                            width: self.width,
-                            height: self.height,
+                            format: surface.preferred_format(),
+                            width: w,
+                            height: h,
                             present_mode: PresentMode::AutoVsync,
                             desired_maximum_frame_latency: 2,
                         });
@@ -113,10 +104,7 @@ impl AppHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                self.render();
-                if let Some(win) = ctx.window(window_id) {
-                    win.request_redraw();
-                }
+                self.render(ctx, window_id);
             }
             _ => {}
         }
@@ -136,10 +124,10 @@ impl AppHandler for App {
 }
 
 impl App {
-    fn render(&mut self) {
+    fn render(&mut self, ctx: &mut dyn EventLoopContext, window_id: WindowId) {
         astrelis_profiling::profile_function!();
-        let (Some(gpu), Some(surface), Some(renderer)) =
-            (&self.gpu, &mut self.surface, &mut self.renderer)
+        let (Some(gpu), Some(surface), Some(egui)) =
+            (&self.gpu, &mut self.surface, &mut self.egui)
         else {
             return;
         };
@@ -147,30 +135,64 @@ impl App {
         astrelis_profiling::profile_scope!("acquire");
         let frame = match surface.acquire() {
             Ok(f) => f,
-            Err(GpuError::SurfaceOutdated | GpuError::SurfaceLost | GpuError::Timeout) => return,
-            Err(e) => panic!("failed to acquire: {e}"),
+            Err(_) => return,
         };
 
-        let wgpu_view = frame.view().raw();
+        let window = ctx.window(window_id).expect("window not found");
+        let size = window.inner_size().physical();
 
-        // Clear pass
+        // Begin egui frame.
+        astrelis_profiling::profile_scope!("egui_frame");
+        egui.begin_frame(window);
+
+        // Build UI.
+        egui::Window::new("egui Demo").show(egui.context(), |ui| {
+            ui.heading("Astrelis + egui");
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("Your name:");
+                ui.text_edit_singleline(&mut self.name);
+            });
+
+            ui.add(egui::Slider::new(&mut self.slider_value, 0.0..=100.0).text("Slider"));
+            ui.checkbox(&mut self.checkbox, "Check me");
+
+            ui.horizontal(|ui| {
+                if ui.button("  -  ").clicked() {
+                    self.counter -= 1;
+                }
+                ui.label(format!("Counter: {}", self.counter));
+                if ui.button("  +  ").clicked() {
+                    self.counter += 1;
+                }
+            });
+
+            ui.separator();
+            ui.label(format!("Hello, {}!", if self.name.is_empty() { "world" } else { &self.name }));
+        });
+
+        astrelis_profiling::profile_scope!("encode");
         let mut encoder =
             gpu.raw_device()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("text_demo_encoder"),
+                    label: Some("egui_demo"),
                 });
 
+        let view = frame.view().raw();
+
+        // Clear pass.
         {
-            let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("clear_pass"),
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("clear"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: wgpu_view,
+                    view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.1,
                             g: 0.1,
-                            b: 0.15,
+                            b: 0.1,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -184,36 +206,18 @@ impl App {
             });
         }
 
-        astrelis_profiling::profile_scope!("prepare_text");
-        // Draw text
-        let texts = [
-            Text::new("Hello, Astrelis!").size(32.0).color(Color::WHITE),
-            Text::new("Small text (14px)")
-                .size(14.0)
-                .color(Color::new(0.8, 0.8, 0.8, 1.0)),
-            Text::new("Medium text (20px)")
-                .size(20.0)
-                .color(Color::YELLOW),
-            Text::new("Bold text").size(24.0).color(Color::CYAN).bold(),
-            Text::new("Italic text")
-                .size(24.0)
-                .color(Color::GREEN)
-                .italic(),
-            Text::new("Red on dark background")
-                .size(18.0)
-                .color(Color::RED),
-        ];
-
-        let mut y = 30.0;
-        for text in &texts {
-            let mut buffer = renderer.prepare(text);
-            renderer.draw_text(&mut buffer, astrelis_core::math::Vec2::new(30.0, y));
-            y += text.font_size * 2.0;
-        }
-
-        astrelis_profiling::profile_scope!("encode");
-        // Render text
-        renderer.render(gpu, &mut encoder, wgpu_view, self.width, self.height);
+        // End egui frame and render.
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [size.width as u32, size.height as u32],
+            pixels_per_point: window.scale_factor(),
+        };
+        egui.end_frame_and_render(
+            gpu,
+            &mut encoder,
+            view,
+            screen_descriptor,
+            Some(window),
+        );
 
         astrelis_profiling::profile_scope!("submit");
         gpu.raw_queue().submit(std::iter::once(encoder.finish()));
@@ -224,15 +228,17 @@ impl App {
 
 fn main() {
     astrelis_profiling::init();
+
     
     let mut app = App {
         window_id: None,
         gpu: None,
         surface: None,
-        renderer: None,
-        surface_format: TextureFormat::Bgra8UnormSrgb,
-        width: 800,
-        height: 600,
+        egui: None,
+        name: String::new(),
+        counter: 0,
+        slider_value: 50.0,
+        checkbox: false,
     };
     astrelis_window::run(&mut app).expect("event loop error");
 }

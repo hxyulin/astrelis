@@ -4,7 +4,7 @@
 //! and SDF rendering for large text or text with effects.
 
 use astrelis_core::math::Vec2;
-use astrelis_gpu_wgpu::WgpuDevice;
+use astrelis_gpu::Gpu;
 use astrelis_text::{FontSystem, SdfConfig, Text, TextEffects, TextRenderMode};
 
 use crate::config::TextRendererConfig;
@@ -24,13 +24,13 @@ pub struct FontRenderer {
 impl FontRenderer {
     /// Create a new hybrid text renderer.
     pub fn new(
-        device: &WgpuDevice,
+        gpu: &Gpu,
         font_system: FontSystem,
         config: TextRendererConfig,
     ) -> Self {
         astrelis_profiling::profile_function!();
-        let bitmap = BitmapTextRenderer::new(device, font_system.clone(), config.clone());
-        let sdf = SdfTextRenderer::new(device, font_system, config);
+        let bitmap = BitmapTextRenderer::new(gpu, font_system.clone(), config.clone());
+        let sdf = SdfTextRenderer::new(gpu, font_system, config);
 
         Self { bitmap, sdf }
     }
@@ -105,14 +105,14 @@ impl FontRenderer {
     /// Render all queued text (both bitmap and SDF).
     pub fn render(
         &mut self,
-        device: &WgpuDevice,
+        gpu: &Gpu,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         width: u32,
         height: u32,
     ) {
         astrelis_profiling::profile_function!();
-        self.bitmap.render(device, encoder, view, width, height);
-        self.sdf.render(device, encoder, view, width, height);
+        self.bitmap.render(gpu, encoder, view, width, height);
+        self.sdf.render(gpu, encoder, view, width, height);
     }
 }

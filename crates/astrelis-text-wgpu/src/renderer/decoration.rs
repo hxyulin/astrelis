@@ -1,6 +1,6 @@
 //! Decoration renderer for underlines, strikethrough, and backgrounds.
 
-use astrelis_gpu_wgpu::WgpuDevice;
+use astrelis_gpu::Gpu;
 use astrelis_text::{DecorationQuad, TextBounds, TextDecoration, generate_decoration_quads};
 
 use super::vertex::DecorationVertex;
@@ -18,9 +18,9 @@ pub struct DecorationRenderer {
 
 impl DecorationRenderer {
     /// Create a new decoration renderer.
-    pub fn new(device: &WgpuDevice, surface_format: wgpu::TextureFormat) -> Self {
+    pub fn new(gpu: &Gpu, surface_format: wgpu::TextureFormat) -> Self {
         astrelis_profiling::profile_function!();
-        let dev = device.wgpu_device();
+        let dev = gpu.raw_device();
 
         let uniform_bind_group_layout =
             dev.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -135,7 +135,7 @@ impl DecorationRenderer {
     /// Render all queued decorations.
     pub fn render(
         &mut self,
-        device: &WgpuDevice,
+        gpu: &Gpu,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         width: u32,
@@ -146,7 +146,7 @@ impl DecorationRenderer {
             return;
         }
 
-        let dev = device.wgpu_device();
+        let dev = gpu.raw_device();
 
         // Projection uniform
         use wgpu::util::DeviceExt;

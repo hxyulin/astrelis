@@ -1,7 +1,7 @@
 //! Render and compute pipeline descriptors.
 
 use crate::bind_group::ShaderStages;
-use crate::id::{BindGroupLayoutId, PipelineLayoutId, ShaderModuleId};
+use crate::resources::{BindGroupLayout, PipelineLayout, ShaderModule};
 use crate::types::{
     BlendState, ColorWrites, CompareFunction, CullMode, FrontFace, IndexFormat, PrimitiveTopology,
     PolygonMode, TextureFormat, VertexFormat, VertexStepMode,
@@ -30,10 +30,9 @@ pub struct VertexBufferLayout<'a> {
 }
 
 /// Describes the vertex shader stage of a render pipeline.
-#[derive(Clone, Debug)]
 pub struct VertexState<'a> {
     /// Shader module containing the vertex entry point.
-    pub module: ShaderModuleId,
+    pub module: &'a ShaderModule,
     /// Entry point function name.
     pub entry_point: &'a str,
     /// Vertex buffer layouts.
@@ -52,10 +51,9 @@ pub struct ColorTargetState {
 }
 
 /// Describes the fragment shader stage of a render pipeline.
-#[derive(Clone, Debug)]
 pub struct FragmentState<'a> {
     /// Shader module containing the fragment entry point.
-    pub module: ShaderModuleId,
+    pub module: &'a ShaderModule,
     /// Entry point function name.
     pub entry_point: &'a str,
     /// Color targets this fragment shader writes to.
@@ -134,23 +132,21 @@ pub struct PushConstantRange {
 }
 
 /// Describes a pipeline layout.
-#[derive(Clone, Debug)]
 pub struct PipelineLayoutDescriptor<'a> {
     /// Debug label.
     pub label: Option<&'a str>,
     /// Bind group layouts used by this pipeline.
-    pub bind_group_layouts: &'a [BindGroupLayoutId],
+    pub bind_group_layouts: &'a [&'a BindGroupLayout],
     /// Push constant ranges.
     pub push_constant_ranges: &'a [PushConstantRange],
 }
 
 /// Describes a render pipeline.
-#[derive(Clone, Debug)]
 pub struct RenderPipelineDescriptor<'a> {
     /// Debug label.
     pub label: Option<&'a str>,
     /// Pipeline layout. `None` = auto-derive from shader.
-    pub layout: Option<PipelineLayoutId>,
+    pub layout: Option<&'a PipelineLayout>,
     /// Vertex stage configuration.
     pub vertex: VertexState<'a>,
     /// Primitive state.
@@ -164,14 +160,13 @@ pub struct RenderPipelineDescriptor<'a> {
 }
 
 /// Describes a compute pipeline.
-#[derive(Clone, Debug)]
 pub struct ComputePipelineDescriptor<'a> {
     /// Debug label.
     pub label: Option<&'a str>,
     /// Pipeline layout. `None` = auto-derive from shader.
-    pub layout: Option<PipelineLayoutId>,
+    pub layout: Option<&'a PipelineLayout>,
     /// Shader module containing the compute entry point.
-    pub module: ShaderModuleId,
+    pub module: &'a ShaderModule,
     /// Entry point function name.
     pub entry_point: &'a str,
 }

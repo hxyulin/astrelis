@@ -1,25 +1,21 @@
 [package]
-name = "astrelis-text-wgpu"
+name = "astrelis-gpu-egui"
 version.workspace = true
 edition.workspace = true
-authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "GPU-accelerated text rendering for the Astrelis game engine using wgpu"
+description = "egui integration for the Astrelis GPU backend"
 
 [dependencies]
 astrelis-core = { workspace = true }
 astrelis-profiling = { workspace = true }
-astrelis-text = { workspace = true }
+astrelis-window = { workspace = true }
 astrelis-gpu = { workspace = true }
+egui = { workspace = true }
+egui-wgpu = { workspace = true }
 wgpu = { workspace = true }
-bytemuck = { workspace = true }
-tracing = { workspace = true }
-fxhash = { workspace = true }
-cosmic-text = { workspace = true }
 
 [dev-dependencies]
-astrelis-window = { workspace = true }
 pollster = { workspace = true }
 
 [lints]

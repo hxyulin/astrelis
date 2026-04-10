@@ -1,11 +1,18 @@
 //! Basic profiling example.
 //!
-//! Run with the `puffin` feature to enable actual profiling:
+//! Run with a backend feature to enable actual profiling:
+//!
+//!   cargo run -p astrelis-profiling --features tracy --example basic_profiling
 //!   cargo run -p astrelis-profiling --features puffin --example basic_profiling
 //!
-//! When the `puffin` feature is enabled, a puffin_http server starts on
-//! localhost:8585. Open the puffin_viewer application to inspect frames.
-//! Without the feature, all profiling calls compile to no-ops.
+//! **Tracy:** Open the Tracy profiler GUI *before* running this example so it
+//! can capture the (short) session. Or use `tracy-capture -o trace.tracy` to
+//! save to a file and open it afterwards.
+//!
+//! **Puffin:** A puffin_http server starts on localhost:8585. Open the
+//! puffin_viewer application to inspect frames.
+//!
+//! Without any backend feature, all profiling calls compile to no-ops.
 
 fn simulate_physics() {
     astrelis_profiling::profile_function!();

@@ -8,12 +8,13 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-puffin = ["dep:puffin", "dep:puffin_http", "dep:profiling"]
+puffin = ["dep:puffin", "dep:puffin_http"]
+tracy = ["dep:tracy-client"]
 
 [dependencies]
 puffin = { workspace = true, optional = true }
 puffin_http = { workspace = true, optional = true }
-profiling = { workspace = true, optional = true, features = ["profile-with-puffin"] }
+tracy-client = { workspace = true, optional = true, features = ["enable"] }
 
 [lints]
 workspace = true

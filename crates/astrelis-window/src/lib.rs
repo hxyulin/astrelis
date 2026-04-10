@@ -1,11 +1,12 @@
-//! Backend-agnostic windowing traits and types for the Astrelis engine.
+//! Windowing system for the Astrelis engine, built on winit.
 //!
-//! This crate defines platform-independent abstractions. Concrete
-//! implementations (e.g., `astrelis-window-winit`) live in separate crates.
+//! This crate provides engine-owned windowing types and a winit-based event
+//! loop. Consumer code implements [`AppHandler`] and calls [`run`] to start
+//! the event loop.
 //!
 //! # Architecture
 //!
-//! - [`WindowBackend`] — top-level entry point; creates the event loop
+//! - [`run`] — top-level entry point; creates the winit event loop
 //! - [`AppHandler`] — user-implemented callback trait for receiving events
 //! - [`EventLoopContext`] — provided during callbacks; create/access windows
 //! - [`Window`] — trait for manipulating a single window
@@ -44,11 +45,17 @@
 //!
 //!     fn on_events_cleared(&mut self, _ctx: &mut dyn EventLoopContext) {}
 //! }
+//!
+//! fn main() {
+//!     astrelis_window::run(&mut MyApp).expect("event loop error");
+//! }
 //! ```
 
 pub mod backend;
 pub mod builder;
+mod capabilities;
 pub mod capability;
+mod convert;
 pub mod control_flow;
 pub mod cursor;
 pub mod error;
@@ -63,9 +70,10 @@ pub mod types;
 pub mod window;
 pub mod window_id;
 pub mod window_level;
+mod winit_window;
 
 // Convenience re-exports.
-pub use backend::{AppHandler, EventLoopContext, WindowBackend};
+pub use backend::{run, AppHandler, EventLoopContext};
 pub use builder::{WindowAttributes, WindowBuilder};
 pub use capability::{Capabilities, Capability};
 pub use control_flow::ControlFlow;

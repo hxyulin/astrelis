@@ -10,29 +10,26 @@
 
 use astrelis_core::color::Color;
 use astrelis_core::math::Vec2;
-use astrelis_gpu::backend::{GpuBackend, GpuConfig};
-use astrelis_gpu::error::GpuError;
-use astrelis_gpu::surface::{GpuSurface, SurfaceConfiguration, SurfaceTexture};
+use astrelis_gpu::{Gpu, GpuConfig};
+use astrelis_gpu::GpuError;
+use astrelis_gpu::surface::SurfaceConfiguration;
 use astrelis_gpu::types::{PresentMode, TextureFormat};
-use astrelis_gpu_wgpu::WgpuBackend;
+
 use astrelis_text::{FontSystem, RichTextBuilder, Text};
 use astrelis_text_wgpu::{FontRenderer, TextRendererConfig};
-use astrelis_window::backend::{AppHandler, EventLoopContext, WindowBackend};
+use astrelis_window::backend::{AppHandler, EventLoopContext};
 use astrelis_window::control_flow::ControlFlow;
 use astrelis_window::event::WindowEvent;
 use astrelis_window::lifecycle::AppLifecycle;
 use astrelis_window::types::LogicalInnerSize;
 use astrelis_window::window_id::WindowId;
 use astrelis_window::WindowBuilder;
-use astrelis_window_winit::WinitBackend;
 
-type WgpuSurface = <WgpuBackend as GpuBackend>::Surface;
-type WgpuSurfaceTexture = <WgpuSurface as GpuSurface>::Texture;
 
 struct App {
     window_id: Option<WindowId>,
-    gpu: Option<WgpuBackend>,
-    surface: Option<WgpuSurface>,
+    gpu: Option<Gpu>,
+    surface: Option<astrelis_gpu::Surface<'static>>,
     renderer: Option<FontRenderer>,
     surface_format: TextureFormat,
     width: u32,
@@ -50,7 +47,7 @@ impl AppHandler for App {
             let win_id = ctx.create_window(attrs).expect("failed to create window");
             self.window_id = Some(win_id);
 
-            let gpu = WgpuBackend::new(&GpuConfig::default()).expect("GPU init failed");
+            let gpu = Gpu::new(&GpuConfig::default()).expect("GPU init failed");
             let window = ctx.window(win_id).expect("window not found");
             let mut surface = gpu.create_surface(window).expect("surface creation failed");
 
@@ -68,9 +65,12 @@ impl AppHandler for App {
 
             let font_system = FontSystem::with_system_fonts();
             let config = TextRendererConfig::new().with_surface_format(
-                astrelis_gpu_wgpu::convert::types::texture_format(self.surface_format),
+                astrelis_gpu::convert::types::texture_format(self.surface_format),
             );
-            let renderer = FontRenderer::new(gpu.device(), font_system, config);
+            let renderer = FontRenderer::new(&gpu, font_system, config);
+
+            // SAFETY: surface lifetime is managed alongside gpu lifetime
+            let surface: astrelis_gpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
 
             self.gpu = Some(gpu);
             self.surface = Some(surface);
@@ -117,7 +117,7 @@ impl AppHandler for App {
     fn on_events_cleared(&mut self, ctx: &mut dyn EventLoopContext) {
         astrelis_profiling::profile_function!();
         if let Some(gpu) = &self.gpu {
-            gpu.device().process_gpu_profiling_frames();
+            gpu.process_profiling_frames();
         }
         if let Some(id) = self.window_id
             && let Some(win) = ctx.window(id)
@@ -137,19 +137,16 @@ impl App {
         };
 
         astrelis_profiling::profile_scope!("acquire");
-        let frame: WgpuSurfaceTexture = match surface.acquire() {
+        let frame = match surface.acquire() {
             Ok(f) => f,
             Err(GpuError::SurfaceOutdated | GpuError::SurfaceLost | GpuError::Timeout) => return,
             Err(e) => panic!("failed to acquire: {e}"),
         };
 
-        let wgpu_device = gpu.device();
-        let views = wgpu_device.texture_views();
-        let wgpu_view = views.get(frame.view()).expect("texture view not found");
+        let wgpu_view = frame.view().raw();
 
         let mut encoder =
-            wgpu_device
-                .wgpu_device()
+            gpu.raw_device()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("rich_text_encoder"),
                 });
@@ -228,12 +225,10 @@ impl App {
         renderer.draw_text(&custom, &mut buffer, Vec2::new(30.0, y_pos));
 
         astrelis_profiling::profile_scope!("encode");
-        renderer.render(wgpu_device, &mut encoder, wgpu_view, self.width, self.height);
+        renderer.render(gpu, &mut encoder, wgpu_view, self.width, self.height);
 
         astrelis_profiling::profile_scope!("submit");
-        wgpu_device
-            .wgpu_queue()
-            .submit(std::iter::once(encoder.finish()));
+        gpu.raw_queue().submit(std::iter::once(encoder.finish()));
         astrelis_profiling::profile_scope!("present");
         frame.present();
     }
@@ -241,7 +236,7 @@ impl App {
 
 fn main() {
     astrelis_profiling::init();
-    let backend = WinitBackend::new().expect("failed to create windowing backend");
+    
     let mut app = App {
         window_id: None,
         gpu: None,
@@ -251,5 +246,5 @@ fn main() {
         width: 800,
         height: 600,
     };
-    backend.run(&mut app).expect("event loop error");
+    astrelis_window::run(&mut app).expect("event loop error");
 }

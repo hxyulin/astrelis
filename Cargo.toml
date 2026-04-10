@@ -4,11 +4,9 @@ members = [
     "crates/astrelis-core",
     "crates/astrelis-profiling",
     "crates/astrelis-window",
-    "crates/astrelis-window-winit",
     "crates/astrelis-window-test",
     "crates/astrelis-gpu",
-    "crates/astrelis-gpu-wgpu",
-    "crates/astrelis-gpu-wgpu-egui",
+    "crates/astrelis-gpu-egui",
     "crates/astrelis-input",
     "crates/astrelis-assets",
     "crates/astrelis-text",
@@ -27,11 +25,9 @@ repository = "https://github.com/hxyulin/astrelis"
 astrelis-core = { path = "crates/astrelis-core", version = "0.3.0" }
 astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.3.0" }
 astrelis-window = { path = "crates/astrelis-window", version = "0.3.0" }
-astrelis-window-winit = { path = "crates/astrelis-window-winit", version = "0.3.0" }
 astrelis-window-test = { path = "crates/astrelis-window-test", version = "0.3.0" }
 astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.3.0" }
-astrelis-gpu-wgpu = { path = "crates/astrelis-gpu-wgpu", version = "0.3.0" }
-astrelis-gpu-wgpu-egui = { path = "crates/astrelis-gpu-wgpu-egui", version = "0.3.0" }
+astrelis-gpu-egui = { path = "crates/astrelis-gpu-egui", version = "0.3.0" }
 astrelis-input = { path = "crates/astrelis-input", version = "0.3.0" }
 astrelis-assets = { path = "crates/astrelis-assets", version = "0.3.0" }
 astrelis-text = { path = "crates/astrelis-text", version = "0.3.0" }
@@ -57,6 +53,7 @@ egui-wgpu = "0.34"
 # Profiling
 puffin = "0.19"
 puffin_http = "0.16"
+tracy-client = { version = "0.18", default-features = false }
 profiling = { version = "1.0", default-features = false }
 
 

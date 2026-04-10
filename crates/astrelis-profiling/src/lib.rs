@@ -1,7 +1,7 @@
 //! Backend-agnostic profiling for the Astrelis engine.
 //!
 //! This crate provides profiling macros that compile to zero-cost no-ops when
-//! no backend feature is enabled. Enable a backend feature (e.g., `puffin`) to
+//! no backend feature is enabled. Enable a backend feature (e.g., `tracy`) to
 //! activate profiling.
 //!
 //! # Usage
@@ -33,9 +33,10 @@
 //!
 //! # Backends
 //!
-//! | Feature   | Backend                                          |
-//! |-----------|--------------------------------------------------|
-//! | `puffin`  | [puffin](https://crates.io/crates/puffin) viewer |
+//! | Feature  | Backend                                              |
+//! |----------|------------------------------------------------------|
+//! | `puffin` | [puffin](https://crates.io/crates/puffin) viewer     |
+//! | `tracy`  | [Tracy](https://github.com/wolfpld/tracy) profiler   |
 //!
 //! When no backend feature is enabled, all macros and functions are zero-cost no-ops.
 
@@ -49,8 +50,53 @@ pub use backend::{finish, init, new_frame, set_thread_name};
 pub use thread::spawn_profiled;
 
 // ============================================================================
+// Feature: tracy ENABLED — use tracy_client::span!() for CPU zones
+// ============================================================================
+
+/// Profiles the enclosing function.
+///
+/// When the `tracy` backend is enabled, this records a Tracy zone spanning
+/// the entire function. When no backend is enabled, this is a no-op.
+#[cfg(feature = "tracy")]
+#[macro_export]
+macro_rules! profile_function {
+    () => {
+        let _tracy_span = ::tracy_client::span!();
+    };
+    ($data:expr) => {
+        let _tracy_span = ::tracy_client::span!($data);
+    };
+}
+
+/// Profiles a named scope within a function.
+///
+/// When the `tracy` backend is enabled, this records a named Tracy zone.
+#[cfg(feature = "tracy")]
+#[macro_export]
+macro_rules! profile_scope {
+    ($name:expr) => {
+        let _tracy_span = ::tracy_client::span!($name);
+    };
+    ($name:expr, $data:expr) => {
+        // Tracy span! only takes name + optional callstack depth.
+        // Attach extra data as a message on the span.
+        let _tracy_span = ::tracy_client::span!($name);
+    };
+}
+
+/// Re-export tracy_client so downstream crates can access it if needed.
+#[cfg(feature = "tracy")]
+#[doc(hidden)]
+pub use tracy_client;
+
+// ============================================================================
 // Feature: puffin ENABLED — re-export puffin's own macros directly
 // ============================================================================
+
+/// Profiles the enclosing function.
+///
+/// When the `puffin` backend is enabled, this records a puffin scope
+/// spanning the entire function.
 #[cfg(feature = "puffin")]
 pub use puffin::{profile_function, profile_scope};
 
@@ -60,7 +106,7 @@ pub use puffin::{profile_function, profile_scope};
 pub use puffin;
 
 // ============================================================================
-// Feature: puffin DISABLED — zero-cost no-op stubs
+// No backend — zero-cost no-op stubs
 // ============================================================================
 
 /// Profiles the enclosing function.
@@ -76,7 +122,7 @@ pub use puffin;
 ///     // ...
 /// }
 /// ```
-#[cfg(not(feature = "puffin"))]
+#[cfg(not(any(feature = "puffin", feature = "tracy")))]
 #[macro_export]
 macro_rules! profile_function {
     () => {};
@@ -99,12 +145,16 @@ macro_rules! profile_function {
 ///     }
 /// }
 /// ```
-#[cfg(not(feature = "puffin"))]
+#[cfg(not(any(feature = "puffin", feature = "tracy")))]
 #[macro_export]
 macro_rules! profile_scope {
     ($name:expr) => {};
     ($name:expr, $data:expr) => {};
 }
+
+// ============================================================================
+// Macros that are the same regardless of backend
+// ============================================================================
 
 /// Names the current thread for profiling.
 ///
@@ -127,8 +177,9 @@ macro_rules! profile_thread {
 
 /// Records a profiling counter value.
 ///
-/// Counters track named integer/float values over time. The value is
-/// reported to the active profiling backend under the given category and name.
+/// When the `tracy` backend is enabled, counters are displayed as native
+/// Tracy plots. With other backends, they route through the backend's
+/// counter API.
 ///
 /// No-op when no profiling backend is enabled.
 ///
@@ -138,6 +189,18 @@ macro_rules! profile_thread {
 /// astrelis_profiling::profile_counter!("gpu_memory", "buffer_bytes", 1024u64);
 /// astrelis_profiling::profile_counter!("cache", "hit_rate", 0.95f64);
 /// ```
+#[cfg(feature = "tracy")]
+#[macro_export]
+macro_rules! profile_counter {
+    ($category:expr, $name:expr, $value:expr) => {
+        ::tracy_client::plot!($name, $crate::data::counter_to_f64($value))
+    };
+}
+
+/// Records a profiling counter value.
+///
+/// No-op when no profiling backend is enabled.
+#[cfg(not(feature = "tracy"))]
 #[macro_export]
 macro_rules! profile_counter {
     ($category:expr, $name:expr, $value:expr) => {
@@ -147,8 +210,9 @@ macro_rules! profile_counter {
 
 /// Records a profiling plot value.
 ///
-/// Plots display as continuous line graphs in the profiler viewer.
-/// Useful for frame time, FPS, temperature, or any continuous metric.
+/// When the `tracy` backend is enabled, plots are displayed as native
+/// Tracy time-series graphs. With other backends, they route through
+/// the backend's plot API.
 ///
 /// No-op when no profiling backend is enabled.
 ///
@@ -157,6 +221,18 @@ macro_rules! profile_counter {
 /// ```rust
 /// astrelis_profiling::profile_plot!("frame_time_ms", 16.3);
 /// ```
+#[cfg(feature = "tracy")]
+#[macro_export]
+macro_rules! profile_plot {
+    ($name:expr, $value:expr) => {
+        ::tracy_client::plot!($name, $value as f64)
+    };
+}
+
+/// Records a profiling plot value.
+///
+/// No-op when no profiling backend is enabled.
+#[cfg(not(feature = "tracy"))]
 #[macro_export]
 macro_rules! profile_plot {
     ($name:expr, $value:expr) => {

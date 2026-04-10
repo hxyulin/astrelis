@@ -1,6 +1,6 @@
 //! Bind group and bind group layout descriptors.
 
-use crate::id::{BindGroupLayoutId, BufferId, SamplerId, TextureViewId};
+use crate::resources::{BindGroupLayout, Buffer, Sampler, TextureView};
 use crate::types::{TextureFormat, TextureViewDimension};
 
 /// Shader stage visibility flags.
@@ -139,14 +139,13 @@ pub struct BindGroupLayoutDescriptor<'a> {
 }
 
 /// A single resource entry in a bind group.
-#[derive(Clone, Debug)]
-pub enum BindGroupEntry {
+pub enum BindGroupEntry<'a> {
     /// A buffer binding.
     Buffer {
         /// Binding index.
         binding: u32,
-        /// Buffer handle.
-        buffer: BufferId,
+        /// Buffer reference.
+        buffer: &'a Buffer,
         /// Byte offset into the buffer.
         offset: u64,
         /// Byte size of the binding. `None` = rest of buffer.
@@ -156,25 +155,24 @@ pub enum BindGroupEntry {
     TextureView {
         /// Binding index.
         binding: u32,
-        /// Texture view handle.
-        view: TextureViewId,
+        /// Texture view reference.
+        view: &'a TextureView,
     },
     /// A sampler binding.
     Sampler {
         /// Binding index.
         binding: u32,
-        /// Sampler handle.
-        sampler: SamplerId,
+        /// Sampler reference.
+        sampler: &'a Sampler,
     },
 }
 
 /// Describes a bind group (a set of resources bound together).
-#[derive(Clone, Debug)]
 pub struct BindGroupDescriptor<'a> {
     /// Debug label.
     pub label: Option<&'a str>,
     /// The layout this bind group conforms to.
-    pub layout: BindGroupLayoutId,
+    pub layout: &'a BindGroupLayout,
     /// Resource entries.
-    pub entries: &'a [BindGroupEntry],
+    pub entries: &'a [BindGroupEntry<'a>],
 }

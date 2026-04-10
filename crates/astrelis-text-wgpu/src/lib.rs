@@ -10,9 +10,7 @@
 //!
 //! # Limitation
 //!
-//! This crate depends directly on `wgpu` and `astrelis-gpu-wgpu` (not the
-//! abstract `astrelis-gpu` traits). If a second GPU backend is added, a
-//! corresponding `astrelis-text-{backend}` crate would be needed.
+//! This crate depends directly on `wgpu` and `astrelis-gpu`.
 
 #![warn(missing_docs)]
 

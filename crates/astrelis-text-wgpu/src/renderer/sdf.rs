@@ -4,7 +4,7 @@
 //! text rendering and visual effects (shadows, outlines, glows).
 
 use astrelis_core::math::Vec2;
-use astrelis_gpu_wgpu::WgpuDevice;
+use astrelis_gpu::Gpu;
 use astrelis_text::{FontSystem, SdfConfig, Text, TextEffects};
 
 use crate::atlas::GlyphPlacement;
@@ -39,16 +39,16 @@ pub struct SdfTextRenderer {
 impl SdfTextRenderer {
     /// Create a new SDF text renderer.
     pub fn new(
-        device: &WgpuDevice,
+        gpu: &Gpu,
         font_system: FontSystem,
         config: TextRendererConfig,
     ) -> Self {
         astrelis_profiling::profile_function!();
-        let shared = SharedContext::new(device, font_system);
+        let shared = SharedContext::new(gpu, font_system);
         let atlas_size = config.atlas_size;
         let atlas = SdfAtlas::new(atlas_size);
 
-        let dev = device.wgpu_device();
+        let dev = gpu.raw_device();
 
         // Create atlas texture
         let gpu_atlas_texture = dev.create_texture(&wgpu::TextureDescriptor {
@@ -366,7 +366,7 @@ impl SdfTextRenderer {
     /// effects gets its own SdfParams uniform upload.
     pub fn render(
         &mut self,
-        device: &WgpuDevice,
+        gpu: &Gpu,
         encoder: &mut wgpu::CommandEncoder,
         view: &wgpu::TextureView,
         width: u32,
@@ -379,8 +379,8 @@ impl SdfTextRenderer {
 
         self.shared.set_viewport(width as f32, height as f32);
 
-        let dev = device.wgpu_device();
-        let queue = device.wgpu_queue();
+        let dev = gpu.raw_device();
+        let queue = gpu.raw_queue();
 
         // Upload atlas if dirty
         if self.atlas.dirty {

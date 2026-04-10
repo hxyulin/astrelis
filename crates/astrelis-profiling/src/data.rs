@@ -68,3 +68,14 @@ impl From<f32> for CounterValue {
         Self::F64(v as f64)
     }
 }
+
+/// Converts a counter value to `f64` for backends (like Tracy) that use
+/// floating-point plots for all metrics.
+#[inline(always)]
+pub fn counter_to_f64(value: impl Into<CounterValue>) -> f64 {
+    match value.into() {
+        CounterValue::U64(v) => v as f64,
+        CounterValue::I64(v) => v as f64,
+        CounterValue::F64(v) => v,
+    }
+}

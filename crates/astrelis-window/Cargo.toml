@@ -1,6 +1,6 @@
 [package]
 name = "astrelis-window"
-description = "Backend-agnostic windowing traits and types for the Astrelis engine"
+description = "Windowing system for the Astrelis engine, built on winit"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -9,6 +9,8 @@ repository.workspace = true
 
 [dependencies]
 astrelis-core = { workspace = true }
+astrelis-profiling = { workspace = true }
+winit = { workspace = true }
 raw-window-handle = { workspace = true }
 
 [lints]

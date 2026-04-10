@@ -19,7 +19,7 @@ pub use vertex::{DecorationVertex, TextVertex};
 
 use std::sync::{Arc, RwLock};
 
-use astrelis_gpu_wgpu::WgpuDevice;
+use astrelis_gpu::Gpu;
 use astrelis_text::FontSystem;
 use cosmic_text::{Metrics, SwashCache};
 
@@ -212,10 +212,10 @@ pub(crate) struct SharedContext {
 
 impl SharedContext {
     /// Create a new shared context.
-    pub fn new(device: &WgpuDevice, font_system: FontSystem) -> Self {
+    pub fn new(gpu: &Gpu, font_system: FontSystem) -> Self {
         let uniform_bind_group_layout =
-            device
-                .wgpu_device()
+            gpu
+                .raw_device()
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("text_uniform_layout"),
                     entries: &[wgpu::BindGroupLayoutEntry {

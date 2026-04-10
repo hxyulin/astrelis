@@ -1,36 +1,32 @@
-//! Backend-agnostic GPU abstraction traits and types for the Astrelis engine.
+//! Concrete wgpu-based GPU types for the Astrelis engine.
 //!
-//! This crate defines platform-independent GPU abstractions. Concrete
-//! implementations (e.g., `astrelis-gpu-wgpu`) live in separate crates.
+//! This crate provides direct wgpu-backed GPU abstractions with thin newtype
+//! wrappers and no trait indirection.
 //!
 //! # Architecture
 //!
-//! - [`GpuBackend`] — top-level entry point; initializes adapter and device
-//! - [`GpuDevice`] — creates and destroys GPU resources, returns typed handles
-//! - [`GpuQueue`] — submits recorded commands for execution
-//! - [`GpuSurface`] / [`SurfaceTexture`] — manages presentation to a window
+//! - [`Gpu`] — top-level entry point; initializes adapter and device
+//! - [`GpuDevice`] — creates GPU resources, returning owned newtype wrappers
 //! - [`CommandEncoder`] — records GPU commands into a command buffer
 //! - [`RenderPass`] / [`ComputePass`] — record render / compute work within a pass
+//! - [`Surface`] / [`SurfaceFrame`] — manages presentation to a window
 //!
-//! # Resource Handles
+//! # Resources
 //!
-//! GPU resources are identified by lightweight typed handles (e.g.,
-//! [`BufferId`](id::BufferId), [`TextureId`](id::TextureId)). The backend
-//! owns the actual GPU objects; handles are `Copy + Send + Sync` IDs built
-//! on [`astrelis_core::id::Id<T>`].
+//! GPU resources are represented as lightweight newtype wrappers around wgpu
+//! types (e.g., [`Buffer`], [`Texture`], [`TextureView`]). Dropping a wrapper
+//! releases the GPU resource. Each wrapper provides a `raw()` escape hatch
+//! for direct wgpu access.
 //!
 //! # Example
 //!
 //! ```ignore
-//! use astrelis_gpu::backend::{GpuBackend, GpuConfig};
-//! use astrelis_gpu::command::{ColorAttachment, CommandEncoder, RenderPassDescriptor};
-//! use astrelis_gpu::device::GpuDevice;
-//! use astrelis_gpu::queue::GpuQueue;
-//! use astrelis_gpu::surface::{GpuSurface, SurfaceConfiguration, SurfaceTexture};
+//! use astrelis_gpu::{Gpu, GpuConfig};
+//! use astrelis_gpu::command::{ColorAttachment, RenderPassDescriptor};
+//! use astrelis_gpu::surface::SurfaceConfiguration;
 //! use astrelis_gpu::types::{LoadOp, PresentMode, StoreOp};
-//! use astrelis_gpu_wgpu::WgpuBackend;
 //!
-//! let gpu = WgpuBackend::new(&GpuConfig::default())?;
+//! let gpu = Gpu::new(&GpuConfig::default())?;
 //! let mut surface = gpu.create_surface(window)?;
 //! surface.configure(&SurfaceConfiguration {
 //!     format: surface.preferred_format(),
@@ -39,7 +35,7 @@
 //!     desired_maximum_frame_latency: 2,
 //! });
 //!
-//! // Render loop: acquire → record → submit → present
+//! // Render loop: acquire -> record -> submit -> present
 //! let frame = surface.acquire()?;
 //! let mut encoder = gpu.device().create_command_encoder(Some("frame"));
 //! {
@@ -54,7 +50,7 @@
 //!         depth_stencil_attachment: None,
 //!     });
 //! }
-//! gpu.queue().submit(std::iter::once(encoder));
+//! gpu.submit(std::iter::once(encoder));
 //! frame.present();
 //! ```
 
@@ -64,22 +60,23 @@ pub mod backend;
 pub mod bind_group;
 pub mod buffer;
 pub mod command;
+/// Type conversion utilities between engine types and `wgpu` types.
+pub mod convert;
 pub mod device;
 pub mod error;
-pub mod id;
 pub mod pipeline;
-pub mod profiling;
-pub mod queue;
+pub(crate) mod profiling;
+pub mod resources;
 pub mod shader;
 pub mod surface;
 pub mod texture;
 pub mod types;
 
 // Convenience re-exports.
-pub use backend::{GpuBackend, GpuConfig};
+pub use backend::{Gpu, GpuConfig};
 pub use command::{CommandEncoder, ComputePass, RenderPass};
 pub use device::GpuDevice;
 pub use error::GpuError;
-pub use queue::GpuQueue;
 pub use profiling::{GpuProfilingCapabilities, GpuProfilingTier};
-pub use surface::{GpuSurface, SurfaceTexture};
+pub use resources::*;
+pub use surface::{Surface, SurfaceFrame};
