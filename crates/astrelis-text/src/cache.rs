@@ -1,10 +1,41 @@
-//! Text shaping cache for performance optimization.
+//! Pluggable text shaping cache.
 //!
-//! Caches shaped text results to avoid expensive reshaping every frame.
-//! Uses version-based keys with width bucketing for stable cache hits.
+//! Provides a [`ShapeCache`] trait for user-defined caching strategies and a
+//! built-in [`HashMapShapeCache`] backed by `RwLock<HashMap>`.
+//!
+//! # Caching modes
+//!
+//! The [`TextPipeline`](crate::pipeline::TextPipeline) accepts an
+//! `Option<Box<dyn ShapeCache>>`:
+//!
+//! - **Default** — `TextPipeline::new()` uses [`HashMapShapeCache`].
+//! - **Disabled** — `TextPipeline::without_cache()` passes `None`; every
+//!   request is shaped from scratch (useful for benchmarking or when
+//!   the caller manages its own cache).
+//! - **Custom** — `TextPipeline::with_cache(Some(Box::new(my_cache)))`
+//!   lets you supply an LRU cache, a bounded cache, a `DashMap`-backed
+//!   concurrent cache, etc.
+//!
+//! # Implementing a custom cache
+//!
+//! ```ignore
+//! use astrelis_text::{ShapeCache, ShapeKey, ShapedTextResult};
+//! use std::sync::Arc;
+//!
+//! struct MyLruCache { /* ... */ }
+//!
+//! impl ShapeCache for MyLruCache {
+//!     fn get(&self, key: &ShapeKey) -> Option<Arc<ShapedTextResult>> { todo!() }
+//!     fn insert(&self, key: ShapeKey, value: Arc<ShapedTextResult>) { todo!() }
+//!     fn clear(&self) { todo!() }
+//!     fn len(&self) -> usize { todo!() }
+//! }
+//! ```
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
+
+use crate::shaping::ShapedTextResult;
 
 /// Key for caching shaped text results.
 ///
@@ -48,143 +79,100 @@ impl ShapeKey {
     }
 }
 
-/// Cached shaped text data.
-#[derive(Debug, Clone)]
-pub struct ShapedTextData {
-    /// Text content that was shaped.
-    pub content: String,
-    /// Measured bounds `(width, height)`.
-    pub bounds: (f32, f32),
-    /// Version the text was shaped at.
-    pub shaped_at_version: u32,
-    /// Render count for this cached entry.
-    pub render_count: u64,
-}
+/// Trait for text shape caching strategies.
+///
+/// Implementations must use interior mutability (`RwLock`, `DashMap`, etc.)
+/// since methods take `&self`. This enables `Arc<dyn ShapeCache>` sharing
+/// across threads when needed.
+///
+/// # Thread Safety
+///
+/// All implementations must be `Send + Sync`.
+pub trait ShapeCache: Send + Sync {
+    /// Look up a cached shaping result by key.
+    fn get(&self, key: &ShapeKey) -> Option<Arc<ShapedTextResult>>;
 
-impl ShapedTextData {
-    /// Create new shaped text data.
-    pub fn new(content: String, bounds: (f32, f32), version: u32) -> Self {
-        Self {
-            content,
-            bounds,
-            shaped_at_version: version,
-            render_count: 0,
-        }
+    /// Store a shaping result in the cache.
+    fn insert(&self, key: ShapeKey, value: Arc<ShapedTextResult>);
+
+    /// Remove all entries from the cache.
+    fn clear(&self);
+
+    /// Number of entries currently in the cache.
+    fn len(&self) -> usize;
+
+    /// Whether the cache contains no entries.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
-/// Cache for shaped text results.
+/// Default hash-map-based shape cache.
 ///
-/// Uses version-based keys to invalidate cached data when text content,
-/// font properties, or layout constraints change.
-pub struct TextShapeCache {
-    cache: HashMap<ShapeKey, Arc<ShapedTextData>>,
-    /// Total cache hits.
-    pub hits: u64,
-    /// Total cache misses.
-    pub misses: u64,
+/// Uses `RwLock<HashMap>` for thread safety. Lock contention is negligible
+/// for typical single-threaded game loops; for highly concurrent scenarios
+/// consider a `DashMap`-backed implementation.
+pub struct HashMapShapeCache {
+    inner: RwLock<HashMap<ShapeKey, Arc<ShapedTextResult>>>,
 }
 
-impl TextShapeCache {
-    /// Create a new empty text shape cache.
+impl HashMapShapeCache {
+    /// Create a new cache with default capacity (256 entries).
     pub fn new() -> Self {
         Self {
-            cache: HashMap::with_capacity(256),
-            hits: 0,
-            misses: 0,
+            inner: RwLock::new(HashMap::with_capacity(256)),
         }
     }
 
-    /// Get cached shaped text or compute it.
-    pub fn get_or_shape<F>(&mut self, key: ShapeKey, shape_fn: F) -> Arc<ShapedTextData>
+    /// Create a new cache with the specified initial capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: RwLock::new(HashMap::with_capacity(capacity)),
+        }
+    }
+
+    /// Remove entries that are only referenced by the cache itself
+    /// (strong reference count == 1).
+    ///
+    /// Useful for evicting entries that are no longer held by any
+    /// pipeline result or user code.
+    pub fn prune_unreferenced(&self) {
+        let mut map = self.inner.write().unwrap();
+        map.retain(|_, v| Arc::strong_count(v) > 1);
+    }
+
+    /// Retain only entries matching a predicate.
+    ///
+    /// This is an eviction hook specific to this implementation.
+    /// Custom caches should expose their own eviction API.
+    pub fn retain<F>(&self, f: F)
     where
-        F: FnOnce() -> ShapedTextData,
+        F: FnMut(&ShapeKey, &mut Arc<ShapedTextResult>) -> bool,
     {
-        if let Some(cached) = self.cache.get_mut(&key) {
-            self.hits += 1;
-            if let Some(data) = Arc::get_mut(cached) {
-                data.render_count += 1;
-            }
-            return cached.clone();
-        }
-
-        self.misses += 1;
-        let shaped = Arc::new(shape_fn());
-        self.cache.insert(key, shaped.clone());
-        shaped
-    }
-
-    /// Get cached data without computing if missing.
-    pub fn get(&mut self, key: &ShapeKey) -> Option<Arc<ShapedTextData>> {
-        let result = self.cache.get_mut(key).map(|cached| {
-            if let Some(data) = Arc::get_mut(cached) {
-                data.render_count += 1;
-            }
-            cached.clone()
-        });
-        if result.is_some() {
-            self.hits += 1;
-        } else {
-            self.misses += 1;
-        }
-        result
-    }
-
-    /// Insert shaped data into the cache.
-    pub fn insert(&mut self, key: ShapeKey, data: ShapedTextData) -> Arc<ShapedTextData> {
-        let arc_data = Arc::new(data);
-        self.cache.insert(key, arc_data.clone());
-        arc_data
-    }
-
-    /// Clear the cache.
-    pub fn clear(&mut self) {
-        self.cache.clear();
-        self.hits = 0;
-        self.misses = 0;
-    }
-
-    /// Remove entries older than a certain version.
-    pub fn prune_old_versions(&mut self, min_version: u32) {
-        self.cache
-            .retain(|_key, data| data.shaped_at_version >= min_version);
-    }
-
-    /// Get cache hit rate as a fraction (0.0 to 1.0).
-    pub fn hit_rate(&self) -> f32 {
-        let total = self.hits + self.misses;
-        if total == 0 {
-            0.0
-        } else {
-            self.hits as f32 / total as f32
-        }
-    }
-
-    /// Get the number of cached entries.
-    pub fn len(&self) -> usize {
-        self.cache.len()
-    }
-
-    /// Check if the cache is empty.
-    pub fn is_empty(&self) -> bool {
-        self.cache.is_empty()
-    }
-
-    /// Get cache statistics as a formatted string.
-    pub fn stats_string(&self) -> String {
-        let total_renders: u64 = self.cache.values().map(|arc| arc.render_count).sum();
-        format!(
-            "TextCache: {} entries, {:.1}% hit rate ({} hits, {} misses), {} total renders",
-            self.len(),
-            self.hit_rate() * 100.0,
-            self.hits,
-            self.misses,
-            total_renders
-        )
+        let mut map = self.inner.write().unwrap();
+        map.retain(f);
     }
 }
 
-impl Default for TextShapeCache {
+impl ShapeCache for HashMapShapeCache {
+    fn get(&self, key: &ShapeKey) -> Option<Arc<ShapedTextResult>> {
+        self.inner.read().unwrap().get(key).cloned()
+    }
+
+    fn insert(&self, key: ShapeKey, value: Arc<ShapedTextResult>) {
+        self.inner.write().unwrap().insert(key, value);
+    }
+
+    fn clear(&self) {
+        self.inner.write().unwrap().clear();
+    }
+
+    fn len(&self) -> usize {
+        self.inner.read().unwrap().len()
+    }
+}
+
+impl Default for HashMapShapeCache {
     fn default() -> Self {
         Self::new()
     }
@@ -211,81 +199,70 @@ mod tests {
         assert_eq!(key1.wrap_width_bucket, key2.wrap_width_bucket);
     }
 
+    fn make_result() -> ShapedTextResult {
+        ShapedTextResult::new((100.0, 20.0), Vec::new())
+    }
+
     #[test]
-    fn test_cache_hit_miss() {
-        let mut cache = TextShapeCache::new();
+    fn test_hashmap_cache_get_insert() {
+        let cache = HashMapShapeCache::new();
         let key = ShapeKey::new(0, 16.0, "Hello", None);
 
-        // Miss
         assert!(cache.get(&key).is_none());
-        assert_eq!(cache.misses, 1);
+        assert!(cache.is_empty());
 
-        // Insert
-        cache.insert(key, ShapedTextData::new("Hello".into(), (100.0, 20.0), 1));
+        cache.insert(key, Arc::new(make_result()));
 
-        // Hit
         assert!(cache.get(&key).is_some());
-        assert_eq!(cache.hits, 1);
+        assert_eq!(cache.len(), 1);
     }
 
     #[test]
-    fn test_get_or_shape() {
-        let mut cache = TextShapeCache::new();
+    fn test_hashmap_cache_clear() {
+        let cache = HashMapShapeCache::new();
         let key = ShapeKey::new(0, 16.0, "Hello", None);
-
-        let data1 = cache.get_or_shape(key, || {
-            ShapedTextData::new("Hello".into(), (100.0, 20.0), 1)
-        });
-        assert_eq!(cache.misses, 1);
-
-        let data2 = cache.get_or_shape(key, || {
-            panic!("should not be called");
-        });
-        assert_eq!(cache.hits, 1);
-        assert_eq!(data1.bounds, data2.bounds);
-    }
-
-    #[test]
-    fn test_cache_clear() {
-        let mut cache = TextShapeCache::new();
-        let key = ShapeKey::new(0, 16.0, "Hello", None);
-        cache.insert(key, ShapedTextData::new("Hello".into(), (100.0, 20.0), 1));
+        cache.insert(key, Arc::new(make_result()));
         assert_eq!(cache.len(), 1);
 
         cache.clear();
         assert!(cache.is_empty());
-        assert_eq!(cache.hits, 0);
-        assert_eq!(cache.misses, 0);
     }
 
     #[test]
-    fn test_prune_old_versions() {
-        let mut cache = TextShapeCache::new();
+    fn test_hashmap_cache_prune_unreferenced() {
+        let cache = HashMapShapeCache::new();
 
-        cache.insert(
-            ShapeKey::new(0, 16.0, "old", None),
-            ShapedTextData::new("old".into(), (50.0, 20.0), 1),
-        );
-        cache.insert(
-            ShapeKey::new(0, 16.0, "new", None),
-            ShapedTextData::new("new".into(), (60.0, 20.0), 5),
-        );
+        let key1 = ShapeKey::new(0, 16.0, "held", None);
+        let key2 = ShapeKey::new(0, 16.0, "dropped", None);
 
-        cache.prune_old_versions(3);
+        let held = Arc::new(make_result());
+        cache.insert(key1, held.clone()); // strong count = 2 (held + cache)
+        cache.insert(key2, Arc::new(make_result())); // strong count = 1 (cache only)
+
+        assert_eq!(cache.len(), 2);
+        cache.prune_unreferenced();
         assert_eq!(cache.len(), 1);
+        assert!(cache.get(&key1).is_some());
+        assert!(cache.get(&key2).is_none());
+
+        drop(held);
     }
 
     #[test]
-    fn test_hit_rate() {
-        let mut cache = TextShapeCache::new();
-        assert_eq!(cache.hit_rate(), 0.0);
+    fn test_hashmap_cache_retain() {
+        let cache = HashMapShapeCache::new();
 
-        let key = ShapeKey::new(0, 16.0, "x", None);
-        cache.insert(key, ShapedTextData::new("x".into(), (10.0, 10.0), 1));
+        cache.insert(
+            ShapeKey::new(0, 16.0, "small", None),
+            Arc::new(ShapedTextResult::new((50.0, 10.0), Vec::new())),
+        );
+        cache.insert(
+            ShapeKey::new(0, 16.0, "large", None),
+            Arc::new(ShapedTextResult::new((200.0, 40.0), Vec::new())),
+        );
 
-        let _ = cache.get(&key); // hit
-        let _ = cache.get(&ShapeKey::new(0, 16.0, "y", None)); // miss
-
-        assert_eq!(cache.hit_rate(), 0.5);
+        assert_eq!(cache.len(), 2);
+        cache.retain(|_, v| v.bounds.0 > 100.0);
+        assert_eq!(cache.len(), 1);
     }
 }

@@ -3,7 +3,7 @@
 //! Provides a worker-ready abstraction for text shaping that can be executed
 //! synchronously now and moved to worker threads later without API changes.
 
-use crate::cache::ShapeKey;
+use crate::cache::{HashMapShapeCache, ShapeCache, ShapeKey};
 use crate::shaping::ShapedTextResult as BaseShapedTextResult;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -57,15 +57,15 @@ impl TextShapeRequest {
 pub struct ShapedTextResult {
     /// Original request ID.
     pub request_id: RequestId,
-    /// Inner shaped text data.
-    pub inner: BaseShapedTextResult,
+    /// Shared shaped text data (zero-copy with cache).
+    pub inner: Arc<BaseShapedTextResult>,
     /// Number of times this result has been rendered.
     pub render_count: u64,
 }
 
 impl ShapedTextResult {
     /// Create a new shaped text result.
-    pub fn new(request_id: RequestId, inner: BaseShapedTextResult) -> Self {
+    pub fn new(request_id: RequestId, inner: Arc<BaseShapedTextResult>) -> Self {
         Self {
             request_id,
             inner,
@@ -113,16 +113,33 @@ impl SyncTextShaper {
         F: FnOnce(&str, f32, Option<f32>) -> BaseShapedTextResult,
     {
         let inner = shape_fn(&request.text, request.font_size, request.wrap_width);
-        ShapedTextResult::new(request.id, inner)
+        ShapedTextResult::new(request.id, Arc::new(inner))
     }
 }
 
 /// Text shaping pipeline managing requests, results, and caching.
+///
+/// # Caching
+///
+/// The pipeline delegates caching to a [`ShapeCache`] implementation:
+///
+/// ```
+/// use astrelis_text::TextPipeline;
+///
+/// // Default (HashMap-backed cache)
+/// let pipeline = TextPipeline::new();
+///
+/// // No caching — every request is shaped from scratch
+/// let pipeline = TextPipeline::without_cache();
+/// ```
+///
+/// For a custom cache, implement [`ShapeCache`] and pass it via
+/// [`TextPipeline::with_cache`].
 pub struct TextPipeline {
     pending: HashMap<RequestId, TextShapeRequest>,
     completed: HashMap<RequestId, Arc<ShapedTextResult>>,
     next_request_id: RequestId,
-    cache: HashMap<ShapeKey, Arc<ShapedTextResult>>,
+    cache: Option<Box<dyn ShapeCache>>,
     /// Total cache hits.
     pub cache_hits: u64,
     /// Total cache misses.
@@ -132,22 +149,54 @@ pub struct TextPipeline {
 }
 
 impl TextPipeline {
-    /// Create a new text pipeline.
+    /// Create a pipeline with the default [`HashMapShapeCache`].
     pub fn new() -> Self {
+        Self::with_cache(Some(Box::new(HashMapShapeCache::new())))
+    }
+
+    /// Create a pipeline with no caching.
+    ///
+    /// Every request will be shaped from scratch. Useful for benchmarking,
+    /// debugging, or when the caller manages its own external cache.
+    pub fn without_cache() -> Self {
+        Self::with_cache(None)
+    }
+
+    /// Create a pipeline with a custom cache implementation.
+    ///
+    /// Pass `None` to disable caching, or `Some(Box::new(my_cache))`
+    /// for a user-provided [`ShapeCache`].
+    pub fn with_cache(cache: Option<Box<dyn ShapeCache>>) -> Self {
         Self {
             pending: HashMap::with_capacity(64),
             completed: HashMap::with_capacity(64),
             next_request_id: 1,
-            cache: HashMap::with_capacity(256),
+            cache,
             cache_hits: 0,
             cache_misses: 0,
             total_requests: 0,
         }
     }
 
+    /// Replace the cache implementation at runtime.
+    ///
+    /// Resets hit/miss counters. Useful for switching strategies between
+    /// scenes or game states.
+    pub fn set_cache(&mut self, cache: Option<Box<dyn ShapeCache>>) {
+        self.cache = cache;
+        self.cache_hits = 0;
+        self.cache_misses = 0;
+    }
+
+    /// Get a reference to the current cache, if any.
+    pub fn cache(&self) -> Option<&dyn ShapeCache> {
+        self.cache.as_deref()
+    }
+
     /// Request text shaping, returns request ID.
     ///
-    /// If cached, the result is immediately available via [`get_completed`](Self::get_completed).
+    /// If a matching result is found in the cache, it is immediately
+    /// available via [`get_completed`](Self::get_completed).
     pub fn request_shape(
         &mut self,
         text: String,
@@ -162,14 +211,17 @@ impl TextPipeline {
         let request = TextShapeRequest::new(request_id, text, font_id, font_size, wrap_width);
         let shape_key = request.shape_key();
 
-        if let Some(cached) = self.cache.get(&shape_key).cloned() {
-            self.cache_hits += 1;
-            self.completed.insert(request_id, cached);
-        } else {
-            self.cache_misses += 1;
-            self.pending.insert(request_id, request);
+        if let Some(cache) = &self.cache {
+            if let Some(cached) = cache.get(&shape_key) {
+                self.cache_hits += 1;
+                let result = ShapedTextResult::new(request_id, cached);
+                self.completed.insert(request_id, Arc::new(result));
+                return request_id;
+            }
         }
 
+        self.cache_misses += 1;
+        self.pending.insert(request_id, request);
         request_id
     }
 
@@ -185,13 +237,14 @@ impl TextPipeline {
         let mut completed_requests = Vec::new();
 
         for (_request_id, request) in self.pending.drain() {
-            let result = SyncTextShaper::shape_with_measurer(&request, &shape_fn);
-            let result_arc = Arc::new(result);
+            let inner = Arc::new(shape_fn(&request.text, request.font_size, request.wrap_width));
 
-            let shape_key = request.shape_key();
-            self.cache.insert(shape_key, result_arc.clone());
+            if let Some(cache) = &self.cache {
+                cache.insert(request.shape_key(), inner.clone());
+            }
 
-            completed_requests.push((request.id, result_arc));
+            let result = ShapedTextResult::new(request.id, inner);
+            completed_requests.push((request.id, Arc::new(result)));
         }
 
         for (request_id, result) in completed_requests {
@@ -215,8 +268,11 @@ impl TextPipeline {
     }
 
     /// Get cache statistics `(hits, misses, entries)`.
+    ///
+    /// The entries count is `0` if no cache is configured.
     pub fn cache_stats(&self) -> (u64, u64, usize) {
-        (self.cache_hits, self.cache_misses, self.cache.len())
+        let entries = self.cache.as_ref().map_or(0, |c| c.len());
+        (self.cache_hits, self.cache_misses, entries)
     }
 
     /// Get cache hit rate as a percentage.
@@ -227,18 +283,13 @@ impl TextPipeline {
         (self.cache_hits as f32 / self.total_requests as f32) * 100.0
     }
 
-    /// Clear the cache.
+    /// Clear the cache, if any.
     pub fn clear_cache(&mut self) {
-        self.cache.clear();
+        if let Some(cache) = &self.cache {
+            cache.clear();
+        }
         self.cache_hits = 0;
         self.cache_misses = 0;
-    }
-
-    /// Prune cache entries with low render counts.
-    pub fn prune_cache(&mut self, min_render_count: u64) {
-        self.cache.retain(|_, result| {
-            Arc::strong_count(result) > 1 || result.render_count >= min_render_count
-        });
     }
 }
 
@@ -316,21 +367,6 @@ mod tests {
     }
 
     #[test]
-    fn test_cache_prune() {
-        let mut pipeline = TextPipeline::new();
-
-        for i in 0..5 {
-            let req_id = pipeline.request_shape(format!("Text {i}"), 0, 16.0, None);
-            pipeline.process_pending(mock_shape);
-            let _ = pipeline.take_completed(req_id);
-        }
-
-        assert_eq!(pipeline.cache.len(), 5);
-        pipeline.prune_cache(10);
-        assert_eq!(pipeline.cache.len(), 0);
-    }
-
-    #[test]
     fn test_hit_rate_calculation() {
         let mut pipeline = TextPipeline::new();
 
@@ -344,5 +380,112 @@ mod tests {
         let _ = pipeline.take_completed(req_id2);
 
         assert_eq!(pipeline.cache_hit_rate(), 50.0);
+    }
+
+    #[test]
+    fn test_without_cache_always_pending() {
+        let mut pipeline = TextPipeline::without_cache();
+
+        let req_id1 = pipeline.request_shape("Hello".to_string(), 0, 16.0, None);
+        pipeline.process_pending(mock_shape);
+        let _ = pipeline.take_completed(req_id1);
+
+        // Same text again — no cache, so it goes to pending
+        let req_id2 = pipeline.request_shape("Hello".to_string(), 0, 16.0, None);
+        assert!(pipeline.is_pending(req_id2));
+        assert_eq!(pipeline.cache_hits, 0);
+        assert_eq!(pipeline.cache_misses, 2);
+    }
+
+    #[test]
+    fn test_set_cache_resets_stats() {
+        let mut pipeline = TextPipeline::new();
+
+        let req_id = pipeline.request_shape("A".to_string(), 0, 16.0, None);
+        pipeline.process_pending(mock_shape);
+        let _ = pipeline.take_completed(req_id);
+
+        assert_eq!(pipeline.cache_misses, 1);
+
+        pipeline.set_cache(Some(Box::new(HashMapShapeCache::new())));
+        assert_eq!(pipeline.cache_hits, 0);
+        assert_eq!(pipeline.cache_misses, 0);
+    }
+
+    #[test]
+    fn test_cache_stats_no_cache() {
+        let pipeline = TextPipeline::without_cache();
+        let (hits, misses, entries) = pipeline.cache_stats();
+        assert_eq!(hits, 0);
+        assert_eq!(misses, 0);
+        assert_eq!(entries, 0);
+    }
+
+    #[test]
+    fn test_custom_cache() {
+        use std::sync::Mutex;
+
+        /// A mock cache that only stores the last entry.
+        struct LastEntryCache {
+            inner: Mutex<Option<(ShapeKey, Arc<BaseShapedTextResult>)>>,
+        }
+
+        impl LastEntryCache {
+            fn new() -> Self {
+                Self {
+                    inner: Mutex::new(None),
+                }
+            }
+        }
+
+        impl ShapeCache for LastEntryCache {
+            fn get(&self, key: &ShapeKey) -> Option<Arc<BaseShapedTextResult>> {
+                let guard = self.inner.lock().unwrap();
+                guard
+                    .as_ref()
+                    .filter(|(k, _)| k == key)
+                    .map(|(_, v)| v.clone())
+            }
+
+            fn insert(&self, key: ShapeKey, value: Arc<BaseShapedTextResult>) {
+                *self.inner.lock().unwrap() = Some((key, value));
+            }
+
+            fn clear(&self) {
+                *self.inner.lock().unwrap() = None;
+            }
+
+            fn len(&self) -> usize {
+                if self.inner.lock().unwrap().is_some() {
+                    1
+                } else {
+                    0
+                }
+            }
+        }
+
+        let mut pipeline =
+            TextPipeline::with_cache(Some(Box::new(LastEntryCache::new())));
+
+        // First request — miss
+        let req1 = pipeline.request_shape("A".to_string(), 0, 16.0, None);
+        pipeline.process_pending(mock_shape);
+        let _ = pipeline.take_completed(req1);
+
+        // Same text — hit from custom cache
+        let req2 = pipeline.request_shape("A".to_string(), 0, 16.0, None);
+        assert_eq!(pipeline.cache_hits, 1);
+        assert!(!pipeline.is_pending(req2));
+
+        // Different text — miss, and evicts "A" from last-entry cache
+        let req3 = pipeline.request_shape("B".to_string(), 0, 16.0, None);
+        pipeline.process_pending(mock_shape);
+        let _ = pipeline.take_completed(req3);
+
+        // "A" again — miss because last-entry cache only holds "B"
+        let req4 = pipeline.request_shape("A".to_string(), 0, 16.0, None);
+        assert!(pipeline.is_pending(req4));
+        assert_eq!(pipeline.cache_hits, 1);
+        assert_eq!(pipeline.cache_misses, 3);
     }
 }

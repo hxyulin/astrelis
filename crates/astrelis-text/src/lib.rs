@@ -48,7 +48,7 @@ pub mod text;
 pub mod asset;
 
 // Re-export main types
-pub use cache::{ShapeKey, ShapedTextData, TextShapeCache};
+pub use cache::{HashMapShapeCache, ShapeCache, ShapeKey};
 pub use decoration::{
     DecorationQuad, DecorationQuadType, LineStyle, StrikethroughStyle, TextBounds,
     TextDecoration, UnderlineStyle, generate_decoration_quads,
