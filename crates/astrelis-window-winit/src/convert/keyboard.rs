@@ -5,6 +5,7 @@ use winit::keyboard::PhysicalKey;
 
 /// Converts a winit physical key to an astrelis KeyCode.
 pub(crate) fn convert_key_code(key: PhysicalKey) -> KeyCode {
+    astrelis_profiling::profile_function!();
     match key {
         PhysicalKey::Code(code) => convert_winit_key_code(code),
         PhysicalKey::Unidentified(_) => KeyCode::Escape, // fallback
@@ -245,5 +246,102 @@ pub(crate) fn convert_modifiers(mods: &winit::event::Modifiers) -> ModifiersStat
         control: state.control_key(),
         alt: state.alt_key(),
         meta: state.super_key(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use winit::keyboard::{KeyCode as WinitKeyCode, NativeKeyCode, PhysicalKey};
+
+    /// Helper to convert a winit KeyCode (via PhysicalKey::Code) and return the
+    /// astrelis KeyCode.
+    fn convert(code: WinitKeyCode) -> KeyCode {
+        convert_key_code(PhysicalKey::Code(code))
+    }
+
+    #[test]
+    fn common_letter_keys() {
+        assert_eq!(convert(WinitKeyCode::KeyW), KeyCode::KeyW);
+        assert_eq!(convert(WinitKeyCode::KeyA), KeyCode::KeyA);
+        assert_eq!(convert(WinitKeyCode::KeyS), KeyCode::KeyS);
+        assert_eq!(convert(WinitKeyCode::KeyD), KeyCode::KeyD);
+        assert_eq!(convert(WinitKeyCode::KeyZ), KeyCode::KeyZ);
+    }
+
+    #[test]
+    fn space_enter_escape() {
+        assert_eq!(convert(WinitKeyCode::Space), KeyCode::Space);
+        assert_eq!(convert(WinitKeyCode::Enter), KeyCode::Enter);
+        assert_eq!(convert(WinitKeyCode::Escape), KeyCode::Escape);
+    }
+
+    #[test]
+    fn modifier_keys() {
+        assert_eq!(convert(WinitKeyCode::ShiftLeft), KeyCode::ShiftLeft);
+        assert_eq!(convert(WinitKeyCode::ShiftRight), KeyCode::ShiftRight);
+        assert_eq!(convert(WinitKeyCode::ControlLeft), KeyCode::ControlLeft);
+        assert_eq!(convert(WinitKeyCode::ControlRight), KeyCode::ControlRight);
+        assert_eq!(convert(WinitKeyCode::AltLeft), KeyCode::AltLeft);
+        assert_eq!(convert(WinitKeyCode::AltRight), KeyCode::AltRight);
+        // winit Super maps to astrelis Meta
+        assert_eq!(convert(WinitKeyCode::SuperLeft), KeyCode::MetaLeft);
+        assert_eq!(convert(WinitKeyCode::SuperRight), KeyCode::MetaRight);
+    }
+
+    #[test]
+    fn function_keys() {
+        assert_eq!(convert(WinitKeyCode::F1), KeyCode::F1);
+        assert_eq!(convert(WinitKeyCode::F12), KeyCode::F12);
+        assert_eq!(convert(WinitKeyCode::F24), KeyCode::F24);
+    }
+
+    #[test]
+    fn arrow_keys() {
+        assert_eq!(convert(WinitKeyCode::ArrowUp), KeyCode::ArrowUp);
+        assert_eq!(convert(WinitKeyCode::ArrowDown), KeyCode::ArrowDown);
+        assert_eq!(convert(WinitKeyCode::ArrowLeft), KeyCode::ArrowLeft);
+        assert_eq!(convert(WinitKeyCode::ArrowRight), KeyCode::ArrowRight);
+    }
+
+    #[test]
+    fn digit_keys() {
+        assert_eq!(convert(WinitKeyCode::Digit0), KeyCode::Digit0);
+        assert_eq!(convert(WinitKeyCode::Digit1), KeyCode::Digit1);
+        assert_eq!(convert(WinitKeyCode::Digit9), KeyCode::Digit9);
+    }
+
+    #[test]
+    fn numpad_keys() {
+        assert_eq!(convert(WinitKeyCode::Numpad0), KeyCode::Numpad0);
+        assert_eq!(convert(WinitKeyCode::Numpad5), KeyCode::Numpad5);
+        assert_eq!(convert(WinitKeyCode::NumpadEnter), KeyCode::NumpadEnter);
+        assert_eq!(convert(WinitKeyCode::NumpadAdd), KeyCode::NumpadAdd);
+        assert_eq!(convert(WinitKeyCode::NumpadDecimal), KeyCode::NumpadDecimal);
+    }
+
+    #[test]
+    fn punctuation_and_editing_keys() {
+        assert_eq!(convert(WinitKeyCode::Tab), KeyCode::Tab);
+        assert_eq!(convert(WinitKeyCode::Backspace), KeyCode::Backspace);
+        assert_eq!(convert(WinitKeyCode::Delete), KeyCode::Delete);
+        assert_eq!(convert(WinitKeyCode::Insert), KeyCode::Insert);
+        assert_eq!(convert(WinitKeyCode::Home), KeyCode::Home);
+        assert_eq!(convert(WinitKeyCode::End), KeyCode::End);
+        assert_eq!(convert(WinitKeyCode::PageUp), KeyCode::PageUp);
+        assert_eq!(convert(WinitKeyCode::PageDown), KeyCode::PageDown);
+    }
+
+    #[test]
+    fn unmapped_winit_key_code_falls_back_to_escape() {
+        // `Fn` is a valid winit KeyCode that is not handled by the match,
+        // so it should hit the catch-all `_ => KeyCode::Escape` arm.
+        assert_eq!(convert(WinitKeyCode::Fn), KeyCode::Escape);
+    }
+
+    #[test]
+    fn unidentified_physical_key_falls_back_to_escape() {
+        let unidentified = PhysicalKey::Unidentified(NativeKeyCode::Unidentified);
+        assert_eq!(convert_key_code(unidentified), KeyCode::Escape);
     }
 }

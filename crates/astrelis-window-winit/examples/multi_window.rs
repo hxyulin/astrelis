@@ -56,6 +56,7 @@ impl App {
 
 impl AppHandler for App {
     fn on_lifecycle(&mut self, ctx: &mut dyn EventLoopContext, state: AppLifecycle) {
+        astrelis_profiling::profile_function!();
         if state == AppLifecycle::Resumed {
             // Open two windows at different positions.
             self.open_window(ctx, 100.0, 100.0);
@@ -72,6 +73,7 @@ impl AppHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        astrelis_profiling::profile_function!();
         match event {
             WindowEvent::CloseRequested => {
                 println!("Closing window {window_id}");
@@ -113,10 +115,13 @@ impl AppHandler for App {
         }
     }
 
-    fn on_events_cleared(&mut self, _ctx: &mut dyn EventLoopContext) {}
+    fn on_events_cleared(&mut self, _ctx: &mut dyn EventLoopContext) {
+        astrelis_profiling::profile_function!();
+    }
 }
 
 fn main() {
+    astrelis_profiling::init();
     let backend = WinitBackend::new().expect("failed to create backend");
     let mut app = App {
         windows: HashSet::new(),

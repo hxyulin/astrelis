@@ -26,6 +26,7 @@ mod compute_pass;
 pub mod convert;
 mod device;
 mod encoder;
+pub(crate) mod profiling;
 mod queue;
 mod render_pass;
 mod resources;

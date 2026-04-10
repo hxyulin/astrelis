@@ -55,8 +55,10 @@ egui = "0.34"
 egui-wgpu = "0.34"
 
 # Profiling
-puffin = "0.20"
-puffin_http = "0.17"
+puffin = "0.19"
+puffin_http = "0.16"
+profiling = { version = "1.0", default-features = false }
+
 
 # Assets
 notify = "8"

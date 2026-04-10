@@ -101,6 +101,7 @@ struct App {
 
 impl AppHandler for App {
     fn on_lifecycle(&mut self, ctx: &mut dyn EventLoopContext, state: AppLifecycle) {
+        astrelis_profiling::profile_function!();
         match state {
             AppLifecycle::Resumed => {
                 let attrs = WindowBuilder::new()
@@ -196,7 +197,7 @@ impl AppHandler for App {
                 self.surface = Some(surface);
                 self.pipeline = Some(pipeline);
                 self.vertex_buffer = Some(vertex_buffer);
-                ctx.set_control_flow(ControlFlow::Poll);
+                ctx.set_control_flow(ControlFlow::Wait);
             }
             AppLifecycle::Suspended => {}
             AppLifecycle::Exiting => {
@@ -211,6 +212,7 @@ impl AppHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        astrelis_profiling::profile_function!();
         match event {
             WindowEvent::CloseRequested => ctx.exit(),
             WindowEvent::Resized(size) => {
@@ -241,6 +243,7 @@ impl AppHandler for App {
     }
 
     fn on_events_cleared(&mut self, ctx: &mut dyn EventLoopContext) {
+        astrelis_profiling::profile_function!();
         if let Some(id) = self.window_id
             && let Some(win) = ctx.window(id)
         {
@@ -251,12 +254,17 @@ impl AppHandler for App {
 
 impl App {
     fn render(&mut self) {
+        astrelis_profiling::profile_function!();
         let (Some(gpu), Some(surface), Some(pipeline), Some(vertex_buffer)) =
             (&self.gpu, &mut self.surface, &self.pipeline, &self.vertex_buffer)
         else {
             return;
         };
 
+        // Process GPU profiling results from prior frames.
+        gpu.process_profiling_frames();
+
+        astrelis_profiling::profile_scope!("acquire");
         let frame = match surface.acquire() {
             Ok(f) => f,
             Err(GpuError::SurfaceOutdated | GpuError::SurfaceLost) => return,
@@ -264,6 +272,7 @@ impl App {
             Err(e) => panic!("failed to acquire surface texture: {e}"),
         };
 
+        astrelis_profiling::profile_scope!("encode");
         let mut encoder = gpu.device().create_command_encoder(Some("triangle"));
         {
             let mut pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -281,12 +290,18 @@ impl App {
             pass.draw(0..3, 0..1);
         }
 
+        astrelis_profiling::profile_scope!("submit");
         gpu.queue().submit(std::iter::once(encoder));
+        astrelis_profiling::profile_scope!("present");
         frame.present();
     }
 }
 
 fn main() {
+    // Initialize the profiler. With the `puffin` feature enabled on
+    // astrelis-profiling, open http://localhost:8585 in the puffin viewer.
+    astrelis_profiling::init();
+
     let backend = WinitBackend::new().expect("failed to create windowing backend");
     let mut app = App {
         window_id: None,

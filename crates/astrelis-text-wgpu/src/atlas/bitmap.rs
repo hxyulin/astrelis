@@ -29,6 +29,7 @@ pub struct BitmapAtlas {
 impl BitmapAtlas {
     /// Create a new bitmap atlas of the given size.
     pub fn new(size: u32) -> Self {
+        astrelis_profiling::profile_function!();
         Self {
             data: vec![0u8; (size * size) as usize],
             size,
@@ -49,6 +50,7 @@ impl BitmapAtlas {
         height: u32,
         placement: GlyphPlacement,
     ) -> Option<AtlasEntry> {
+        astrelis_profiling::profile_function!();
         if let Some((entry, _)) = self.entries.get(&cache_key) {
             return Some(*entry);
         }

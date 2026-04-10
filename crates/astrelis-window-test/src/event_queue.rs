@@ -19,6 +19,6 @@ pub enum ScriptedEvent {
     /// A device-level event (not tied to any window).
     Device(DeviceEvent),
     /// Signals that all pending events in this batch have been dispatched.
-    /// Triggers [`AppHandler::on_events_cleared`].
+    /// Triggers [`AppHandler::on_events_cleared`](astrelis_window::backend::AppHandler::on_events_cleared).
     EventsCleared,
 }

@@ -43,6 +43,7 @@ impl SdfTextRenderer {
         font_system: FontSystem,
         config: TextRendererConfig,
     ) -> Self {
+        astrelis_profiling::profile_function!();
         let shared = SharedContext::new(device, font_system);
         let atlas_size = config.atlas_size;
         let atlas = SdfAtlas::new(atlas_size);
@@ -193,6 +194,7 @@ impl SdfTextRenderer {
 
     /// Prepare text for rendering.
     pub fn prepare(&mut self, text: &Text) -> TextBuffer {
+        astrelis_profiling::profile_function!();
         let mut fs = self.shared.font_system.write().unwrap();
         let mut buffer = TextBuffer::new(&mut fs, 1.0);
         buffer.set_text(&mut fs, text, 1.0);
@@ -202,6 +204,7 @@ impl SdfTextRenderer {
 
     /// Queue text for drawing at the given position (no effects).
     pub fn draw_text(&mut self, buffer: &mut TextBuffer, position: Vec2) {
+        astrelis_profiling::profile_function!();
         self.emit_glyphs(buffer, position, [1.0, 1.0, 1.0, 1.0], Vec2::ZERO, SdfParams::default());
     }
 
@@ -216,6 +219,7 @@ impl SdfTextRenderer {
         position: Vec2,
         _effects: &TextEffects,
     ) {
+        astrelis_profiling::profile_function!();
         // TODO: implement SDF-based text effects (shadow, outline, glow)
         self.emit_glyphs(buffer, position, [1.0, 1.0, 1.0, 1.0], Vec2::ZERO, SdfParams::default());
     }
@@ -368,6 +372,7 @@ impl SdfTextRenderer {
         width: u32,
         height: u32,
     ) {
+        astrelis_profiling::profile_function!();
         if self.batches.is_empty() {
             return;
         }

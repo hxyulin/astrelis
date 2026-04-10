@@ -56,10 +56,16 @@ impl ShapedTextResult {
     }
 }
 
+/// Default line height multiplier relative to font size.
+///
+/// The line height is computed as `font_size * LINE_HEIGHT_MULTIPLIER`.
+/// Override this per-call via [`shape_text_with_line_height`].
+pub const DEFAULT_LINE_HEIGHT_MULTIPLIER: f32 = 1.2;
+
 /// Shape text using cosmic-text and extract glyph data.
 ///
-/// Performs text shaping using cosmic-text's layout engine and extracts
-/// positioned glyphs with metrics for retained rendering.
+/// Uses [`DEFAULT_LINE_HEIGHT_MULTIPLIER`] for line spacing. For custom
+/// line spacing, use [`shape_text_with_line_height`].
 pub fn shape_text(
     font_system: &mut FontSystem,
     text: &str,
@@ -68,8 +74,31 @@ pub fn shape_text(
     scale: f32,
 ) -> ShapedTextResult {
     astrelis_profiling::profile_function!();
+    shape_text_with_line_height(
+        font_system,
+        text,
+        font_size,
+        wrap_width,
+        scale,
+        DEFAULT_LINE_HEIGHT_MULTIPLIER,
+    )
+}
 
-    let metrics = Metrics::new(font_size * scale, font_size * scale * 1.2);
+/// Shape text with a custom line height multiplier.
+///
+/// The `line_height_multiplier` controls line spacing as a multiple of
+/// `font_size` (e.g., `1.2` = 120% of font size, `1.5` = 150%).
+pub fn shape_text_with_line_height(
+    font_system: &mut FontSystem,
+    text: &str,
+    font_size: f32,
+    wrap_width: Option<f32>,
+    scale: f32,
+    line_height_multiplier: f32,
+) -> ShapedTextResult {
+    astrelis_profiling::profile_function!();
+
+    let metrics = Metrics::new(font_size * scale, font_size * scale * line_height_multiplier);
     let mut buffer = Buffer::new(font_system, metrics);
 
     buffer.set_text(font_system, text, &Attrs::new(), Shaping::Advanced, None);
@@ -92,6 +121,7 @@ pub fn extract_glyphs_from_buffer(
     _font_size: f32,
     scale: f32,
 ) -> ShapedTextResult {
+    astrelis_profiling::profile_function!();
     let mut max_x = 0.0_f32;
     let mut min_y = f32::MAX;
     let mut max_y = f32::MIN;
@@ -137,6 +167,8 @@ pub fn extract_glyphs_from_buffer(
 }
 
 /// Measure text without extracting glyph data (faster for layout-only).
+///
+/// Uses [`DEFAULT_LINE_HEIGHT_MULTIPLIER`] for line spacing.
 pub fn measure_text_fast(
     font_system: &mut FontSystem,
     text: &str,
@@ -144,7 +176,8 @@ pub fn measure_text_fast(
     wrap_width: Option<f32>,
     scale: f32,
 ) -> (f32, f32) {
-    let metrics = Metrics::new(font_size * scale, font_size * scale * 1.2);
+    astrelis_profiling::profile_function!();
+    let metrics = Metrics::new(font_size * scale, font_size * scale * DEFAULT_LINE_HEIGHT_MULTIPLIER);
     let mut buffer = Buffer::new(font_system, metrics);
 
     buffer.set_text(font_system, text, &Attrs::new(), Shaping::Advanced, None);

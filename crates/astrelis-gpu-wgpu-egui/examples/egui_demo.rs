@@ -31,6 +31,7 @@ struct App {
 
 impl AppHandler for App {
     fn on_lifecycle(&mut self, ctx: &mut dyn EventLoopContext, state: AppLifecycle) {
+        astrelis_profiling::profile_function!();
         match state {
             AppLifecycle::Resumed => {
                 let attrs = astrelis_window::WindowBuilder::new()
@@ -63,7 +64,7 @@ impl AppHandler for App {
                 self.gpu = Some(gpu);
                 self.surface = Some(surface);
                 self.egui = Some(egui);
-                ctx.set_control_flow(ControlFlow::Poll);
+                ctx.set_control_flow(ControlFlow::Wait);
             }
             AppLifecycle::Suspended | AppLifecycle::Exiting => {}
         }
@@ -75,6 +76,7 @@ impl AppHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        astrelis_profiling::profile_function!();
         // Let egui process the event first.
         if let Some(egui) = &mut self.egui {
             let consumed = egui.handle_window_event(&event);
@@ -109,6 +111,10 @@ impl AppHandler for App {
     }
 
     fn on_events_cleared(&mut self, ctx: &mut dyn EventLoopContext) {
+        astrelis_profiling::profile_function!();
+        if let Some(gpu) = &self.gpu {
+            gpu.device().process_gpu_profiling_frames();
+        }
         if let Some(id) = self.window_id
             && let Some(win) = ctx.window(id)
         {
@@ -119,12 +125,14 @@ impl AppHandler for App {
 
 impl App {
     fn render(&mut self, ctx: &mut dyn EventLoopContext, window_id: WindowId) {
+        astrelis_profiling::profile_function!();
         let (Some(gpu), Some(surface), Some(egui)) =
             (&self.gpu, &mut self.surface, &mut self.egui)
         else {
             return;
         };
 
+        astrelis_profiling::profile_scope!("acquire");
         let frame = match surface.acquire() {
             Ok(f) => f,
             Err(_) => return,
@@ -134,6 +142,7 @@ impl App {
         let size = window.inner_size().physical();
 
         // Begin egui frame.
+        astrelis_profiling::profile_scope!("egui_frame");
         egui.begin_frame(window);
 
         // Build UI.
@@ -163,6 +172,7 @@ impl App {
             ui.label(format!("Hello, {}!", if self.name.is_empty() { "world" } else { &self.name }));
         });
 
+        astrelis_profiling::profile_scope!("encode");
         // EguiIntegration::end_frame_and_render requires a raw wgpu::CommandEncoder
         // and wgpu::TextureView, so we use the WgpuDevice escape-hatch methods here
         // instead of the abstract GpuDevice API.
@@ -217,12 +227,16 @@ impl App {
             Some(window),
         );
 
+        astrelis_profiling::profile_scope!("submit");
         device.wgpu_queue().submit(std::iter::once(encoder.finish()));
+        astrelis_profiling::profile_scope!("present");
         frame.present();
     }
 }
 
 fn main() {
+    astrelis_profiling::init();
+
     let backend = WinitBackend::new().expect("failed to create windowing backend");
     let mut app = App {
         window_id: None,

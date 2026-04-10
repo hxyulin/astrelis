@@ -12,6 +12,7 @@ use cosmic_text::SwashImage;
 /// - `Mask` — already 1 byte/pixel, returned as-is
 /// - `SubpixelMask` / `Color` — 4 bytes/pixel RGBA, converted to luminance
 pub fn swash_image_to_grayscale(image: &SwashImage) -> Vec<u8> {
+    astrelis_profiling::profile_function!();
     let width = image.placement.width as usize;
     let height = image.placement.height as usize;
     let pixel_count = width * height;
@@ -69,10 +70,16 @@ impl TextRenderMode {
     }
 }
 
+/// Default edge threshold for SDF generation.
+///
+/// Pixels with grayscale values at or above this threshold are considered
+/// "inside" the glyph. The default of 128 splits the 0–255 range evenly.
+pub const DEFAULT_SDF_THRESHOLD: u8 = 128;
+
 /// Generate a signed distance field from a grayscale bitmap.
 ///
-/// Uses brute-force distance computation. For each pixel, finds the nearest
-/// edge and normalizes the distance to `[0, 255]` where 127 is the edge.
+/// Uses [`DEFAULT_SDF_THRESHOLD`] for edge detection. For a custom
+/// threshold, use [`generate_sdf_with_threshold`].
 ///
 /// # Arguments
 ///
@@ -81,12 +88,29 @@ impl TextRenderMode {
 /// * `height` - Image height in pixels
 /// * `spread` - Distance field spread in pixels
 pub fn generate_sdf(grayscale: &[u8], width: usize, height: usize, spread: f32) -> Vec<u8> {
+    astrelis_profiling::profile_function!();
+    generate_sdf_with_threshold(grayscale, width, height, spread, DEFAULT_SDF_THRESHOLD)
+}
+
+/// Generate an SDF with a custom edge threshold.
+///
+/// The `threshold` controls which grayscale values are considered "inside"
+/// the glyph (values >= threshold). Lower values expand the glyph boundary;
+/// higher values shrink it.
+pub fn generate_sdf_with_threshold(
+    grayscale: &[u8],
+    width: usize,
+    height: usize,
+    spread: f32,
+    threshold: u8,
+) -> Vec<u8> {
+    astrelis_profiling::profile_function!();
+
     if width == 0 || height == 0 {
         return Vec::new();
     }
 
     let mut output = vec![0u8; width * height];
-    let threshold = 128u8;
     let search_radius = (spread.ceil() as i32) + 1;
 
     for y in 0..height {
@@ -141,6 +165,7 @@ pub fn generate_sdf(grayscale: &[u8], width: usize, height: usize, spread: f32) 
 /// * `height` - Image height in pixels
 /// * `spread` - Distance field spread in pixels
 pub fn generate_sdf_smooth(grayscale: &[u8], width: usize, height: usize, spread: f32) -> Vec<u8> {
+    astrelis_profiling::profile_function!();
     if width == 0 || height == 0 {
         return Vec::new();
     }

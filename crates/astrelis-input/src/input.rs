@@ -77,6 +77,7 @@ impl InputState {
     /// `JustPressed` → `Held` and `JustReleased` → `Released`, and clears
     /// per-frame accumulators (scroll delta, mouse delta, text input).
     pub fn begin_frame(&mut self) {
+        astrelis_profiling::profile_function!();
         advance_and_clean(&mut self.keyboard);
         advance_and_clean(&mut self.logical_keys);
         advance_and_clean(&mut self.mouse_buttons);
@@ -89,6 +90,7 @@ impl InputState {
     ///
     /// Call this for each window event received during the frame.
     pub fn handle_event(&mut self, event: &WindowEvent) {
+        astrelis_profiling::profile_function!();
         match event {
             WindowEvent::KeyboardInput(key_event) => {
                 self.handle_key_event(key_event);
@@ -130,6 +132,7 @@ impl InputState {
     /// deltas (essential for first-person camera controls when the cursor is
     /// locked).
     pub fn handle_device_event(&mut self, event: &DeviceEvent) {
+        astrelis_profiling::profile_function!();
         if let DeviceEvent::MouseMotion { delta_x, delta_y } = event {
             self.mouse_delta.0 += delta_x;
             self.mouse_delta.1 += delta_y;

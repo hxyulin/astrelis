@@ -8,6 +8,7 @@ description = "egui integration for the astrelis-gpu-wgpu backend"
 
 [dependencies]
 astrelis-core = { workspace = true }
+astrelis-profiling = { workspace = true }
 astrelis-window = { workspace = true }
 astrelis-gpu-wgpu = { workspace = true }
 egui = { workspace = true }

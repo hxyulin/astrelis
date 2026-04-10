@@ -18,6 +18,7 @@ pub struct FontDatabase {
 impl FontDatabase {
     /// Create a new font database with system fonts loaded.
     pub fn new() -> Self {
+        astrelis_profiling::profile_function!();
         let mut db = fontdb::Database::new();
         db.load_system_fonts();
         Self { inner: db }
@@ -32,18 +33,21 @@ impl FontDatabase {
 
     /// Load a font from raw bytes.
     pub fn load_font_data(&mut self, data: Vec<u8>) {
+        astrelis_profiling::profile_function!();
         self.inner
             .load_font_source(fontdb::Source::Binary(Arc::new(data)));
     }
 
     /// Load a font from a `.ttf` or `.otf` file.
     pub fn load_font_file(&mut self, path: impl AsRef<std::path::Path>) -> std::io::Result<()> {
+        astrelis_profiling::profile_function!();
         self.inner.load_font_file(path)?;
         Ok(())
     }
 
     /// Load fonts from a directory.
     pub fn load_fonts_dir(&mut self, path: impl AsRef<std::path::Path>) {
+        astrelis_profiling::profile_function!();
         self.inner.load_fonts_dir(path);
     }
 
@@ -98,6 +102,7 @@ pub struct FontSystem {
 impl FontSystem {
     /// Create a new font system with the given font database.
     pub fn new(db: FontDatabase) -> Self {
+        astrelis_profiling::profile_function!();
         let cosmic_font_system = cosmic_text::FontSystem::new_with_locale_and_db(
             sys_locale::get_locale().unwrap_or_else(|| String::from("en-US")),
             db.inner,
@@ -109,6 +114,7 @@ impl FontSystem {
 
     /// Create a new font system with system fonts.
     pub fn with_system_fonts() -> Self {
+        astrelis_profiling::profile_function!();
         Self::new(FontDatabase::new())
     }
 
@@ -163,7 +169,6 @@ pub enum FontWeight {
 
 impl FontWeight {
     /// Convert to cosmic-text weight.
-    /// Convert to cosmic-text weight.
     pub fn to_cosmic(self) -> cosmic_text::Weight {
         match self {
             FontWeight::Thin => cosmic_text::Weight::THIN,
@@ -192,7 +197,6 @@ pub enum FontStyle {
 }
 
 impl FontStyle {
-    /// Convert to cosmic-text style.
     /// Convert to cosmic-text style.
     pub fn to_cosmic(self) -> cosmic_text::Style {
         match self {
@@ -228,7 +232,6 @@ pub enum FontStretch {
 }
 
 impl FontStretch {
-    /// Convert to cosmic-text stretch.
     /// Convert to cosmic-text stretch.
     pub fn to_cosmic(self) -> cosmic_text::Stretch {
         match self {

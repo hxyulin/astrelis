@@ -31,6 +31,7 @@ impl<'a> WgpuRenderPass<'a> {
         device: &'a Arc<WgpuDevice>,
         desc: &RenderPassDescriptor<'_>,
     ) -> Self {
+        astrelis_profiling::profile_function!();
         // Resolve attachment texture view handles to wgpu references.
         // We hold the read guard for the duration of this scope to build
         // the wgpu descriptor, then the guard is dropped before we create
@@ -87,10 +88,6 @@ impl<'a> WgpuRenderPass<'a> {
                 }
             });
 
-        // SAFETY: We're creating the render pass while the views_guard is alive.
-        // The wgpu::RenderPass borrows the TextureViews through the encoder,
-        // but wgpu internally copies/references them — the guard just needs to
-        // be alive during `begin_render_pass`.
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: desc.label,
             color_attachments: &color_attachments,
@@ -182,10 +179,12 @@ impl RenderPass for WgpuRenderPass<'_> {
     }
 
     fn draw(&mut self, vertices: Range<u32>, instances: Range<u32>) {
+        astrelis_profiling::profile_function!();
         self.pass_mut().draw(vertices, instances);
     }
 
     fn draw_indexed(&mut self, indices: Range<u32>, base_vertex: i32, instances: Range<u32>) {
+        astrelis_profiling::profile_function!();
         self.pass_mut()
             .draw_indexed(indices, base_vertex, instances);
     }
@@ -196,3 +195,4 @@ impl RenderPass for WgpuRenderPass<'_> {
         unimplemented!("push constants are not supported in the wgpu 29 backend");
     }
 }
+

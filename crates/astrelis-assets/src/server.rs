@@ -80,6 +80,7 @@ impl AssetServer {
     /// A background thread is spawned to handle file I/O. The thread
     /// exits automatically when the server is dropped.
     pub fn new(asset_dir: impl Into<PathBuf>) -> Self {
+        astrelis_profiling::profile_function!();
         let (load_tx, load_rx) = std::sync::mpsc::channel::<LoadRequest>();
         let (result_tx, result_rx) = std::sync::mpsc::channel::<LoadResult>();
 
@@ -141,6 +142,7 @@ impl AssetServer {
     /// If the same path has already been loaded (and a strong handle still
     /// exists), the existing handle is returned without re-loading.
     pub fn load<T: Asset>(&self, path: impl AsRef<Path>) -> Handle<T> {
+        astrelis_profiling::profile_function!();
         let path = path.as_ref();
         let key = path.to_string_lossy().to_string();
 
@@ -225,6 +227,7 @@ impl AssetServer {
         bytes: &[u8],
         label: &str,
     ) -> Result<Handle<T>, AssetLoadError> {
+        astrelis_profiling::profile_function!();
         let extension = Path::new(label)
             .extension()
             .and_then(|e| e.to_str())
@@ -279,6 +282,7 @@ impl AssetServer {
     /// updates storage, emits events for state changes, and optionally
     /// processes hot-reload file change notifications.
     pub fn update(&self) -> Vec<AssetEvent> {
+        astrelis_profiling::profile_function!();
         let mut events = Vec::new();
 
         // Drain completed loads.

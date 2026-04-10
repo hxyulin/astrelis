@@ -13,6 +13,7 @@ hot-reload = ["dep:notify"]
 
 [dependencies]
 astrelis-core = { workspace = true }
+astrelis-profiling = { workspace = true }
 notify = { workspace = true, optional = true }
 
 [dev-dependencies]

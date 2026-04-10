@@ -316,3 +316,460 @@ pub(crate) fn store_op(op: StoreOp) -> wgpu::StoreOp {
         StoreOp::Discard => wgpu::StoreOp::Discard,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── TextureFormat round-trip ──────────────────────────────────────
+
+    /// Every format that the engine wraps must survive a round-trip
+    /// through `texture_format` -> `texture_format_from_wgpu`.
+    #[test]
+    fn texture_format_round_trip() {
+        let formats = [
+            TextureFormat::R8Unorm,
+            TextureFormat::R8Snorm,
+            TextureFormat::R8Uint,
+            TextureFormat::R8Sint,
+            TextureFormat::R16Uint,
+            TextureFormat::R16Sint,
+            TextureFormat::R16Float,
+            TextureFormat::Rg8Unorm,
+            TextureFormat::Rg8Snorm,
+            TextureFormat::Rg8Uint,
+            TextureFormat::Rg8Sint,
+            TextureFormat::R32Uint,
+            TextureFormat::R32Sint,
+            TextureFormat::R32Float,
+            TextureFormat::Rg16Uint,
+            TextureFormat::Rg16Sint,
+            TextureFormat::Rg16Float,
+            TextureFormat::Rgba8Unorm,
+            TextureFormat::Rgba8UnormSrgb,
+            TextureFormat::Rgba8Snorm,
+            TextureFormat::Rgba8Uint,
+            TextureFormat::Rgba8Sint,
+            TextureFormat::Bgra8Unorm,
+            TextureFormat::Bgra8UnormSrgb,
+            TextureFormat::Rg32Uint,
+            TextureFormat::Rg32Sint,
+            TextureFormat::Rg32Float,
+            TextureFormat::Rgba16Uint,
+            TextureFormat::Rgba16Sint,
+            TextureFormat::Rgba16Float,
+            TextureFormat::Rgba32Uint,
+            TextureFormat::Rgba32Sint,
+            TextureFormat::Rgba32Float,
+            TextureFormat::Depth16Unorm,
+            TextureFormat::Depth24Plus,
+            TextureFormat::Depth24PlusStencil8,
+            TextureFormat::Depth32Float,
+            TextureFormat::Depth32FloatStencil8,
+        ];
+
+        for fmt in formats {
+            let wgpu_fmt = texture_format(fmt);
+            let back = texture_format_from_wgpu(wgpu_fmt);
+            assert_eq!(fmt, back, "round-trip failed for {fmt:?}");
+        }
+    }
+
+    /// Spot-check a few common texture formats individually.
+    #[test]
+    fn texture_format_common_formats() {
+        assert_eq!(
+            texture_format(TextureFormat::Rgba8Unorm),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        assert_eq!(
+            texture_format(TextureFormat::Bgra8UnormSrgb),
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+        );
+        assert_eq!(
+            texture_format(TextureFormat::Depth32Float),
+            wgpu::TextureFormat::Depth32Float,
+        );
+    }
+
+    /// `texture_format_from_wgpu` falls back to `Rgba8Unorm` for wgpu
+    /// formats the engine does not wrap.
+    #[test]
+    fn texture_format_from_wgpu_fallback() {
+        // Bc1RgbaUnorm is a compressed format we intentionally don't wrap.
+        let result = texture_format_from_wgpu(wgpu::TextureFormat::Bc1RgbaUnorm);
+        assert_eq!(result, TextureFormat::Rgba8Unorm);
+    }
+
+    // ── PresentMode round-trip ───────────────────────────────────────
+
+    #[test]
+    fn present_mode_round_trip() {
+        let modes = [
+            PresentMode::Immediate,
+            PresentMode::Fifo,
+            PresentMode::Mailbox,
+            PresentMode::AutoVsync,
+            PresentMode::AutoNoVsync,
+        ];
+
+        for mode in modes {
+            let wgpu_mode = present_mode(mode);
+            let back = present_mode_from_wgpu(wgpu_mode);
+            assert_eq!(mode, back, "round-trip failed for {mode:?}");
+        }
+    }
+
+    #[test]
+    fn present_mode_from_wgpu_fallback() {
+        // FifoRelaxed is not wrapped; should fall back to Fifo.
+        let result = present_mode_from_wgpu(wgpu::PresentMode::FifoRelaxed);
+        assert_eq!(result, PresentMode::Fifo);
+    }
+
+    // ── PowerPreference ──────────────────────────────────────────────
+
+    #[test]
+    fn power_preference_conversion() {
+        assert_eq!(
+            power_preference(PowerPreference::None),
+            wgpu::PowerPreference::None,
+        );
+        assert_eq!(
+            power_preference(PowerPreference::LowPower),
+            wgpu::PowerPreference::LowPower,
+        );
+        assert_eq!(
+            power_preference(PowerPreference::HighPerformance),
+            wgpu::PowerPreference::HighPerformance,
+        );
+    }
+
+    // ── PrimitiveTopology ────────────────────────────────────────────
+
+    #[test]
+    fn primitive_topology_conversion() {
+        assert_eq!(
+            primitive_topology(PrimitiveTopology::PointList),
+            wgpu::PrimitiveTopology::PointList,
+        );
+        assert_eq!(
+            primitive_topology(PrimitiveTopology::LineList),
+            wgpu::PrimitiveTopology::LineList,
+        );
+        assert_eq!(
+            primitive_topology(PrimitiveTopology::LineStrip),
+            wgpu::PrimitiveTopology::LineStrip,
+        );
+        assert_eq!(
+            primitive_topology(PrimitiveTopology::TriangleList),
+            wgpu::PrimitiveTopology::TriangleList,
+        );
+        assert_eq!(
+            primitive_topology(PrimitiveTopology::TriangleStrip),
+            wgpu::PrimitiveTopology::TriangleStrip,
+        );
+    }
+
+    // ── FrontFace / CullMode / PolygonMode ───────────────────────────
+
+    #[test]
+    fn front_face_conversion() {
+        assert_eq!(front_face(FrontFace::Ccw), wgpu::FrontFace::Ccw);
+        assert_eq!(front_face(FrontFace::Cw), wgpu::FrontFace::Cw);
+    }
+
+    #[test]
+    fn cull_mode_conversion() {
+        assert_eq!(cull_mode(CullMode::None), None);
+        assert_eq!(cull_mode(CullMode::Front), Some(wgpu::Face::Front));
+        assert_eq!(cull_mode(CullMode::Back), Some(wgpu::Face::Back));
+    }
+
+    #[test]
+    fn polygon_mode_conversion() {
+        assert_eq!(polygon_mode(PolygonMode::Fill), wgpu::PolygonMode::Fill);
+        assert_eq!(polygon_mode(PolygonMode::Line), wgpu::PolygonMode::Line);
+        assert_eq!(polygon_mode(PolygonMode::Point), wgpu::PolygonMode::Point);
+    }
+
+    // ── CompareFunction ──────────────────────────────────────────────
+
+    #[test]
+    fn compare_function_conversion() {
+        let pairs = [
+            (CompareFunction::Never, wgpu::CompareFunction::Never),
+            (CompareFunction::Less, wgpu::CompareFunction::Less),
+            (CompareFunction::Equal, wgpu::CompareFunction::Equal),
+            (CompareFunction::LessEqual, wgpu::CompareFunction::LessEqual),
+            (CompareFunction::Greater, wgpu::CompareFunction::Greater),
+            (CompareFunction::NotEqual, wgpu::CompareFunction::NotEqual),
+            (
+                CompareFunction::GreaterEqual,
+                wgpu::CompareFunction::GreaterEqual,
+            ),
+            (CompareFunction::Always, wgpu::CompareFunction::Always),
+        ];
+        for (engine, expected) in pairs {
+            assert_eq!(
+                compare_function(engine),
+                expected,
+                "mismatch for {engine:?}"
+            );
+        }
+    }
+
+    // ── BlendFactor / BlendOperation ─────────────────────────────────
+
+    #[test]
+    fn blend_factor_conversion() {
+        let pairs = [
+            (BlendFactor::Zero, wgpu::BlendFactor::Zero),
+            (BlendFactor::One, wgpu::BlendFactor::One),
+            (BlendFactor::Src, wgpu::BlendFactor::Src),
+            (BlendFactor::OneMinusSrc, wgpu::BlendFactor::OneMinusSrc),
+            (BlendFactor::SrcAlpha, wgpu::BlendFactor::SrcAlpha),
+            (
+                BlendFactor::OneMinusSrcAlpha,
+                wgpu::BlendFactor::OneMinusSrcAlpha,
+            ),
+            (BlendFactor::Dst, wgpu::BlendFactor::Dst),
+            (BlendFactor::OneMinusDst, wgpu::BlendFactor::OneMinusDst),
+            (BlendFactor::DstAlpha, wgpu::BlendFactor::DstAlpha),
+            (
+                BlendFactor::OneMinusDstAlpha,
+                wgpu::BlendFactor::OneMinusDstAlpha,
+            ),
+            (
+                BlendFactor::SrcAlphaSaturated,
+                wgpu::BlendFactor::SrcAlphaSaturated,
+            ),
+            (BlendFactor::Constant, wgpu::BlendFactor::Constant),
+            (
+                BlendFactor::OneMinusConstant,
+                wgpu::BlendFactor::OneMinusConstant,
+            ),
+        ];
+        for (engine, expected) in pairs {
+            assert_eq!(
+                blend_factor(engine),
+                expected,
+                "mismatch for {engine:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn blend_operation_conversion() {
+        let pairs = [
+            (BlendOperation::Add, wgpu::BlendOperation::Add),
+            (BlendOperation::Subtract, wgpu::BlendOperation::Subtract),
+            (
+                BlendOperation::ReverseSubtract,
+                wgpu::BlendOperation::ReverseSubtract,
+            ),
+            (BlendOperation::Min, wgpu::BlendOperation::Min),
+            (BlendOperation::Max, wgpu::BlendOperation::Max),
+        ];
+        for (engine, expected) in pairs {
+            assert_eq!(
+                blend_operation(engine),
+                expected,
+                "mismatch for {engine:?}"
+            );
+        }
+    }
+
+    // ── BlendComponent / BlendState ──────────────────────────────────
+
+    #[test]
+    fn blend_component_conversion() {
+        let comp = BlendComponent {
+            src_factor: BlendFactor::SrcAlpha,
+            dst_factor: BlendFactor::OneMinusSrcAlpha,
+            operation: BlendOperation::Add,
+        };
+        let wgpu_comp = blend_component(&comp);
+        assert_eq!(wgpu_comp.src_factor, wgpu::BlendFactor::SrcAlpha);
+        assert_eq!(wgpu_comp.dst_factor, wgpu::BlendFactor::OneMinusSrcAlpha);
+        assert_eq!(wgpu_comp.operation, wgpu::BlendOperation::Add);
+    }
+
+    #[test]
+    fn blend_state_conversion() {
+        let state = BlendState {
+            color: BlendComponent {
+                src_factor: BlendFactor::One,
+                dst_factor: BlendFactor::Zero,
+                operation: BlendOperation::Add,
+            },
+            alpha: BlendComponent {
+                src_factor: BlendFactor::SrcAlpha,
+                dst_factor: BlendFactor::OneMinusSrcAlpha,
+                operation: BlendOperation::Add,
+            },
+        };
+        let wgpu_state = blend_state(&state);
+        assert_eq!(wgpu_state.color.src_factor, wgpu::BlendFactor::One);
+        assert_eq!(wgpu_state.color.dst_factor, wgpu::BlendFactor::Zero);
+        assert_eq!(wgpu_state.alpha.src_factor, wgpu::BlendFactor::SrcAlpha);
+        assert_eq!(
+            wgpu_state.alpha.dst_factor,
+            wgpu::BlendFactor::OneMinusSrcAlpha
+        );
+    }
+
+    // ── IndexFormat / VertexStepMode ─────────────────────────────────
+
+    #[test]
+    fn index_format_conversion() {
+        assert_eq!(
+            index_format(IndexFormat::Uint16),
+            wgpu::IndexFormat::Uint16
+        );
+        assert_eq!(
+            index_format(IndexFormat::Uint32),
+            wgpu::IndexFormat::Uint32
+        );
+    }
+
+    #[test]
+    fn vertex_step_mode_conversion() {
+        assert_eq!(
+            vertex_step_mode(VertexStepMode::Vertex),
+            wgpu::VertexStepMode::Vertex,
+        );
+        assert_eq!(
+            vertex_step_mode(VertexStepMode::Instance),
+            wgpu::VertexStepMode::Instance,
+        );
+    }
+
+    // ── VertexFormat (spot-check representative formats) ─────────────
+
+    #[test]
+    fn vertex_format_conversion() {
+        let pairs = [
+            (VertexFormat::Float32, wgpu::VertexFormat::Float32),
+            (VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2),
+            (VertexFormat::Float32x3, wgpu::VertexFormat::Float32x3),
+            (VertexFormat::Float32x4, wgpu::VertexFormat::Float32x4),
+            (VertexFormat::Uint32, wgpu::VertexFormat::Uint32),
+            (VertexFormat::Uint8x4, wgpu::VertexFormat::Uint8x4),
+            (VertexFormat::Sint32x4, wgpu::VertexFormat::Sint32x4),
+            (VertexFormat::Unorm8x4, wgpu::VertexFormat::Unorm8x4),
+            (VertexFormat::Float16x4, wgpu::VertexFormat::Float16x4),
+        ];
+        for (engine, expected) in pairs {
+            assert_eq!(
+                vertex_format(engine),
+                expected,
+                "mismatch for {engine:?}"
+            );
+        }
+    }
+
+    // ── TextureDimension / TextureViewDimension ──────────────────────
+
+    #[test]
+    fn texture_dimension_conversion() {
+        assert_eq!(
+            texture_dimension(TextureDimension::D1),
+            wgpu::TextureDimension::D1,
+        );
+        assert_eq!(
+            texture_dimension(TextureDimension::D2),
+            wgpu::TextureDimension::D2,
+        );
+        assert_eq!(
+            texture_dimension(TextureDimension::D3),
+            wgpu::TextureDimension::D3,
+        );
+    }
+
+    #[test]
+    fn texture_view_dimension_conversion() {
+        assert_eq!(
+            texture_view_dimension(TextureViewDimension::D1),
+            wgpu::TextureViewDimension::D1,
+        );
+        assert_eq!(
+            texture_view_dimension(TextureViewDimension::D2),
+            wgpu::TextureViewDimension::D2,
+        );
+        assert_eq!(
+            texture_view_dimension(TextureViewDimension::D2Array),
+            wgpu::TextureViewDimension::D2Array,
+        );
+        assert_eq!(
+            texture_view_dimension(TextureViewDimension::Cube),
+            wgpu::TextureViewDimension::Cube,
+        );
+        assert_eq!(
+            texture_view_dimension(TextureViewDimension::CubeArray),
+            wgpu::TextureViewDimension::CubeArray,
+        );
+    }
+
+    // ── FilterMode / AddressMode ─────────────────────────────────────
+
+    #[test]
+    fn filter_mode_conversion() {
+        assert_eq!(
+            filter_mode(FilterMode::Nearest),
+            wgpu::FilterMode::Nearest
+        );
+        assert_eq!(filter_mode(FilterMode::Linear), wgpu::FilterMode::Linear);
+    }
+
+    #[test]
+    fn address_mode_conversion() {
+        assert_eq!(
+            address_mode(AddressMode::ClampToEdge),
+            wgpu::AddressMode::ClampToEdge,
+        );
+        assert_eq!(
+            address_mode(AddressMode::Repeat),
+            wgpu::AddressMode::Repeat,
+        );
+        assert_eq!(
+            address_mode(AddressMode::MirrorRepeat),
+            wgpu::AddressMode::MirrorRepeat,
+        );
+    }
+
+    // ── ColorWrites ──────────────────────────────────────────────────
+
+    #[test]
+    fn color_writes_all() {
+        let all = ColorWrites::ALL;
+        let result = color_writes(all);
+        assert_eq!(result, wgpu::ColorWrites::ALL);
+    }
+
+    #[test]
+    fn color_writes_individual_channels() {
+        assert_eq!(color_writes(ColorWrites::RED), wgpu::ColorWrites::RED);
+        assert_eq!(color_writes(ColorWrites::GREEN), wgpu::ColorWrites::GREEN);
+        assert_eq!(color_writes(ColorWrites::BLUE), wgpu::ColorWrites::BLUE);
+        assert_eq!(color_writes(ColorWrites::ALPHA), wgpu::ColorWrites::ALPHA);
+    }
+
+    #[test]
+    fn color_writes_combination() {
+        let rg = ColorWrites::RED | ColorWrites::GREEN;
+        let result = color_writes(rg);
+        assert!(result.contains(wgpu::ColorWrites::RED));
+        assert!(result.contains(wgpu::ColorWrites::GREEN));
+        assert!(!result.contains(wgpu::ColorWrites::BLUE));
+        assert!(!result.contains(wgpu::ColorWrites::ALPHA));
+    }
+
+    // ── StoreOp ──────────────────────────────────────────────────────
+
+    #[test]
+    fn store_op_conversion() {
+        assert_eq!(store_op(StoreOp::Store), wgpu::StoreOp::Store);
+        assert_eq!(store_op(StoreOp::Discard), wgpu::StoreOp::Discard);
+    }
+}

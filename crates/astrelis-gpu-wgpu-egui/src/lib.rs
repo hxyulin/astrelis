@@ -62,6 +62,7 @@ impl EguiIntegration {
     /// - `surface_format`: The texture format of the render target surface.
     ///   Use the format returned by [`GpuSurface::preferred_format()`](astrelis_gpu_wgpu::convert::types::texture_format).
     pub fn new(device: &WgpuDevice, surface_format: wgpu::TextureFormat) -> Self {
+        astrelis_profiling::profile_function!();
         let context = egui::Context::default();
         context.set_visuals(egui::Visuals::dark());
 
@@ -111,6 +112,7 @@ impl EguiIntegration {
     /// Returns `true` if egui consumed the event (i.e., it hit an egui widget
     /// and the application should not process it further).
     pub fn handle_window_event(&mut self, event: &WindowEvent) -> bool {
+        astrelis_profiling::profile_function!();
         match event {
             WindowEvent::KeyboardInput(key_event) => self.on_keyboard_input(key_event),
             WindowEvent::ModifiersChanged(modifiers) => {
@@ -249,6 +251,7 @@ impl EguiIntegration {
     ///
     /// Call this once per frame before building your UI via [`context()`](Self::context).
     pub fn begin_frame(&mut self, window: &dyn Window) {
+        astrelis_profiling::profile_function!();
         let size = window.inner_size();
         let phys = size.physical();
         let ppp = self.pixels_per_point();
@@ -283,6 +286,7 @@ impl EguiIntegration {
         screen_descriptor: egui_wgpu::ScreenDescriptor,
         window: Option<&dyn Window>,
     ) {
+        astrelis_profiling::profile_function!();
         let full_output = self.context.end_pass();
 
         // Apply cursor icon.

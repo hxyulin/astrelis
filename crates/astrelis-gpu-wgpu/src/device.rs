@@ -12,11 +12,13 @@ use astrelis_gpu::id::*;
 use astrelis_gpu::pipeline::{
     ComputePipelineDescriptor, PipelineLayoutDescriptor, RenderPipelineDescriptor,
 };
+use astrelis_gpu::profiling::GpuProfilingTier;
 use astrelis_gpu::shader::{ShaderModuleDescriptor, ShaderSource};
 use astrelis_gpu::texture::{Extent3d, SamplerDescriptor, TextureDescriptor, TextureViewDescriptor};
 
 use crate::convert::{bind_group as conv_bg, buffer as conv_buf, pipeline as conv_pl, texture as conv_tex, types as conv};
 use crate::encoder::WgpuCommandEncoder;
+use crate::profiling::GpuTimestampProfiler;
 use crate::resources::ResourceMap;
 
 fn mipmap_filter_mode(f: astrelis_gpu::types::FilterMode) -> wgpu::MipmapFilterMode {
@@ -44,6 +46,7 @@ pub struct WgpuDevice {
     pub(crate) pipeline_layouts: ResourceMap<PipelineLayoutMarker, wgpu::PipelineLayout>,
     pub(crate) render_pipelines: ResourceMap<RenderPipelineMarker, wgpu::RenderPipeline>,
     pub(crate) compute_pipelines: ResourceMap<ComputePipelineMarker, wgpu::ComputePipeline>,
+    pub(crate) gpu_profiler: std::sync::Mutex<GpuTimestampProfiler>,
 }
 
 impl WgpuDevice {
@@ -51,7 +54,16 @@ impl WgpuDevice {
         device: wgpu::Device,
         queue: wgpu::Queue,
         adapter_info: AdapterInfo,
+        profiling_tier: GpuProfilingTier,
     ) -> Arc<Self> {
+        astrelis_profiling::profile_function!();
+        let timestamp_period_ns = queue.get_timestamp_period();
+        let gpu_profiler = GpuTimestampProfiler::new(
+            device.clone(),
+            profiling_tier,
+            timestamp_period_ns,
+        );
+
         let arc = Arc::new(Self {
             self_ref: std::sync::OnceLock::new(),
             device,
@@ -67,6 +79,7 @@ impl WgpuDevice {
             pipeline_layouts: ResourceMap::new(),
             render_pipelines: ResourceMap::new(),
             compute_pipelines: ResourceMap::new(),
+            gpu_profiler: std::sync::Mutex::new(gpu_profiler),
         });
         let _ = arc.self_ref.set(Arc::downgrade(&arc));
         arc
@@ -95,6 +108,18 @@ impl WgpuDevice {
     /// to the raw wgpu queue.
     pub fn wgpu_queue(&self) -> &wgpu::Queue {
         &self.queue
+    }
+
+    /// Processes finished GPU profiling frames and reports results to the
+    /// active profiling backend.
+    ///
+    /// Call this once per frame (typically before [`astrelis_profiling::new_frame`])
+    /// to resolve GPU timestamp queries from previous frames. Results arrive
+    /// 1-3 frames late due to GPU buffering.
+    pub fn process_gpu_profiling_frames(&self) {
+        astrelis_profiling::profile_function!();
+        let mut profiler = self.gpu_profiler.lock().unwrap();
+        profiler.process_finished_frames();
     }
 
     /// Returns a read guard providing access to raw [`wgpu::TextureView`]s by ID.
@@ -131,6 +156,7 @@ impl GpuDevice for WgpuDevice {
     }
 
     fn create_buffer(&self, desc: &BufferDescriptor<'_>) -> Result<BufferId, GpuError> {
+        astrelis_profiling::profile_function!();
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: desc.label,
             size: desc.size,
@@ -141,6 +167,7 @@ impl GpuDevice for WgpuDevice {
     }
 
     fn create_buffer_init(&self, desc: &BufferInitDescriptor<'_>) -> Result<BufferId, GpuError> {
+        astrelis_profiling::profile_function!();
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: desc.label,
             size: desc.contents.len() as u64,
@@ -165,6 +192,7 @@ impl GpuDevice for WgpuDevice {
     }
 
     fn create_texture(&self, desc: &TextureDescriptor<'_>) -> Result<TextureId, GpuError> {
+        astrelis_profiling::profile_function!();
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: desc.label,
             size: conv_tex::extent3d(desc.size),
@@ -183,6 +211,7 @@ impl GpuDevice for WgpuDevice {
         texture: TextureId,
         desc: &TextureViewDescriptor<'_>,
     ) -> Result<TextureViewId, GpuError> {
+        astrelis_profiling::profile_function!();
         let view_id = self
             .textures
             .get(texture, |tex| {
@@ -203,6 +232,7 @@ impl GpuDevice for WgpuDevice {
     }
 
     fn create_sampler(&self, desc: &SamplerDescriptor<'_>) -> Result<SamplerId, GpuError> {
+        astrelis_profiling::profile_function!();
         let sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
             label: desc.label,
             address_mode_u: conv::address_mode(desc.address_mode_u),
@@ -241,6 +271,7 @@ impl GpuDevice for WgpuDevice {
         layout: BufferCopyView,
         size: Extent3d,
     ) {
+        astrelis_profiling::profile_function!();
         self.textures.get(dst.texture, |tex| {
             self.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {
@@ -268,6 +299,7 @@ impl GpuDevice for WgpuDevice {
         &self,
         desc: &ShaderModuleDescriptor<'_>,
     ) -> Result<ShaderModuleId, GpuError> {
+        astrelis_profiling::profile_function!();
         let source = match desc.source {
             ShaderSource::Wgsl(src) => wgpu::ShaderSource::Wgsl(src.into()),
             ShaderSource::SpirV(_) => {
@@ -293,6 +325,7 @@ impl GpuDevice for WgpuDevice {
         &self,
         desc: &BindGroupLayoutDescriptor<'_>,
     ) -> Result<BindGroupLayoutId, GpuError> {
+        astrelis_profiling::profile_function!();
         let entries: Vec<wgpu::BindGroupLayoutEntry> = desc
             .entries
             .iter()
@@ -316,6 +349,7 @@ impl GpuDevice for WgpuDevice {
         &self,
         desc: &BindGroupDescriptor<'_>,
     ) -> Result<BindGroupId, GpuError> {
+        astrelis_profiling::profile_function!();
         let buffers_guard = self.buffers.read_guard();
         let views_guard = self.texture_views.read_guard();
         let samplers_guard = self.samplers.read_guard();
@@ -390,6 +424,7 @@ impl GpuDevice for WgpuDevice {
         &self,
         desc: &PipelineLayoutDescriptor<'_>,
     ) -> Result<PipelineLayoutId, GpuError> {
+        astrelis_profiling::profile_function!();
         let layouts_guard = self.bind_group_layouts.read_guard();
         let bind_group_layouts: Vec<&wgpu::BindGroupLayout> = desc
             .bind_group_layouts
@@ -418,6 +453,7 @@ impl GpuDevice for WgpuDevice {
         &self,
         desc: &RenderPipelineDescriptor<'_>,
     ) -> Result<RenderPipelineId, GpuError> {
+        astrelis_profiling::profile_function!();
         let layouts_guard = self.pipeline_layouts.read_guard();
         let shaders_guard = self.shader_modules.read_guard();
 
@@ -495,6 +531,7 @@ impl GpuDevice for WgpuDevice {
         &self,
         desc: &ComputePipelineDescriptor<'_>,
     ) -> Result<ComputePipelineId, GpuError> {
+        astrelis_profiling::profile_function!();
         let layouts_guard = self.pipeline_layouts.read_guard();
         let shaders_guard = self.shader_modules.read_guard();
 
@@ -536,6 +573,7 @@ impl GpuDevice for WgpuDevice {
     }
 
     fn create_command_encoder(&self, label: Option<&str>) -> Self::Encoder {
+        astrelis_profiling::profile_function!();
         let encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });

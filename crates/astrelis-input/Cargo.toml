@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 astrelis-core = { workspace = true }
+astrelis-profiling = { workspace = true }
 astrelis-window = { workspace = true }
 
 [lints]

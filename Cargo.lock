@@ -118,6 +118,7 @@ name = "astrelis-assets"
 version = "0.3.0"
 dependencies = [
  "astrelis-core",
+ "astrelis-profiling",
  "notify",
  "tempfile",
 ]
@@ -146,6 +147,7 @@ version = "0.3.0"
 dependencies = [
  "astrelis-core",
  "astrelis-gpu",
+ "astrelis-profiling",
  "astrelis-window",
  "astrelis-window-winit",
  "bytemuck",
@@ -161,6 +163,7 @@ dependencies = [
  "astrelis-core",
  "astrelis-gpu",
  "astrelis-gpu-wgpu",
+ "astrelis-profiling",
  "astrelis-window",
  "astrelis-window-winit",
  "egui",
@@ -174,6 +177,7 @@ name = "astrelis-input"
 version = "0.3.0"
 dependencies = [
  "astrelis-core",
+ "astrelis-profiling",
  "astrelis-window",
 ]
 
@@ -181,6 +185,7 @@ dependencies = [
 name = "astrelis-profiling"
 version = "0.3.0"
 dependencies = [
+ "profiling",
  "puffin",
  "puffin_http",
 ]
@@ -240,6 +245,7 @@ name = "astrelis-window-winit"
 version = "0.3.0"
 dependencies = [
  "astrelis-core",
+ "astrelis-profiling",
  "astrelis-window",
  "raw-window-handle",
  "winit",
@@ -1025,9 +1031,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.14.0"
+version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
 dependencies = [
  "either",
 ]
@@ -1235,9 +1241,9 @@ checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "lz4_flex"
-version = "0.13.0"
+version = "0.11.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db9a0d582c2874f68138a16ce1867e0ffde6c0bb0a0df85e1f36d04146db488a"
+checksum = "373f5eceeeab7925e0c1098212f2fbc4d416adec9d35051a6ab251e824c1854a"
 
 [[package]]
 name = "memchr"
@@ -1830,12 +1836,26 @@ name = "profiling"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eb8486b569e12e2c32ad3e204dbaba5e4b5b216e9367044f25f1dba42341773"
+dependencies = [
+ "profiling-procmacros",
+ "puffin",
+]
+
+[[package]]
+name = "profiling-procmacros"
+version = "1.0.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52717f9a02b6965224f95ca2a81e2e0c5c43baacd28ca057577988930b6c3d5b"
+dependencies = [
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "puffin"
-version = "0.20.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84b514d95a258be801fde8a1ff1c974f4a4841d9750f5d1d6690fc07a5ad4049"
+checksum = "fa9dae7b05c02ec1a6bc9bcf20d8bc64a7dcbf57934107902a872014899b741f"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1843,15 +1863,16 @@ dependencies = [
  "cfg-if",
  "itertools",
  "lz4_flex",
+ "once_cell",
  "parking_lot",
  "serde",
 ]
 
 [[package]]
 name = "puffin_http"
-version = "0.17.0"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f912991aab1adae69d2be9455e8db0f41e5ad3da87706ab2de64908678c2c76"
+checksum = "739a3c7f56604713b553d7addd7718c226e88d598979ae3450320800bd0e9810"
 dependencies = [
  "anyhow",
  "crossbeam-channel",

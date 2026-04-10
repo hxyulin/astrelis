@@ -60,6 +60,7 @@ impl Window for WinitWindow {
     }
 
     fn request_inner_size(&self, size: LogicalInnerSize) {
+        astrelis_profiling::profile_function!();
         let s = size.logical();
         let _ = self
             .inner
@@ -67,6 +68,7 @@ impl Window for WinitWindow {
     }
 
     fn set_min_inner_size(&self, size: Option<LogicalInnerSize>) {
+        astrelis_profiling::profile_function!();
         self.inner.set_min_inner_size(
             size.map(|s| {
                 let s = s.logical();
@@ -76,6 +78,7 @@ impl Window for WinitWindow {
     }
 
     fn set_max_inner_size(&self, size: Option<LogicalInnerSize>) {
+        astrelis_profiling::profile_function!();
         self.inner.set_max_inner_size(
             size.map(|s| {
                 let s = s.logical();
@@ -85,12 +88,14 @@ impl Window for WinitWindow {
     }
 
     fn set_outer_position(&self, position: LogicalOuterPosition) {
+        astrelis_profiling::profile_function!();
         let p = position.logical();
         self.inner
             .set_outer_position(winit::dpi::LogicalPosition::new(p.x, p.y));
     }
 
     fn set_title(&self, title: &str) {
+        astrelis_profiling::profile_function!();
         self.inner.set_title(title);
     }
 
@@ -99,6 +104,7 @@ impl Window for WinitWindow {
     }
 
     fn set_visible(&self, visible: bool) {
+        astrelis_profiling::profile_function!();
         self.inner.set_visible(visible);
     }
 
@@ -107,6 +113,7 @@ impl Window for WinitWindow {
     }
 
     fn set_minimized(&self, minimized: bool) {
+        astrelis_profiling::profile_function!();
         self.inner.set_minimized(minimized);
     }
 
@@ -115,6 +122,7 @@ impl Window for WinitWindow {
     }
 
     fn set_maximized(&self, maximized: bool) {
+        astrelis_profiling::profile_function!();
         self.inner.set_maximized(maximized);
     }
 
@@ -123,6 +131,7 @@ impl Window for WinitWindow {
     }
 
     fn set_fullscreen(&self, mode: Option<FullscreenMode>) {
+        astrelis_profiling::profile_function!();
         let winit_fs = mode.map(|m| match m {
             FullscreenMode::Borderless(_) => {
                 winit::window::Fullscreen::Borderless(self.inner.current_monitor())
@@ -143,6 +152,7 @@ impl Window for WinitWindow {
     }
 
     fn set_decorations(&self, decorations: bool) {
+        astrelis_profiling::profile_function!();
         self.inner.set_decorations(decorations);
     }
 
@@ -156,6 +166,7 @@ impl Window for WinitWindow {
     }
 
     fn set_window_level(&self, level: WindowLevel) {
+        astrelis_profiling::profile_function!();
         let winit_level = match level {
             WindowLevel::AlwaysOnBottom => winit::window::WindowLevel::AlwaysOnBottom,
             WindowLevel::Normal => winit::window::WindowLevel::Normal,
@@ -165,6 +176,7 @@ impl Window for WinitWindow {
     }
 
     fn set_resizable(&self, resizable: bool) {
+        astrelis_profiling::profile_function!();
         self.inner.set_resizable(resizable);
     }
 
@@ -173,6 +185,7 @@ impl Window for WinitWindow {
     }
 
     fn focus(&self) {
+        astrelis_profiling::profile_function!();
         self.inner.focus_window();
     }
 
@@ -181,15 +194,18 @@ impl Window for WinitWindow {
     }
 
     fn set_cursor_icon(&self, icon: CursorIcon) {
+        astrelis_profiling::profile_function!();
         self.inner
             .set_cursor(winit::window::Cursor::Icon(convert::cursor::to_winit_cursor(icon)));
     }
 
     fn set_cursor_visible(&self, visible: bool) {
+        astrelis_profiling::profile_function!();
         self.inner.set_cursor_visible(visible);
     }
 
     fn set_cursor_grab(&self, mode: CursorGrabMode) -> Result<(), WindowError> {
+        astrelis_profiling::profile_function!();
         let winit_mode = match mode {
             CursorGrabMode::None => winit::window::CursorGrabMode::None,
             CursorGrabMode::Confined => winit::window::CursorGrabMode::Confined,
@@ -201,12 +217,14 @@ impl Window for WinitWindow {
     }
 
     fn set_cursor_position(&self, position: Point<Logical>) -> Result<(), WindowError> {
+        astrelis_profiling::profile_function!();
         self.inner
             .set_cursor_position(winit::dpi::LogicalPosition::new(position.x, position.y))
             .map_err(|e| WindowError::EventLoopError(e.to_string()))
     }
 
     fn request_redraw(&self) {
+        astrelis_profiling::profile_function!();
         self.inner.request_redraw();
     }
 
@@ -217,6 +235,7 @@ impl Window for WinitWindow {
     }
 
     fn set_content_protected(&self, protected: bool) {
+        astrelis_profiling::profile_function!();
         self.inner.set_content_protected(protected);
     }
 
@@ -228,6 +247,7 @@ impl Window for WinitWindow {
     }
 
     fn set_theme(&self, theme: Option<Theme>) {
+        astrelis_profiling::profile_function!();
         self.inner.set_theme(theme.map(|t| match t {
             Theme::Light => winit::window::Theme::Light,
             Theme::Dark => winit::window::Theme::Dark,
@@ -235,12 +255,14 @@ impl Window for WinitWindow {
     }
 
     fn drag_window(&self) -> Result<(), WindowError> {
+        astrelis_profiling::profile_function!();
         self.inner
             .drag_window()
             .map_err(|e| WindowError::EventLoopError(e.to_string()))
     }
 
     fn drag_resize_window(&self, direction: ResizeDirection) -> Result<(), WindowError> {
+        astrelis_profiling::profile_function!();
         let winit_dir = match direction {
             ResizeDirection::North => winit::window::ResizeDirection::North,
             ResizeDirection::South => winit::window::ResizeDirection::South,

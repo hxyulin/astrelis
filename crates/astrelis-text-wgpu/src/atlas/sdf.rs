@@ -59,6 +59,7 @@ pub struct SdfAtlas {
 impl SdfAtlas {
     /// Create a new SDF atlas of the given size.
     pub fn new(size: u32) -> Self {
+        astrelis_profiling::profile_function!();
         Self {
             data: vec![0u8; (size * size) as usize],
             size,
@@ -81,6 +82,7 @@ impl SdfAtlas {
         base_size: f32,
         spread: f32,
     ) -> Option<SdfAtlasEntry> {
+        astrelis_profiling::profile_function!();
         if let Some(entry) = self.entries.get(&cache_key) {
             return Some(*entry);
         }

@@ -19,6 +19,7 @@ pub struct DecorationRenderer {
 impl DecorationRenderer {
     /// Create a new decoration renderer.
     pub fn new(device: &WgpuDevice, surface_format: wgpu::TextureFormat) -> Self {
+        astrelis_profiling::profile_function!();
         let dev = device.wgpu_device();
 
         let uniform_bind_group_layout =
@@ -90,6 +91,7 @@ impl DecorationRenderer {
 
     /// Queue a decoration quad for rendering.
     pub fn queue_quad(&mut self, quad: &DecorationQuad) {
+        astrelis_profiling::profile_function!();
         let (x, y, w, h) = quad.bounds;
         let color = [quad.color.r, quad.color.g, quad.color.b, quad.color.a];
 
@@ -118,6 +120,7 @@ impl DecorationRenderer {
 
     /// Queue decoration quads from text bounds and decoration config.
     pub fn queue_from_text(&mut self, bounds: &TextBounds, decoration: &TextDecoration) {
+        astrelis_profiling::profile_function!();
         let quads = generate_decoration_quads(bounds, decoration);
         for quad in &quads {
             self.queue_quad(quad);
@@ -138,6 +141,7 @@ impl DecorationRenderer {
         width: u32,
         height: u32,
     ) {
+        astrelis_profiling::profile_function!();
         if !self.has_queued() {
             return;
         }

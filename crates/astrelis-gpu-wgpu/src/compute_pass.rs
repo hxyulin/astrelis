@@ -19,10 +19,12 @@ impl<'a> WgpuComputePass<'a> {
         device: &'a Arc<WgpuDevice>,
         label: Option<&str>,
     ) -> Self {
+        astrelis_profiling::profile_function!();
         let pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label,
             ..Default::default()
         });
+
         Self {
             pass: Some(pass),
             device,
@@ -52,6 +54,7 @@ impl ComputePass for WgpuComputePass<'_> {
     }
 
     fn dispatch(&mut self, x: u32, y: u32, z: u32) {
+        astrelis_profiling::profile_function!();
         self.pass_mut().dispatch_workgroups(x, y, z);
     }
 
@@ -68,3 +71,4 @@ impl ComputePass for WgpuComputePass<'_> {
         unimplemented!("push constants are not supported in the wgpu 29 backend");
     }
 }
+

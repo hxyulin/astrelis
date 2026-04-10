@@ -23,6 +23,7 @@ fn convert_element_state(state: winit::event::ElementState) -> ElementState {
 pub(crate) fn convert_window_event(
     event: winit::event::WindowEvent,
 ) -> Option<WindowEvent> {
+    astrelis_profiling::profile_function!();
     Some(match event {
         winit::event::WindowEvent::CloseRequested => WindowEvent::CloseRequested,
 

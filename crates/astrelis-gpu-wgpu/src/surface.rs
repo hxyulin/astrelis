@@ -61,6 +61,7 @@ impl GpuSurface for WgpuSurface {
     }
 
     fn configure(&mut self, config: &SurfaceConfiguration) {
+        astrelis_profiling::profile_function!();
         let wgpu_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: conv::texture_format(config.format),
@@ -81,6 +82,7 @@ impl GpuSurface for WgpuSurface {
     }
 
     fn acquire(&mut self) -> Result<Self::Texture, GpuError> {
+        astrelis_profiling::profile_function!();
         let current = self.surface.get_current_texture();
         let surface_texture = match current {
             wgpu::CurrentSurfaceTexture::Success(tex)
@@ -122,6 +124,7 @@ impl SurfaceTexture for WgpuSurfaceTexture {
     }
 
     fn present(mut self) {
+        astrelis_profiling::profile_function!();
         if let Some(output) = self.output.take() {
             output.present();
         }

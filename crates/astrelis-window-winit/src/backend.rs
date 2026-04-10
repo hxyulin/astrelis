@@ -19,19 +19,26 @@ use crate::capabilities::build_capabilities;
 use crate::convert;
 use crate::window::WinitWindow;
 
-/// winit-based windowing backend.
+/// Winit-based windowing backend.
+///
+/// Implements [`WindowBackend`] from `astrelis-window`, using winit's
+/// event loop to drive window creation, input handling, and lifecycle events.
 pub struct WinitBackend {
     event_loop: EventLoop<()>,
 }
 
 impl WindowBackend for WinitBackend {
     fn new() -> Result<Self, WindowError> {
+        astrelis_profiling::profile_function!();
         let event_loop = EventLoop::new()
             .map_err(|e| WindowError::BackendInitFailed(e.to_string()))?;
         Ok(Self { event_loop })
     }
 
     fn run(self, handler: &mut dyn AppHandler) -> Result<(), WindowError> {
+        // NOTE: Do NOT use profile_function!() here — run_app() never returns,
+        // so the scope guard would keep puffin's depth > 0 forever, preventing
+        // all inner scopes from being reported to the viewer.
         let mut bridge = WinitBridge {
             handler,
             windows: HashMap::new(),
@@ -87,6 +94,7 @@ impl WinitBridge<'_> {
 
 impl ApplicationHandler for WinitBridge<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        astrelis_profiling::profile_function!();
         let mut ctx = Self::make_context(
             event_loop,
             &mut self.windows,
@@ -101,6 +109,7 @@ impl ApplicationHandler for WinitBridge<'_> {
     }
 
     fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        astrelis_profiling::profile_function!();
         let mut ctx = Self::make_context(
             event_loop,
             &mut self.windows,
@@ -120,11 +129,15 @@ impl ApplicationHandler for WinitBridge<'_> {
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
+        astrelis_profiling::profile_function!();
         let Some(&astrelis_id) = self.winit_to_astrelis.get(&window_id) else {
             return;
         };
 
-        let Some(converted) = convert::event::convert_window_event(event) else {
+        let Some(converted) = ({
+            astrelis_profiling::profile_scope!("convert_event");
+            convert::event::convert_window_event(event)
+        }) else {
             return;
         };
 
@@ -148,6 +161,7 @@ impl ApplicationHandler for WinitBridge<'_> {
         _device_id: winit::event::DeviceId,
         event: winit::event::DeviceEvent,
     ) {
+        astrelis_profiling::profile_function!();
         let converted = match event {
             winit::event::DeviceEvent::MouseMotion { delta } => {
                 astrelis_window::event::DeviceEvent::MouseMotion {
@@ -213,6 +227,8 @@ impl ApplicationHandler for WinitBridge<'_> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        astrelis_profiling::new_frame();
+        astrelis_profiling::profile_function!();
         let mut ctx = Self::make_context(
             event_loop,
             &mut self.windows,
@@ -226,6 +242,7 @@ impl ApplicationHandler for WinitBridge<'_> {
         self.handler.on_events_cleared(&mut ctx);
 
         // Apply control flow.
+        astrelis_profiling::profile_scope!("apply_control_flow");
         match self.control_flow {
             ControlFlow::Poll => {
                 event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
@@ -246,6 +263,7 @@ impl ApplicationHandler for WinitBridge<'_> {
     }
 
     fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+        astrelis_profiling::profile_function!();
         let mut ctx = Self::make_context(
             event_loop,
             &mut self.windows,
@@ -274,6 +292,7 @@ struct WinitEventLoopContext<'a> {
 
 impl EventLoopContext for WinitEventLoopContext<'_> {
     fn create_window(&mut self, attrs: WindowAttributes) -> Result<WindowId, WindowError> {
+        astrelis_profiling::profile_function!();
         let inner_size = attrs.inner_size.logical();
         let mut winit_attrs = winit::window::WindowAttributes::default()
             .with_title(&attrs.title)

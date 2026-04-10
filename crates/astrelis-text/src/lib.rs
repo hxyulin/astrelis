@@ -63,8 +63,8 @@ pub use pipeline::{
     TextShapeRequest, TextShaper,
 };
 pub use rich_text::{RichText, RichTextBuilder, TextSpan, TextSpanStyle};
-pub use sdf::{SdfConfig, TextRenderMode, generate_sdf, generate_sdf_smooth, swash_image_to_grayscale};
-pub use shaping::{ShapedGlyph, ShapedTextResult, extract_glyphs_from_buffer, measure_text_fast, shape_text};
+pub use sdf::{DEFAULT_SDF_THRESHOLD, SdfConfig, TextRenderMode, generate_sdf, generate_sdf_smooth, generate_sdf_with_threshold, swash_image_to_grayscale};
+pub use shaping::{DEFAULT_LINE_HEIGHT_MULTIPLIER, ShapedGlyph, ShapedTextResult, extract_glyphs_from_buffer, measure_text_fast, shape_text, shape_text_with_line_height};
 pub use text::{LineBreakConfig, Text, TextAlign, TextMetrics, TextWrap, VerticalAlign};
 
 // Re-export asset types when feature is enabled

@@ -37,6 +37,7 @@ struct App {
 
 impl AppHandler for App {
     fn on_lifecycle(&mut self, ctx: &mut dyn EventLoopContext, state: AppLifecycle) {
+        astrelis_profiling::profile_function!();
         match state {
             AppLifecycle::Resumed => {
                 let attrs = WindowBuilder::new()
@@ -68,7 +69,7 @@ impl AppHandler for App {
 
                 self.gpu = Some(gpu);
                 self.surface = Some(surface);
-                ctx.set_control_flow(ControlFlow::Poll);
+                ctx.set_control_flow(ControlFlow::Wait);
             }
             AppLifecycle::Suspended => {}
             AppLifecycle::Exiting => {
@@ -83,6 +84,7 @@ impl AppHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        astrelis_profiling::profile_function!();
         match event {
             WindowEvent::CloseRequested => ctx.exit(),
             WindowEvent::Resized(size) => {
@@ -114,6 +116,7 @@ impl AppHandler for App {
     }
 
     fn on_events_cleared(&mut self, ctx: &mut dyn EventLoopContext) {
+        astrelis_profiling::profile_function!();
         if let Some(id) = self.window_id
             && let Some(win) = ctx.window(id)
         {
@@ -124,11 +127,16 @@ impl AppHandler for App {
 
 impl App {
     fn render(&mut self) {
+        astrelis_profiling::profile_function!();
         let (Some(gpu), Some(surface)) = (&self.gpu, &mut self.surface) else {
             return;
         };
 
+        // Process GPU profiling results from prior frames.
+        gpu.process_profiling_frames();
+
         // Acquire the next surface texture.
+        astrelis_profiling::profile_scope!("acquire");
         let frame = match surface.acquire() {
             Ok(f) => f,
             Err(GpuError::SurfaceOutdated | GpuError::SurfaceLost) => {
@@ -147,6 +155,7 @@ impl App {
         let clear_color = Color::new(r, g, b, 1.0);
 
         // Record a render pass that just clears.
+        astrelis_profiling::profile_scope!("encode");
         let mut encoder = gpu.device().create_command_encoder(Some("clear"));
         {
             let _pass = encoder.begin_render_pass(&RenderPassDescriptor {
@@ -162,13 +171,16 @@ impl App {
             // No draw calls — just clear.
         }
 
+        astrelis_profiling::profile_scope!("submit");
         gpu.queue().submit(std::iter::once(encoder));
+        astrelis_profiling::profile_scope!("present");
         frame.present();
         self.frame_count += 1;
     }
 }
 
 fn main() {
+    astrelis_profiling::init();
     let backend = WinitBackend::new().expect("failed to create windowing backend");
     let mut app = App {
         window_id: None,

@@ -35,6 +35,7 @@ impl BitmapTextRenderer {
         font_system: FontSystem,
         config: TextRendererConfig,
     ) -> Self {
+        astrelis_profiling::profile_function!();
         let shared = SharedContext::new(device, font_system);
         let atlas_size = config.atlas_size;
         let atlas = BitmapAtlas::new(atlas_size);
@@ -165,6 +166,7 @@ impl BitmapTextRenderer {
 
     /// Prepare text for rendering.
     pub fn prepare(&mut self, text: &Text) -> TextBuffer {
+        astrelis_profiling::profile_function!();
         let mut fs = self.shared.font_system.write().unwrap();
         let mut buffer = TextBuffer::new(&mut fs, 1.0);
         buffer.set_text(&mut fs, text, 1.0);
@@ -174,6 +176,7 @@ impl BitmapTextRenderer {
 
     /// Queue text for drawing at the given position.
     pub fn draw_text(&mut self, buffer: &mut TextBuffer, position: Vec2) {
+        astrelis_profiling::profile_function!();
         let mut fs = self.shared.font_system.write().unwrap();
         buffer.layout(&mut fs);
 
@@ -262,6 +265,7 @@ impl BitmapTextRenderer {
         width: u32,
         height: u32,
     ) {
+        astrelis_profiling::profile_function!();
         if self.vertices.is_empty() {
             return;
         }

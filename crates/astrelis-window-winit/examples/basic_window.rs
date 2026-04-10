@@ -23,6 +23,7 @@ struct App {
 
 impl AppHandler for App {
     fn on_lifecycle(&mut self, ctx: &mut dyn EventLoopContext, state: AppLifecycle) {
+        astrelis_profiling::profile_function!();
         match state {
             AppLifecycle::Resumed => {
                 // Create a window when the application is ready.
@@ -33,7 +34,7 @@ impl AppHandler for App {
                 self.window_id = Some(ctx.create_window(attrs).expect("failed to create window"));
 
                 // Game mode: poll continuously for maximum frame rate.
-                ctx.set_control_flow(ControlFlow::Poll);
+                ctx.set_control_flow(ControlFlow::Wait);
             }
             AppLifecycle::Suspended => {
                 // On mobile, release GPU resources here.
@@ -50,6 +51,7 @@ impl AppHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        astrelis_profiling::profile_function!();
         match event {
             WindowEvent::CloseRequested => {
                 println!("Close requested for window {window_id}");
@@ -71,6 +73,7 @@ impl AppHandler for App {
     }
 
     fn on_events_cleared(&mut self, ctx: &mut dyn EventLoopContext) {
+        astrelis_profiling::profile_function!();
         // In game mode, request a redraw every frame.
         if let Some(id) = self.window_id
             && let Some(win) = ctx.window(id)
@@ -81,6 +84,7 @@ impl AppHandler for App {
 }
 
 fn main() {
+    astrelis_profiling::init();
     let backend = WinitBackend::new().expect("failed to create backend");
     let mut app = App { window_id: None };
     backend.run(&mut app).expect("event loop error");

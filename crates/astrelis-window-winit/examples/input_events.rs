@@ -46,6 +46,7 @@ struct App {
 
 impl AppHandler for App {
     fn on_lifecycle(&mut self, ctx: &mut dyn EventLoopContext, state: AppLifecycle) {
+        astrelis_profiling::profile_function!();
         if state == AppLifecycle::Resumed {
             let attrs = WindowBuilder::new()
                 .with_title("Astrelis — Input Events (L=lock cursor, Esc=quit)")
@@ -70,6 +71,7 @@ impl AppHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        astrelis_profiling::profile_function!();
         match event {
             WindowEvent::CloseRequested => ctx.exit(),
 
@@ -186,6 +188,7 @@ impl AppHandler for App {
         _ctx: &mut dyn EventLoopContext,
         event: DeviceEvent,
     ) {
+        astrelis_profiling::profile_function!();
         match event {
             DeviceEvent::MouseMotion { delta_x, delta_y } => {
                 // Only print when cursor is locked to avoid flooding stdout.
@@ -212,10 +215,13 @@ impl AppHandler for App {
         }
     }
 
-    fn on_events_cleared(&mut self, _ctx: &mut dyn EventLoopContext) {}
+    fn on_events_cleared(&mut self, _ctx: &mut dyn EventLoopContext) {
+        astrelis_profiling::profile_function!();
+    }
 }
 
 fn main() {
+    astrelis_profiling::init();
     let backend = WinitBackend::new().expect("failed to create backend");
     let mut app = App {
         window_id: None,

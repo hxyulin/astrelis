@@ -41,6 +41,7 @@ struct App {
 
 impl AppHandler for App {
     fn on_lifecycle(&mut self, ctx: &mut dyn EventLoopContext, state: AppLifecycle) {
+        astrelis_profiling::profile_function!();
         if let AppLifecycle::Resumed = state {
             let attrs = WindowBuilder::new()
                 .with_title("Astrelis — SDF Text Demo")
@@ -74,7 +75,7 @@ impl AppHandler for App {
             self.gpu = Some(gpu);
             self.surface = Some(surface);
             self.renderer = Some(renderer);
-            ctx.set_control_flow(ControlFlow::Poll);
+            ctx.set_control_flow(ControlFlow::Wait);
         }
     }
 
@@ -84,6 +85,7 @@ impl AppHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
+        astrelis_profiling::profile_function!();
         match event {
             WindowEvent::CloseRequested => ctx.exit(),
             WindowEvent::Resized(size) => {
@@ -113,6 +115,10 @@ impl AppHandler for App {
     }
 
     fn on_events_cleared(&mut self, ctx: &mut dyn EventLoopContext) {
+        astrelis_profiling::profile_function!();
+        if let Some(gpu) = &self.gpu {
+            gpu.device().process_gpu_profiling_frames();
+        }
         if let Some(id) = self.window_id
             && let Some(win) = ctx.window(id)
         {
@@ -123,12 +129,14 @@ impl AppHandler for App {
 
 impl App {
     fn render(&mut self) {
+        astrelis_profiling::profile_function!();
         let (Some(gpu), Some(surface), Some(renderer)) =
             (&self.gpu, &mut self.surface, &mut self.renderer)
         else {
             return;
         };
 
+        astrelis_profiling::profile_scope!("acquire");
         let frame: WgpuSurfaceTexture = match surface.acquire() {
             Ok(f) => f,
             Err(GpuError::SurfaceOutdated | GpuError::SurfaceLost | GpuError::Timeout) => return,
@@ -171,6 +179,7 @@ impl App {
             });
         }
 
+        astrelis_profiling::profile_scope!("prepare_text");
         // SDF text at various sizes - demonstrates resolution-independent rendering
         let texts = [
             ("SDF Text — 24px", 24.0, Color::WHITE),
@@ -188,16 +197,20 @@ impl App {
             y += size * 1.5;
         }
 
+        astrelis_profiling::profile_scope!("encode");
         renderer.render(wgpu_device, &mut encoder, wgpu_view, self.width, self.height);
 
+        astrelis_profiling::profile_scope!("submit");
         wgpu_device
             .wgpu_queue()
             .submit(std::iter::once(encoder.finish()));
+        astrelis_profiling::profile_scope!("present");
         frame.present();
     }
 }
 
 fn main() {
+    astrelis_profiling::init();
     let backend = WinitBackend::new().expect("failed to create windowing backend");
     let mut app = App {
         window_id: None,

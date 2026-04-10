@@ -4,6 +4,7 @@ use astrelis_window::Window;
 
 use crate::device::GpuDevice;
 use crate::error::GpuError;
+use crate::profiling::GpuProfilingCapabilities;
 use crate::queue::GpuQueue;
 use crate::surface::GpuSurface;
 use crate::types::PowerPreference;
@@ -58,4 +59,20 @@ pub trait GpuBackend: Sized {
     /// The window must outlive the surface. Call
     /// [`GpuSurface::configure`] before rendering.
     fn create_surface(&self, window: &dyn Window) -> Result<Self::Surface, GpuError>;
+
+    /// Returns the GPU profiling capabilities detected at initialization.
+    ///
+    /// Use this to determine what level of GPU timing data is available
+    /// on the current platform. See [`GpuProfilingCapabilities`] for details.
+    fn profiling_capabilities(&self) -> GpuProfilingCapabilities;
+
+    /// Processes completed GPU profiling frames and reports results to the
+    /// active profiling backend.
+    ///
+    /// Call once per frame, typically before `astrelis_profiling::new_frame()`.
+    /// GPU timestamp results arrive 1-3 frames late due to GPU buffering.
+    ///
+    /// No-op when GPU profiling is not available or the profiling backend
+    /// is disabled.
+    fn process_profiling_frames(&self);
 }

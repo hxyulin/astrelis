@@ -5,10 +5,12 @@ use std::sync::Arc;
 use astrelis_gpu::backend::{GpuBackend, GpuConfig};
 use astrelis_gpu::device::{AdapterInfo, DeviceType, GpuBackendType};
 use astrelis_gpu::error::GpuError;
+use astrelis_gpu::profiling::{GpuProfilingCapabilities, GpuProfilingTier};
 use astrelis_window::Window;
 
 use crate::convert::types as conv;
 use crate::device::WgpuDevice;
+use crate::profiling::tier;
 use crate::queue::WgpuQueue;
 use crate::surface::WgpuSurface;
 
@@ -28,6 +30,7 @@ pub struct WgpuBackend {
     adapter: wgpu::Adapter,
     device: Arc<WgpuDevice>,
     queue: WgpuQueue,
+    profiling_tier: GpuProfilingTier,
 }
 
 impl GpuBackend for WgpuBackend {
@@ -36,6 +39,7 @@ impl GpuBackend for WgpuBackend {
     type Surface = WgpuSurface;
 
     fn new(config: &GpuConfig) -> Result<Self, GpuError> {
+        astrelis_profiling::profile_function!();
         let flags = if config.validation.unwrap_or(cfg!(debug_assertions)) {
             wgpu::InstanceFlags::debugging()
         } else {
@@ -73,15 +77,30 @@ impl GpuBackend for WgpuBackend {
             },
         };
 
+        // Detect GPU profiling capabilities.
+        let profiling_tier = tier::detect_tier(&adapter);
+        let timer_features = tier::required_features(profiling_tier);
+        eprintln!(
+            "GPU profiling: tier={profiling_tier:?}, features={timer_features:?}"
+        );
+        if profiling_tier == GpuProfilingTier::None {
+            eprintln!(
+                "GPU adapter does not support any timer query features; \
+                 GPU profiling will produce no timing data"
+            );
+        }
+
+        let required_features = timer_features;
         let device_desc = wgpu::DeviceDescriptor {
             label: config.device_label.as_deref(),
             memory_hints: wgpu::MemoryHints::Performance,
+            required_features,
             ..Default::default()
         };
         let (wgpu_device, wgpu_queue) = pollster::block_on(adapter.request_device(&device_desc))
             .map_err(|e| GpuError::DeviceCreationFailed(e.to_string()))?;
 
-        let device = WgpuDevice::new(wgpu_device, wgpu_queue, adapter_info);
+        let device = WgpuDevice::new(wgpu_device, wgpu_queue, adapter_info, profiling_tier);
         let queue = WgpuQueue::new(Arc::clone(&device));
 
         Ok(Self {
@@ -89,6 +108,7 @@ impl GpuBackend for WgpuBackend {
             adapter,
             device,
             queue,
+            profiling_tier,
         })
     }
 
@@ -101,6 +121,7 @@ impl GpuBackend for WgpuBackend {
     }
 
     fn create_surface(&self, window: &dyn Window) -> Result<Self::Surface, GpuError> {
+        astrelis_profiling::profile_function!();
         // SAFETY: The caller must ensure the window outlives the surface.
         let surface = unsafe {
             let raw_display = window
@@ -125,5 +146,18 @@ impl GpuBackend for WgpuBackend {
             Arc::clone(&self.device),
             capabilities,
         ))
+    }
+
+    fn profiling_capabilities(&self) -> GpuProfilingCapabilities {
+        let profiler = self.device.gpu_profiler.lock().unwrap();
+        GpuProfilingCapabilities {
+            tier: self.profiling_tier,
+            timestamp_period_ns: profiler.timestamp_period_ns(),
+        }
+    }
+
+    fn process_profiling_frames(&self) {
+        astrelis_profiling::profile_function!();
+        self.device.process_gpu_profiling_frames();
     }
 }

@@ -28,6 +28,7 @@ impl FontRenderer {
         font_system: FontSystem,
         config: TextRendererConfig,
     ) -> Self {
+        astrelis_profiling::profile_function!();
         let bitmap = BitmapTextRenderer::new(device, font_system.clone(), config.clone());
         let sdf = SdfTextRenderer::new(device, font_system, config);
 
@@ -45,6 +46,7 @@ impl FontRenderer {
 
     /// Prepare text for rendering.
     pub fn prepare(&mut self, text: &Text) -> TextBuffer {
+        astrelis_profiling::profile_function!();
         let mode = text
             .render_mode
             .unwrap_or_else(|| Self::select_render_mode(text.font_size, text.needs_sdf()));
@@ -58,6 +60,7 @@ impl FontRenderer {
 
     /// Queue text for drawing at the given position.
     pub fn draw_text(&mut self, text: &Text, buffer: &mut TextBuffer, position: Vec2) {
+        astrelis_profiling::profile_function!();
         let mode = text
             .render_mode
             .unwrap_or_else(|| Self::select_render_mode(text.font_size, text.needs_sdf()));
@@ -79,6 +82,7 @@ impl FontRenderer {
         position: Vec2,
         effects: &TextEffects,
     ) {
+        astrelis_profiling::profile_function!();
         self.sdf.draw_text_with_effects(buffer, position, effects);
     }
 
@@ -107,6 +111,7 @@ impl FontRenderer {
         width: u32,
         height: u32,
     ) {
+        astrelis_profiling::profile_function!();
         self.bitmap.render(device, encoder, view, width, height);
         self.sdf.render(device, encoder, view, width, height);
     }

@@ -204,6 +204,7 @@ impl TextPipeline {
         font_size: f32,
         wrap_width: Option<f32>,
     ) -> RequestId {
+        astrelis_profiling::profile_function!();
         self.total_requests += 1;
         let request_id = self.next_request_id;
         self.next_request_id += 1;
@@ -230,6 +231,7 @@ impl TextPipeline {
     where
         F: Fn(&str, f32, Option<f32>) -> BaseShapedTextResult,
     {
+        astrelis_profiling::profile_function!();
         if self.pending.is_empty() {
             return;
         }

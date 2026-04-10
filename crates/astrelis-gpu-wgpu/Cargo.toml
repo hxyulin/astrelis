@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 astrelis-core = { workspace = true }
 astrelis-gpu = { workspace = true }
+astrelis-profiling = { workspace = true }
 astrelis-window = { workspace = true }
 raw-window-handle = { workspace = true }
 wgpu = { workspace = true }
