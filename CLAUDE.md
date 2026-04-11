@@ -40,10 +40,13 @@ No circular dependencies.
 
 ### Backend Agnosticism
 
-Windowing, GPU, and profiling use the **trait crate + impl crate**
-pattern:
-- `astrelis-window` defines traits; `astrelis-window-winit` implements them.
-- `astrelis-gpu` defines traits; `astrelis-gpu-wgpu` implements them.
+Windowing and GPU use concrete implementations (no trait indirection):
+- `astrelis-window` wraps winit directly.
+- `astrelis-gpu` wraps wgpu directly.
+- `astrelis-profiling` is a custom in-engine profiler. CPU and GPU
+  spans land on a single global timeline; the viewer
+  (`astrelis-profiling-egui`) reads from it in-process. Always on —
+  no feature flags, no external tool.
 - Feature flags select optional dependencies, **not** architectural
   boundaries.
 
@@ -58,7 +61,9 @@ pattern:
   `[workspace.dependencies]` in the root `Cargo.toml`. Crate-level
   `Cargo.toml` files reference them with `{ workspace = true }`.
 - **Profiling:** Use `astrelis_profiling::profile_function!()` and
-  `astrelis_profiling::profile_scope!()`. Never call raw puffin/tracy
-  APIs directly.
+  `astrelis_profiling::profile_scope!()`. For counters and plots,
+  use `astrelis_profiling::profile_counter!()` and
+  `astrelis_profiling::profile_plot!()`. Call `new_frame()` once
+  per frame to drain buffers into the global timeline.
 - **Commits:** Conventional commits — `feat:`, `fix:`, `chore:`,
   `docs:`, `refactor:`, `test:`.

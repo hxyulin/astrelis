@@ -8,7 +8,6 @@ use crate::error::GpuError;
 use crate::pipeline::{
     ComputePipelineDescriptor, PipelineLayoutDescriptor, RenderPipelineDescriptor,
 };
-use crate::profiling::{GpuProfilingTier, GpuTimestampProfiler};
 use crate::resources::*;
 use crate::shader::{ShaderModuleDescriptor, ShaderSource};
 use crate::texture::{Extent3d, SamplerDescriptor, TextureDescriptor, TextureViewDescriptor};
@@ -69,7 +68,7 @@ pub struct GpuDevice {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
     pub(crate) adapter_info: AdapterInfo,
-    pub(crate) gpu_profiler: std::sync::Mutex<GpuTimestampProfiler>,
+    pub(crate) gpu_profiler: std::sync::Mutex<wgpu_profiler::GpuProfiler>,
 }
 
 impl GpuDevice {
@@ -77,16 +76,9 @@ impl GpuDevice {
         device: wgpu::Device,
         queue: wgpu::Queue,
         adapter_info: AdapterInfo,
-        profiling_tier: GpuProfilingTier,
-        timestamp_period_ns: f32,
+        gpu_profiler: wgpu_profiler::GpuProfiler,
     ) -> Self {
         astrelis_profiling::profile_function!();
-        let gpu_profiler = GpuTimestampProfiler::new(
-            device.clone(),
-            profiling_tier,
-            timestamp_period_ns,
-        );
-
         Self {
             device,
             queue,
@@ -116,16 +108,27 @@ impl GpuDevice {
         &self.queue
     }
 
-    /// Processes finished GPU profiling frames and reports results to the
-    /// active profiling backend.
+    /// Processes finished GPU profiling frames and forwards results
+    /// to [`astrelis_profiling::gpu::report_gpu_frame`].
     ///
-    /// Call this once per frame (typically before [`astrelis_profiling::new_frame`])
-    /// to resolve GPU timestamp queries from previous frames. Results arrive
-    /// 1-3 frames late due to GPU buffering.
+    /// Call this once per frame (typically before
+    /// [`astrelis_profiling::new_frame`]) to resolve GPU timestamp
+    /// queries from previous frames. Results arrive 1-3 frames late
+    /// due to GPU buffering. The profiler absorbs the scopes into
+    /// its global timeline for the in-engine viewer to render.
     pub fn process_gpu_profiling_frames(&self) {
         astrelis_profiling::profile_function!();
+        let _ = self.device.poll(wgpu::PollType::Poll);
         let mut profiler = self.gpu_profiler.lock().unwrap();
-        profiler.process_finished_frames();
+        let period = self.queue.get_timestamp_period();
+        while let Some(results) = profiler.process_finished_frame(period) {
+            let scopes = convert_results(&results);
+            if !scopes.is_empty() {
+                astrelis_profiling::gpu::report_gpu_frame(
+                    astrelis_profiling::gpu::GpuFrame { scopes },
+                );
+            }
+        }
     }
 
     // --- Buffer ---
@@ -467,4 +470,45 @@ impl GpuDevice {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         CommandEncoder::new(encoder, self)
     }
+}
+
+/// Converts a tree of `wgpu_profiler` timer-query results into
+/// backend-agnostic [`astrelis_profiling::gpu::GpuScope`]s.
+///
+/// Results whose `time` field is `None` (unresolved) are silently
+/// dropped — wgpu-profiler may emit these for queries still pending
+/// readback. The timestamp period has already been applied by
+/// `process_finished_frame`, so `time.start`/`time.end` are in
+/// seconds; we convert to nanoseconds here.
+///
+/// Scopes with `start_ns == 0` are treated as corrupt and dropped.
+/// wgpu-profiler reads raw u64 values directly from the mapped
+/// readback buffer without validation; on Metal, the very first
+/// frame's query buffer can contain zeros if the GPU counter sample
+/// wasn't ready yet. Legitimate Metal timestamps are mach-time
+/// absolute values (tens of billions of ns since boot), so 0 is
+/// unambiguous corruption. Using such a value as the CPU/GPU
+/// calibration anchor would push every subsequent real timestamp
+/// tens of seconds into the future on the shared timeline.
+fn convert_results(
+    results: &[wgpu_profiler::GpuTimerQueryResult],
+) -> Vec<astrelis_profiling::gpu::GpuScope> {
+    use astrelis_profiling::gpu::GpuScope;
+    results
+        .iter()
+        .filter_map(|r| {
+            let time = r.time.as_ref()?;
+            let start_ns = (time.start * 1_000_000_000.0) as i64;
+            let end_ns = (time.end * 1_000_000_000.0) as i64;
+            if start_ns <= 0 || end_ns < start_ns {
+                return None;
+            }
+            Some(GpuScope {
+                label: r.label.clone(),
+                start_ns,
+                end_ns,
+                nested: convert_results(&r.nested_queries),
+            })
+        })
+        .collect()
 }

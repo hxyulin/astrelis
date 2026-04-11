@@ -11,8 +11,6 @@ use astrelis_core::color::Color;
 use crate::bind_group::ShaderStages;
 use crate::convert::types as conv;
 use crate::device::GpuDevice;
-use crate::profiling::query_pool::TimestampPair;
-use crate::profiling::GpuProfilingTier;
 use crate::resources::*;
 use crate::texture::Extent3d;
 use crate::types::{IndexFormat, LoadOp, StoreOp};
@@ -91,8 +89,18 @@ pub struct Origin3d {
 pub struct CommandEncoder<'a> {
     pub(crate) encoder: Option<wgpu::CommandEncoder>,
     pub(crate) device: &'a GpuDevice,
-    /// The most recent scope whose end timestamp hasn't been written yet.
-    open_scope: Option<TimestampPair>,
+    /// Open GPU profiling query for the current scope.
+    ///
+    /// This is a **flat, single-query-per-pass** model: at most one
+    /// query is open on the encoder at a time, closed implicitly when
+    /// the next pass begins or the encoder is finished. We deliberately
+    /// do not use `wgpu_profiler::Scope`'s nested-query API because
+    /// nesting requires `TIMESTAMP_QUERY_INSIDE_PASSES`, which Metal
+    /// does not support (its tile-based deferred rendering architecture
+    /// makes intra-pass timestamps physically unavailable). Keeping the
+    /// model flat gives identical profiler output across backends
+    /// without runtime branching.
+    open_query: Option<wgpu_profiler::GpuProfilerQuery>,
 }
 
 impl<'a> CommandEncoder<'a> {
@@ -100,36 +108,26 @@ impl<'a> CommandEncoder<'a> {
         Self {
             encoder: Some(encoder),
             device,
-            open_scope: None,
+            open_query: None,
         }
     }
 
-    /// Writes the end timestamp for the currently open scope, if any.
-    fn close_open_scope(&mut self) {
-        if let Some(pair) = self.open_scope.take() {
+    /// Ends the currently open GPU profiling query, if any.
+    fn close_open_query(&mut self) {
+        if let Some(query) = self.open_query.take() {
             let profiler = self.device.gpu_profiler.lock().unwrap();
-            if profiler.tier() >= GpuProfilingTier::Encoder
-                && let Some(query_set) = profiler.active_query_set()
-            {
-                let encoder = self.encoder.as_mut().expect("encoder already consumed");
-                encoder.write_timestamp(query_set, pair.end_index);
-            }
+            let encoder = self.encoder.as_mut().expect("encoder already consumed");
+            profiler.end_query(encoder, query);
         }
     }
 
     /// Consumes the encoder and returns the finished command buffer.
     pub(crate) fn finish(mut self) -> wgpu::CommandBuffer {
         astrelis_profiling::profile_function!();
-        self.close_open_scope();
-
+        self.close_open_query();
         let mut encoder = self.encoder.take().expect("encoder already consumed");
-
-        // Resolve all queries in the active pool.
-        {
-            let mut profiler = self.device.gpu_profiler.lock().unwrap();
-            profiler.resolve_frame(&mut encoder);
-        }
-
+        let mut profiler = self.device.gpu_profiler.lock().unwrap();
+        profiler.resolve_queries(&mut encoder);
         encoder.finish()
     }
 
@@ -142,28 +140,83 @@ impl<'a> CommandEncoder<'a> {
         desc: &RenderPassDescriptor<'_>,
     ) -> RenderPass<'pass> {
         astrelis_profiling::profile_function!();
+        self.close_open_query();
 
-        self.close_open_scope();
+        // Allocate a pass-attached timestamp query BEFORE starting the
+        // pass. `begin_pass_query` reserves a query pair but emits no
+        // encoder commands — the actual timestamp writes are attached
+        // to the `RenderPassDescriptor.timestamp_writes` below. This is
+        // the canonical wgpu path for timing passes and is what Metal
+        // reliably supports (`MTLRenderPassDescriptor.sampleBufferAttachments`).
+        // We intentionally avoid `begin_query(encoder)` + encoder-level
+        // `write_timestamp`, because Metal advertises
+        // `TIMESTAMP_QUERY_INSIDE_ENCODERS` but returns zeros for
+        // those writes in practice.
+        {
+            let profiler = self.device.gpu_profiler.lock().unwrap();
+            let encoder = self.encoder.as_mut().expect("encoder already consumed");
+            let query = profiler.begin_pass_query(
+                desc.label.unwrap_or("render_pass"),
+                encoder,
+            );
+            drop(profiler);
+            self.open_query = Some(query);
+        }
+
+        let color_attachments: Vec<Option<wgpu::RenderPassColorAttachment<'_>>> = desc
+            .color_attachments
+            .iter()
+            .map(|att| {
+                Some(wgpu::RenderPassColorAttachment {
+                    view: &att.view.0,
+                    resolve_target: att.resolve_target.map(|v| &v.0),
+                    ops: wgpu::Operations {
+                        load: match att.load_op {
+                            LoadOp::Clear(c) => wgpu::LoadOp::Clear(wgpu::Color {
+                                r: c.r as f64,
+                                g: c.g as f64,
+                                b: c.b as f64,
+                                a: c.a as f64,
+                            }),
+                            LoadOp::Load => wgpu::LoadOp::Load,
+                        },
+                        store: conv::store_op(att.store_op),
+                    },
+                    depth_slice: None,
+                })
+            })
+            .collect();
+
+        let depth_stencil_attachment =
+            desc.depth_stencil_attachment.as_ref().map(|att| {
+                wgpu::RenderPassDepthStencilAttachment {
+                    view: &att.view.0,
+                    depth_ops: Some(wgpu::Operations {
+                        load: match att.depth_load_op {
+                            LoadOp::Clear(v) => wgpu::LoadOp::Clear(v),
+                            LoadOp::Load => wgpu::LoadOp::Load,
+                        },
+                        store: conv::store_op(att.depth_store_op),
+                    }),
+                    stencil_ops: None,
+                }
+            });
+
+        let timestamp_writes = self
+            .open_query
+            .as_ref()
+            .and_then(|q| q.render_pass_timestamp_writes());
 
         let encoder = self.encoder.as_mut().expect("encoder already consumed");
-        let label = desc.label.unwrap_or("render_pass");
+        let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: desc.label,
+            color_attachments: &color_attachments,
+            depth_stencil_attachment,
+            timestamp_writes,
+            ..Default::default()
+        });
 
-        // GPU profiling timestamp insertion.
-        let mut profiler = self.device.gpu_profiler.lock().unwrap();
-        let tier = profiler.tier();
-        if tier >= GpuProfilingTier::Encoder {
-            if let Some(pair) = profiler.begin_scope(label) {
-                if let Some(query_set) = profiler.active_query_set() {
-                    encoder.write_timestamp(query_set, pair.start_index);
-                }
-                self.open_scope = Some(pair);
-            }
-        } else if tier == GpuProfilingTier::Basic {
-            profiler.begin_scope(label);
-        }
-        drop(profiler);
-
-        RenderPass::new(encoder, desc)
+        RenderPass { pass: Some(pass) }
     }
 
     /// Begins a compute pass.
@@ -172,27 +225,32 @@ impl<'a> CommandEncoder<'a> {
         label: Option<&str>,
     ) -> ComputePass<'pass> {
         astrelis_profiling::profile_function!();
+        self.close_open_query();
 
-        self.close_open_scope();
+        // See `begin_render_pass` for the rationale behind
+        // `begin_pass_query` + `timestamp_writes`.
+        {
+            let profiler = self.device.gpu_profiler.lock().unwrap();
+            let encoder = self.encoder.as_mut().expect("encoder already consumed");
+            let query = profiler.begin_pass_query(
+                label.unwrap_or("compute_pass"),
+                encoder,
+            );
+            drop(profiler);
+            self.open_query = Some(query);
+        }
+
+        let timestamp_writes = self
+            .open_query
+            .as_ref()
+            .and_then(|q| q.compute_pass_timestamp_writes());
 
         let encoder = self.encoder.as_mut().expect("encoder already consumed");
-        let scope_label = label.unwrap_or("compute_pass");
-
-        let mut profiler = self.device.gpu_profiler.lock().unwrap();
-        let tier = profiler.tier();
-        if tier >= GpuProfilingTier::Encoder {
-            if let Some(pair) = profiler.begin_scope(scope_label) {
-                if let Some(query_set) = profiler.active_query_set() {
-                    encoder.write_timestamp(query_set, pair.start_index);
-                }
-                self.open_scope = Some(pair);
-            }
-        } else if tier == GpuProfilingTier::Basic {
-            profiler.begin_scope(scope_label);
-        }
-        drop(profiler);
-
-        ComputePass::new(encoder, label)
+        let pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label,
+            timestamp_writes,
+        });
+        ComputePass { pass: Some(pass) }
     }
 
     /// Copies data between buffers.
@@ -324,63 +382,6 @@ pub struct RenderPass<'a> {
 }
 
 impl<'a> RenderPass<'a> {
-    pub(crate) fn new(
-        encoder: &'a mut wgpu::CommandEncoder,
-        desc: &RenderPassDescriptor<'_>,
-    ) -> Self {
-        astrelis_profiling::profile_function!();
-
-        let color_attachments: Vec<Option<wgpu::RenderPassColorAttachment<'_>>> = desc
-            .color_attachments
-            .iter()
-            .map(|att| {
-                Some(wgpu::RenderPassColorAttachment {
-                    view: &att.view.0,
-                    resolve_target: att.resolve_target.map(|v| &v.0),
-                    ops: wgpu::Operations {
-                        load: match att.load_op {
-                            LoadOp::Clear(c) => wgpu::LoadOp::Clear(wgpu::Color {
-                                r: c.r as f64,
-                                g: c.g as f64,
-                                b: c.b as f64,
-                                a: c.a as f64,
-                            }),
-                            LoadOp::Load => wgpu::LoadOp::Load,
-                        },
-                        store: conv::store_op(att.store_op),
-                    },
-                    depth_slice: None,
-                })
-            })
-            .collect();
-
-        let depth_stencil_attachment =
-            desc.depth_stencil_attachment.as_ref().map(|att| {
-                wgpu::RenderPassDepthStencilAttachment {
-                    view: &att.view.0,
-                    depth_ops: Some(wgpu::Operations {
-                        load: match att.depth_load_op {
-                            LoadOp::Clear(v) => wgpu::LoadOp::Clear(v),
-                            LoadOp::Load => wgpu::LoadOp::Load,
-                        },
-                        store: conv::store_op(att.depth_store_op),
-                    }),
-                    stencil_ops: None,
-                }
-            });
-
-        let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: desc.label,
-            color_attachments: &color_attachments,
-            depth_stencil_attachment,
-            ..Default::default()
-        });
-
-        Self {
-            pass: Some(pass),
-        }
-    }
-
     fn pass_mut(&mut self) -> &mut wgpu::RenderPass<'a> {
         self.pass.as_mut().expect("render pass already ended")
     }
@@ -472,20 +473,6 @@ pub struct ComputePass<'a> {
 }
 
 impl<'a> ComputePass<'a> {
-    pub(crate) fn new(
-        encoder: &'a mut wgpu::CommandEncoder,
-        label: Option<&str>,
-    ) -> Self {
-        astrelis_profiling::profile_function!();
-        let pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label,
-            ..Default::default()
-        });
-        Self {
-            pass: Some(pass),
-        }
-    }
-
     fn pass_mut(&mut self) -> &mut wgpu::ComputePass<'a> {
         self.pass.as_mut().expect("compute pass already ended")
     }

@@ -1,18 +1,17 @@
-//! Basic profiling example.
+//! End-to-end demo of the Astrelis in-engine profiler.
 //!
-//! Run with a backend feature to enable actual profiling:
+//! Runs a synthetic physics + render loop, marks frames, and prints
+//! a one-line summary after the run. No external tool is required:
+//! the profiler collects into its global timeline in-process.
 //!
-//!   cargo run -p astrelis-profiling --features tracy --example basic_profiling
-//!   cargo run -p astrelis-profiling --features puffin --example basic_profiling
+//! For a live flame-graph window, see the `viewer_demo` example in
+//! the `astrelis-profiling-egui` crate.
 //!
-//! **Tracy:** Open the Tracy profiler GUI *before* running this example so it
-//! can capture the (short) session. Or use `tracy-capture -o trace.tracy` to
-//! save to a file and open it afterwards.
+//! Run with:
 //!
-//! **Puffin:** A puffin_http server starts on localhost:8585. Open the
-//! puffin_viewer application to inspect frames.
-//!
-//! Without any backend feature, all profiling calls compile to no-ops.
+//!     cargo run -p astrelis-profiling --example basic_profiling
+
+use astrelis_profiling::Profiler;
 
 fn simulate_physics() {
     astrelis_profiling::profile_function!();
@@ -21,7 +20,6 @@ fn simulate_physics() {
 
 fn render() {
     astrelis_profiling::profile_function!();
-
     {
         astrelis_profiling::profile_scope!("prepare_draw_calls");
         std::thread::sleep(std::time::Duration::from_millis(3));
@@ -40,6 +38,26 @@ fn main() {
         simulate_physics();
         render();
     }
-
+    // One final frame_mark so the spans from the last loop iteration
+    // are drained into the timeline.
+    astrelis_profiling::new_frame();
     astrelis_profiling::finish();
+
+    let p = Profiler::get();
+    let timeline = p.timeline.read().unwrap();
+    let total_spans: usize = timeline.thread_streams.values().map(|s| s.spans.len()).sum();
+    let frames = timeline.frame_marks.len();
+    let threads = timeline.threads.len();
+    let scopes = timeline.scopes.len();
+
+    println!(
+        "profiler collected: {frames} frames, {threads} thread(s), \
+         {scopes} scope site(s), {total_spans} span(s)"
+    );
+
+    assert!(frames >= 10, "expected at least 10 frame marks");
+    assert!(
+        total_spans >= 10 * 4,
+        "expected at least 40 spans (4 per frame × 10 frames)"
+    );
 }

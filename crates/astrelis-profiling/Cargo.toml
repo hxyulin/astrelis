@@ -1,20 +1,20 @@
 [package]
 name = "astrelis-profiling"
-description = "Backend-agnostic profiling macros for the Astrelis engine"
+description = "In-engine custom profiler for the Astrelis engine"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[features]
-puffin = ["dep:puffin", "dep:puffin_http"]
-tracy = ["dep:tracy-client"]
-
 [dependencies]
-puffin = { workspace = true, optional = true }
-puffin_http = { workspace = true, optional = true }
-tracy-client = { workspace = true, optional = true, features = ["enable"] }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "hot_path"
+harness = false
 
 [lints]
 workspace = true

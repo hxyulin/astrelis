@@ -16,6 +16,7 @@ egui-wgpu = { workspace = true }
 wgpu = { workspace = true }
 
 [dev-dependencies]
+astrelis-profiling-egui = { workspace = true }
 pollster = { workspace = true }
 
 [lints]

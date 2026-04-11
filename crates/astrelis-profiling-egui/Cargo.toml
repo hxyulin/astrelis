@@ -1,0 +1,15 @@
+[package]
+name = "astrelis-profiling-egui"
+description = "egui viewer for the Astrelis in-engine profiler"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-profiling = { workspace = true }
+egui = { workspace = true }
+
+[lints]
+workspace = true

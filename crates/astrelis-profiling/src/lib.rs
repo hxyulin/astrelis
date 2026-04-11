@@ -1,118 +1,138 @@
-//! Backend-agnostic profiling for the Astrelis engine.
+//! Custom in-engine profiler for the Astrelis game engine.
 //!
-//! This crate provides profiling macros that compile to zero-cost no-ops when
-//! no backend feature is enabled. Enable a backend feature (e.g., `tracy`) to
-//! activate profiling.
+//! `astrelis-profiling` collects CPU and GPU timing data into a
+//! global [`Timeline`](crate::timeline::Timeline) that can be read
+//! by an in-process viewer (see the `astrelis-profiling-egui`
+//! crate). It replaces the previous Tracy-based backend entirely —
+//! there is no external profiler binary to attach; everything lives
+//! in-engine.
 //!
-//! # Usage
+//! # Overview
 //!
 //! ```rust
 //! fn update_physics() {
 //!     astrelis_profiling::profile_function!();
-//!
 //!     {
 //!         astrelis_profiling::profile_scope!("broad_phase");
-//!         // ... broad phase collision detection ...
+//!         // ...
+//!     }
+//! }
+//!
+//! fn main_loop() {
+//!     astrelis_profiling::init();
+//!     for _ in 0..60 {
+//!         astrelis_profiling::new_frame();
+//!         update_physics();
 //!     }
 //! }
 //! ```
 //!
-//! # GPU Profiling
+//! # Data model
 //!
-//! GPU backend implementations report timing data via [`gpu::report_gpu_scopes`].
-//! The active profiling backend displays these under a virtual "GPU" thread.
+//! All profiling data lives on a single global timeline keyed by
+//! absolute nanoseconds. Spans are identified by `SpanId` rather
+//! than by stack position so the same API can later extend to
+//! async spans that begin on one thread and end on another. Frames
+//! are *marks* on the timeline, not containers, and the retention
+//! policy keeps a rolling window of recent frames.
 //!
-//! # Counters & Plots
+//! # Performance
 //!
-//! Track custom metrics with [`profile_counter!`] and [`profile_plot!`]:
-//!
-//! ```rust
-//! astrelis_profiling::profile_counter!("gpu_memory", "buffer_bytes", 1024u64);
-//! astrelis_profiling::profile_plot!("frame_time_ms", 16.3);
-//! ```
-//!
-//! # Backends
-//!
-//! | Feature  | Backend                                              |
-//! |----------|------------------------------------------------------|
-//! | `puffin` | [puffin](https://crates.io/crates/puffin) viewer     |
-//! | `tracy`  | [Tracy](https://github.com/wolfpld/tracy) profiler   |
-//!
-//! When no backend feature is enabled, all macros and functions are zero-cost no-ops.
+//! The hot path for `profile_scope!` and `profile_function!` costs
+//! roughly ~100 ns per scope on modern hardware: one `OnceLock`
+//! read, one atomic increment, one `Instant::now`, one thread-local
+//! access, one uncontended mutex lock, and one `Vec` push.
 
-pub(crate) mod backend;
-pub mod counters;
+#![warn(missing_docs)]
+
+pub mod clock;
 pub mod data;
 pub mod gpu;
+pub mod profiler;
+pub mod string_table;
 pub mod thread;
-
-pub use backend::{finish, init, new_frame, set_thread_name};
-pub use thread::spawn_profiled;
+pub(crate) mod thread_local;
+pub mod timeline;
 
 // ============================================================================
-// Feature: tracy ENABLED — use tracy_client::span!() for CPU zones
+// Public API — backwards-compatible function surface
 // ============================================================================
 
-/// Profiles the enclosing function.
+pub use profiler::{Profiler, ScopeGuard, finish, frame_mark, init, set_thread_name};
+pub use thread::{configure_pool_thread, spawn_profiled};
+
+/// Signals a frame boundary. Equivalent to calling [`frame_mark`].
 ///
-/// When the `tracy` backend is enabled, this records a Tracy zone spanning
-/// the entire function. When no backend is enabled, this is a no-op.
-#[cfg(feature = "tracy")]
-#[macro_export]
-macro_rules! profile_function {
-    () => {
-        let _tracy_span = ::tracy_client::span!();
-    };
-    ($data:expr) => {
-        let _tracy_span = ::tracy_client::span!($data);
+/// Kept as a free function for backwards compatibility with code
+/// that called the older `new_frame` API.
+#[inline]
+pub fn new_frame() {
+    profiler::frame_mark();
+}
+
+// ============================================================================
+// Macro-reachable internals
+// ============================================================================
+
+/// Items reachable from macros but not part of the stable public API.
+/// Users should never reference anything in this module directly.
+#[doc(hidden)]
+pub mod private {
+    pub use std::sync::OnceLock;
+
+    pub use crate::data::{CounterValue, ScopeId, StringId};
+    pub use crate::profiler::{
+        ScopeGuard, enter_scope, record_counter_shim, record_counter_value,
     };
 }
+
+// ============================================================================
+// Macros
+// ============================================================================
 
 /// Profiles a named scope within a function.
 ///
-/// When the `tracy` backend is enabled, this records a named Tracy zone.
-#[cfg(feature = "tracy")]
+/// The scope begins at the macro call site and ends when the returned
+/// guard is dropped (at the end of the enclosing block).
+///
+/// A per-call-site `OnceLock<ScopeId>` caches the scope registration,
+/// so only the *first* invocation of a given call site touches the
+/// timeline write lock. Subsequent invocations pay one atomic load
+/// plus the per-scope hot-path cost (see crate-level docs).
+///
+/// # Example
+///
+/// ```rust
+/// fn process() {
+///     astrelis_profiling::profile_scope!("step_1");
+///     // ...
+/// }
+/// ```
 #[macro_export]
 macro_rules! profile_scope {
     ($name:expr) => {
-        let _tracy_span = ::tracy_client::span!($name);
+        // The `static` is placed inside a block expression so that
+        // multiple `profile_scope!` invocations within the same
+        // enclosing scope do not collide on a single item name.
+        // The returned guard is bound by the outer `let`, so its
+        // drop point is the enclosing block — matching the old
+        // `profiling::scope!` RAII semantics.
+        let _astrelis_scope_guard = {
+            static CACHE: $crate::private::OnceLock<$crate::private::ScopeId> =
+                $crate::private::OnceLock::new();
+            $crate::private::enter_scope(&CACHE, $name, file!(), line!())
+        };
     };
-    ($name:expr, $data:expr) => {
-        // Tracy span! only takes name + optional callstack depth.
-        // Attach extra data as a message on the span.
-        let _tracy_span = ::tracy_client::span!($name);
+    ($name:expr, $_data:expr) => {
+        // Accept an optional second argument for forward compatibility
+        // with structured span data; currently unused.
+        $crate::profile_scope!($name);
     };
 }
 
-/// Re-export tracy_client so downstream crates can access it if needed.
-#[cfg(feature = "tracy")]
-#[doc(hidden)]
-pub use tracy_client;
-
-// ============================================================================
-// Feature: puffin ENABLED — re-export puffin's own macros directly
-// ============================================================================
-
-/// Profiles the enclosing function.
-///
-/// When the `puffin` backend is enabled, this records a puffin scope
-/// spanning the entire function.
-#[cfg(feature = "puffin")]
-pub use puffin::{profile_function, profile_scope};
-
-/// Re-export puffin so downstream crates can access it if needed.
-#[cfg(feature = "puffin")]
-#[doc(hidden)]
-pub use puffin;
-
-// ============================================================================
-// No backend — zero-cost no-op stubs
-// ============================================================================
-
-/// Profiles the enclosing function.
-///
-/// When a profiling backend is enabled, this records a scope spanning the
-/// entire function. When no backend is enabled, this is a no-op.
+/// Profiles the enclosing function. The scope name is inferred from
+/// `std::any::type_name` on a local nested function, giving the fully
+/// qualified path of the caller.
 ///
 /// # Example
 ///
@@ -122,52 +142,34 @@ pub use puffin;
 ///     // ...
 /// }
 /// ```
-#[cfg(not(any(feature = "puffin", feature = "tracy")))]
 #[macro_export]
 macro_rules! profile_function {
-    () => {};
-    ($data:expr) => {};
+    () => {
+        // See `profile_scope!` for the reason the `static` lives
+        // inside the `let` expression rather than at statement level.
+        let _astrelis_fn_guard = {
+            static CACHE: $crate::private::OnceLock<$crate::private::ScopeId> =
+                $crate::private::OnceLock::new();
+            fn __astrelis_f() {}
+            fn type_name_of<T>(_: T) -> &'static str {
+                ::std::any::type_name::<T>()
+            }
+            // `type_name_of(__astrelis_f)` returns something like
+            // `crate::module::my_function::__astrelis_f`. Strip the
+            // trailing "::__astrelis_f" to get the caller's path.
+            const SUFFIX_LEN: usize = "::__astrelis_f".len();
+            let full = type_name_of(__astrelis_f);
+            let name = &full[..full.len() - SUFFIX_LEN];
+            $crate::private::enter_scope(&CACHE, name, file!(), line!())
+        };
+    };
+    ($_data:expr) => {
+        $crate::profile_function!();
+    };
 }
 
-/// Profiles a named scope within a function.
-///
-/// # Example
-///
-/// ```rust
-/// fn process() {
-///     {
-///         astrelis_profiling::profile_scope!("step_1");
-///         // ...
-///     }
-///     {
-///         astrelis_profiling::profile_scope!("step_2", "extra data");
-///         // ...
-///     }
-/// }
-/// ```
-#[cfg(not(any(feature = "puffin", feature = "tracy")))]
-#[macro_export]
-macro_rules! profile_scope {
-    ($name:expr) => {};
-    ($name:expr, $data:expr) => {};
-}
-
-// ============================================================================
-// Macros that are the same regardless of backend
-// ============================================================================
-
-/// Names the current thread for profiling.
-///
-/// Call at the start of thread entry points (e.g., thread pool workers,
-/// rayon callbacks) to give the thread a human-readable name in the
-/// profiler viewer.
-///
-/// # Example
-///
-/// ```rust
-/// // Inside a thread pool worker:
-/// astrelis_profiling::profile_thread!("worker_0");
-/// ```
+/// Names the current thread for the profiler. Call at the start of
+/// thread entry points (e.g. pool workers, rayon callbacks).
 #[macro_export]
 macro_rules! profile_thread {
     ($name:expr) => {
@@ -175,69 +177,41 @@ macro_rules! profile_thread {
     };
 }
 
-/// Records a profiling counter value.
+/// Records a counter sample on the current thread.
 ///
-/// When the `tracy` backend is enabled, counters are displayed as native
-/// Tracy plots. With other backends, they route through the backend's
-/// counter API.
-///
-/// No-op when no profiling backend is enabled.
+/// The `category` argument is accepted but currently unused. The
+/// name is interned once per call site via a `OnceLock<StringId>`
+/// cache.
 ///
 /// # Example
 ///
 /// ```rust
 /// astrelis_profiling::profile_counter!("gpu_memory", "buffer_bytes", 1024u64);
-/// astrelis_profiling::profile_counter!("cache", "hit_rate", 0.95f64);
 /// ```
-#[cfg(feature = "tracy")]
 #[macro_export]
 macro_rules! profile_counter {
-    ($category:expr, $name:expr, $value:expr) => {
-        ::tracy_client::plot!($name, $crate::data::counter_to_f64($value))
-    };
+    ($_category:expr, $name:expr, $value:expr) => {{
+        static CACHE: $crate::private::OnceLock<$crate::private::StringId> =
+            $crate::private::OnceLock::new();
+        $crate::private::record_counter_shim(&CACHE, $name, $value);
+    }};
 }
 
-/// Records a profiling counter value.
-///
-/// No-op when no profiling backend is enabled.
-#[cfg(not(feature = "tracy"))]
-#[macro_export]
-macro_rules! profile_counter {
-    ($category:expr, $name:expr, $value:expr) => {
-        $crate::counters::record_counter($category, $name, $value)
-    };
-}
-
-/// Records a profiling plot value.
-///
-/// When the `tracy` backend is enabled, plots are displayed as native
-/// Tracy time-series graphs. With other backends, they route through
-/// the backend's plot API.
-///
-/// No-op when no profiling backend is enabled.
+/// Records a plot sample on the current thread. Equivalent to
+/// `profile_counter!` without the category field.
 ///
 /// # Example
 ///
 /// ```rust
 /// astrelis_profiling::profile_plot!("frame_time_ms", 16.3);
 /// ```
-#[cfg(feature = "tracy")]
 #[macro_export]
 macro_rules! profile_plot {
-    ($name:expr, $value:expr) => {
-        ::tracy_client::plot!($name, $value as f64)
-    };
-}
-
-/// Records a profiling plot value.
-///
-/// No-op when no profiling backend is enabled.
-#[cfg(not(feature = "tracy"))]
-#[macro_export]
-macro_rules! profile_plot {
-    ($name:expr, $value:expr) => {
-        $crate::counters::record_plot($name, $value)
-    };
+    ($name:expr, $value:expr) => {{
+        static CACHE: $crate::private::OnceLock<$crate::private::StringId> =
+            $crate::private::OnceLock::new();
+        $crate::private::record_counter_value(&CACHE, $name, ($value) as f64);
+    }};
 }
 
 #[cfg(test)]
@@ -274,7 +248,7 @@ mod tests {
     #[test]
     fn counter_macro_compiles() {
         profile_counter!("test", "counter", 42u64);
-        profile_counter!("test", "float_counter", 3.14f64);
+        profile_counter!("test", "float_counter", 2.5f64);
     }
 
     #[test]
@@ -283,7 +257,19 @@ mod tests {
     }
 
     #[test]
-    fn gpu_reporting_compiles() {
-        gpu::report_gpu_scopes(&[]);
+    fn scope_spans_are_recorded() {
+        init();
+        {
+            profile_scope!("recorded_scope");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        new_frame();
+        let p = Profiler::get();
+        let timeline = p.timeline.read().unwrap();
+        let has_span = timeline
+            .thread_streams
+            .values()
+            .any(|s| !s.spans.is_empty());
+        assert!(has_span, "expected at least one recorded span after frame_mark");
     }
 }

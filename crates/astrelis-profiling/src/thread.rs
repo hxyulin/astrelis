@@ -5,7 +5,7 @@
 
 /// Spawns a named thread with automatic profiler thread naming.
 ///
-/// The thread name appears in the profiler viewer (e.g., puffin)
+/// The thread name appears in the profiler viewer
 /// instead of a raw thread ID. This is the preferred way to spawn
 /// threads that should be visible in profiling output.
 ///

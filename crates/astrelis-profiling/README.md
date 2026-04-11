@@ -1,16 +1,16 @@
 # astrelis-profiling
 
-Backend-agnostic profiling macros for the Astrelis engine.
+A custom in-engine profiler for the Astrelis engine. CPU and GPU
+spans are collected into a single global timeline and rendered
+in-process by the `astrelis-profiling-egui` viewer — no external
+tool is required.
 
-All macros compile to zero-cost no-ops when no backend feature is enabled,
-so profiling instrumentation can stay in production code without overhead.
-
-## Backends
-
-| Feature  | Backend | Description |
-|----------|---------|-------------|
-| `puffin` | [puffin](https://crates.io/crates/puffin) | CPU profiling with HTTP viewer on `localhost:8585` |
-| *(none)* | no-op | All macros expand to nothing |
+Enabled by default via the `enabled` Cargo feature. When active,
+the hot path for `profile_scope!` and `profile_function!` is
+roughly ~100 ns per scope (thread-local write under an uncontended
+mutex). Compile with `--no-default-features` for zero-cost release
+builds, or call `set_enabled(false)` for a runtime toggle (~1 ns
+per-scope cost for the atomic check).
 
 ## Usage
 
@@ -31,24 +31,31 @@ fn update_physics() {
 // At startup:
 astrelis_profiling::init();
 
-// Each frame:
+// Each frame (drains thread-local buffers into the timeline):
 astrelis_profiling::new_frame();
-
-// At shutdown:
-astrelis_profiling::finish();
 ```
 
-Enable a backend in your `Cargo.toml`:
+## Counters and plots
 
-```toml
-[dependencies]
-astrelis-profiling = { version = "0.3", features = ["puffin"] }
+```rust
+astrelis_profiling::profile_counter!("gpu_memory", "buffer_bytes", 1024u64);
+astrelis_profiling::profile_plot!("frame_time_ms", 16.3);
 ```
 
-## GPU Profiling
+## GPU profiling
 
-The crate also defines a `GpuProfiler` trait for future GPU crate integration.
-Implement it on your GPU context to enable GPU scope tracking.
+GPU timestamps are collected by `wgpu-profiler` in `astrelis-gpu`
+and submitted to the global timeline via
+`astrelis_profiling::gpu::report_gpu_frame`. They share the same
+nanosecond axis as CPU spans once calibration has run.
+
+## Viewer
+
+The in-engine viewer lives in the sibling
+[`astrelis-profiling-egui`](../astrelis-profiling-egui) crate. It
+exposes an egui widget that reads from the global timeline and
+renders a flame graph of the most recent frame (Stage 1) and — in
+later stages — a scrollable multi-frame timeline.
 
 ## License
 

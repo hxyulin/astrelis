@@ -24,22 +24,22 @@ pub struct SurfaceConfiguration {
 /// A presentation surface tied to a window.
 ///
 /// Manages the swap chain for presenting rendered frames to the screen.
-pub struct Surface<'a> {
+pub struct Surface {
     surface: wgpu::Surface<'static>,
-    device: &'a GpuDevice,
+    device: wgpu::Device,
     capabilities: wgpu::SurfaceCapabilities,
     config: Option<SurfaceConfiguration>,
 }
 
-impl<'a> Surface<'a> {
+impl Surface {
     pub(crate) fn new(
         surface: wgpu::Surface<'static>,
-        device: &'a GpuDevice,
+        device: &GpuDevice,
         capabilities: wgpu::SurfaceCapabilities,
     ) -> Self {
         Self {
             surface,
-            device,
+            device: device.device.clone(),
             capabilities,
             config: None,
         }
@@ -95,7 +95,7 @@ impl<'a> Surface<'a> {
             view_formats: vec![],
             desired_maximum_frame_latency: config.desired_maximum_frame_latency,
         };
-        self.surface.configure(&self.device.device, &wgpu_config);
+        self.surface.configure(&self.device, &wgpu_config);
         self.config = Some(config.clone());
     }
 

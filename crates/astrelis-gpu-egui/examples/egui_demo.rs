@@ -7,6 +7,7 @@ use astrelis_gpu::convert::types::texture_format;
 use astrelis_gpu::surface::SurfaceConfiguration;
 use astrelis_gpu::types::PresentMode;
 use astrelis_gpu_egui::EguiIntegration;
+use astrelis_profiling_egui::LastFrameFlameGraph;
 use astrelis_window::backend::{AppHandler, EventLoopContext};
 use astrelis_window::control_flow::ControlFlow;
 use astrelis_window::event::WindowEvent;
@@ -17,7 +18,7 @@ use astrelis_window::window_id::WindowId;
 struct App {
     window_id: Option<WindowId>,
     gpu: Option<Gpu>,
-    surface: Option<astrelis_gpu::Surface<'static>>,
+    surface: Option<astrelis_gpu::Surface>,
     egui: Option<EguiIntegration>,
 
     // Demo state
@@ -25,6 +26,9 @@ struct App {
     counter: i32,
     slider_value: f32,
     checkbox: bool,
+
+    // Profiler viewer
+    flame_graph: LastFrameFlameGraph,
 }
 
 impl AppHandler for App {
@@ -59,13 +63,13 @@ impl AppHandler for App {
 
                 let egui = EguiIntegration::new(&gpu, texture_format(format));
 
-                // SAFETY: surface lifetime is managed alongside gpu lifetime
-                let surface: astrelis_gpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
-
                 self.gpu = Some(gpu);
                 self.surface = Some(surface);
                 self.egui = Some(egui);
-                ctx.set_control_flow(ControlFlow::Wait);
+                // Poll so the event loop ticks continuously and the
+                // profiler flame graph updates live rather than
+                // only on input events.
+                ctx.set_control_flow(ControlFlow::Poll);
             }
             AppLifecycle::Suspended | AppLifecycle::Exiting => {}
         }
@@ -172,6 +176,17 @@ impl App {
             ui.label(format!("Hello, {}!", if self.name.is_empty() { "world" } else { &self.name }));
         });
 
+        // Profiler flame graph for the most recent completed frame.
+        // The widget reads from the global profiler timeline
+        // populated by every `profile_scope!` / `profile_function!`
+        // in this process, plus the GPU spans that astrelis-gpu
+        // submits from `process_profiling_frames` each tick.
+        egui::Window::new("Profiler")
+            .default_size([900.0, 260.0])
+            .show(egui.context(), |ui| {
+                self.flame_graph.ui(ui);
+            });
+
         astrelis_profiling::profile_scope!("encode");
         let mut encoder =
             gpu.raw_device()
@@ -239,6 +254,7 @@ fn main() {
         counter: 0,
         slider_value: 50.0,
         checkbox: false,
+        flame_graph: LastFrameFlameGraph::new(),
     };
     astrelis_window::run(&mut app).expect("event loop error");
 }

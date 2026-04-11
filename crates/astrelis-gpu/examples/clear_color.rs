@@ -26,7 +26,7 @@ use astrelis_core::color::Color;
 struct App {
     window_id: Option<WindowId>,
     gpu: Option<Gpu>,
-    surface: Option<astrelis_gpu::Surface<'static>>,
+    surface: Option<astrelis_gpu::Surface>,
     frame_count: u64,
 }
 
@@ -61,9 +61,6 @@ impl AppHandler for App {
                     desired_maximum_frame_latency: 2,
                 };
                 surface.configure(&config);
-
-                // SAFETY: surface lifetime is managed alongside gpu lifetime
-                let surface: astrelis_gpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
 
                 self.gpu = Some(gpu);
                 self.surface = Some(surface);

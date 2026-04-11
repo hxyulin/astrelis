@@ -98,6 +98,8 @@ impl Gpu {
                 "GPU adapter does not support any timer query features; \
                  GPU profiling will produce no timing data"
             );
+        } else {
+            astrelis_profiling::gpu::init_gpu_context(map_backend(info.backend));
         }
 
         let required_features = timer_features;
@@ -110,9 +112,23 @@ impl Gpu {
         let (wgpu_device, wgpu_queue) = pollster::block_on(adapter.request_device(&device_desc))
             .map_err(|e| GpuError::DeviceCreationFailed(e.to_string()))?;
 
-        let timestamp_period_ns = wgpu_queue.get_timestamp_period();
         let queue_clone = wgpu_queue.clone();
-        let device = GpuDevice::new(wgpu_device, queue_clone, adapter_info, profiling_tier, timestamp_period_ns);
+
+        // Construct `wgpu_profiler::GpuProfiler` directly rather than
+        // going through the `new_with_tracy_client` helper, which
+        // calls `device.poll(wait_indefinitely)` during calibration
+        // and hangs on macOS Metal. The profiler's GPU lane is
+        // registered lazily inside `astrelis-profiling` on the first
+        // reported frame, which also sidesteps the calibration
+        // ordering problem Metal has with standalone timestamp
+        // queries.
+        let gpu_profiler = wgpu_profiler::GpuProfiler::new(
+            &wgpu_device,
+            wgpu_profiler::GpuProfilerSettings::default(),
+        )
+        .map_err(|e| GpuError::DeviceCreationFailed(format!("GPU profiler creation failed: {e}")))?;
+
+        let device = GpuDevice::new(wgpu_device, queue_clone, adapter_info, gpu_profiler);
 
         Ok(Self {
             instance,
@@ -132,7 +148,7 @@ impl Gpu {
     ///
     /// The window must outlive the surface. Call
     /// [`Surface::configure`] before rendering.
-    pub fn create_surface(&self, window: &dyn Window) -> Result<Surface<'_>, GpuError> {
+    pub fn create_surface(&self, window: &dyn Window) -> Result<Surface, GpuError> {
         astrelis_profiling::profile_function!();
         // SAFETY: The caller must ensure the window outlives the surface.
         let surface = unsafe {
@@ -171,9 +187,11 @@ impl Gpu {
             .collect();
         self.queue.submit(command_buffers);
 
-        // Signal end of frame to the GPU profiler so it can initiate readback.
+        // Signal end of frame to the GPU profiler.
         let mut profiler = self.device.gpu_profiler.lock().unwrap();
-        profiler.end_frame();
+        if let Err(e) = profiler.end_frame() {
+            eprintln!("GPU profiler end_frame error: {e}");
+        }
     }
 
     /// Returns the GPU profiling capabilities detected at initialization.
@@ -181,21 +199,20 @@ impl Gpu {
     /// Use this to determine what level of GPU timing data is available
     /// on the current platform. See [`GpuProfilingCapabilities`] for details.
     pub fn profiling_capabilities(&self) -> GpuProfilingCapabilities {
-        let profiler = self.device.gpu_profiler.lock().unwrap();
         GpuProfilingCapabilities {
             tier: self.profiling_tier,
-            timestamp_period_ns: profiler.timestamp_period_ns(),
+            timestamp_period_ns: self.queue.get_timestamp_period(),
         }
     }
 
-    /// Processes completed GPU profiling frames and reports results to the
-    /// active profiling backend.
+    /// Processes completed GPU profiling frames and submits the
+    /// resulting spans to `astrelis-profiling`'s global timeline.
     ///
-    /// Call once per frame, typically before `astrelis_profiling::new_frame()`.
-    /// GPU timestamp results arrive 1-3 frames late due to GPU buffering.
-    ///
-    /// No-op when GPU profiling is not available or the profiling backend
-    /// is disabled.
+    /// Call once per frame, typically before
+    /// `astrelis_profiling::new_frame()`. GPU timestamp results
+    /// arrive 1-3 frames late due to GPU buffering; the profiler
+    /// places them on the shared timeline using their absolute
+    /// nanosecond timestamps, not the current frame index.
     pub fn process_profiling_frames(&self) {
         astrelis_profiling::profile_function!();
         self.device.process_gpu_profiling_frames();
@@ -215,5 +232,18 @@ impl Gpu {
     /// to the raw wgpu queue.
     pub fn raw_queue(&self) -> &wgpu::Queue {
         &self.queue
+    }
+}
+
+/// Maps a `wgpu::Backend` to the backend-agnostic profiling enum.
+fn map_backend(backend: wgpu::Backend) -> astrelis_profiling::gpu::GpuBackend {
+    use astrelis_profiling::gpu::GpuBackend;
+    match backend {
+        wgpu::Backend::Vulkan => GpuBackend::Vulkan,
+        wgpu::Backend::Metal => GpuBackend::Metal,
+        wgpu::Backend::Dx12 => GpuBackend::Dx12,
+        wgpu::Backend::Gl => GpuBackend::Gl,
+        wgpu::Backend::BrowserWebGpu => GpuBackend::WebGpu,
+        _ => GpuBackend::Unknown,
     }
 }

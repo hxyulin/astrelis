@@ -87,7 +87,7 @@ const VERTICES: &[Vertex] = &[
 struct App {
     window_id: Option<WindowId>,
     gpu: Option<Gpu>,
-    surface: Option<astrelis_gpu::Surface<'static>>,
+    surface: Option<astrelis_gpu::Surface>,
     pipeline: Option<RenderPipeline>,
     vertex_buffer: Option<Buffer>,
     surface_format: TextureFormat,
@@ -184,9 +184,6 @@ impl AppHandler for App {
                             }],
                         }),
                     });
-
-                // SAFETY: surface lifetime is managed alongside gpu lifetime
-                let surface: astrelis_gpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
 
                 self.gpu = Some(gpu);
                 self.surface = Some(surface);

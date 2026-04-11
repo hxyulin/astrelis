@@ -105,12 +105,11 @@ pub trait EventLoopContext {
 /// created, or [`WindowError::EventLoopError`] if the event loop encounters
 /// an error while running.
 pub fn run(handler: &mut dyn AppHandler) -> Result<(), WindowError> {
-    astrelis_profiling::profile_function!();
+    // NOTE: Do NOT use profile_function!() here — run_app() never returns,
+    // so the scope guard would stay open for the entire process
+    // lifetime and anchor every frame's root span under it.
     let event_loop = EventLoop::new()
         .map_err(|e| WindowError::BackendInitFailed(e.to_string()))?;
-
-    // NOTE: Do NOT use profile_function!() inside run_app — it never returns,
-    // so the scope guard would keep puffin's depth > 0 forever.
     let mut bridge = WinitBridge {
         handler,
         windows: HashMap::new(),

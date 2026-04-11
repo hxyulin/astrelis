@@ -29,7 +29,7 @@ use astrelis_window::WindowBuilder;
 struct App {
     window_id: Option<WindowId>,
     gpu: Option<Gpu>,
-    surface: Option<astrelis_gpu::Surface<'static>>,
+    surface: Option<astrelis_gpu::Surface>,
     renderer: Option<FontRenderer>,
     surface_format: TextureFormat,
     width: u32,
@@ -68,9 +68,6 @@ impl AppHandler for App {
                 astrelis_gpu::convert::types::texture_format(self.surface_format),
             );
             let renderer = FontRenderer::new(&gpu, font_system, config);
-
-            // SAFETY: surface lifetime is managed alongside gpu lifetime
-            let surface: astrelis_gpu::Surface<'static> = unsafe { std::mem::transmute(surface) };
 
             self.gpu = Some(gpu);
             self.surface = Some(surface);

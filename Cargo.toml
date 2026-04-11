@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/astrelis-core",
     "crates/astrelis-profiling",
+    "crates/astrelis-profiling-egui",
     "crates/astrelis-window",
     "crates/astrelis-window-test",
     "crates/astrelis-gpu",
@@ -24,6 +25,7 @@ repository = "https://github.com/hxyulin/astrelis"
 # Internal crates
 astrelis-core = { path = "crates/astrelis-core", version = "0.3.0" }
 astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.3.0" }
+astrelis-profiling-egui = { path = "crates/astrelis-profiling-egui", version = "0.3.0" }
 astrelis-window = { path = "crates/astrelis-window", version = "0.3.0" }
 astrelis-window-test = { path = "crates/astrelis-window-test", version = "0.3.0" }
 astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.3.0" }
@@ -51,10 +53,8 @@ egui = "0.34"
 egui-wgpu = "0.34"
 
 # Profiling
-puffin = "0.19"
-puffin_http = "0.16"
-tracy-client = { version = "0.18", default-features = false }
-profiling = { version = "1.0", default-features = false }
+wgpu-profiler = { version = "0.27", default-features = false }
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 
 
 # Assets
