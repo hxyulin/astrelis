@@ -296,7 +296,6 @@ impl ApplicationHandler for WinitBridge<'_> {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        astrelis_profiling::new_frame();
         astrelis_profiling::profile_function!();
         let mut ctx = Self::make_context(
             event_loop,

@@ -184,6 +184,20 @@ fn bench_frame_mark_cold(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_scope_runtime_disabled(c: &mut Criterion) {
+    astrelis_profiling::init();
+    let _ = pool();
+    drain();
+    astrelis_profiling::set_enabled(false);
+    c.bench_function("scope/runtime_disabled", |b| {
+        b.iter(|| {
+            astrelis_profiling::profile_scope!("disabled_scope");
+            black_box(());
+        });
+    });
+    astrelis_profiling::set_enabled(true);
+}
+
 fn bench_frame_mark_contended_4t(c: &mut Criterion) {
     astrelis_profiling::init();
     let pool = pool();
@@ -207,6 +221,7 @@ criterion_group!(
     bench_scope_empty_1t,
     bench_scope_nested_4_1t,
     bench_scope_empty_4t_contended,
+    bench_scope_runtime_disabled,
     bench_frame_mark_cold,
     bench_frame_mark_contended_4t,
 );

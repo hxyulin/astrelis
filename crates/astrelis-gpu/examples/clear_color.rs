@@ -64,7 +64,7 @@ impl AppHandler for App {
 
                 self.gpu = Some(gpu);
                 self.surface = Some(surface);
-                ctx.set_control_flow(ControlFlow::Wait);
+                ctx.set_control_flow(ControlFlow::Poll);
             }
             AppLifecycle::Suspended => {}
             AppLifecycle::Exiting => {
@@ -83,6 +83,7 @@ impl AppHandler for App {
         match event {
             WindowEvent::CloseRequested => ctx.exit(),
             WindowEvent::Resized(size) => {
+                astrelis_profiling::profile_scope!("resize");
                 if let Some(surface) = &mut self.surface {
                     let phys = size.physical();
                     let w = phys.width as u32;
@@ -100,6 +101,7 @@ impl AppHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                astrelis_profiling::profile_scope!("redraw");
                 self.render();
                 if let Some(win) = ctx.window(window_id) {
                     win.request_redraw();
@@ -111,6 +113,7 @@ impl AppHandler for App {
 
     fn on_events_cleared(&mut self, ctx: &mut dyn EventLoopContext) {
         astrelis_profiling::profile_function!();
+        astrelis_profiling::new_frame();
         if let Some(id) = self.window_id
             && let Some(win) = ctx.window(id)
         {
@@ -172,7 +175,8 @@ impl App {
 
 fn main() {
     astrelis_profiling::init();
-    
+    astrelis_profiling::set_thread_name("main");
+
     let mut app = App {
         window_id: None,
         gpu: None,

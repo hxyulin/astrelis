@@ -7,6 +7,14 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["enabled"]
+## Compile in profiling support. When off, all macros expand to
+## nothing and public API functions become no-ops — true zero cost.
+## A runtime toggle (`set_enabled`/`is_enabled`) is available when
+## this feature is on.
+enabled = []
+
 [dependencies]
 
 [dev-dependencies]

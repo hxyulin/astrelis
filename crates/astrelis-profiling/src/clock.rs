@@ -67,6 +67,15 @@ impl Clock {
         self.gpu_calibrated.store(1, Ordering::Release);
     }
 
+    /// Returns the current GPU↔CPU clock offset in nanoseconds.
+    ///
+    /// Used by the GPU backend's adaptive calibration logic to detect
+    /// drift between consecutive calibrations.
+    #[inline]
+    pub fn gpu_offset_ns(&self) -> i64 {
+        self.gpu_offset_ns.load(Ordering::Relaxed)
+    }
+
     /// Returns `true` if a GPU clock offset has been installed.
     #[inline]
     pub fn gpu_calibrated(&self) -> bool {

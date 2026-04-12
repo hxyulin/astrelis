@@ -7,6 +7,15 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+## Use Vulkan via MoltenVK on macOS instead of Metal.
+##
+## Enables workarounds for macOS 26 (Metal 4) which broke the legacy
+## MTLCounterSampleBuffer API. The workarounds include a blocking
+## device poll per frame and a separate resolve submission to ensure
+## timestamp query results are valid.
+molten-vk = ["wgpu/vulkan-portability"]
+
 [dependencies]
 astrelis-core = { workspace = true }
 astrelis-profiling = { workspace = true }

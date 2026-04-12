@@ -12,11 +12,10 @@
 //!
 //! # Clock alignment
 //!
-//! On the first call to `report_gpu_frame`, the profiler's clock is
-//! calibrated by pinning the first GPU scope's start to the current
-//! CPU `now_ns`. Stage 1 uses a single static offset — good enough
-//! for the in-engine viewer, which presents spans relative to recent
-//! frames. Stage 2 will periodically refresh the offset.
+//! The CPU↔GPU clock offset is installed by `astrelis-gpu` via a
+//! synchronous calibration round-trip at device creation, and
+//! refreshed periodically (every 5 s). This module assumes the
+//! offset is already set when `report_gpu_frame` is called.
 
 use std::sync::OnceLock;
 
@@ -121,39 +120,10 @@ pub fn report_gpu_frame(frame: GpuFrame) {
         }
     };
 
-    // Calibrate the CPU↔GPU offset on the first frame: pin the first
-    // span's start to the current CPU `now_ns`.
-    if !p.clock.gpu_calibrated()
-        && let Some(first_gpu_ns) = earliest_gpu_start(&frame.scopes)
-    {
-        let cpu_ns = p.clock.now_ns();
-        let offset = cpu_ns as i64 - first_gpu_ns;
-        p.clock.set_gpu_epoch_offset_ns(offset);
-    }
-
     let mut timeline = p.timeline.write().unwrap();
     for scope in &frame.scopes {
         absorb_scope(&mut timeline, p, scope, lane, None);
     }
-}
-
-fn earliest_gpu_start(scopes: &[GpuScope]) -> Option<i64> {
-    let mut earliest: Option<i64> = None;
-    for s in scopes {
-        if s.start_ns >= 0 {
-            earliest = Some(match earliest {
-                Some(prev) => prev.min(s.start_ns),
-                None => s.start_ns,
-            });
-        }
-        if let Some(nested_earliest) = earliest_gpu_start(&s.nested) {
-            earliest = Some(match earliest {
-                Some(prev) => prev.min(nested_earliest),
-                None => nested_earliest,
-            });
-        }
-    }
-    earliest
 }
 
 fn absorb_scope(

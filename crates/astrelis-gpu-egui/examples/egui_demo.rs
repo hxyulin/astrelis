@@ -18,9 +18,9 @@ use astrelis_window::window_id::WindowId;
 /// Which profiler widget is currently displayed. Toggled with F2.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProfilerView {
-    /// Stage 2 scrollable timeline — the default.
+    /// Scrollable timeline — the default.
     Timeline,
-    /// Stage 1 last-frame flame graph, kept for A/B comparison.
+    /// Last-frame flame graph, kept for comparison.
     LastFrame,
 }
 
@@ -104,6 +104,7 @@ impl AppHandler for App {
         match event {
             WindowEvent::CloseRequested => ctx.exit(),
             WindowEvent::Resized(size) => {
+                astrelis_profiling::profile_scope!("resize");
                 if let Some(surface) = &mut self.surface {
                     let phys = size.physical();
                     let w = phys.width as u32;
@@ -120,6 +121,7 @@ impl AppHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                astrelis_profiling::profile_scope!("redraw");
                 self.render(ctx, window_id);
             }
             _ => {}
@@ -131,6 +133,7 @@ impl AppHandler for App {
         if let Some(gpu) = &self.gpu {
             gpu.process_profiling_frames();
         }
+        astrelis_profiling::new_frame();
         if let Some(id) = self.window_id
             && let Some(win) = ctx.window(id)
         {
@@ -188,11 +191,9 @@ impl App {
             ui.label(format!("Hello, {}!", if self.name.is_empty() { "world" } else { &self.name }));
         });
 
-        // F2 toggles between the Stage 2 scrollable timeline
-        // (default) and the Stage 1 last-frame flame graph. Both
-        // widgets read the same global timeline; the toggle lets us
-        // verify they show the same spans for a given frame during
-        // manual review.
+        // F2 toggles between the scrollable timeline (default) and
+        // the last-frame flame graph. Both widgets read the same
+        // global timeline.
         if egui.context().input(|i| i.key_pressed(egui::Key::F2)) {
             self.view = match self.view {
                 ProfilerView::Timeline => ProfilerView::LastFrame,
@@ -201,8 +202,8 @@ impl App {
         }
 
         let title = match self.view {
-            ProfilerView::Timeline => "Profiler (Stage 2 — F2 to toggle)",
-            ProfilerView::LastFrame => "Profiler (Stage 1 — F2 to toggle)",
+            ProfilerView::Timeline => "Profiler (timeline — F2 to toggle)",
+            ProfilerView::LastFrame => "Profiler (flame graph — F2 to toggle)",
         };
         egui::Window::new(title)
             .default_size([900.0, 320.0])
@@ -211,52 +212,42 @@ impl App {
                 ProfilerView::LastFrame => self.flame_graph.ui(ui),
             });
 
-        astrelis_profiling::profile_scope!("encode");
+        // Clear pass — profiled via astrelis-gpu wrapper.
+        astrelis_profiling::profile_scope!("encode_clear");
+        let mut clear_encoder = gpu.device().create_command_encoder(Some("egui_demo_clear"));
+        {
+            let _pass = clear_encoder.begin_render_pass(
+                &astrelis_gpu::command::RenderPassDescriptor {
+                    label: Some("clear"),
+                    color_attachments: &[astrelis_gpu::command::ColorAttachment {
+                        view: frame.view(),
+                        resolve_target: None,
+                        load_op: astrelis_gpu::types::LoadOp::Clear(
+                            astrelis_core::color::Color::new(0.1, 0.1, 0.1, 1.0),
+                        ),
+                        store_op: astrelis_gpu::types::StoreOp::Store,
+                    }],
+                    depth_stencil_attachment: None,
+                },
+            );
+        }
+        gpu.submit(std::iter::once(clear_encoder));
+
+        // egui pass — profiled via gpu_profile_scope.
+        astrelis_profiling::profile_scope!("encode_egui");
         let mut encoder =
             gpu.raw_device()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("egui_demo"),
+                    label: Some("egui_demo_egui"),
                 });
-
         let view = frame.view().raw();
-
-        // Clear pass.
-        {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("clear"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.1,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-        }
-
-        // End egui frame and render.
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [size.width as u32, size.height as u32],
             pixels_per_point: window.scale_factor(),
         };
-        egui.end_frame_and_render(
-            gpu,
-            &mut encoder,
-            view,
-            screen_descriptor,
-            Some(window),
-        );
+        gpu.device().gpu_profile_scope("egui_render", &mut encoder, |enc| {
+            egui.end_frame_and_render(gpu, enc, view, screen_descriptor, Some(window));
+        });
 
         astrelis_profiling::profile_scope!("submit");
         gpu.raw_queue().submit(std::iter::once(encoder.finish()));
@@ -267,8 +258,8 @@ impl App {
 
 fn main() {
     astrelis_profiling::init();
+    astrelis_profiling::set_thread_name("main");
 
-    
     let mut app = App {
         window_id: None,
         gpu: None,

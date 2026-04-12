@@ -45,8 +45,10 @@ Windowing and GPU use concrete implementations (no trait indirection):
 - `astrelis-gpu` wraps wgpu directly.
 - `astrelis-profiling` is a custom in-engine profiler. CPU and GPU
   spans land on a single global timeline; the viewer
-  (`astrelis-profiling-egui`) reads from it in-process. Always on —
-  no feature flags, no external tool.
+  (`astrelis-profiling-egui`) reads from it in-process. No external
+  tool. Enabled by default via the `enabled` cargo feature; can be
+  compiled out (`--no-default-features`) for zero-cost release
+  builds, or toggled at runtime via `set_enabled()`/`is_enabled()`.
 - Feature flags select optional dependencies, **not** architectural
   boundaries.
 

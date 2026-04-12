@@ -1,4 +1,4 @@
-//! Stage 2 profiler viewer demo with real GPU + multi-thread CPU data.
+//! Profiler viewer demo with real GPU + multi-thread CPU data.
 //!
 //! Opens an egui window, spawns three background worker threads that
 //! emit nested CPU scopes, and uses real GPU timestamp queries from
@@ -91,7 +91,7 @@ impl AppHandler for App {
         match state {
             AppLifecycle::Resumed => {
                 let attrs = astrelis_window::WindowBuilder::new()
-                    .with_title("Astrelis — Profiler Stage 2 viewer demo")
+                    .with_title("Astrelis — Profiler viewer demo")
                     .with_inner_size(LogicalInnerSize::new(1200.0, 720.0))
                     .build();
                 let win_id = ctx.create_window(attrs).expect("failed to create window");
@@ -217,7 +217,7 @@ impl App {
         astrelis_profiling::profile_scope!("egui_frame");
         egui.begin_frame(window);
 
-        egui::Window::new("Profiler Stage 2 viewer")
+        egui::Window::new("Profiler timeline")
             .default_size([1100.0, 520.0])
             .show(egui.context(), |ui| {
                 ui.label(
@@ -229,43 +229,46 @@ impl App {
                 self.profiler.ui(ui);
             });
 
-        astrelis_profiling::profile_scope!("encode");
-        let mut encoder =
+        let view = frame.view().raw();
+
+        // Use the astrelis-gpu CommandEncoder for the clear pass so
+        // GPU profiler timestamp queries are attached automatically.
+        astrelis_profiling::profile_scope!("encode_clear");
+        let mut clear_encoder = gpu.device().create_command_encoder(Some("viewer_demo_clear"));
+        {
+            let _pass = clear_encoder.begin_render_pass(
+                &astrelis_gpu::command::RenderPassDescriptor {
+                    label: Some("clear"),
+                    color_attachments: &[astrelis_gpu::command::ColorAttachment {
+                        view: frame.view(),
+                        resolve_target: None,
+                        load_op: astrelis_gpu::types::LoadOp::Clear(
+                            astrelis_core::color::Color::new(0.08, 0.08, 0.1, 1.0),
+                        ),
+                        store_op: astrelis_gpu::types::StoreOp::Store,
+                    }],
+                    depth_stencil_attachment: None,
+                },
+            );
+        }
+        gpu.submit(std::iter::once(clear_encoder));
+
+        // egui pass — profiled via gpu_profile_scope.
+        astrelis_profiling::profile_scope!("encode_egui");
+        let mut egui_encoder =
             gpu.raw_device()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("viewer_demo"),
+                    label: Some("viewer_demo_egui"),
                 });
-        let view = frame.view().raw();
-        {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("clear"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.08,
-                            g: 0.08,
-                            b: 0.1,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-        }
         let screen_descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [size.width as u32, size.height as u32],
             pixels_per_point: window.scale_factor(),
         };
-        egui.end_frame_and_render(gpu, &mut encoder, view, screen_descriptor, Some(window));
+        gpu.device().gpu_profile_scope("egui_render", &mut egui_encoder, |enc| {
+            egui.end_frame_and_render(gpu, enc, view, screen_descriptor, Some(window));
+        });
         astrelis_profiling::profile_scope!("submit");
-        gpu.raw_queue().submit(std::iter::once(encoder.finish()));
+        gpu.raw_queue().submit(std::iter::once(egui_encoder.finish()));
         astrelis_profiling::profile_scope!("present");
         frame.present();
     }

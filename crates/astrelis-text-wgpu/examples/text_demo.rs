@@ -77,7 +77,7 @@ impl AppHandler for App {
                 self.gpu = Some(gpu);
                 self.surface = Some(surface);
                 self.renderer = Some(renderer);
-                ctx.set_control_flow(ControlFlow::Wait);
+                ctx.set_control_flow(ControlFlow::Poll);
             }
             AppLifecycle::Suspended => {}
             AppLifecycle::Exiting => {}
@@ -94,6 +94,7 @@ impl AppHandler for App {
         match event {
             WindowEvent::CloseRequested => ctx.exit(),
             WindowEvent::Resized(size) => {
+                astrelis_profiling::profile_scope!("resize");
                 let phys = size.physical();
                 self.width = phys.width as u32;
                 self.height = phys.height as u32;
@@ -110,6 +111,7 @@ impl AppHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                astrelis_profiling::profile_scope!("redraw");
                 self.render();
                 if let Some(win) = ctx.window(window_id) {
                     win.request_redraw();
@@ -124,6 +126,7 @@ impl AppHandler for App {
         if let Some(gpu) = &self.gpu {
             gpu.process_profiling_frames();
         }
+        astrelis_profiling::new_frame();
         if let Some(id) = self.window_id
             && let Some(win) = ctx.window(id)
         {
@@ -148,41 +151,26 @@ impl App {
             Err(e) => panic!("failed to acquire: {e}"),
         };
 
-        let wgpu_view = frame.view().raw();
-
-        // Clear pass
-        let mut encoder =
-            gpu.raw_device()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("text_demo_encoder"),
-                });
-
+        // Clear pass — goes through astrelis-gpu wrapper for GPU profiling.
+        astrelis_profiling::profile_scope!("clear");
+        let mut clear_encoder = gpu.device().create_command_encoder(Some("text_demo_clear"));
         {
-            let _clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("clear_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: wgpu_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.15,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+            let _pass = clear_encoder.begin_render_pass(
+                &astrelis_gpu::command::RenderPassDescriptor {
+                    label: Some("clear"),
+                    color_attachments: &[astrelis_gpu::command::ColorAttachment {
+                        view: frame.view(),
+                        resolve_target: None,
+                        load_op: astrelis_gpu::types::LoadOp::Clear(Color::new(0.1, 0.1, 0.15, 1.0)),
+                        store_op: astrelis_gpu::types::StoreOp::Store,
+                    }],
+                    depth_stencil_attachment: None,
+                },
+            );
         }
+        gpu.submit(std::iter::once(clear_encoder));
 
         astrelis_profiling::profile_scope!("prepare_text");
-        // Draw text
         let texts = [
             Text::new("Hello, Astrelis!").size(32.0).color(Color::WHITE),
             Text::new("Small text (14px)")
@@ -208,9 +196,19 @@ impl App {
             y += text.font_size * 2.0;
         }
 
+        // Text render pass — profiled via gpu_profile_scope.
         astrelis_profiling::profile_scope!("encode");
-        // Render text
-        renderer.render(gpu, &mut encoder, wgpu_view, self.width, self.height);
+        let mut encoder =
+            gpu.raw_device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("text_demo_text"),
+                });
+        let wgpu_view = frame.view().raw();
+        let w = self.width;
+        let h = self.height;
+        gpu.device().gpu_profile_scope("text_render", &mut encoder, |enc| {
+            renderer.render(gpu, enc, wgpu_view, w, h);
+        });
 
         astrelis_profiling::profile_scope!("submit");
         gpu.raw_queue().submit(std::iter::once(encoder.finish()));
@@ -221,7 +219,8 @@ impl App {
 
 fn main() {
     astrelis_profiling::init();
-    
+    astrelis_profiling::set_thread_name("main");
+
     let mut app = App {
         window_id: None,
         gpu: None,

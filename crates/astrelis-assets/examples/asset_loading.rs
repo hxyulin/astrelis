@@ -36,22 +36,32 @@ impl AssetLoader for TextLoader {
 }
 
 fn main() {
+    astrelis_profiling::init();
+    astrelis_profiling::set_thread_name("main");
+
     // Create a server and register our text loader.
+    astrelis_profiling::profile_scope!("setup");
     let mut server = AssetServer::new("assets");
     server.add_loader(TextLoader);
 
     // Load an asset directly from bytes (no file I/O required).
-    let handle = server
-        .load_from_bytes::<TextAsset>(b"Hello from astrelis-assets!", "greeting.txt")
-        .expect("failed to load from bytes");
+    {
+        astrelis_profiling::profile_scope!("load_from_bytes");
+        let handle = server
+            .load_from_bytes::<TextAsset>(b"Hello from astrelis-assets!", "greeting.txt")
+            .expect("failed to load from bytes");
 
-    // The asset is immediately available after `load_from_bytes`.
-    let asset: Arc<TextAsset> = server.get(&handle).expect("asset should be loaded");
-    println!("Loaded asset: {}", asset.content);
+        // The asset is immediately available after `load_from_bytes`.
+        let asset: Arc<TextAsset> = server.get(&handle).expect("asset should be loaded");
+        println!("Loaded asset: {}", asset.content);
+    }
 
     // Attempting to load with a missing loader produces a clear error.
     let err = server
         .load_from_bytes::<TextAsset>(b"data", "image.png")
         .unwrap_err();
     println!("Expected error: {err}");
+
+    astrelis_profiling::new_frame();
+    astrelis_profiling::finish();
 }

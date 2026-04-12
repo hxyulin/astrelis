@@ -69,6 +69,9 @@ pub struct GpuDevice {
     pub(crate) queue: wgpu::Queue,
     pub(crate) adapter_info: AdapterInfo,
     pub(crate) gpu_profiler: std::sync::Mutex<wgpu_profiler::GpuProfiler>,
+    /// Last submission index from `queue.submit()`, used to poll for
+    /// completion before reading profiler results.
+    pub(crate) last_submission: std::sync::Mutex<Option<wgpu::SubmissionIndex>>,
 }
 
 impl GpuDevice {
@@ -84,6 +87,7 @@ impl GpuDevice {
             queue,
             adapter_info,
             gpu_profiler: std::sync::Mutex::new(gpu_profiler),
+            last_submission: std::sync::Mutex::new(None),
         }
     }
 
@@ -118,7 +122,22 @@ impl GpuDevice {
     /// its global timeline for the in-engine viewer to render.
     pub fn process_gpu_profiling_frames(&self) {
         astrelis_profiling::profile_function!();
-        let _ = self.device.poll(wgpu::PollType::Poll);
+        // Poll for completion of the last submission so buffer mapping
+        // callbacks fire before we try to read profiler results.
+        // We use a generous 100 ms timeout — the previous frame's GPU
+        // work should complete well within this. An indefinite wait
+        // risks hanging on drivers with broken timestamp support
+        // (e.g. Metal on macOS 26 where timestamp queries never
+        // resolve). If the timeout expires the profiling data for
+        // that frame is lost, but the app stays responsive.
+        let poll_type = match self.last_submission.lock().unwrap().take() {
+            Some(idx) => wgpu::PollType::Wait {
+                submission_index: Some(idx),
+                timeout: Some(std::time::Duration::from_millis(100)),
+            },
+            None => wgpu::PollType::Poll,
+        };
+        let _ = self.device.poll(poll_type);
         let mut profiler = self.gpu_profiler.lock().unwrap();
         let period = self.queue.get_timestamp_period();
         while let Some(results) = profiler.process_finished_frame(period) {
@@ -460,6 +479,45 @@ impl GpuDevice {
         ComputePipeline(pipeline)
     }
 
+    /// Wraps a raw wgpu encoder operation with GPU profiler timestamps.
+    ///
+    /// Use this to profile GPU work that goes through raw wgpu APIs
+    /// (e.g., third-party renderers like egui or text). The closure
+    /// receives the raw encoder; a start timestamp is written before
+    /// it runs and an end timestamp after. The scope appears in the
+    /// profiler timeline alongside spans from [`CommandEncoder`].
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// gpu.device().gpu_profile_scope(
+    ///     "text_render",
+    ///     &mut raw_encoder,
+    ///     |encoder| {
+    ///         text_renderer.render(gpu, encoder, view, w, h);
+    ///     },
+    /// );
+    /// ```
+    pub fn gpu_profile_scope(
+        &self,
+        label: &str,
+        encoder: &mut wgpu::CommandEncoder,
+        f: impl FnOnce(&mut wgpu::CommandEncoder),
+    ) {
+        if !astrelis_profiling::is_enabled() {
+            f(encoder);
+            return;
+        }
+        let profiler = self.gpu_profiler.lock().unwrap();
+        let query = profiler.begin_query(label, encoder);
+        drop(profiler);
+
+        f(encoder);
+
+        let profiler = self.gpu_profiler.lock().unwrap();
+        profiler.end_query(encoder, query);
+    }
+
     // --- Command ---
 
     /// Creates a new command encoder for recording GPU commands.
@@ -481,15 +539,8 @@ impl GpuDevice {
 /// `process_finished_frame`, so `time.start`/`time.end` are in
 /// seconds; we convert to nanoseconds here.
 ///
-/// Scopes with `start_ns == 0` are treated as corrupt and dropped.
-/// wgpu-profiler reads raw u64 values directly from the mapped
-/// readback buffer without validation; on Metal, the very first
-/// frame's query buffer can contain zeros if the GPU counter sample
-/// wasn't ready yet. Legitimate Metal timestamps are mach-time
-/// absolute values (tens of billions of ns since boot), so 0 is
-/// unambiguous corruption. Using such a value as the CPU/GPU
-/// calibration anchor would push every subsequent real timestamp
-/// tens of seconds into the future on the shared timeline.
+/// Scopes with `start_ns == 0` or `end_ns < start_ns` are treated
+/// as corrupt and dropped.
 fn convert_results(
     results: &[wgpu_profiler::GpuTimerQueryResult],
 ) -> Vec<astrelis_profiling::gpu::GpuScope> {

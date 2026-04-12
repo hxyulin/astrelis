@@ -28,7 +28,7 @@ astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.3.0" }
 astrelis-profiling-egui = { path = "crates/astrelis-profiling-egui", version = "0.3.0" }
 astrelis-window = { path = "crates/astrelis-window", version = "0.3.0" }
 astrelis-window-test = { path = "crates/astrelis-window-test", version = "0.3.0" }
-astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.3.0" }
+astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.3.0", features = ["molten-vk"] }
 astrelis-gpu-egui = { path = "crates/astrelis-gpu-egui", version = "0.3.0" }
 astrelis-input = { path = "crates/astrelis-input", version = "0.3.0" }
 astrelis-assets = { path = "crates/astrelis-assets", version = "0.3.0" }

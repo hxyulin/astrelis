@@ -91,15 +91,9 @@ pub struct CommandEncoder<'a> {
     pub(crate) device: &'a GpuDevice,
     /// Open GPU profiling query for the current scope.
     ///
-    /// This is a **flat, single-query-per-pass** model: at most one
-    /// query is open on the encoder at a time, closed implicitly when
-    /// the next pass begins or the encoder is finished. We deliberately
-    /// do not use `wgpu_profiler::Scope`'s nested-query API because
-    /// nesting requires `TIMESTAMP_QUERY_INSIDE_PASSES`, which Metal
-    /// does not support (its tile-based deferred rendering architecture
-    /// makes intra-pass timestamps physically unavailable). Keeping the
-    /// model flat gives identical profiler output across backends
-    /// without runtime branching.
+    /// Flat, single-query-per-pass model: at most one query is open on
+    /// the encoder at a time, closed implicitly when the next pass
+    /// begins or the encoder is finished.
     open_query: Option<wgpu_profiler::GpuProfilerQuery>,
 }
 
@@ -122,12 +116,16 @@ impl<'a> CommandEncoder<'a> {
     }
 
     /// Consumes the encoder and returns the finished command buffer.
+    ///
+    /// Query resolution is NOT done here — it's deferred to
+    /// [`Gpu::submit`](crate::backend::Gpu::submit) which emits the
+    /// resolve on a separate command buffer. This works around a
+    /// MoltenVK bug where `vkCmdCopyQueryPoolResults(WAIT)` doesn't
+    /// properly wait for end-of-pass timestamps (wgpu#6406).
     pub(crate) fn finish(mut self) -> wgpu::CommandBuffer {
         astrelis_profiling::profile_function!();
         self.close_open_query();
-        let mut encoder = self.encoder.take().expect("encoder already consumed");
-        let mut profiler = self.device.gpu_profiler.lock().unwrap();
-        profiler.resolve_queries(&mut encoder);
+        let encoder = self.encoder.take().expect("encoder already consumed");
         encoder.finish()
     }
 
@@ -142,20 +140,18 @@ impl<'a> CommandEncoder<'a> {
         astrelis_profiling::profile_function!();
         self.close_open_query();
 
-        // Allocate a pass-attached timestamp query BEFORE starting the
-        // pass. `begin_pass_query` reserves a query pair but emits no
-        // encoder commands — the actual timestamp writes are attached
-        // to the `RenderPassDescriptor.timestamp_writes` below. This is
-        // the canonical wgpu path for timing passes and is what Metal
-        // reliably supports (`MTLRenderPassDescriptor.sampleBufferAttachments`).
-        // We intentionally avoid `begin_query(encoder)` + encoder-level
-        // `write_timestamp`, because Metal advertises
-        // `TIMESTAMP_QUERY_INSIDE_ENCODERS` but returns zeros for
-        // those writes in practice.
-        {
+        // Write a start timestamp on the encoder BEFORE the pass.
+        // We use encoder-level timestamps (begin_query / end_query)
+        // rather than pass-attached timestamps because MoltenVK's
+        // vkCmdCopyQueryPoolResults doesn't reliably wait for
+        // end-of-pass timestamps to become available.
+        //
+        // Skipped when runtime profiling is disabled to avoid
+        // accumulating stale queries.
+        if astrelis_profiling::is_enabled() {
             let profiler = self.device.gpu_profiler.lock().unwrap();
             let encoder = self.encoder.as_mut().expect("encoder already consumed");
-            let query = profiler.begin_pass_query(
+            let query = profiler.begin_query(
                 desc.label.unwrap_or("render_pass"),
                 encoder,
             );
@@ -202,17 +198,11 @@ impl<'a> CommandEncoder<'a> {
                 }
             });
 
-        let timestamp_writes = self
-            .open_query
-            .as_ref()
-            .and_then(|q| q.render_pass_timestamp_writes());
-
         let encoder = self.encoder.as_mut().expect("encoder already consumed");
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: desc.label,
             color_attachments: &color_attachments,
             depth_stencil_attachment,
-            timestamp_writes,
             ..Default::default()
         });
 
@@ -227,12 +217,12 @@ impl<'a> CommandEncoder<'a> {
         astrelis_profiling::profile_function!();
         self.close_open_query();
 
-        // See `begin_render_pass` for the rationale behind
-        // `begin_pass_query` + `timestamp_writes`.
-        {
+        // Encoder-level timestamps — same approach as begin_render_pass.
+        // Skipped when runtime profiling is disabled.
+        if astrelis_profiling::is_enabled() {
             let profiler = self.device.gpu_profiler.lock().unwrap();
             let encoder = self.encoder.as_mut().expect("encoder already consumed");
-            let query = profiler.begin_pass_query(
+            let query = profiler.begin_query(
                 label.unwrap_or("compute_pass"),
                 encoder,
             );
@@ -240,15 +230,10 @@ impl<'a> CommandEncoder<'a> {
             self.open_query = Some(query);
         }
 
-        let timestamp_writes = self
-            .open_query
-            .as_ref()
-            .and_then(|q| q.compute_pass_timestamp_writes());
-
         let encoder = self.encoder.as_mut().expect("encoder already consumed");
         let pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label,
-            timestamp_writes,
+            timestamp_writes: None,
         });
         ComputePass { pass: Some(pass) }
     }

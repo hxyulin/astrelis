@@ -27,6 +27,9 @@ pub struct ProfilerWindow {
     min_rect_width: f32,
     lane_spacing: f32,
     header_height: f32,
+    /// Height of the top ruler row where frame-mark timestamps are
+    /// rendered. Lane content starts below this.
+    ruler_height: f32,
     cpu_color: egui::Color32,
     gpu_color: egui::Color32,
     /// Visible window start, nanoseconds. `None` on first frame; a
@@ -55,6 +58,7 @@ impl ProfilerWindow {
             min_rect_width: 1.0,
             lane_spacing: 4.0,
             header_height: 16.0,
+            ruler_height: 14.0,
             cpu_color: egui::Color32::from_rgb(110, 170, 230),
             gpu_color: egui::Color32::from_rgb(230, 180, 80),
             visible_start_ns: None,
@@ -106,19 +110,20 @@ impl ProfilerWindow {
             return;
         }
 
-        // Total canvas height.
+        // Total canvas height: ruler row + all lanes.
         let lane_height = |lane: &Lane| {
             self.header_height
                 + (lane.max_depth + 1) as f32 * self.row_height
                 + self.lane_spacing
         };
-        let total_height: f32 = snap
-            .cpu_lanes
-            .iter()
-            .chain(snap.gpu_lanes.iter())
-            .map(lane_height)
-            .sum::<f32>()
-            .max(80.0);
+        let total_height: f32 = self.ruler_height
+            + snap
+                .cpu_lanes
+                .iter()
+                .chain(snap.gpu_lanes.iter())
+                .map(lane_height)
+                .sum::<f32>()
+                .max(80.0);
 
         let width = ui.available_width().max(200.0);
         let (rect, response) = ui
@@ -242,7 +247,7 @@ impl ProfilerWindow {
         // can show a single tooltip after the paint pass.
         let mut hovered: Option<HoverInfo> = None;
         let hover_pos = response.hover_pos();
-        let mut y = rect.top();
+        let mut y = rect.top() + self.ruler_height;
 
         for lane in snap.cpu_lanes.iter().chain(snap.gpu_lanes.iter()) {
             painter.text(

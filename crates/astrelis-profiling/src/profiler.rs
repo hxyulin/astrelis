@@ -6,7 +6,7 @@
 //! and designed to be fast enough (~100 ns per scope) to leave in
 //! production code.
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use crate::clock::Clock;
@@ -92,6 +92,40 @@ impl Profiler {
     }
 }
 
+// ============================================================================
+// Runtime toggle
+// ============================================================================
+
+/// Global runtime enable/disable. Checked on every scope entry when
+/// the `enabled` feature is on. Cost: one `Relaxed` atomic load (~1 ns).
+static RUNTIME_ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// Enables or disables profiling at runtime.
+///
+/// When disabled, [`enter_scope`] returns immediately with a no-op
+/// guard, and counter/plot recording is skipped. Already in-flight
+/// spans are unaffected.
+///
+/// This has no effect when the `enabled` feature is off (profiling
+/// is compiled out entirely).
+#[inline]
+pub fn set_enabled(enabled: bool) {
+    RUNTIME_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Returns whether profiling is currently enabled at runtime.
+///
+/// Always returns `true` unless [`set_enabled(false)`](set_enabled)
+/// has been called.
+#[inline]
+pub fn is_enabled() -> bool {
+    RUNTIME_ENABLED.load(Ordering::Relaxed)
+}
+
+// ============================================================================
+// Lifecycle
+// ============================================================================
+
 /// Initialises the global profiler if it has not been already. Safe
 /// to call multiple times. Equivalent to forcing lazy construction.
 pub fn init() {
@@ -149,6 +183,9 @@ pub struct ScopeGuard {
 impl Drop for ScopeGuard {
     #[inline]
     fn drop(&mut self) {
+        if self.span_id == SpanId::NONE {
+            return;
+        }
         let p = Profiler::get();
         let ts_ns = p.clock.now_ns();
         with_state(|state| {
@@ -174,6 +211,10 @@ impl Drop for ScopeGuard {
 ///
 /// `cache` is a call-site-local `OnceLock<ScopeId>` used to memoize
 /// the scope registration so the hot path never locks the timeline.
+///
+/// When runtime profiling is disabled (via [`set_enabled`]), returns
+/// a no-op guard with `SpanId::NONE` — cost: one `Relaxed` atomic
+/// load (~1 ns).
 #[inline]
 pub fn enter_scope(
     cache: &OnceLock<ScopeId>,
@@ -181,6 +222,11 @@ pub fn enter_scope(
     file: &'static str,
     line: u32,
 ) -> ScopeGuard {
+    if !RUNTIME_ENABLED.load(Ordering::Relaxed) {
+        return ScopeGuard {
+            span_id: SpanId::NONE,
+        };
+    }
     let p = Profiler::get();
     let scope_id = *cache.get_or_init(|| {
         let name_id = p.strings.intern(name);
@@ -204,8 +250,13 @@ pub fn enter_scope(
 }
 
 /// Records a counter sample on the current thread's event buffer.
+///
+/// Skipped when runtime profiling is disabled.
 #[inline]
 pub fn record_counter_value(name_cache: &OnceLock<StringId>, name: &'static str, value: f64) {
+    if !RUNTIME_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
     let p = Profiler::get();
     let counter = *name_cache.get_or_init(|| p.strings.intern(name));
     let ts_ns = p.clock.now_ns();
@@ -220,12 +271,17 @@ pub fn record_counter_value(name_cache: &OnceLock<StringId>, name: &'static str,
 }
 
 /// Shim called by the `profile_counter!` macro.
+///
+/// Skipped when runtime profiling is disabled.
 #[inline]
 pub fn record_counter_shim(
     name_cache: &OnceLock<StringId>,
     name: &'static str,
     value: impl Into<CounterValue>,
 ) {
+    if !RUNTIME_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
     record_counter_value(name_cache, name, counter_to_f64(value));
 }
 

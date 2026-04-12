@@ -59,16 +59,32 @@ pub mod timeline;
 // ============================================================================
 
 pub use profiler::{Profiler, ScopeGuard, finish, frame_mark, init, set_thread_name};
+#[cfg(feature = "enabled")]
+pub use profiler::{is_enabled, set_enabled};
 pub use thread::{configure_pool_thread, spawn_profiled};
 
 /// Signals a frame boundary. Equivalent to calling [`frame_mark`].
 ///
 /// Kept as a free function for backwards compatibility with code
 /// that called the older `new_frame` API.
+///
+/// No-op when the `enabled` feature is off.
 #[inline]
 pub fn new_frame() {
     profiler::frame_mark();
 }
+
+/// Returns `false` when profiling is compiled out.
+#[cfg(not(feature = "enabled"))]
+#[inline]
+pub fn is_enabled() -> bool {
+    false
+}
+
+/// No-op when profiling is compiled out.
+#[cfg(not(feature = "enabled"))]
+#[inline]
+pub fn set_enabled(_enabled: bool) {}
 
 // ============================================================================
 // Macro-reachable internals
@@ -76,6 +92,7 @@ pub fn new_frame() {
 
 /// Items reachable from macros but not part of the stable public API.
 /// Users should never reference anything in this module directly.
+#[cfg(feature = "enabled")]
 #[doc(hidden)]
 pub mod private {
     pub use std::sync::OnceLock;
@@ -87,13 +104,17 @@ pub mod private {
 }
 
 // ============================================================================
-// Macros
+// Macros — enabled (default)
 // ============================================================================
 
 /// Profiles a named scope within a function.
 ///
 /// The scope begins at the macro call site and ends when the returned
 /// guard is dropped (at the end of the enclosing block).
+///
+/// When the `enabled` feature is off, this macro expands to nothing.
+/// When compiled in but runtime-disabled via [`set_enabled`], the
+/// per-call cost is a single `Relaxed` atomic load (~1 ns).
 ///
 /// A per-call-site `OnceLock<ScopeId>` caches the scope registration,
 /// so only the *first* invocation of a given call site touches the
@@ -108,6 +129,7 @@ pub mod private {
 ///     // ...
 /// }
 /// ```
+#[cfg(feature = "enabled")]
 #[macro_export]
 macro_rules! profile_scope {
     ($name:expr) => {
@@ -134,6 +156,8 @@ macro_rules! profile_scope {
 /// `std::any::type_name` on a local nested function, giving the fully
 /// qualified path of the caller.
 ///
+/// When the `enabled` feature is off, this macro expands to nothing.
+///
 /// # Example
 ///
 /// ```rust
@@ -142,6 +166,7 @@ macro_rules! profile_scope {
 ///     // ...
 /// }
 /// ```
+#[cfg(feature = "enabled")]
 #[macro_export]
 macro_rules! profile_function {
     () => {
@@ -170,6 +195,9 @@ macro_rules! profile_function {
 
 /// Names the current thread for the profiler. Call at the start of
 /// thread entry points (e.g. pool workers, rayon callbacks).
+///
+/// When the `enabled` feature is off, this macro expands to nothing.
+#[cfg(feature = "enabled")]
 #[macro_export]
 macro_rules! profile_thread {
     ($name:expr) => {
@@ -183,11 +211,14 @@ macro_rules! profile_thread {
 /// name is interned once per call site via a `OnceLock<StringId>`
 /// cache.
 ///
+/// When the `enabled` feature is off, this macro expands to nothing.
+///
 /// # Example
 ///
 /// ```rust
 /// astrelis_profiling::profile_counter!("gpu_memory", "buffer_bytes", 1024u64);
 /// ```
+#[cfg(feature = "enabled")]
 #[macro_export]
 macro_rules! profile_counter {
     ($_category:expr, $name:expr, $value:expr) => {{
@@ -200,11 +231,14 @@ macro_rules! profile_counter {
 /// Records a plot sample on the current thread. Equivalent to
 /// `profile_counter!` without the category field.
 ///
+/// When the `enabled` feature is off, this macro expands to nothing.
+///
 /// # Example
 ///
 /// ```rust
 /// astrelis_profiling::profile_plot!("frame_time_ms", 16.3);
 /// ```
+#[cfg(feature = "enabled")]
 #[macro_export]
 macro_rules! profile_plot {
     ($name:expr, $value:expr) => {{
@@ -212,6 +246,45 @@ macro_rules! profile_plot {
             $crate::private::OnceLock::new();
         $crate::private::record_counter_value(&CACHE, $name, ($value) as f64);
     }};
+}
+
+// ============================================================================
+// Macros — disabled (feature = "enabled" is off)
+// ============================================================================
+
+/// No-op: profiling compiled out.
+#[cfg(not(feature = "enabled"))]
+#[macro_export]
+macro_rules! profile_scope {
+    ($($tt:tt)*) => {};
+}
+
+/// No-op: profiling compiled out.
+#[cfg(not(feature = "enabled"))]
+#[macro_export]
+macro_rules! profile_function {
+    ($($tt:tt)*) => {};
+}
+
+/// No-op: profiling compiled out.
+#[cfg(not(feature = "enabled"))]
+#[macro_export]
+macro_rules! profile_thread {
+    ($($tt:tt)*) => {};
+}
+
+/// No-op: profiling compiled out.
+#[cfg(not(feature = "enabled"))]
+#[macro_export]
+macro_rules! profile_counter {
+    ($($tt:tt)*) => {};
+}
+
+/// No-op: profiling compiled out.
+#[cfg(not(feature = "enabled"))]
+#[macro_export]
+macro_rules! profile_plot {
+    ($($tt:tt)*) => {};
 }
 
 #[cfg(test)]

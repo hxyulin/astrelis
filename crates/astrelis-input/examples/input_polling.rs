@@ -17,9 +17,13 @@ fn key_event(code: KeyCode, state: ElementState) -> WindowEvent {
 }
 
 fn main() {
+    astrelis_profiling::init();
+    astrelis_profiling::set_thread_name("main");
+
     let mut input = InputState::new();
 
     // --- Frame 1: press W, move cursor, click left mouse, scroll, raw mouse motion ---
+    astrelis_profiling::profile_scope!("frame_1");
     input.begin_frame();
     input.handle_event(&key_event(KeyCode::KeyW, ElementState::Pressed));
     input.handle_event(&WindowEvent::CursorMoved(Point::<Physical>::new(320.0, 240.0)));
@@ -38,7 +42,10 @@ fn main() {
     println!("Scroll delta:   {:?}", input.scroll_delta());
     println!("Mouse delta:    {:?}", input.mouse_delta());
 
+    astrelis_profiling::new_frame();
+
     // --- Frame 2: hold continues, release left mouse ---
+    astrelis_profiling::profile_scope!("frame_2");
     input.begin_frame();
     input.handle_event(&WindowEvent::MouseButtonInput {
         button: MouseButton::Left,
@@ -50,4 +57,7 @@ fn main() {
     println!("W still held:   {}", input.is_key_pressed(KeyCode::KeyW));
     println!("Left released:  {}", input.is_mouse_button_just_released(MouseButton::Left));
     println!("Scroll (reset): {:?}", input.scroll_delta());
+
+    astrelis_profiling::new_frame();
+    astrelis_profiling::finish();
 }
