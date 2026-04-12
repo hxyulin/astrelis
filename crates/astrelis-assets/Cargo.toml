@@ -15,6 +15,7 @@ hot-reload = ["dep:notify"]
 astrelis-core = { workspace = true }
 astrelis-profiling = { workspace = true }
 notify = { workspace = true, optional = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

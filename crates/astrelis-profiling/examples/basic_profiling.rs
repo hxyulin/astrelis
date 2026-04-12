@@ -32,6 +32,7 @@ fn render() {
 
 fn main() {
     astrelis_profiling::init();
+    astrelis_core::logging::init_default();
 
     for _ in 0..10 {
         astrelis_profiling::new_frame();
@@ -50,7 +51,7 @@ fn main() {
     let threads = timeline.threads.len();
     let scopes = timeline.scopes.len();
 
-    println!(
+    tracing::info!(
         "profiler collected: {frames} frames, {threads} thread(s), \
          {scopes} scope site(s), {total_spans} span(s)"
     );

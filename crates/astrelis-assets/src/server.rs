@@ -81,6 +81,8 @@ impl AssetServer {
     /// exits automatically when the server is dropped.
     pub fn new(asset_dir: impl Into<PathBuf>) -> Self {
         astrelis_profiling::profile_function!();
+        let asset_dir = asset_dir.into();
+        tracing::info!(dir = %asset_dir.display(), "Asset server initialized");
         let (load_tx, load_rx) = std::sync::mpsc::channel::<LoadRequest>();
         let (result_tx, result_rx) = std::sync::mpsc::channel::<LoadResult>();
 
@@ -92,7 +94,7 @@ impl AssetServer {
             .expect("failed to spawn asset loader thread");
 
         Self {
-            asset_dir: asset_dir.into(),
+            asset_dir,
             loaders: LoaderRegistry::new(),
             storage: RwLock::new(StorageMap::new()),
             path_map: RwLock::new(HashMap::new()),
@@ -111,12 +113,16 @@ impl AssetServer {
         sender: std::sync::mpsc::Sender<LoadResult>,
     ) {
         while let Ok(request) = receiver.recv() {
+            tracing::debug!(path = %request.path.display(), "Loading asset");
             let result = match std::fs::read(&request.path) {
                 Ok(bytes) => request
                     .loader
                     .load_erased(&bytes, &request.path)
                     .map_err(|e| e.to_string()),
-                Err(e) => Err(format!("I/O error reading {}: {e}", request.path.display())),
+                Err(e) => {
+                    tracing::error!(path = %request.path.display(), error = %e, "Failed to read asset file");
+                    Err(format!("I/O error reading {}: {e}", request.path.display()))
+                }
             };
 
             let _ = sender.send(LoadResult {
@@ -294,15 +300,14 @@ impl AssetServer {
                     match result.result {
                         Ok(asset) => {
                             erased.set_loaded(&result.id, asset);
-                            // Build an UntypedHandle for the event.
-                            // We need to get the ref_count from the entry — it's already stored.
-                            // For the event, we can create a lightweight handle.
+                            tracing::debug!(id = ?result.id, "Asset loaded successfully");
                             events.push(AssetEvent::Created {
                                 handle: self.make_event_handle(result.id, result.type_id),
                             });
                         }
                         Err(error) => {
                             erased.set_failed(&result.id, error.clone());
+                            tracing::warn!(id = ?result.id, error = %error, "Asset load failed");
                             events.push(AssetEvent::Failed {
                                 handle: self.make_event_handle(result.id, result.type_id),
                                 error,
@@ -410,6 +415,7 @@ impl AssetServer {
                         .unwrap_or("");
 
                     if let Some(loader) = self.loaders.find(type_id, extension) {
+                        tracing::info!(path = %key, "Hot-reloading asset");
                         // Re-read and reload synchronously for hot-reload.
                         if let Ok(bytes) = std::fs::read(&full_path) {
                             match loader.load_erased(&bytes, &full_path) {
@@ -418,6 +424,7 @@ impl AssetServer {
                                     if let Some(erased) = storage.get_erased_mut(&type_id) {
                                         erased.set_loaded(&id, asset);
                                     }
+                                    tracing::debug!(path = %key, "Asset hot-reload complete");
                                     events.push(AssetEvent::Modified {
                                         handle: UntypedHandle {
                                             id,
@@ -427,6 +434,7 @@ impl AssetServer {
                                     });
                                 }
                                 Err(e) => {
+                                    tracing::warn!(path = %key, error = %e, "Asset hot-reload failed");
                                     events.push(AssetEvent::Failed {
                                         handle: self.make_event_handle(id, type_id),
                                         error: e.to_string(),

@@ -19,6 +19,7 @@ fn key_event(code: KeyCode, state: ElementState) -> WindowEvent {
 fn main() {
     astrelis_profiling::init();
     astrelis_profiling::set_thread_name("main");
+    astrelis_core::logging::init_default();
 
     let mut input = InputState::new();
 
@@ -34,13 +35,13 @@ fn main() {
     input.handle_event(&WindowEvent::MouseWheel(MouseScrollDelta::LineDelta { x: 0.0, y: 3.0 }));
     input.handle_device_event(&DeviceEvent::MouseMotion { delta_x: 5.5, delta_y: -2.0 });
 
-    println!("=== Frame 1 ===");
-    println!("W just pressed: {}", input.is_key_just_pressed(KeyCode::KeyW));
-    println!("W pressed:      {}", input.is_key_pressed(KeyCode::KeyW));
-    println!("Mouse pos:      {:?}", input.mouse_position());
-    println!("Left btn:       {}", input.is_mouse_button_pressed(MouseButton::Left));
-    println!("Scroll delta:   {:?}", input.scroll_delta());
-    println!("Mouse delta:    {:?}", input.mouse_delta());
+    tracing::info!("=== Frame 1 ===");
+    tracing::info!("W just pressed: {}", input.is_key_just_pressed(KeyCode::KeyW));
+    tracing::info!("W pressed:      {}", input.is_key_pressed(KeyCode::KeyW));
+    tracing::info!("Mouse pos:      {:?}", input.mouse_position());
+    tracing::info!("Left btn:       {}", input.is_mouse_button_pressed(MouseButton::Left));
+    tracing::info!("Scroll delta:   {:?}", input.scroll_delta());
+    tracing::info!("Mouse delta:    {:?}", input.mouse_delta());
 
     astrelis_profiling::new_frame();
 
@@ -52,11 +53,11 @@ fn main() {
         state: ElementState::Released,
     });
 
-    println!("\n=== Frame 2 ===");
-    println!("W just pressed: {}", input.is_key_just_pressed(KeyCode::KeyW));
-    println!("W still held:   {}", input.is_key_pressed(KeyCode::KeyW));
-    println!("Left released:  {}", input.is_mouse_button_just_released(MouseButton::Left));
-    println!("Scroll (reset): {:?}", input.scroll_delta());
+    tracing::info!("=== Frame 2 ===");
+    tracing::info!("W just pressed: {}", input.is_key_just_pressed(KeyCode::KeyW));
+    tracing::info!("W still held:   {}", input.is_key_pressed(KeyCode::KeyW));
+    tracing::info!("Left released:  {}", input.is_mouse_button_just_released(MouseButton::Left));
+    tracing::info!("Scroll (reset): {:?}", input.scroll_delta());
 
     astrelis_profiling::new_frame();
     astrelis_profiling::finish();

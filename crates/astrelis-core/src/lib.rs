@@ -9,4 +9,6 @@
 pub mod color;
 pub mod geometry;
 pub mod id;
+#[cfg(feature = "tracing-init")]
+pub mod logging;
 pub mod math;

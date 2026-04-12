@@ -184,6 +184,12 @@ impl Gpu {
         .map_err(|e| GpuError::NoAdapter(e.to_string()))?;
 
         let info = adapter.get_info();
+        tracing::info!(
+            adapter = %info.name,
+            backend = ?info.backend,
+            device_type = ?info.device_type,
+            "GPU adapter selected"
+        );
         let adapter_info = AdapterInfo {
             name: info.name.clone(),
             backend: match info.backend {
@@ -206,10 +212,10 @@ impl Gpu {
         // Detect GPU profiling capabilities.
         let profiling_tier = tier::detect_tier(&adapter);
         let timer_features = tier::required_features(profiling_tier);
-        eprintln!("GPU profiling: tier={profiling_tier:?}, features={timer_features:?}");
+        tracing::info!(tier = ?profiling_tier, features = ?timer_features, "GPU profiling capabilities detected");
         if profiling_tier == GpuProfilingTier::None {
-            eprintln!(
-                "GPU adapter does not support any timer query features; \
+            tracing::warn!(
+                "GPU adapter does not support timer query features; \
                  GPU profiling will produce no timing data"
             );
         } else {
@@ -225,6 +231,11 @@ impl Gpu {
         };
         let (wgpu_device, wgpu_queue) = pollster::block_on(adapter.request_device(&device_desc))
             .map_err(|e| GpuError::DeviceCreationFailed(e.to_string()))?;
+        tracing::info!(
+            label = ?config.device_label,
+            validation = config.validation.unwrap_or(cfg!(debug_assertions)),
+            "GPU device created"
+        );
 
         let queue_clone = wgpu_queue.clone();
 
@@ -275,6 +286,7 @@ impl Gpu {
         #[cfg(not(feature = "molten-vk"))]
         let needs_separate_resolve = false;
 
+        tracing::info!("GPU backend initialized");
         Ok(Self {
             instance,
             adapter,
@@ -378,7 +390,7 @@ impl Gpu {
         // Signal end of frame to the GPU profiler.
         let mut profiler = self.device.gpu_profiler.lock().unwrap();
         if let Err(e) = profiler.end_frame() {
-            eprintln!("GPU profiler end_frame error: {e}");
+            tracing::error!(error = %e, "GPU profiler end_frame failed");
         }
     }
 
@@ -466,6 +478,7 @@ impl Gpu {
 /// the midpoint of CPU timestamps taken before and after the blocking
 /// poll.
 fn calibrate_gpu_clock(device: &wgpu::Device, queue: &wgpu::Queue) {
+    tracing::trace!("Running GPU clock calibration");
     let query_set = device.create_query_set(&wgpu::QuerySetDescriptor {
         label: Some("gpu_clock_calibration"),
         count: 1,
@@ -524,7 +537,7 @@ fn calibrate_gpu_clock(device: &wgpu::Device, queue: &wgpu::Queue) {
     readback_buf.unmap();
 
     if gpu_ticks == 0 {
-        eprintln!("GPU clock calibration: timestamp was zero, skipping");
+        tracing::warn!("GPU clock calibration: timestamp was zero, skipping");
         return;
     }
 
@@ -534,6 +547,7 @@ fn calibrate_gpu_clock(device: &wgpu::Device, queue: &wgpu::Queue) {
     let offset = cpu_mid - gpu_ns;
 
     p.clock.set_gpu_epoch_offset_ns(offset);
+    tracing::trace!(offset_ns = offset, "GPU clock calibration complete");
 }
 
 #[cfg(feature = "molten-vk")]
@@ -602,12 +616,12 @@ fn probe_needs_separate_resolve(device: &wgpu::Device, queue: &wgpu::Queue) -> b
     // data — same-encoder resolve doesn't work.
     let needs_separate = ticks == 0;
     if needs_separate {
-        eprintln!(
-            "GPU resolve probe: same-encoder resolve returned zero — \
+        tracing::info!(
+            "GPU resolve probe: same-encoder resolve returned zero; \
              enabling pipelined resolve workaround"
         );
     } else {
-        eprintln!("GPU resolve probe: same-encoder resolve works correctly");
+        tracing::debug!("GPU resolve probe: same-encoder resolve works correctly");
     }
     needs_separate
 }

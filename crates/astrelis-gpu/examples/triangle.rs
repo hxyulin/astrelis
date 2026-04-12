@@ -107,7 +107,7 @@ impl AppHandler for App {
 
                 let gpu =
                     Gpu::new(&GpuConfig::default()).expect("failed to create GPU backend");
-                println!(
+                tracing::info!(
                     "GPU: {} ({:?})",
                     gpu.device().adapter_info().name,
                     gpu.device().adapter_info().backend
@@ -193,7 +193,7 @@ impl AppHandler for App {
             }
             AppLifecycle::Suspended => {}
             AppLifecycle::Exiting => {
-                println!("Goodbye!");
+                tracing::info!("Goodbye!");
             }
         }
     }
@@ -296,6 +296,7 @@ impl App {
 fn main() {
     astrelis_profiling::init();
     astrelis_profiling::set_thread_name("main");
+    astrelis_core::logging::init_default();
 
     let mut app = App {
         window_id: None,

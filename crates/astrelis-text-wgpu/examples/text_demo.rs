@@ -220,6 +220,7 @@ impl App {
 fn main() {
     astrelis_profiling::init();
     astrelis_profiling::set_thread_name("main");
+    astrelis_core::logging::init_default();
 
     let mut app = App {
         window_id: None,

@@ -24,6 +24,7 @@ raw-window-handle = { workspace = true }
 wgpu = { workspace = true }
 pollster = { workspace = true }
 wgpu-profiler = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 bytemuck = { workspace = true }

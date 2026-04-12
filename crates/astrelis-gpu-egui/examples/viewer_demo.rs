@@ -277,6 +277,7 @@ impl App {
 fn main() {
     astrelis_profiling::init();
     astrelis_profiling::set_thread_name("main");
+    astrelis_core::logging::init_default();
 
     // Keep 3000 frames (~50 s at 60 fps) so there's enough history
     // to pan around when auto-follow is off.

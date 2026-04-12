@@ -108,6 +108,7 @@ pub fn run(handler: &mut dyn AppHandler) -> Result<(), WindowError> {
     // NOTE: Do NOT use profile_function!() here — run_app() never returns,
     // so the scope guard would stay open for the entire process
     // lifetime and anchor every frame's root span under it.
+    tracing::info!("Starting event loop");
     let event_loop = EventLoop::new()
         .map_err(|e| WindowError::BackendInitFailed(e.to_string()))?;
     let mut bridge = WinitBridge {
@@ -406,6 +407,7 @@ impl EventLoopContext for WinitEventLoopContext<'_> {
             title: attrs.title,
         };
 
+        tracing::info!(id = ?astrelis_id, title = %winit_window.title, "Window created");
         self.windows.insert(winit_id, winit_window);
         self.winit_to_astrelis.insert(winit_id, astrelis_id);
         self.astrelis_to_winit.insert(astrelis_id, winit_id);
@@ -430,6 +432,7 @@ impl EventLoopContext for WinitEventLoopContext<'_> {
             .ok_or(WindowError::InvalidWindowId(id))?;
         self.winit_to_astrelis.remove(&winit_id);
         self.windows.remove(&winit_id);
+        tracing::debug!(id = ?id, "Window destroyed");
         Ok(())
     }
 

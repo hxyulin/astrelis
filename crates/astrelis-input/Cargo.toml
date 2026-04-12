@@ -12,5 +12,8 @@ astrelis-core = { workspace = true }
 astrelis-profiling = { workspace = true }
 astrelis-window = { workspace = true }
 
+[dev-dependencies]
+tracing = { workspace = true }
+
 [lints]
 workspace = true

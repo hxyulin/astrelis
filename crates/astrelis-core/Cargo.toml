@@ -11,6 +11,12 @@ repository.workspace = true
 glam = { workspace = true }
 bytemuck = { workspace = true }
 mint = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
+
+[features]
+default = ["tracing-init"]
+tracing-init = ["dep:tracing-subscriber"]
 
 [lints]
 workspace = true

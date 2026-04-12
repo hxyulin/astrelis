@@ -18,7 +18,9 @@ enabled = []
 [dependencies]
 
 [dev-dependencies]
+astrelis-core = { workspace = true }
 criterion = { workspace = true }
+tracing = { workspace = true }
 
 [[bench]]
 name = "hot_path"

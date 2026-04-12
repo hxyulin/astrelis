@@ -12,6 +12,7 @@ astrelis-core = { workspace = true }
 astrelis-profiling = { workspace = true }
 winit = { workspace = true }
 raw-window-handle = { workspace = true }
+tracing = { workspace = true }
 
 [lints]
 workspace = true

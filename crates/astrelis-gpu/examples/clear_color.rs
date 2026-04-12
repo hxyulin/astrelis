@@ -45,7 +45,7 @@ impl AppHandler for App {
                 // Initialize GPU.
                 let gpu =
                     Gpu::new(&GpuConfig::default()).expect("failed to create GPU backend");
-                println!("GPU: {} ({:?})", gpu.device().adapter_info().name, gpu.device().adapter_info().backend);
+                tracing::info!("GPU: {} ({:?})", gpu.device().adapter_info().name, gpu.device().adapter_info().backend);
 
                 // Create surface from window.
                 let window = ctx.window(win_id).expect("window not found");
@@ -68,7 +68,7 @@ impl AppHandler for App {
             }
             AppLifecycle::Suspended => {}
             AppLifecycle::Exiting => {
-                println!("Rendered {frames} frames. Goodbye!", frames = self.frame_count);
+                tracing::info!("Rendered {frames} frames. Goodbye!", frames = self.frame_count);
             }
         }
     }
@@ -176,6 +176,7 @@ impl App {
 fn main() {
     astrelis_profiling::init();
     astrelis_profiling::set_thread_name("main");
+    astrelis_core::logging::init_default();
 
     let mut app = App {
         window_id: None,

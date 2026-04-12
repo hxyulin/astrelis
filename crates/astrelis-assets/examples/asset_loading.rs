@@ -38,6 +38,7 @@ impl AssetLoader for TextLoader {
 fn main() {
     astrelis_profiling::init();
     astrelis_profiling::set_thread_name("main");
+    astrelis_core::logging::init_default();
 
     // Create a server and register our text loader.
     astrelis_profiling::profile_scope!("setup");
@@ -53,14 +54,14 @@ fn main() {
 
         // The asset is immediately available after `load_from_bytes`.
         let asset: Arc<TextAsset> = server.get(&handle).expect("asset should be loaded");
-        println!("Loaded asset: {}", asset.content);
+        tracing::info!("Loaded asset: {}", asset.content);
     }
 
     // Attempting to load with a missing loader produces a clear error.
     let err = server
         .load_from_bytes::<TextAsset>(b"data", "image.png")
         .unwrap_err();
-    println!("Expected error: {err}");
+    tracing::info!("Expected error: {err}");
 
     astrelis_profiling::new_frame();
     astrelis_profiling::finish();

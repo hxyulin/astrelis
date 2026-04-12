@@ -67,5 +67,12 @@ Windowing and GPU use concrete implementations (no trait indirection):
   use `astrelis_profiling::profile_counter!()` and
   `astrelis_profiling::profile_plot!()`. Call `new_frame()` once
   per frame to drain buffers into the global timeline.
+- **Logging:** Use `tracing` macros (`tracing::info!`, `tracing::warn!`,
+  etc.) for diagnostic logging. Do not use `println!` or `eprintln!`
+  in library crates. Call `astrelis_core::logging::init_default()` once
+  at the start of `main()` to install the subscriber. The default filter
+  is `warn` globally, `info` for `astrelis_*` crates; override via
+  `RUST_LOG` env var. Profiling and tracing serve different purposes:
+  profiling measures performance spans, tracing provides diagnostic logs.
 - **Commits:** Conventional commits — `feat:`, `fix:`, `chore:`,
   `docs:`, `refactor:`, `test:`.
