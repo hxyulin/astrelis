@@ -18,6 +18,16 @@ fn convert_element_state(state: winit::event::ElementState) -> ElementState {
     }
 }
 
+/// Converts a winit TouchPhase to astrelis.
+fn convert_touch_phase(phase: winit::event::TouchPhase) -> TouchPhase {
+    match phase {
+        winit::event::TouchPhase::Started => TouchPhase::Started,
+        winit::event::TouchPhase::Moved => TouchPhase::Moved,
+        winit::event::TouchPhase::Ended => TouchPhase::Ended,
+        winit::event::TouchPhase::Cancelled => TouchPhase::Cancelled,
+    }
+}
+
 /// Converts a winit WindowEvent to an astrelis WindowEvent.
 ///
 /// Returns `None` for events that have no astrelis equivalent.
@@ -118,15 +128,9 @@ pub(crate) fn convert_window_event(
         }
 
         winit::event::WindowEvent::Touch(touch) => {
-            let phase = match touch.phase {
-                winit::event::TouchPhase::Started => TouchPhase::Started,
-                winit::event::TouchPhase::Moved => TouchPhase::Moved,
-                winit::event::TouchPhase::Ended => TouchPhase::Ended,
-                winit::event::TouchPhase::Cancelled => TouchPhase::Cancelled,
-            };
             WindowEvent::Touch(TouchEvent {
                 id: TouchId(touch.id),
-                phase,
+                phase: convert_touch_phase(touch.phase),
                 position: Point::<Physical>::new(
                     touch.location.x as f32,
                     touch.location.y as f32,
@@ -143,6 +147,30 @@ pub(crate) fn convert_window_event(
         }
 
         winit::event::WindowEvent::HoveredFileCancelled => WindowEvent::DroppedFileCancelled,
+
+        winit::event::WindowEvent::PinchGesture { delta, phase, .. } => {
+            WindowEvent::PinchGesture {
+                delta,
+                phase: convert_touch_phase(phase),
+            }
+        }
+
+        winit::event::WindowEvent::PanGesture { delta, phase, .. } => {
+            WindowEvent::PanGesture {
+                delta_x: delta.x,
+                delta_y: delta.y,
+                phase: convert_touch_phase(phase),
+            }
+        }
+
+        winit::event::WindowEvent::RotationGesture { delta, phase, .. } => {
+            WindowEvent::RotationGesture {
+                delta,
+                phase: convert_touch_phase(phase),
+            }
+        }
+
+        winit::event::WindowEvent::DoubleTapGesture { .. } => WindowEvent::DoubleTapGesture,
 
         // Events we don't map
         _ => return None,

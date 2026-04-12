@@ -39,22 +39,86 @@ pub struct GpuLaneInfo {
     pub name: StringId,
 }
 
-/// Per-thread stream of completed CPU spans, ordered by `start_ns`.
+/// Per-thread stream of completed CPU spans, ordered by `end_ns`.
+///
+/// Spans are pushed at `End`-event arrival time and the per-thread
+/// clock is monotonic, so the deque is `end_ns`-sorted. It is *not*
+/// `start_ns`-sorted: a nested parent has an earlier `start_ns` than
+/// its children but is pushed after them, so `start_ns` may decrease
+/// from one element to the next.
 ///
 /// Backed by [`VecDeque`] so retention can drop the oldest spans
 /// from the front in `O(drop_count)` rather than the `O(total)` cost
 /// of a `Vec::retain` pass.
 #[derive(Clone, Debug, Default)]
 pub struct ThreadStream {
-    /// Completed spans, ordered by start time.
+    /// Completed spans, ordered by `end_ns`.
     pub spans: VecDeque<CpuSpan>,
 }
 
-/// Per-GPU-lane stream of completed GPU spans.
+impl ThreadStream {
+    /// Returns all spans that overlap the half-open window
+    /// `[visible_start_ns, visible_end_ns)`.
+    ///
+    /// A span overlaps the window iff `span.end_ns > visible_start_ns`
+    /// and `span.start_ns < visible_end_ns`. Spans whose `end_ns`
+    /// equals `visible_start_ns`, or whose `start_ns` equals
+    /// `visible_end_ns`, are *not* included.
+    ///
+    /// Because the stream is `end_ns`-sorted, a
+    /// [`VecDeque::partition_point`] lookup skips over the entire
+    /// prefix of spans that ended before the window — usually the
+    /// bulk of the retained buffer when the user is inspecting recent
+    /// frames. The back edge cannot be short-circuited by `start_ns`
+    /// because nested parents can be pushed to the deque after their
+    /// children with a smaller `start_ns`, so the tail walk uses a
+    /// filter rather than an early-termination `take_while`.
+    ///
+    /// Worst-case cost is `O(log n + (n - start_idx))`, which matches
+    /// the previous linear filter in the common "zoom near the end of
+    /// retention" case and beats it when `start_idx` is large.
+    pub fn spans_in_window(
+        &self,
+        visible_start_ns: u64,
+        visible_end_ns: u64,
+    ) -> impl Iterator<Item = &CpuSpan> {
+        let start_idx = self
+            .spans
+            .partition_point(|s| s.end_ns <= visible_start_ns);
+        self.spans
+            .iter()
+            .skip(start_idx)
+            .filter(move |s| s.start_ns < visible_end_ns)
+    }
+}
+
+/// Per-GPU-lane stream of completed GPU spans, ordered by `end_ns`.
 #[derive(Clone, Debug, Default)]
 pub struct GpuStream {
-    /// Completed GPU spans, ordered by start time.
+    /// Completed GPU spans, ordered by `end_ns`.
     pub spans: VecDeque<GpuSpan>,
+}
+
+impl GpuStream {
+    /// Returns all GPU spans that overlap the half-open window
+    /// `[visible_start_ns, visible_end_ns)`.
+    ///
+    /// See [`ThreadStream::spans_in_window`] for semantics and
+    /// complexity — GPU spans share the same `end_ns`-sorted
+    /// insertion invariant.
+    pub fn spans_in_window(
+        &self,
+        visible_start_ns: u64,
+        visible_end_ns: u64,
+    ) -> impl Iterator<Item = &GpuSpan> {
+        let start_idx = self
+            .spans
+            .partition_point(|s| s.end_ns <= visible_start_ns);
+        self.spans
+            .iter()
+            .skip(start_idx)
+            .filter(move |s| s.start_ns < visible_end_ns)
+    }
 }
 
 /// Per-counter stream of samples.
@@ -313,7 +377,7 @@ impl Default for Timeline {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::SpanId;
+    use crate::data::{CpuSpan, GpuLaneId, GpuSpan, ScopeId, SpanData, SpanId};
     use std::num::NonZeroU32;
 
     fn sid(n: u32) -> StringId {
@@ -515,6 +579,188 @@ mod tests {
 
         let spans = &t.thread_streams[&tid(0)].spans;
         assert!(spans.is_empty());
+    }
+
+    /// Helper for the GPU `spans_in_window` tests: build a stream
+    /// directly from `(start, end)` pairs, bypassing pairing.
+    fn gpu_stream_from(pairs: &[(u64, u64)]) -> GpuStream {
+        let mut stream = GpuStream::default();
+        let scope = ScopeId(NonZeroU32::new(1).unwrap());
+        for (i, &(s, e)) in pairs.iter().enumerate() {
+            stream.spans.push_back(GpuSpan {
+                id: SpanId(i as u64 + 1),
+                scope,
+                lane: GpuLaneId(0),
+                parent: None,
+                start_ns: s,
+                end_ns: e,
+            });
+        }
+        stream
+    }
+
+    fn thread_stream_with_spans(t: &Timeline, thread: ThreadId) -> &ThreadStream {
+        &t.thread_streams[&thread]
+    }
+
+    fn push_spans(t: &mut Timeline, scope: ScopeId, spans: &[(u64, u64)]) {
+        for (i, &(s, e)) in spans.iter().enumerate() {
+            t.absorb_thread_events(
+                tid(0),
+                vec![
+                    Event::Begin {
+                        id: SpanId(i as u64 + 1_000),
+                        scope,
+                        ts_ns: s,
+                        parent: None,
+                    },
+                    Event::End {
+                        id: SpanId(i as u64 + 1_000),
+                        ts_ns: e,
+                    },
+                ],
+            );
+        }
+    }
+
+    #[test]
+    fn spans_in_window_contained_inside_single_span() {
+        // A single span [0, 1000] completely contains the window
+        // [400, 600) — it should be returned.
+        let mut t = Timeline::new();
+        let scope = t.register_scope(sid(1), "x.rs", 1);
+        t.register_thread(tid(0), sid(1));
+        push_spans(&mut t, scope, &[(0, 1000)]);
+
+        let stream = thread_stream_with_spans(&t, tid(0));
+        let hits: Vec<_> = stream.spans_in_window(400, 600).collect();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].start_ns, 0);
+        assert_eq!(hits[0].end_ns, 1000);
+    }
+
+    #[test]
+    fn spans_in_window_straddles_start_edge() {
+        // Span [50, 150] overlaps the window [100, 200) on the left;
+        // must be returned. Span [10, 40] ends before the window
+        // and must be excluded.
+        let mut t = Timeline::new();
+        let scope = t.register_scope(sid(1), "x.rs", 1);
+        t.register_thread(tid(0), sid(1));
+        push_spans(&mut t, scope, &[(10, 40), (50, 150)]);
+
+        let stream = thread_stream_with_spans(&t, tid(0));
+        let hits: Vec<_> = stream.spans_in_window(100, 200).collect();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].start_ns, 50);
+    }
+
+    #[test]
+    fn spans_in_window_straddles_end_edge() {
+        // Span [150, 250] overlaps the window [100, 200) on the
+        // right; must be returned. Span [210, 300] starts after
+        // the window ends and must be excluded.
+        let mut t = Timeline::new();
+        let scope = t.register_scope(sid(1), "x.rs", 1);
+        t.register_thread(tid(0), sid(1));
+        push_spans(&mut t, scope, &[(150, 250), (210, 300)]);
+
+        let stream = thread_stream_with_spans(&t, tid(0));
+        let hits: Vec<_> = stream.spans_in_window(100, 200).collect();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].start_ns, 150);
+    }
+
+    #[test]
+    fn spans_in_window_empty_stream() {
+        let stream = ThreadStream::default();
+        let hits: Vec<_> = stream.spans_in_window(0, 1000).collect();
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn spans_in_window_outside_retained_range() {
+        // All spans ended before the window's start — partition_point
+        // should land past every span and the iterator is empty.
+        let mut t = Timeline::new();
+        let scope = t.register_scope(sid(1), "x.rs", 1);
+        t.register_thread(tid(0), sid(1));
+        push_spans(&mut t, scope, &[(0, 50), (60, 90), (100, 150)]);
+
+        let stream = thread_stream_with_spans(&t, tid(0));
+        let hits: Vec<_> = stream.spans_in_window(500, 1000).collect();
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn spans_in_window_half_open_boundary() {
+        // Boundary cases under the [start, end) convention:
+        //  - A span whose end_ns == visible_start_ns is excluded.
+        //  - A span whose start_ns == visible_end_ns is excluded.
+        let mut t = Timeline::new();
+        let scope = t.register_scope(sid(1), "x.rs", 1);
+        t.register_thread(tid(0), sid(1));
+        push_spans(&mut t, scope, &[(0, 100), (200, 300)]);
+
+        let stream = thread_stream_with_spans(&t, tid(0));
+        let hits: Vec<_> = stream.spans_in_window(100, 200).collect();
+        assert!(
+            hits.is_empty(),
+            "half-open boundaries must exclude touching spans, got {hits:?}",
+        );
+    }
+
+    #[test]
+    fn spans_in_window_includes_nested_parent_pushed_after_children() {
+        // Nested-scope invariant: the parent span has an earlier
+        // start_ns than its children but is pushed to the deque after
+        // them (end_ns is monotonic, start_ns is not). A window that
+        // the parent overlaps must still include it even though the
+        // naive "walk forward until start_ns exits window" approach
+        // would miss it.
+        //
+        // Deque state (ordered by push time / end_ns):
+        //   [0] child1  start=10, end=20
+        //   [1] child2  start=30, end=40
+        //   [2] parent  start=5,  end=1000
+        //
+        // Window [100, 200): parent overlaps (5 < 200 && 1000 > 100),
+        // children do not.
+        let mut stream = ThreadStream::default();
+        let scope = ScopeId(NonZeroU32::new(1).unwrap());
+        for (i, &(s, e)) in [(10, 20), (30, 40), (5, 1000)].iter().enumerate() {
+            stream.spans.push_back(CpuSpan {
+                id: SpanId(i as u64 + 1),
+                scope,
+                thread: tid(0),
+                parent: None,
+                start_ns: s,
+                end_ns: e,
+                data: SpanData::None,
+            });
+        }
+
+        let hits: Vec<_> = stream.spans_in_window(100, 200).collect();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].start_ns, 5);
+        assert_eq!(hits[0].end_ns, 1000);
+    }
+
+    #[test]
+    fn gpu_spans_in_window_basic() {
+        // Mirror the CPU coverage in miniature for the GPU helper.
+        let stream = gpu_stream_from(&[(0, 50), (60, 150), (200, 300)]);
+        let hits: Vec<_> = stream.spans_in_window(100, 250).collect();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].start_ns, 60);
+        assert_eq!(hits[1].start_ns, 200);
+    }
+
+    #[test]
+    fn gpu_spans_in_window_half_open_boundary() {
+        let stream = gpu_stream_from(&[(0, 100), (200, 300)]);
+        let hits: Vec<_> = stream.spans_in_window(100, 200).collect();
+        assert!(hits.is_empty());
     }
 
     #[test]

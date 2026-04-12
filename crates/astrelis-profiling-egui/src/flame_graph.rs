@@ -1,11 +1,9 @@
-//! Stage 1 flame graph widget: renders the most recent frame's CPU
+//! Last-frame flame graph widget: renders the most recent frame's CPU
 //! and GPU spans as a nested set of colored rectangles, one lane per
 //! thread or GPU queue.
 //!
-//! Depth for each CPU span is computed on the fly by maintaining a
-//! simple stack ordered by `end_ns` — well-formed sync RAII spans
-//! on a single thread always end in reverse begin order, so this is
-//! both correct and cheap.
+//! Depth computation is delegated to [`crate::layout::compute_depth`]
+//! so [`crate::ProfilerWindow`] shares the same logic.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -13,7 +11,9 @@ use astrelis_profiling::data::{CpuSpan, FrameMark, GpuSpan, StringId};
 use astrelis_profiling::profiler::Profiler;
 use astrelis_profiling::timeline::Timeline;
 
-/// Widget state for the Stage 1 "last frame" flame graph.
+use crate::layout::compute_depth;
+
+/// Widget state for the last-frame flame graph.
 ///
 /// The widget is a pure reader: it locks the profiler's timeline for
 /// reading once per frame, copies out the data it needs, and drops the
@@ -165,40 +165,35 @@ fn build_cpu_bars(
     timeline: &Timeline,
     strings: &mut HashMap<StringId, String>,
 ) -> Vec<Bar> {
-    // Only spans overlapping the current frame window.
+    // Only spans overlapping the current frame window. The deque is
+    // `end_ns`-sorted, not `start_ns`-sorted, so we must sort after
+    // filtering before handing to `compute_depth`.
     let mut window: Vec<&CpuSpan> = spans
         .iter()
         .filter(|s| s.end_ns > frame.start_ns && s.start_ns < frame.end_ns)
         .collect();
     window.sort_by_key(|s| s.start_ns);
 
-    // Compute depth from the end_ns stack described in the module docs.
-    let mut stack: Vec<u64> = Vec::new();
-    let mut bars = Vec::with_capacity(window.len());
-    let p = Profiler::get();
-    for s in window {
-        while let Some(&top_end) = stack.last() {
-            if top_end <= s.start_ns {
-                stack.pop();
-            } else {
-                break;
-            }
-        }
-        let depth = stack.len() as u32;
-        stack.push(s.end_ns);
+    let pairs: Vec<(u64, u64)> = window.iter().map(|s| (s.start_ns, s.end_ns)).collect();
+    let depths = compute_depth(&pairs);
 
-        let scope = &timeline.scopes[(s.scope.0.get() - 1) as usize];
-        strings
-            .entry(scope.name)
-            .or_insert_with(|| p.strings.get(scope.name).unwrap_or_default());
-        bars.push(Bar {
-            start_ns: s.start_ns,
-            end_ns: s.end_ns,
-            depth,
-            name_id: scope.name,
-        });
-    }
-    bars
+    let p = Profiler::get();
+    window
+        .iter()
+        .zip(depths)
+        .map(|(s, depth)| {
+            let scope = &timeline.scopes[(s.scope.0.get() - 1) as usize];
+            strings
+                .entry(scope.name)
+                .or_insert_with(|| p.strings.get(scope.name).unwrap_or_default());
+            Bar {
+                start_ns: s.start_ns,
+                end_ns: s.end_ns,
+                depth,
+                name_id: scope.name,
+            }
+        })
+        .collect()
 }
 
 fn build_gpu_bars(
@@ -213,32 +208,26 @@ fn build_gpu_bars(
         .collect();
     window.sort_by_key(|s| s.start_ns);
 
-    let mut stack: Vec<u64> = Vec::new();
-    let mut bars = Vec::with_capacity(window.len());
-    let p = Profiler::get();
-    for s in window {
-        while let Some(&top_end) = stack.last() {
-            if top_end <= s.start_ns {
-                stack.pop();
-            } else {
-                break;
-            }
-        }
-        let depth = stack.len() as u32;
-        stack.push(s.end_ns);
+    let pairs: Vec<(u64, u64)> = window.iter().map(|s| (s.start_ns, s.end_ns)).collect();
+    let depths = compute_depth(&pairs);
 
-        let scope = &timeline.scopes[(s.scope.0.get() - 1) as usize];
-        strings
-            .entry(scope.name)
-            .or_insert_with(|| p.strings.get(scope.name).unwrap_or_default());
-        bars.push(Bar {
-            start_ns: s.start_ns,
-            end_ns: s.end_ns,
-            depth,
-            name_id: scope.name,
-        });
-    }
-    bars
+    let p = Profiler::get();
+    window
+        .iter()
+        .zip(depths)
+        .map(|(s, depth)| {
+            let scope = &timeline.scopes[(s.scope.0.get() - 1) as usize];
+            strings
+                .entry(scope.name)
+                .or_insert_with(|| p.strings.get(scope.name).unwrap_or_default());
+            Bar {
+                start_ns: s.start_ns,
+                end_ns: s.end_ns,
+                depth,
+                name_id: scope.name,
+            }
+        })
+        .collect()
 }
 
 struct RenderLaneParams<'a> {

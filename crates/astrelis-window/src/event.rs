@@ -163,6 +163,36 @@ pub enum WindowEvent {
     /// A touch event occurred.
     Touch(TouchEvent),
 
+    // --- Trackpad gestures (macOS / iOS) ---
+    /// Two-finger pinch gesture. Positive delta = zoom in, negative = zoom out.
+    PinchGesture {
+        /// Magnification delta since the last event.
+        delta: f64,
+        /// Gesture phase.
+        phase: TouchPhase,
+    },
+
+    /// Multi-finger pan gesture.
+    PanGesture {
+        /// Pan delta in logical pixels.
+        delta_x: f32,
+        /// Pan delta in logical pixels.
+        delta_y: f32,
+        /// Gesture phase.
+        phase: TouchPhase,
+    },
+
+    /// Two-finger rotation gesture.
+    RotationGesture {
+        /// Rotation delta in radians.
+        delta: f32,
+        /// Gesture phase.
+        phase: TouchPhase,
+    },
+
+    /// Trackpad double-tap (smart magnify).
+    DoubleTapGesture,
+
     // --- Drag & drop ---
     /// File(s) are being dragged over the window (hovering).
     DroppedFileHovered(Vec<PathBuf>),

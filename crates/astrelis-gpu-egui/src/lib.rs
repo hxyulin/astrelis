@@ -223,6 +223,30 @@ impl EguiIntegration {
                 });
                 self.context.egui_is_using_pointer()
             }
+            WindowEvent::PinchGesture { delta, .. } => {
+                // delta is a magnification factor: +0.1 = 10% zoom in.
+                // egui::Event::Zoom expects a scale where 1.0 = no change.
+                self.raw_input
+                    .events
+                    .push(egui::Event::Zoom(1.0 + *delta as f32));
+                self.context.egui_wants_pointer_input()
+            }
+            WindowEvent::PanGesture {
+                delta_x, delta_y, ..
+            } => {
+                self.raw_input.events.push(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(*delta_x, *delta_y),
+                    modifiers: self.raw_input.modifiers,
+                    phase: egui::TouchPhase::Move,
+                });
+                self.context.egui_wants_pointer_input()
+            }
+            WindowEvent::DoubleTapGesture => {
+                // Smart magnify: toggle between 1× and 2× zoom.
+                self.raw_input.events.push(egui::Event::Zoom(2.0));
+                self.context.egui_wants_pointer_input()
+            }
             // Events handled elsewhere or not relevant to egui.
             WindowEvent::CursorEntered
             | WindowEvent::Resized(_)
@@ -238,7 +262,8 @@ impl EguiIntegration {
             | WindowEvent::Minimized
             | WindowEvent::Restored
             | WindowEvent::Maximized
-            | WindowEvent::Unmaximized => false,
+            | WindowEvent::Unmaximized
+            | WindowEvent::RotationGesture { .. } => false,
             _ => false,
         }
     }
