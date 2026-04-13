@@ -1,0 +1,22 @@
+[package]
+name = "astrelis"
+description = "Astrelis game engine — modular Rust engine built on wgpu"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-profiling = { workspace = true }
+astrelis-window = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-input = { workspace = true }
+astrelis-assets = { workspace = true }
+astrelis-app = { workspace = true }
+astrelis-render-2d = { workspace = true }
+astrelis-text = { workspace = true }
+
+[lints]
+workspace = true

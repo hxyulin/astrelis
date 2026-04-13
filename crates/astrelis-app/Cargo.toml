@@ -1,0 +1,20 @@
+[package]
+name = "astrelis-app"
+description = "Application framework for the Astrelis engine"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-profiling = { workspace = true }
+astrelis-window = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-input = { workspace = true }
+astrelis-assets = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "astrelis-render-2d"
+description = "2D rendering pipeline for the Astrelis engine"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-profiling = { workspace = true }
+bytemuck = { workspace = true }
+tracing = { workspace = true }
+wgpu = { workspace = true }
+
+[lints]
+workspace = true

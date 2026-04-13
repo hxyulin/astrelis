@@ -129,6 +129,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis"
+version = "0.3.0"
+dependencies = [
+ "astrelis-app",
+ "astrelis-assets",
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-input",
+ "astrelis-profiling",
+ "astrelis-render-2d",
+ "astrelis-text",
+ "astrelis-window",
+]
+
+[[package]]
+name = "astrelis-app"
+version = "0.3.0"
+dependencies = [
+ "astrelis-assets",
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-input",
+ "astrelis-profiling",
+ "astrelis-window",
+ "tracing",
+]
+
+[[package]]
 name = "astrelis-assets"
 version = "0.3.0"
 dependencies = [
@@ -205,6 +233,18 @@ version = "0.3.0"
 dependencies = [
  "astrelis-profiling",
  "egui",
+]
+
+[[package]]
+name = "astrelis-render-2d"
+version = "0.3.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-profiling",
+ "bytemuck",
+ "tracing",
+ "wgpu",
 ]
 
 [[package]]
