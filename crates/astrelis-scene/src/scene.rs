@@ -279,6 +279,9 @@ impl NodeBuilder<'_> {
     }
 
     /// Attaches a component to the node.
+    ///
+    /// Overwrites any existing `T` on the node without returning the
+    /// old value — use [`Scene::insert`] if you need the replaced value.
     pub fn with<T: crate::component::Component>(self, component: T) -> Self {
         self.scene.insert(self.id, component);
         self

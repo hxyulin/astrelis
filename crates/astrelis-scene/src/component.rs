@@ -41,17 +41,25 @@ impl<T: Component> ComponentColumn for SecondaryMap<NodeId, T> {
 
 impl Scene {
     fn column<T: Component>(&self) -> Option<&SecondaryMap<NodeId, T>> {
-        self.columns
-            .get(&TypeId::of::<T>())?
-            .as_any()
-            .downcast_ref()
+        // Missing column is a normal `None`; a failed downcast would be
+        // an engine bug (column stored under the wrong TypeId) — be loud.
+        let column = self.columns.get(&TypeId::of::<T>())?;
+        Some(
+            column
+                .as_any()
+                .downcast_ref()
+                .expect("column type matches TypeId key"),
+        )
     }
 
     fn column_mut<T: Component>(&mut self) -> Option<&mut SecondaryMap<NodeId, T>> {
-        self.columns
-            .get_mut(&TypeId::of::<T>())?
-            .as_any_mut()
-            .downcast_mut()
+        let column = self.columns.get_mut(&TypeId::of::<T>())?;
+        Some(
+            column
+                .as_any_mut()
+                .downcast_mut()
+                .expect("column type matches TypeId key"),
+        )
     }
 
     /// Attaches `value` to node `id`, replacing and returning any
@@ -179,5 +187,20 @@ mod tests {
         scene.despawn(parent);
         assert_eq!(scene.iter::<Health>().count(), 0);
         assert_eq!(scene.iter::<Tag>().count(), 0);
+    }
+
+    #[test]
+    fn reused_slot_does_not_inherit_old_components() {
+        // Regression guard: if storage were ever swapped to a
+        // non-generational map, a new node reusing a despawned node's
+        // slot would inherit its components.
+        let mut scene = Scene::new();
+        let old = scene.spawn().with(Health(99)).id();
+        scene.despawn(old);
+        // slotmap reuses the freed slot with a bumped generation.
+        let new = scene.spawn().id();
+        assert_eq!(scene.get::<Health>(new), None);
+        assert_eq!(scene.get::<Health>(old), None);
+        assert_eq!(scene.iter::<Health>().count(), 0);
     }
 }
