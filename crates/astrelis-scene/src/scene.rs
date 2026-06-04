@@ -112,6 +112,11 @@ impl Scene {
                 cur = self.nodes[c].parent;
             }
         }
+        // No-op when the parent is unchanged — detach+reattach would
+        // silently move the node to the end of the sibling list.
+        if self.nodes[id].parent == new_parent {
+            return Ok(());
+        }
         self.detach(id);
         match new_parent {
             Some(p) => {
@@ -239,6 +244,7 @@ impl Scene {
 ///
 /// The node already exists; the builder just configures it. Call
 /// [`id`](Self::id) to finish and get the [`NodeId`].
+#[must_use = "call .id() to get the NodeId; without it the node stays in the scene but you have no direct handle"]
 pub struct NodeBuilder<'a> {
     scene: &'a mut Scene,
     id: NodeId,
@@ -254,18 +260,21 @@ impl NodeBuilder<'_> {
     /// Sets the node's full local transform.
     pub fn transform(self, transform: Transform) -> Self {
         self.scene.nodes[self.id].transform = transform;
+        self.scene.nodes[self.id].dirty = true;
         self
     }
 
     /// Sets the node's local position.
     pub fn position(self, position: Vec3) -> Self {
         self.scene.nodes[self.id].transform.position = position;
+        self.scene.nodes[self.id].dirty = true;
         self
     }
 
     /// Sets the node's visibility flag.
     pub fn visible(self, visible: bool) -> Self {
         self.scene.nodes[self.id].visible = visible;
+        self.scene.nodes[self.id].dirty = true;
         self
     }
 
@@ -279,7 +288,6 @@ impl NodeBuilder<'_> {
 mod tests {
     use super::*;
     use astrelis_core::math::Vec3;
-    use crate::transform::Transform;
 
     #[test]
     fn spawn_creates_root_nodes() {
@@ -390,6 +398,21 @@ mod tests {
         scene.despawn(dead);
         assert_eq!(scene.set_parent(dead, Some(a)), Err(SceneError::InvalidNode));
         assert_eq!(scene.set_parent(a, Some(dead)), Err(SceneError::InvalidNode));
+    }
+
+    #[test]
+    fn set_parent_same_parent_preserves_child_order() {
+        let mut scene = Scene::new();
+        let p = scene.spawn().id();
+        let c1 = scene.spawn_child(p).id();
+        let c2 = scene.spawn_child(p).id();
+        // Re-setting the same parent must not reorder siblings.
+        scene.set_parent(c1, Some(p)).unwrap();
+        assert_eq!(scene.children(p), &[c1, c2]);
+        // Same for root-level nodes.
+        let r1 = scene.spawn().id();
+        scene.set_parent(p, None).unwrap();
+        assert_eq!(scene.roots(), &[p, r1]);
     }
 
     #[test]
