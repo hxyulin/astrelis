@@ -30,4 +30,4 @@ pub mod transform;
 // pub use node::NodeId;
 // pub use plugin::ScenePlugin;
 // pub use scene::{NodeBuilder, Scene, SceneError};
-// pub use transform::Transform;
+pub use transform::Transform;
