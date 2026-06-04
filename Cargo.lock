@@ -139,6 +139,7 @@ dependencies = [
  "astrelis-input",
  "astrelis-profiling",
  "astrelis-render-2d",
+ "astrelis-render-3d",
  "astrelis-scene",
  "astrelis-text",
  "astrelis-window",
