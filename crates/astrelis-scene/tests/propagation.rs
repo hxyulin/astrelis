@@ -77,7 +77,9 @@ fn dirty_pass_matches_brute_force_under_random_mutations() {
                         scene.despawn(nodes[rng.pick(nodes.len())]);
                     }
                 }
-                // Random local transform.
+                // Random local transform. (set_position/set_rotation/
+                // set_scale share set_transform's dirty-marking path, so
+                // the harness intentionally fuzzes only set_transform.)
                 2 => {
                     if !nodes.is_empty() {
                         let id = nodes[rng.pick(nodes.len())];
@@ -86,7 +88,10 @@ fn dirty_pass_matches_brute_force_under_random_mutations() {
                             Transform {
                                 position: Vec3::new(rng.f32(), rng.f32(), rng.f32()),
                                 rotation: Quat::from_rotation_z(rng.f32()),
-                                scale: Vec3::splat(rng.f32().abs().max(0.1)),
+                                // Clamp scale: deep chains of scale ~10 would
+                                // push matrix elements past f32 precision at
+                                // the 1e-3 absolute epsilon and flake.
+                                scale: Vec3::splat(rng.f32().abs().clamp(0.1, 2.0)),
                             },
                         );
                     }
