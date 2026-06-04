@@ -23,8 +23,6 @@ pub struct Vertex {
 
 impl Vertex {
     /// Vertex buffer layout matching the WGSL vertex inputs.
-    // used by pipeline (Task 7)
-    #[allow(dead_code)]
     pub(crate) fn layout() -> VertexBufferLayout<'static> {
         const ATTRS: [VertexAttribute; 4] = [
             VertexAttribute { format: VertexFormat::Float32x3, offset: 0, shader_location: 0 },
@@ -56,11 +54,7 @@ pub struct MeshData {
 /// Plain index, valid for the lifetime of the renderer that created
 /// it (no `destroy_mesh` in v1).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct MeshHandle(
-    // used by pipeline (Task 7)
-    #[allow(dead_code)]
-    pub(crate) u32,
-);
+pub struct MeshHandle(pub(crate) u32);
 
 #[cfg(test)]
 mod tests {

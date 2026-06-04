@@ -20,7 +20,9 @@
 pub mod camera;
 mod debug;
 pub mod mesh;
+mod pipeline;
 pub mod primitives;
+mod renderer;
 
 pub use camera::Camera3D;
 pub use mesh::{MeshData, MeshHandle, Vertex};
