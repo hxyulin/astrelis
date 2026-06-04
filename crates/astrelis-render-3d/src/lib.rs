@@ -18,6 +18,7 @@
 #![warn(missing_docs)]
 
 pub mod camera;
+mod debug;
 pub mod mesh;
 pub mod primitives;
 
