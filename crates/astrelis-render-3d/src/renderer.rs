@@ -31,6 +31,7 @@ pub(crate) struct LineVertex {
 
 impl LineVertex {
     /// Vertex buffer layout matching the WGSL line vertex inputs.
+    #[must_use]
     pub(crate) fn layout() -> VertexBufferLayout<'static> {
         const ATTRS: [VertexAttribute; 2] = [
             VertexAttribute { format: VertexFormat::Float32x3, offset: 0, shader_location: 0 },
@@ -54,11 +55,14 @@ struct DrawData {
     tint: [f32; 4],
 }
 
+/// A queued draw: sort key (mesh id) + the GPU-visible payload.
 struct DrawCmd {
     mesh: u32,
     data: DrawData,
 }
 
+/// Uploaded mesh buffers; `index_count` always equals the source
+/// `MeshData::indices` length and drives `draw_indexed`.
 struct GpuMesh {
     vertex_buffer: Buffer,
     index_buffer: Buffer,
@@ -257,8 +261,12 @@ impl Renderer3D {
     ) {
         astrelis_profiling::profile_function!();
 
-        let width = target_size.width as u32;
-        let height = target_size.height as u32;
+        // Round, don't truncate: a fractional physical size (e.g.
+        // 1199.9 on a HiDPI surface) must not round down and produce
+        // a depth texture one pixel smaller than the color target —
+        // mismatched attachment sizes are a wgpu validation error.
+        let width = target_size.width.round() as u32;
+        let height = target_size.height.round() as u32;
         if width == 0 || height == 0 || (self.draws.is_empty() && self.lines.is_empty()) {
             self.draws.clear();
             self.lines.clear();
@@ -293,8 +301,7 @@ impl Renderer3D {
         // Sort by mesh so identical meshes form instanced runs.
         // (Draw order within a depth-tested opaque pass is free.)
         self.draws.sort_unstable_by_key(|d| d.mesh);
-        let mesh_ids: Vec<u32> = self.draws.iter().map(|d| d.mesh).collect();
-        let runs = instance_runs(&mesh_ids);
+        let runs = instance_runs(&self.draws, |d| d.mesh);
 
         // Upload per-draw data, growing the storage buffer if needed.
         // Growth recreates the bind group too — it references the buffer.
@@ -351,7 +358,10 @@ impl Renderer3D {
                         astrelis_gpu::command::DepthStencilAttachment {
                             view: &depth.view,
                             depth_load_op: LoadOp::Clear(0.0), // reverse-Z far
-                            depth_store_op: StoreOp::Store,
+                            // The depth buffer is transient (cleared
+                            // every pass, never sampled): Discard lets
+                            // tile-based GPUs skip the write-back.
+                            depth_store_op: StoreOp::Discard,
                             depth_read_only: false,
                         },
                     ),
@@ -392,14 +402,17 @@ impl Renderer3D {
     }
 }
 
-/// Groups a sorted slice of mesh ids into (mesh, instance range)
+/// Groups a slice (pre-sorted by `key`) into (key, instance range)
 /// runs — each run becomes one instanced draw call.
-fn instance_runs(sorted: &[u32]) -> Vec<(u32, std::ops::Range<u32>)> {
+///
+/// Generic over the element so `end()` can pass `&[DrawCmd]` directly
+/// without collecting a scratch `Vec<u32>` of ids every frame.
+fn instance_runs<T>(sorted: &[T], key: impl Fn(&T) -> u32) -> Vec<(u32, std::ops::Range<u32>)> {
     let mut runs = Vec::new();
     let mut start = 0usize;
     for i in 1..=sorted.len() {
-        if i == sorted.len() || sorted[i] != sorted[start] {
-            runs.push((sorted[start], start as u32..i as u32));
+        if i == sorted.len() || key(&sorted[i]) != key(&sorted[start]) {
+            runs.push((key(&sorted[start]), start as u32..i as u32));
             start = i;
         }
     }
@@ -413,13 +426,13 @@ mod tests {
     #[test]
     fn instance_runs_groups_consecutive_meshes() {
         // Already sorted (the caller sorts): two 0s, one 1, three 2s.
-        let runs = instance_runs(&[0, 0, 1, 2, 2, 2]);
+        let runs = instance_runs(&[0u32, 0, 1, 2, 2, 2], |&id| id);
         assert_eq!(runs, vec![(0, 0..2), (1, 2..3), (2, 3..6)]);
     }
 
     #[test]
     fn instance_runs_empty_and_single() {
-        assert!(instance_runs(&[]).is_empty());
-        assert_eq!(instance_runs(&[7]), vec![(7, 0..1)]);
+        assert!(instance_runs(&[] as &[u32], |&id| id).is_empty());
+        assert_eq!(instance_runs(&[7u32], |&id| id), vec![(7, 0..1)]);
     }
 }

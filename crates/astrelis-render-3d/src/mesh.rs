@@ -23,6 +23,7 @@ pub struct Vertex {
 
 impl Vertex {
     /// Vertex buffer layout matching the WGSL vertex inputs.
+    #[must_use]
     pub(crate) fn layout() -> VertexBufferLayout<'static> {
         const ATTRS: [VertexAttribute; 4] = [
             VertexAttribute { format: VertexFormat::Float32x3, offset: 0, shader_location: 0 },
