@@ -278,6 +278,12 @@ impl NodeBuilder<'_> {
         self
     }
 
+    /// Attaches a component to the node.
+    pub fn with<T: crate::component::Component>(self, component: T) -> Self {
+        self.scene.insert(self.id, component);
+        self
+    }
+
     /// Finishes building and returns the node's id.
     pub fn id(self) -> NodeId {
         self.id

@@ -26,7 +26,7 @@ pub mod scene;
 pub mod transform;
 
 // Re-exports restored as the types land in Tasks 2-7.
-// pub use component::Component;
+pub use component::Component;
 // pub use plugin::ScenePlugin;
 pub use node::NodeId;
 pub use scene::{NodeBuilder, Scene, SceneError};
