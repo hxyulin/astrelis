@@ -1,0 +1,18 @@
+[package]
+name = "astrelis-render-3d"
+description = "Unlit/debug 3D rendering pipeline for the Astrelis engine"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-profiling = { workspace = true }
+bytemuck = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

@@ -15,6 +15,7 @@ members = [
     "crates/astrelis-app",
     "crates/astrelis-scene",
     "crates/astrelis-render-2d",
+    "crates/astrelis-render-3d",
     "crates/astrelis",
 ]
 
@@ -41,6 +42,7 @@ astrelis-text-wgpu = { path = "crates/astrelis-text-wgpu", version = "0.3.0" }
 astrelis-app = { path = "crates/astrelis-app", version = "0.3.0" }
 astrelis-scene = { path = "crates/astrelis-scene", version = "0.3.0" }
 astrelis-render-2d = { path = "crates/astrelis-render-2d", version = "0.3.0" }
+astrelis-render-3d = { path = "crates/astrelis-render-3d", version = "0.3.0" }
 
 # Math
 glam = { version = "0.32", features = ["mint", "bytemuck"] }
