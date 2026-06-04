@@ -1,9 +1,5 @@
 //! Render pipeline setup for the 3D renderer.
 
-// Pipeline3D, DEPTH_FORMAT, and LineVertex::layout are all first used
-// in Task 8 (renderer.rs). Suppress dead-code warnings until then.
-#![allow(dead_code)]
-
 use astrelis_gpu::bind_group::{
     BindGroupDescriptor, BindGroupEntry, BindGroupLayoutDescriptor, BindGroupLayoutEntry,
     BindingType, ShaderStages,
@@ -26,8 +22,6 @@ use crate::renderer::LineVertex;
 pub(crate) const DEPTH_FORMAT: TextureFormat = TextureFormat::Depth32Float;
 
 /// GPU resources for the 3D render pipelines.
-// constructed in Task 8
-#[allow(dead_code)]
 pub(crate) struct Pipeline3D {
     /// Opaque mesh render pipeline.
     pub mesh_pipeline: RenderPipeline,

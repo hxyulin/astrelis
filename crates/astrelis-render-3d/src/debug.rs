@@ -8,8 +8,6 @@ use astrelis_core::math::{Mat4, Vec3};
 
 /// Grid lines on the XZ plane at y=0, every `spacing` units out to
 /// `±half_extent` on both axes.
-// used by Renderer3D (Task 8)
-#[allow(dead_code)]
 pub(crate) fn grid_segments(half_extent: f32, spacing: f32) -> Vec<(Vec3, Vec3)> {
     let mut segments = Vec::new();
     let steps = (half_extent / spacing).floor() as i32;
@@ -22,8 +20,6 @@ pub(crate) fn grid_segments(half_extent: f32, spacing: f32) -> Vec<(Vec3, Vec3)>
 }
 
 /// X/Y/Z axis segments (RGB) of `length`, drawn in `transform`'s frame.
-// used by Renderer3D (Task 8)
-#[allow(dead_code)]
 pub(crate) fn axes_segments(transform: Mat4, length: f32) -> [(Vec3, Vec3, Color); 3] {
     let o = transform.transform_point3(Vec3::ZERO);
     [
