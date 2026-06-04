@@ -22,3 +22,4 @@ pub mod mesh;
 pub mod primitives;
 
 pub use camera::Camera3D;
+pub use mesh::{MeshData, MeshHandle, Vertex};
