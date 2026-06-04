@@ -248,6 +248,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-scene"
+version = "0.3.0"
+dependencies = [
+ "astrelis-app",
+ "astrelis-core",
+ "astrelis-profiling",
+ "slotmap",
+]
+
+[[package]]
 name = "astrelis-text"
 version = "0.3.0"
 dependencies = [
