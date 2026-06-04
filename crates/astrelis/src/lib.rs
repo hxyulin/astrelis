@@ -53,6 +53,9 @@ pub use astrelis_profiling as profiling;
 /// 2D rendering: sprites, shapes, camera, batching.
 pub use astrelis_render_2d as render_2d;
 
+/// 3D rendering: unlit meshes, debug lines, perspective camera.
+pub use astrelis_render_3d as render_3d;
+
 /// Scene tree with columnar component storage.
 pub use astrelis_scene as scene;
 
@@ -76,6 +79,9 @@ pub mod prelude {
 
     // 2D rendering.
     pub use astrelis_render_2d::{Camera2D, Renderer2D, SpriteOptions, TextureHandle};
+
+    // 3D rendering.
+    pub use astrelis_render_3d::{Camera3D, MeshData, MeshHandle, Renderer3D, Vertex};
 
     // Scene tree.
     pub use astrelis_scene::{Component, NodeId, Scene, SceneError, ScenePlugin, Transform};
