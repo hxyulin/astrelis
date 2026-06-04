@@ -20,3 +20,5 @@
 pub mod camera;
 pub mod mesh;
 pub mod primitives;
+
+pub use camera::Camera3D;
