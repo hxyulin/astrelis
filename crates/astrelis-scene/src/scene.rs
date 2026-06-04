@@ -469,6 +469,22 @@ mod tests {
     }
 
     #[test]
+    fn field_setters_and_stale_descendants() {
+        let mut scene = Scene::new();
+        let id = scene.spawn().id();
+        scene.set_name(id, "n");
+        assert_eq!(scene.name(id), Some("n"));
+        scene.set_rotation(id, Quat::from_rotation_z(1.0));
+        scene.set_scale(id, Vec3::splat(2.0));
+        let t = scene.local_transform(id).unwrap();
+        assert_eq!(t.rotation, Quat::from_rotation_z(1.0));
+        assert_eq!(t.scale, Vec3::splat(2.0));
+        // Descendants of a stale id is empty, not a panic.
+        scene.despawn(id);
+        assert_eq!(scene.descendants(id).count(), 0);
+    }
+
+    #[test]
     fn descendants_walks_subtree() {
         let mut scene = Scene::new();
         let a = scene.spawn().id();

@@ -13,6 +13,17 @@
 //! frame in `Phase::PostUpdate` — mutate the scene in `Update`, read
 //! world transforms in `Render`.
 //!
+//! Mutating nodes while iterating a component column would alias the
+//! scene borrow, so collect the target ids first:
+//!
+//! ```ignore
+//! let spinners: Vec<(NodeId, f32)> =
+//!     scene.iter::<Spin>().map(|(id, s)| (id, s.speed)).collect();
+//! for (id, speed) in spinners {
+//!     scene.set_rotation(id, Quat::from_rotation_z(angle * speed));
+//! }
+//! ```
+//!
 //! This crate has no renderer or GPU dependencies. Rendering glue
 //! (e.g. a sprite component plus a `Render`-phase system that calls a
 //! renderer) lives downstream.
