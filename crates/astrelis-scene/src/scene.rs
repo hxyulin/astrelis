@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use slotmap::SlotMap;
 
-use astrelis_core::math::{Quat, Vec3};
+use astrelis_core::math::{Mat4, Quat, Vec3};
 
 use crate::component::ComponentColumn;
 use crate::node::{Node, NodeId};
@@ -238,6 +238,50 @@ impl Scene {
             node.dirty = true;
         }
     }
+
+    /// Recomputes cached world transforms and hierarchical visibility.
+    ///
+    /// Runs once per frame in `Phase::PostUpdate` when using
+    /// `ScenePlugin`; call directly for mid-frame freshness. Nodes
+    /// whose ancestor chain contains no dirty node skip the matrix
+    /// math.
+    pub fn flush_transforms(&mut self) {
+        astrelis_profiling::profile_function!();
+        // (id, parent world, parent world-visible, ancestor dirty)
+        let mut stack: Vec<(NodeId, Mat4, bool, bool)> = self
+            .roots
+            .iter()
+            .map(|&r| (r, Mat4::IDENTITY, true, false))
+            .collect();
+        while let Some((id, parent_world, parent_visible, ancestor_dirty)) = stack.pop() {
+            let Some(node) = self.nodes.get_mut(id) else {
+                continue;
+            };
+            let dirty = ancestor_dirty || node.dirty;
+            if dirty {
+                node.world = parent_world * node.transform.matrix();
+                node.world_visible = parent_visible && node.visible;
+                node.dirty = false;
+            }
+            let world = node.world;
+            let world_visible = node.world_visible;
+            // Descend even when clean: descendants may be dirty.
+            for &child in &node.children {
+                stack.push((child, world, world_visible, dirty));
+            }
+        }
+    }
+
+    /// A node's cached world matrix, as of the last propagation pass.
+    pub fn world_transform(&self, id: NodeId) -> Option<Mat4> {
+        self.nodes.get(id).map(|n| n.world)
+    }
+
+    /// A node's cached hierarchical visibility (its own flag ANDed with
+    /// all ancestors'), as of the last propagation pass.
+    pub fn is_world_visible(&self, id: NodeId) -> Option<bool> {
+        self.nodes.get(id).map(|n| n.world_visible)
+    }
 }
 
 /// Builder returned by [`Scene::spawn`]/[`Scene::spawn_child`].
@@ -437,5 +481,105 @@ mod tests {
         let mut expected = vec![b, c, d];
         expected.sort();
         assert_eq!(desc, expected);
+    }
+
+    #[test]
+    fn world_transform_composes_down_the_tree() {
+        let mut scene = Scene::new();
+        let parent = scene.spawn().position(Vec3::new(10.0, 0.0, 0.0)).id();
+        let child = scene
+            .spawn_child(parent)
+            .position(Vec3::new(0.0, 5.0, 0.0))
+            .id();
+        scene.flush_transforms();
+        let world = scene.world_transform(child).unwrap();
+        let origin = world.transform_point3(Vec3::ZERO);
+        assert!(origin.abs_diff_eq(Vec3::new(10.0, 5.0, 0.0), 1e-5));
+    }
+
+    #[test]
+    fn parent_rotation_moves_children() {
+        let mut scene = Scene::new();
+        let parent = scene.spawn().id();
+        let child = scene
+            .spawn_child(parent)
+            .position(Vec3::new(1.0, 0.0, 0.0))
+            .id();
+        let mut t = Transform::IDENTITY;
+        t.set_rotation_2d(std::f32::consts::FRAC_PI_2);
+        scene.set_transform(parent, t);
+        scene.flush_transforms();
+        let origin = scene
+            .world_transform(child)
+            .unwrap()
+            .transform_point3(Vec3::ZERO);
+        assert!(origin.abs_diff_eq(Vec3::new(0.0, 1.0, 0.0), 1e-5));
+    }
+
+    #[test]
+    fn cache_is_stale_until_flush() {
+        let mut scene = Scene::new();
+        let id = scene.spawn().id();
+        scene.flush_transforms();
+        scene.set_position(id, Vec3::new(5.0, 0.0, 0.0));
+        // Documented semantics: reads return the cache as of the last pass.
+        let before = scene
+            .world_transform(id)
+            .unwrap()
+            .transform_point3(Vec3::ZERO);
+        assert!(before.abs_diff_eq(Vec3::ZERO, 1e-6));
+        scene.flush_transforms();
+        let after = scene
+            .world_transform(id)
+            .unwrap()
+            .transform_point3(Vec3::ZERO);
+        assert!(after.abs_diff_eq(Vec3::new(5.0, 0.0, 0.0), 1e-6));
+    }
+
+    #[test]
+    fn reparenting_keeps_local_changes_world() {
+        let mut scene = Scene::new();
+        let a = scene.spawn().position(Vec3::new(100.0, 0.0, 0.0)).id();
+        let b = scene.spawn().id();
+        let child = scene
+            .spawn_child(a)
+            .position(Vec3::new(1.0, 0.0, 0.0))
+            .id();
+        scene.flush_transforms();
+        scene.set_parent(child, Some(b)).unwrap();
+        scene.flush_transforms();
+        let origin = scene
+            .world_transform(child)
+            .unwrap()
+            .transform_point3(Vec3::ZERO);
+        assert!(origin.abs_diff_eq(Vec3::new(1.0, 0.0, 0.0), 1e-5));
+    }
+
+    #[test]
+    fn visibility_inherits_down() {
+        let mut scene = Scene::new();
+        let a = scene.spawn().id();
+        let b = scene.spawn_child(a).id();
+        let c = scene.spawn_child(b).id();
+        scene.flush_transforms();
+        assert_eq!(scene.is_world_visible(c), Some(true));
+        scene.set_visible(a, false);
+        scene.flush_transforms();
+        assert_eq!(scene.is_world_visible(b), Some(false));
+        assert_eq!(scene.is_world_visible(c), Some(false));
+        // Child's own flag is untouched.
+        assert_eq!(scene.visible(c), Some(true));
+        scene.set_visible(a, true);
+        scene.flush_transforms();
+        assert_eq!(scene.is_world_visible(c), Some(true));
+    }
+
+    #[test]
+    fn world_transform_on_stale_id_is_none() {
+        let mut scene = Scene::new();
+        let id = scene.spawn().id();
+        scene.despawn(id);
+        assert_eq!(scene.world_transform(id), None);
+        assert_eq!(scene.is_world_visible(id), None);
     }
 }

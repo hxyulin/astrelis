@@ -2,6 +2,8 @@
 
 use slotmap::new_key_type;
 
+use astrelis_core::math::Mat4;
+
 use crate::transform::Transform;
 
 new_key_type! {
@@ -22,6 +24,10 @@ pub(crate) struct Node {
     pub(crate) visible: bool,
     /// Set on any transform/visibility/parent change; cleared by the propagation pass.
     pub(crate) dirty: bool,
+    /// Cached world matrix, valid as of the last propagation pass.
+    pub(crate) world: Mat4,
+    /// Cached hierarchical visibility, valid as of the last pass.
+    pub(crate) world_visible: bool,
 }
 
 impl Node {
@@ -33,6 +39,8 @@ impl Node {
             children: Vec::new(),
             visible: true,
             dirty: true,
+            world: Mat4::IDENTITY,
+            world_visible: true,
         }
     }
 }
