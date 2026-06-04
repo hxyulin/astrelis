@@ -76,7 +76,7 @@ struct Node {                                 // PRIVATE — all access via Scen
     // engine-maintained caches:
     world: Mat4,
     world_visible: bool,
-    transform_dirty: bool,
+    dirty: bool,          // covers transform and visibility changes
 }
 
 pub struct Scene {
@@ -105,7 +105,8 @@ let player = scene.spawn()                    // root-level
 
 let gun = scene.spawn_child(player).name("gun").id();
 
-scene.set_parent(gun, other)?;                // Err(SceneError::WouldCycle)
+scene.set_parent(gun, Some(other))?;          // Err on cycle or stale id
+scene.set_parent(gun, None)?;                 // detach to root level
 scene.despawn(player);                        // recursive; clears every column
 ```
 
@@ -170,8 +171,9 @@ window, or GPU.
 
 ## Error handling
 
-- `SceneError` with a single v1 variant: `WouldCycle` (from
-  `set_parent`).
+- `SceneError` with two v1 variants: `WouldCycle` and `InvalidNode`
+  (both from `set_parent`, where silently succeeding on a stale ID
+  would hide bugs).
 - Everything else is `Option` (stale IDs, missing components).
 - Despawn-during-iteration is prevented structurally: `iter()` borrows
   `&Scene`; structural mutation needs `&mut Scene`. No command queue in
