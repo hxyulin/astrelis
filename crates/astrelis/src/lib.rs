@@ -53,6 +53,9 @@ pub use astrelis_profiling as profiling;
 /// 2D rendering: sprites, shapes, camera, batching.
 pub use astrelis_render_2d as render_2d;
 
+/// Scene tree with columnar component storage.
+pub use astrelis_scene as scene;
+
 /// Text shaping and font management.
 pub use astrelis_text as text;
 
@@ -73,6 +76,9 @@ pub mod prelude {
 
     // 2D rendering.
     pub use astrelis_render_2d::{Camera2D, Renderer2D, SpriteOptions, TextureHandle};
+
+    // Scene tree.
+    pub use astrelis_scene::{Component, NodeId, Scene, SceneError, ScenePlugin, Transform};
 
     // Input.
     pub use astrelis_input::InputState;

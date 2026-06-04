@@ -16,6 +16,7 @@ astrelis-input = { workspace = true }
 astrelis-assets = { workspace = true }
 astrelis-app = { workspace = true }
 astrelis-render-2d = { workspace = true }
+astrelis-scene = { workspace = true }
 astrelis-text = { workspace = true }
 
 [lints]
