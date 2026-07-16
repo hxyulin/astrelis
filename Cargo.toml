@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "crates/astrelis-app",
   "crates/astrelis-core",
   "crates/astrelis-gpu",
   "crates/astrelis-gpu-wgpu",
@@ -22,6 +23,7 @@ license = "MIT"
 repository = "https://github.com/hxyulin/astrelis"
 
 [workspace.dependencies]
+astrelis-app = { path = "crates/astrelis-app", version = "0.0.0" }
 astrelis-core = { path = "crates/astrelis-core", version = "0.0.0" }
 astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.0.0" }
 astrelis-platform = { path = "crates/astrelis-platform", version = "0.0.0" }

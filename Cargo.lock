@@ -129,6 +129,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-app"
+version = "0.0.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-gpu-wgpu",
+ "astrelis-platform",
+ "astrelis-platform-test",
+ "astrelis-platform-winit",
+ "astrelis-profiling",
+ "pollster",
+]
+
+[[package]]
 name = "astrelis-core"
 version = "0.0.0"
 dependencies = [

@@ -161,6 +161,25 @@ impl<T: Send + 'static> TestRunner<T> {
     where
         A: Application<UserEvent = T>,
     {
+        self.run_return_inner(&mut app)?;
+        drop(app);
+        Ok(self.state())
+    }
+
+    /// Runs a script and returns the application after loop termination.
+    pub fn run_return<A>(mut self, mut app: A) -> Result<(A, TestState), PlatformError>
+    where
+        A: Application<UserEvent = T>,
+    {
+        self.run_return_inner(&mut app)?;
+        let state = self.state();
+        Ok((app, state))
+    }
+
+    fn run_return_inner<A>(&mut self, app: &mut A) -> Result<(), PlatformError>
+    where
+        A: Application<UserEvent = T>,
+    {
         let mut context = TestContext {
             shared: self.shared.clone(),
             monitors: self.monitors.clone(),
@@ -194,13 +213,12 @@ impl<T: Send + 'static> TestRunner<T> {
                 }),
                 ScriptEvent::Exit => context.exited = true,
             }
-            drain_proxy(&mut context, &mut app);
-            drain_destroyed(&mut context, &mut app);
+            drain_proxy(&mut context, app);
+            drain_destroyed(&mut context, app);
         }
         self.shared.open.store(false, Ordering::Release);
         invoke(&mut context, Dispatch::Exiting, |c| app.exiting(c));
-        drop(app);
-        Ok(self.state())
+        Ok(())
     }
 }
 

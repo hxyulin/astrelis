@@ -1,0 +1,23 @@
+[package]
+name = "astrelis-app"
+description = "Shared desktop and continuously updating application runtime for Astrelis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-platform = { workspace = true }
+astrelis-profiling = { workspace = true }
+
+[dev-dependencies]
+astrelis-core = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
+astrelis-platform-test = { path = "../astrelis-platform-test" }
+astrelis-platform-winit = { path = "../astrelis-platform-winit" }
+pollster = { workspace = true }
+
+[lints]
+workspace = true

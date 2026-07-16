@@ -26,6 +26,11 @@ use crate::window::WinitWindow;
 
 /// Runs an application on winit's portable owned event loop.
 pub fn run<A: Application>(app: A) -> Result<(), PlatformError> {
+    run_return(app).map(|_| ())
+}
+
+/// Runs an application and returns it after the event loop terminates.
+pub fn run_return<A: Application>(app: A) -> Result<A, PlatformError> {
     let event_loop = EventLoop::<A::UserEvent>::with_user_event()
         .build()
         .map_err(|error| PlatformError::new(error.to_string()))?;
@@ -38,7 +43,8 @@ pub fn run<A: Application>(app: A) -> Result<(), PlatformError> {
     };
     event_loop
         .run_app(&mut adapter)
-        .map_err(|error| PlatformError::new(error.to_string()))
+        .map_err(|error| PlatformError::new(error.to_string()))?;
+    Ok(adapter.app)
 }
 
 struct Adapter<A: Application> {
