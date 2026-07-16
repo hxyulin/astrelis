@@ -6,6 +6,9 @@ Astrelis is being rebuilt methodically from a small foundation. The current
 workspace contains:
 
 - `astrelis-core`: shared math, color, geometry, IDs, and logging helpers;
+- `astrelis-platform`: backend-neutral windows, lifecycle, and input;
+- `astrelis-platform-winit`: desktop winit implementation;
+- `astrelis-platform-test`: deterministic display-free scripted backend;
 - `astrelis-profiling`: dependency-free CPU/GPU timeline profiling.
 
 Windowing, event-loop, GPU, painting, text, application-runtime, and UI layers

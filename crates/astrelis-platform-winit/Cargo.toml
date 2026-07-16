@@ -1,0 +1,18 @@
+[package]
+name = "astrelis-platform-winit"
+description = "Winit desktop backend for Astrelis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-platform = { workspace = true }
+astrelis-profiling = { workspace = true }
+raw-window-handle = { workspace = true }
+winit = { workspace = true }
+
+[lints]
+workspace = true

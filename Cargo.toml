@@ -1,6 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["crates/astrelis-core", "crates/astrelis-profiling"]
+members = [
+  "crates/astrelis-core",
+  "crates/astrelis-platform",
+  "crates/astrelis-platform-test",
+  "crates/astrelis-platform-winit",
+  "crates/astrelis-profiling",
+]
 
 [workspace.package]
 version = "0.0.0"
@@ -11,6 +17,7 @@ repository = "https://github.com/hxyulin/astrelis"
 
 [workspace.dependencies]
 astrelis-core = { path = "crates/astrelis-core", version = "0.0.0" }
+astrelis-platform = { path = "crates/astrelis-platform", version = "0.0.0" }
 astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.0.0" }
 glam = { version = "0.33", features = ["mint", "bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
@@ -19,6 +26,8 @@ criterion = { version = "0.8", default-features = false, features = [
 ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+raw-window-handle = "0.6"
+winit = { version = "=0.30.13", features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
 
 [workspace.lints.rust]
 missing_docs = "warn"

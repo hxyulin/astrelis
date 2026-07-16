@@ -26,52 +26,61 @@ pub struct Logical;
 pub struct Physical;
 
 /// A 2D point in coordinate space `S`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Point<S> {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Point<S, Scalar = f32> {
     /// X coordinate.
-    pub x: f32,
+    pub x: Scalar,
     /// Y coordinate.
-    pub y: f32,
+    pub y: Scalar,
     _space: PhantomData<S>,
 }
 
 /// A 2D size in coordinate space `S`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Size<S> {
+pub struct Size<S, Scalar = f32> {
     /// Width.
-    pub width: f32,
+    pub width: Scalar,
     /// Height.
-    pub height: f32,
+    pub height: Scalar,
     _space: PhantomData<S>,
 }
 
 /// An axis-aligned rectangle in coordinate space `S`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Rect<S> {
+pub struct Rect<S, Scalar = f32> {
     /// Top-left origin.
-    pub origin: Point<S>,
+    pub origin: Point<S, Scalar>,
     /// Size of the rectangle.
-    pub size: Size<S>,
+    pub size: Size<S, Scalar>,
 }
 
 // --- Point ---
 
-impl<S> Point<S> {
+impl<S, Scalar> Point<S, Scalar> {
     /// Creates a new point.
     #[inline]
-    pub const fn new(x: f32, y: f32) -> Self {
+    pub const fn new(x: Scalar, y: Scalar) -> Self {
         Self {
             x,
             y,
             _space: PhantomData,
         }
     }
+}
 
+impl<S, Scalar: Default> Point<S, Scalar> {
+    /// The origin point, using the scalar's default value.
+    pub fn zero() -> Self {
+        Self::new(Scalar::default(), Scalar::default())
+    }
+}
+
+impl<S> Point<S> {
     /// The origin point (0, 0).
     pub const ZERO: Self = Self::new(0.0, 0.0);
 }
 
-impl Point<Logical> {
+impl Point<Logical, f32> {
     /// Converts to physical coordinates by multiplying by the scale factor.
     #[inline]
     pub fn to_physical(self, scale_factor: f32) -> Point<Physical> {
@@ -79,7 +88,7 @@ impl Point<Logical> {
     }
 }
 
-impl Point<Physical> {
+impl Point<Physical, f32> {
     /// Converts to logical coordinates by dividing by the scale factor.
     #[inline]
     pub fn to_logical(self, scale_factor: f32) -> Point<Logical> {
@@ -89,22 +98,31 @@ impl Point<Physical> {
 
 // --- Size ---
 
-impl<S> Size<S> {
+impl<S, Scalar> Size<S, Scalar> {
     /// Creates a new size.
     #[inline]
-    pub const fn new(width: f32, height: f32) -> Self {
+    pub const fn new(width: Scalar, height: Scalar) -> Self {
         Self {
             width,
             height,
             _space: PhantomData,
         }
     }
+}
 
+impl<S, Scalar: Default> Size<S, Scalar> {
+    /// A zero size, using the scalar's default value.
+    pub fn zero() -> Self {
+        Self::new(Scalar::default(), Scalar::default())
+    }
+}
+
+impl<S> Size<S> {
     /// A zero size.
     pub const ZERO: Self = Self::new(0.0, 0.0);
 }
 
-impl Size<Logical> {
+impl Size<Logical, f32> {
     /// Converts to physical coordinates.
     #[inline]
     pub fn to_physical(self, scale_factor: f32) -> Size<Physical> {
@@ -112,7 +130,7 @@ impl Size<Logical> {
     }
 }
 
-impl Size<Physical> {
+impl Size<Physical, f32> {
     /// Converts to logical coordinates.
     #[inline]
     pub fn to_logical(self, scale_factor: f32) -> Size<Logical> {
@@ -122,49 +140,54 @@ impl Size<Physical> {
 
 // --- Rect ---
 
-impl<S> Rect<S> {
+impl<S, Scalar> Rect<S, Scalar> {
     /// Creates a new rectangle from origin and size.
     #[inline]
-    pub const fn new(origin: Point<S>, size: Size<S>) -> Self {
+    pub const fn new(origin: Point<S, Scalar>, size: Size<S, Scalar>) -> Self {
         Self { origin, size }
     }
 
     /// Creates a rectangle from position and dimensions.
     #[inline]
-    pub const fn from_xywh(x: f32, y: f32, width: f32, height: f32) -> Self {
+    pub const fn from_xywh(x: Scalar, y: Scalar, width: Scalar, height: Scalar) -> Self {
         Self {
             origin: Point::new(x, y),
             size: Size::new(width, height),
         }
     }
+}
 
+impl<S, Scalar> Rect<S, Scalar>
+where
+    Scalar: Copy + std::ops::Add<Output = Scalar> + PartialOrd,
+{
     /// Returns the minimum x coordinate (left edge).
     #[inline]
-    pub fn min_x(&self) -> f32 {
+    pub fn min_x(&self) -> Scalar {
         self.origin.x
     }
 
     /// Returns the minimum y coordinate (top edge).
     #[inline]
-    pub fn min_y(&self) -> f32 {
+    pub fn min_y(&self) -> Scalar {
         self.origin.y
     }
 
     /// Returns the maximum x coordinate (right edge).
     #[inline]
-    pub fn max_x(&self) -> f32 {
+    pub fn max_x(&self) -> Scalar {
         self.origin.x + self.size.width
     }
 
     /// Returns the maximum y coordinate (bottom edge).
     #[inline]
-    pub fn max_y(&self) -> f32 {
+    pub fn max_y(&self) -> Scalar {
         self.origin.y + self.size.height
     }
 
     /// Returns `true` if the point is inside this rectangle.
     #[inline]
-    pub fn contains(&self, point: Point<S>) -> bool {
+    pub fn contains(&self, point: Point<S, Scalar>) -> bool {
         point.x >= self.min_x()
             && point.x <= self.max_x()
             && point.y >= self.min_y()
@@ -172,7 +195,7 @@ impl<S> Rect<S> {
     }
 }
 
-impl Rect<Logical> {
+impl Rect<Logical, f32> {
     /// Converts to physical coordinates.
     #[inline]
     pub fn to_physical(self, scale_factor: f32) -> Rect<Physical> {
@@ -183,7 +206,7 @@ impl Rect<Logical> {
     }
 }
 
-impl Rect<Physical> {
+impl Rect<Physical, f32> {
     /// Converts to logical coordinates.
     #[inline]
     pub fn to_logical(self, scale_factor: f32) -> Rect<Logical> {
@@ -240,5 +263,18 @@ mod tests {
         assert_eq!(rect.min_y(), 20.0);
         assert_eq!(rect.max_x(), 40.0);
         assert_eq!(rect.max_y(), 60.0);
+    }
+
+    #[test]
+    fn generic_integer_size_is_exact() {
+        let size = Size::<Physical, u32>::new(3840, 2160);
+        assert_eq!(size.width, 3840);
+        assert_eq!(size.height, 2160);
+    }
+
+    #[test]
+    fn default_scalar_remains_f32() {
+        let point: Point<Logical> = Point::new(1.5, 2.5);
+        assert_eq!(point.x, 1.5_f32);
     }
 }
