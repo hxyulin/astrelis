@@ -1,0 +1,31 @@
+[package]
+name = "astrelis-profiling"
+description = "In-engine custom profiler for the Astrelis engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["enabled"]
+## Compile in profiling support. When off, all macros expand to
+## nothing, so instrumented call sites have zero runtime cost. The
+## timeline data types and explicit lifecycle functions remain
+## available. A runtime toggle (`set_enabled`/`is_enabled`) is
+## available when this feature is on.
+enabled = []
+
+[dependencies]
+
+[dev-dependencies]
+astrelis-core = { workspace = true }
+criterion = { workspace = true }
+tracing = { workspace = true }
+
+[[bench]]
+name = "hot_path"
+harness = false
+
+[lints]
+workspace = true

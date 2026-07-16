@@ -1,0 +1,21 @@
+[package]
+name = "astrelis-core"
+description = "Core types and math for the Astrelis engine"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+glam = { workspace = true }
+bytemuck = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true, optional = true }
+
+[features]
+default = ["tracing-init"]
+tracing-init = ["dep:tracing-subscriber"]
+
+[lints]
+workspace = true

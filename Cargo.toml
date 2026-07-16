@@ -1,0 +1,27 @@
+[workspace]
+resolver = "3"
+members = ["crates/astrelis-core", "crates/astrelis-profiling"]
+
+[workspace.package]
+version = "0.0.0"
+authors = ["hxyulin <hxyulin@proton.me>"]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/hxyulin/astrelis"
+
+[workspace.dependencies]
+astrelis-core = { path = "crates/astrelis-core", version = "0.0.0" }
+astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.0.0" }
+glam = { version = "0.33", features = ["mint", "bytemuck"] }
+bytemuck = { version = "1", features = ["derive"] }
+criterion = { version = "0.8", default-features = false, features = [
+  "cargo_bench_support",
+] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = "warn"
