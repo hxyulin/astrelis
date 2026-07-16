@@ -1,6 +1,6 @@
 [package]
-name = "astrelis-paint"
-description = "Backend-independent paint paths, images, and display lists for Astrelis"
+name = "astrelis-text"
+description = "Backend-independent font discovery, shaping, and retained text layout for Astrelis"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -9,10 +9,7 @@ repository.workspace = true
 
 [dependencies]
 astrelis-core = { workspace = true }
-astrelis-text = { workspace = true }
-
-[dev-dependencies]
-insta = "1.48.0"
+parley = { workspace = true }
 
 [lints]
 workspace = true

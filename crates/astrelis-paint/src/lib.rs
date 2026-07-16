@@ -17,6 +17,7 @@ use astrelis_core::{
     geometry::{LogicalPoint, LogicalRect, Physical, Point, Rect, Size},
     math::Affine2,
 };
+use astrelis_text::TextLayout;
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_IMAGE_ID: AtomicU64 = AtomicU64::new(1);
@@ -481,6 +482,10 @@ pub struct PathRef(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ImageRef(pub u32);
 
+/// Display-list-local retained text-layout reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct TextRef(pub u32);
+
 /// One semantic display-list command.
 #[allow(missing_docs)]
 #[derive(Clone, Debug, PartialEq)]
@@ -519,6 +524,12 @@ pub enum Command {
         destination: LogicalRect,
         options: ImageOptions,
     },
+    /// Draws a retained text layout at a logical origin.
+    DrawText {
+        text: TextRef,
+        origin: LogicalPoint,
+        opacity: f32,
+    },
 }
 
 /// Immutable, validated semantic display list.
@@ -527,6 +538,7 @@ pub struct DisplayList {
     commands: Arc<[Command]>,
     paths: Arc<[Path]>,
     images: Arc<[Image]>,
+    texts: Arc<[TextLayout]>,
 }
 
 impl DisplayList {
@@ -554,6 +566,16 @@ impl DisplayList {
     pub fn images(&self) -> &[Image] {
         &self.images
     }
+
+    /// Resolves a retained text-layout reference.
+    pub fn text(&self, reference: TextRef) -> &TextLayout {
+        &self.texts[reference.0 as usize]
+    }
+
+    /// Resource text layouts in local-index order.
+    pub fn texts(&self) -> &[TextLayout] {
+        &self.texts
+    }
 }
 
 /// Semantic display-list recorder.
@@ -562,8 +584,10 @@ pub struct Painter {
     commands: Vec<Command>,
     paths: Vec<Path>,
     images: Vec<Image>,
+    texts: Vec<TextLayout>,
     path_refs: HashMap<u64, PathRef>,
     image_refs: HashMap<u64, ImageRef>,
+    text_refs: HashMap<u64, TextRef>,
     save_depth: usize,
 }
 
@@ -721,6 +745,26 @@ impl Painter {
         Ok(())
     }
 
+    /// Draws a retained text layout.
+    pub fn draw_text(
+        &mut self,
+        text: &TextLayout,
+        origin: LogicalPoint,
+        opacity: f32,
+    ) -> Result<(), PaintError> {
+        validate_point(origin)?;
+        if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
+            return Err(PaintError::new("text opacity must be within 0..=1"));
+        }
+        let text = self.intern_text(text);
+        self.commands.push(Command::DrawText {
+            text,
+            origin,
+            opacity,
+        });
+        Ok(())
+    }
+
     /// Freezes the display list.
     pub fn finish(self) -> Result<DisplayList, PaintError> {
         if self.save_depth != 0 {
@@ -733,6 +777,7 @@ impl Painter {
             commands: self.commands.into(),
             paths: self.paths.into(),
             images: self.images.into(),
+            texts: self.texts.into(),
         })
     }
 
@@ -748,6 +793,14 @@ impl Painter {
         *self.image_refs.entry(image.cache_id()).or_insert_with(|| {
             let reference = ImageRef(self.images.len() as u32);
             self.images.push(image.clone());
+            reference
+        })
+    }
+
+    fn intern_text(&mut self, text: &TextLayout) -> TextRef {
+        *self.text_refs.entry(text.cache_id()).or_insert_with(|| {
+            let reference = TextRef(self.texts.len() as u32);
+            self.texts.push(text.clone());
             reference
         })
     }

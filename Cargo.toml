@@ -10,6 +10,8 @@ members = [
   "crates/astrelis-platform-test",
   "crates/astrelis-platform-winit",
   "crates/astrelis-profiling",
+  "crates/astrelis-text",
+  "crates/astrelis-text-gpu",
 ]
 
 [workspace.package]
@@ -25,9 +27,14 @@ astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.0.0" }
 astrelis-platform = { path = "crates/astrelis-platform", version = "0.0.0" }
 astrelis-paint = { path = "crates/astrelis-paint", version = "0.0.0" }
 astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.0.0" }
+astrelis-text = { path = "crates/astrelis-text", version = "0.0.0" }
+astrelis-text-gpu = { path = "crates/astrelis-text-gpu", version = "0.0.0" }
 glam = { version = "0.33", features = ["mint", "bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 lyon_tessellation = "1.0.20"
+parley = { version = "=0.11.0", features = ["complex-scripts"] }
+swash = "=0.2.9"
+etagere = "=0.3.0"
 bitflags = "2"
 pollster = "0.4"
 wgpu = { version = "=29.0.4", features = ["vulkan-portability"] }

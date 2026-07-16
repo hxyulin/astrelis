@@ -1,6 +1,6 @@
 [package]
-name = "astrelis-paint"
-description = "Backend-independent paint paths, images, and display lists for Astrelis"
+name = "astrelis-text-gpu"
+description = "GPU glyph rasterization and atlas caching for Astrelis text layouts"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -9,10 +9,10 @@ repository.workspace = true
 
 [dependencies]
 astrelis-core = { workspace = true }
+astrelis-gpu = { workspace = true }
 astrelis-text = { workspace = true }
-
-[dev-dependencies]
-insta = "1.48.0"
+etagere = { workspace = true }
+swash = { workspace = true }
 
 [lints]
 workspace = true

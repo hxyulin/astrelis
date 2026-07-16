@@ -1,7 +1,7 @@
 # astrelis-paint
 
-Backend-independent paths, immutable images, semantic display lists, and the
-`Painter` recording API.
+Backend-independent paths, immutable images, retained text layouts, semantic
+display lists, and the `Painter` recording API.
 
 This crate deliberately has no platform or GPU dependency. Display-list
 generation, validation, inspection, and snapshot testing can run headlessly.

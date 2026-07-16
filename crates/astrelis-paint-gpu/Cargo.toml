@@ -11,6 +11,7 @@ repository.workspace = true
 astrelis-core = { workspace = true }
 astrelis-gpu = { workspace = true }
 astrelis-paint = { workspace = true }
+astrelis-text-gpu = { workspace = true }
 bytemuck = { workspace = true }
 lyon_tessellation = { workspace = true }
 
@@ -18,6 +19,7 @@ lyon_tessellation = { workspace = true }
 astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
 astrelis-platform = { workspace = true }
 astrelis-platform-winit = { path = "../astrelis-platform-winit" }
+astrelis-text = { workspace = true }
 pollster = { workspace = true }
 
 [lints]

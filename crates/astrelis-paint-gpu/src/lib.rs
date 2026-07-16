@@ -14,6 +14,7 @@ use astrelis_paint::{
     Brush, Command, CornerRadii, DisplayList, FillRule, Image, ImageOptions, ImageSampling,
     LineCap, LineJoin, Path, PathVerb, RoundedRect, StrokeStyle,
 };
+use astrelis_text_gpu::{AtlasKind, GlyphCache, GlyphCacheOptions};
 use bytemuck::{Pod, Zeroable};
 use lyon_tessellation::{
     BuffersBuilder, FillOptions, FillTessellator, FillVertex, StrokeOptions, StrokeTessellator,
@@ -46,6 +47,8 @@ pub struct CacheLimits {
     pub mesh_bytes: usize,
     /// Maximum cached uploaded image bytes.
     pub image_bytes: usize,
+    /// Maximum glyph atlas texture bytes.
+    pub glyph_bytes: usize,
 }
 
 impl Default for CacheLimits {
@@ -53,6 +56,7 @@ impl Default for CacheLimits {
         Self {
             mesh_bytes: 32 << 20,
             image_bytes: 128 << 20,
+            glyph_bytes: 64 << 20,
         }
     }
 }
@@ -96,6 +100,12 @@ pub struct RenderStats {
     pub image_cache_hits: u32,
     /// Newly uploaded images.
     pub image_cache_misses: u32,
+    /// Reused rasterized glyphs.
+    pub glyph_cache_hits: u32,
+    /// Newly rasterized glyphs.
+    pub glyph_cache_misses: u32,
+    /// Newly uploaded glyph images.
+    pub glyph_uploads: u32,
 }
 
 /// Display-list rendering failure.
@@ -170,6 +180,8 @@ struct PipelineKey(gpu::TextureFormat, u32);
 struct Pipelines {
     solid: gpu::RenderPipeline,
     image: gpu::RenderPipeline,
+    text_mask: gpu::RenderPipeline,
+    text_color: gpu::RenderPipeline,
     clip_push: gpu::RenderPipeline,
     clip_pop: gpu::RenderPipeline,
 }
@@ -236,6 +248,8 @@ struct State {
 enum DrawKind {
     Solid,
     Image(gpu::BindGroup),
+    TextMask(gpu::BindGroup),
+    TextColor(gpu::BindGroup),
     ClipPush,
     ClipPop,
 }
@@ -257,6 +271,7 @@ pub struct Renderer {
     attachments: Option<Attachments>,
     meshes: HashMap<MeshKey, CachedMesh>,
     images: HashMap<u64, CachedImage>,
+    glyphs: GlyphCache,
     vertex_buffer: Option<FrameBuffer>,
     index_buffer: Option<FrameBuffer>,
     clock: u64,
@@ -293,6 +308,15 @@ impl Renderer {
                 },
             ],
         });
+        let glyphs = GlyphCache::new(
+            device.clone(),
+            queue.clone(),
+            GlyphCacheOptions {
+                max_bytes: options.cache_limits.glyph_bytes,
+                ..Default::default()
+            },
+        )
+        .map_err(|error| RenderError::new(error.to_string()))?;
         Ok(Self {
             device,
             queue,
@@ -302,6 +326,7 @@ impl Renderer {
             attachments: None,
             meshes: HashMap::new(),
             images: HashMap::new(),
+            glyphs,
             vertex_buffer: None,
             index_buffer: None,
             clock: 0,
@@ -325,6 +350,7 @@ impl Renderer {
             return Ok(RenderStats::default());
         }
         self.clock = self.clock.wrapping_add(1);
+        self.glyphs.begin_frame();
         let samples = self.options.antialiasing.samples();
         self.ensure_pipelines(target.format, samples)?;
         self.ensure_attachments(target.size, target.format, samples);
@@ -417,6 +443,14 @@ impl Renderer {
                         pass.set_pipeline(&pipeline.image)?;
                         pass.set_bind_group(0, &bind, &[])?;
                     }
+                    DrawKind::TextMask(bind) => {
+                        pass.set_pipeline(&pipeline.text_mask)?;
+                        pass.set_bind_group(0, &bind, &[])?;
+                    }
+                    DrawKind::TextColor(bind) => {
+                        pass.set_pipeline(&pipeline.text_color)?;
+                        pass.set_bind_group(0, &bind, &[])?;
+                    }
                     DrawKind::ClipPush => pass.set_pipeline(&pipeline.clip_push)?,
                     DrawKind::ClipPop => pass.set_pipeline(&pipeline.clip_pop)?,
                 }
@@ -424,6 +458,7 @@ impl Renderer {
             }
         }
         drop(pass);
+        self.glyphs.finish_frame();
         self.evict();
         Ok(stats)
     }
@@ -432,6 +467,7 @@ impl Renderer {
     pub fn trim_caches(&mut self) {
         self.meshes.clear();
         self.images.clear();
+        self.glyphs.clear();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -586,6 +622,82 @@ impl Renderer {
                 );
                 stats.draws += 1;
             }
+            Command::DrawText {
+                text,
+                origin,
+                opacity,
+            } => {
+                if *opacity == 0.0 {
+                    return Ok(());
+                }
+                let text = list.text(*text);
+                let physical_scale = effective_scale(dpi * state.transform);
+                let (glyphs, glyph_stats) = self
+                    .glyphs
+                    .prepare_layout(text, physical_scale)
+                    .map_err(|error| RenderError::new(error.to_string()))?;
+                stats.glyph_cache_hits += glyph_stats.hits;
+                stats.glyph_cache_misses += glyph_stats.misses;
+                stats.glyph_uploads += glyph_stats.uploads;
+                for run in text.glyph_runs() {
+                    for decoration in [run.underline, run.strikethrough].into_iter().flatten() {
+                        let rect = Rect::from_xywh(
+                            decoration.origin.x + origin.x,
+                            decoration.origin.y + origin.y,
+                            decoration.size.width,
+                            decoration.size.height,
+                        );
+                        draw_solid(
+                            rect_mesh(rect),
+                            Brush::Solid(run.color.with_alpha(run.color.a * *opacity)),
+                            state,
+                            dpi,
+                            size,
+                            vertices,
+                            indices,
+                            draws,
+                            stats,
+                        );
+                    }
+                }
+                for (run_index, glyph) in glyphs {
+                    let run = &text.glyph_runs()[run_index];
+                    let rect = Rect::from_xywh(
+                        glyph.rect.origin.x + origin.x,
+                        glyph.rect.origin.y + origin.y,
+                        glyph.rect.size.width,
+                        glyph.rect.size.height,
+                    );
+                    let alpha = (run.color.a * *opacity).clamp(0.0, 1.0);
+                    let (color, kind) = match glyph.kind {
+                        AtlasKind::Mask => (
+                            [
+                                run.color.r * alpha,
+                                run.color.g * alpha,
+                                run.color.b * alpha,
+                                alpha,
+                            ],
+                            DrawKind::TextMask(glyph.bind_group),
+                        ),
+                        AtlasKind::Color => ([*opacity; 4], DrawKind::TextColor(glyph.bind_group)),
+                    };
+                    append(
+                        &rect_mesh(rect),
+                        dpi * state.transform,
+                        size,
+                        color,
+                        Some(glyph.uv),
+                        vertices,
+                        indices,
+                        draws,
+                        kind,
+                        state.scissor,
+                        state.clips.len() as u32,
+                        stats,
+                    );
+                    stats.draws += 1;
+                }
+            }
         }
         Ok(())
     }
@@ -738,6 +850,12 @@ impl Renderer {
                 label: Some("paint image pipeline layout".into()),
                 bind_group_layouts: vec![self.image_layout.clone()],
             })?;
+        let text_layout = self
+            .device
+            .create_pipeline_layout(gpu::PipelineLayoutDescriptor {
+                label: Some("paint text pipeline layout".into()),
+                bind_group_layouts: vec![self.glyphs.bind_group_layout()],
+            })?;
         let vertex = || gpu::VertexState {
             module: shader.clone(),
             entry_point: "vs_main".into(),
@@ -822,6 +940,20 @@ impl Renderer {
             gpu::ColorWrites::ALL,
             content,
         )?;
+        let text_mask = create(
+            "paint text mask",
+            Some(text_layout.clone()),
+            "fs_text_mask",
+            gpu::ColorWrites::ALL,
+            content,
+        )?;
+        let text_color = create(
+            "paint text color",
+            Some(text_layout),
+            "fs_text_color",
+            gpu::ColorWrites::ALL,
+            content,
+        )?;
         let clip_push = create(
             "paint clip push",
             None,
@@ -849,6 +981,8 @@ impl Renderer {
             Pipelines {
                 solid,
                 image,
+                text_mask,
+                text_color,
                 clip_push,
                 clip_pop,
             },
@@ -1394,6 +1528,14 @@ struct Output {
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var image_sampler: sampler;
 @fragment fn fs_image(input: Output) -> @location(0) vec4<f32> {
+    let sample = textureSample(image, image_sampler, input.uv);
+    return vec4<f32>(sample.rgb * sample.a, sample.a) * input.color.a;
+}
+@fragment fn fs_text_mask(input: Output) -> @location(0) vec4<f32> {
+    let coverage = textureSample(image, image_sampler, input.uv).r;
+    return input.color * coverage;
+}
+@fragment fn fs_text_color(input: Output) -> @location(0) vec4<f32> {
     let sample = textureSample(image, image_sampler, input.uv);
     return vec4<f32>(sample.rgb * sample.a, sample.a) * input.color.a;
 }

@@ -11,6 +11,7 @@ use astrelis_gpu::{
 };
 use astrelis_paint::{Brush, FillRule, Painter, Path};
 use astrelis_paint_gpu::{Antialiasing, RenderTarget, Renderer, RendererOptions};
+use astrelis_text::{FontDatabase, TextLayoutContext, TextLayoutRequest};
 
 fn gpu_test_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
@@ -63,6 +64,17 @@ fn renders_solid_stencil_clip_and_reuses_mesh() {
             .fill_path(&path, FillRule::NonZero, Brush::Solid(Color::RED))
             .unwrap();
         painter.restore().unwrap();
+        let mut fonts = FontDatabase::default();
+        let mut text_context = TextLayoutContext::new();
+        let mut request = TextLayoutRequest::new("I");
+        request.style.size = 12.0;
+        request.style.color = Color::GREEN;
+        let text = text_context
+            .layout(&mut fonts, request)
+            .expect("text layout");
+        painter
+            .draw_text(&text, Point::new(1.0, 13.0), 1.0)
+            .unwrap();
         let list = painter.finish().unwrap();
 
         let mut renderer = Renderer::new(
@@ -94,6 +106,9 @@ fn renders_solid_stencil_clip_and_reuses_mesh() {
             .expect("second paint render");
         assert_eq!(first.mesh_cache_misses, 1);
         assert_eq!(second.mesh_cache_hits, 1);
+        assert!(first.glyph_cache_misses > 0);
+        assert!(first.glyph_uploads > 0);
+        assert!(second.glyph_cache_hits > 0);
 
         let readback = device.create_buffer(BufferDescriptor {
             label: Some("paint readback".into()),
@@ -129,7 +144,13 @@ fn renders_solid_stencil_clip_and_reuses_mesh() {
             &bytes[offset..offset + 4]
         };
         assert_eq!(pixel(8, 8), [255, 0, 0, 255]);
-        assert_eq!(pixel(2, 2), [0, 0, 0, 255]);
+        assert!(
+            (0..16).any(|y| (0..8).any(|x| {
+                let value = pixel(x, y);
+                value[1] > value[0] && value[1] > value[2]
+            })),
+            "expected at least one green text pixel"
+        );
         readback.unmap();
     });
 }
