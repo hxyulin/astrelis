@@ -1,0 +1,17 @@
+[package]
+name = "astrelis-paint"
+description = "Backend-independent paint paths, images, and display lists for Astrelis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+
+[dev-dependencies]
+insta = "1.48.0"
+
+[lints]
+workspace = true

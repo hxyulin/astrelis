@@ -4,6 +4,8 @@ members = [
   "crates/astrelis-core",
   "crates/astrelis-gpu",
   "crates/astrelis-gpu-wgpu",
+  "crates/astrelis-paint",
+  "crates/astrelis-paint-gpu",
   "crates/astrelis-platform",
   "crates/astrelis-platform-test",
   "crates/astrelis-platform-winit",
@@ -21,9 +23,11 @@ repository = "https://github.com/hxyulin/astrelis"
 astrelis-core = { path = "crates/astrelis-core", version = "0.0.0" }
 astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.0.0" }
 astrelis-platform = { path = "crates/astrelis-platform", version = "0.0.0" }
+astrelis-paint = { path = "crates/astrelis-paint", version = "0.0.0" }
 astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.0.0" }
 glam = { version = "0.33", features = ["mint", "bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
+lyon_tessellation = "1.0.20"
 bitflags = "2"
 pollster = "0.4"
 wgpu = { version = "=29.0.4", features = ["vulkan-portability"] }

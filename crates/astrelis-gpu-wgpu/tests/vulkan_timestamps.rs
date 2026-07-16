@@ -69,6 +69,7 @@ fn vulkan_timestamps_are_nonzero_and_ordered() {
             .render_pass(RenderPassDescriptor {
                 label: Some("timestamped empty pass".into()),
                 color_attachments: Vec::new(),
+                depth_stencil_attachment: None,
                 timestamp_writes: Some(RenderPassTimestampWrites {
                     query_set: queries.clone(),
                     beginning_of_pass_write_index: Some(0),

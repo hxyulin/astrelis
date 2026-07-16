@@ -86,6 +86,7 @@ impl App {
                         }),
                         store: StoreOp::Store,
                     })],
+                    depth_stencil_attachment: None,
                     timestamp_writes: None,
                 })
                 .expect("begin pass");
@@ -217,9 +218,12 @@ impl Application for App {
                     entry_point: "fs_main".into(),
                     targets: vec![Some(ColorTargetState {
                         format,
+                        blend: None,
                         write_mask: ColorWrites::ALL,
                     })],
                 }),
+                depth_stencil: None,
+                multisample: Default::default(),
             })
             .expect("create pipeline");
         let vertices: [[f32; 5]; 3] = [

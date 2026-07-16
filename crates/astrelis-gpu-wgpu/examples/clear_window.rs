@@ -84,6 +84,7 @@ impl App {
                     }),
                     store: StoreOp::Store,
                 })],
+                depth_stencil_attachment: None,
                 timestamp_writes: None,
             })
             .expect("record clear");

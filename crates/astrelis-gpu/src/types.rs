@@ -729,8 +729,207 @@ bitflags! {
 pub struct ColorTargetState {
     /// Target format.
     pub format: TextureFormat,
+    /// Optional color blending.
+    pub blend: Option<BlendState>,
     /// Writable color channels.
     pub write_mask: ColorWrites,
+}
+
+/// Blend multiplier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum BlendFactor {
+    /// Zero.
+    Zero,
+    /// One.
+    One,
+    /// Source alpha.
+    SrcAlpha,
+    /// One minus source alpha.
+    OneMinusSrcAlpha,
+    /// Destination alpha.
+    DstAlpha,
+    /// One minus destination alpha.
+    OneMinusDstAlpha,
+}
+
+/// Blend arithmetic operation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum BlendOperation {
+    /// Add source and destination terms.
+    #[default]
+    Add,
+    /// Subtract the destination term from the source term.
+    Subtract,
+    /// Subtract the source term from the destination term.
+    ReverseSubtract,
+    /// Select the smaller term.
+    Min,
+    /// Select the larger term.
+    Max,
+}
+
+/// Blend settings for one color component group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BlendComponent {
+    /// Source multiplier.
+    pub src_factor: BlendFactor,
+    /// Destination multiplier.
+    pub dst_factor: BlendFactor,
+    /// Arithmetic operation.
+    pub operation: BlendOperation,
+}
+
+impl BlendComponent {
+    /// Replaces the destination with the source.
+    pub const REPLACE: Self = Self {
+        src_factor: BlendFactor::One,
+        dst_factor: BlendFactor::Zero,
+        operation: BlendOperation::Add,
+    };
+
+    /// Premultiplied source-over blending.
+    pub const PREMULTIPLIED_ALPHA: Self = Self {
+        src_factor: BlendFactor::One,
+        dst_factor: BlendFactor::OneMinusSrcAlpha,
+        operation: BlendOperation::Add,
+    };
+}
+
+/// Color and alpha blending state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BlendState {
+    /// RGB blending.
+    pub color: BlendComponent,
+    /// Alpha blending.
+    pub alpha: BlendComponent,
+}
+
+impl BlendState {
+    /// Premultiplied source-over blending.
+    pub const PREMULTIPLIED_ALPHA: Self = Self {
+        color: BlendComponent::PREMULTIPLIED_ALPHA,
+        alpha: BlendComponent::PREMULTIPLIED_ALPHA,
+    };
+}
+
+/// Depth/stencil comparison function.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CompareFunction {
+    /// Never pass.
+    Never,
+    /// Pass when less.
+    Less,
+    /// Pass when equal.
+    Equal,
+    /// Pass when less or equal.
+    LessEqual,
+    /// Pass when greater.
+    Greater,
+    /// Pass when not equal.
+    NotEqual,
+    /// Pass when greater or equal.
+    GreaterEqual,
+    /// Always pass.
+    #[default]
+    Always,
+}
+
+/// Operation applied to a stencil value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum StencilOperation {
+    /// Preserve the current value.
+    #[default]
+    Keep,
+    /// Replace with zero.
+    Zero,
+    /// Replace with the stencil reference.
+    Replace,
+    /// Increment and clamp.
+    IncrementClamp,
+    /// Decrement and clamp.
+    DecrementClamp,
+    /// Invert all bits.
+    Invert,
+    /// Increment and wrap.
+    IncrementWrap,
+    /// Decrement and wrap.
+    DecrementWrap,
+}
+
+/// Stencil behavior for one face orientation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StencilFaceState {
+    /// Comparison against the stencil reference.
+    pub compare: CompareFunction,
+    /// Operation when stencil comparison fails.
+    pub fail_op: StencilOperation,
+    /// Operation when depth comparison fails.
+    pub depth_fail_op: StencilOperation,
+    /// Operation when both comparisons pass.
+    pub pass_op: StencilOperation,
+}
+
+impl StencilFaceState {
+    /// Ignore stencil and preserve its value.
+    pub const IGNORE: Self = Self {
+        compare: CompareFunction::Always,
+        fail_op: StencilOperation::Keep,
+        depth_fail_op: StencilOperation::Keep,
+        pass_op: StencilOperation::Keep,
+    };
+}
+
+/// Stencil pipeline state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct StencilState {
+    /// Front-facing triangle behavior.
+    pub front: StencilFaceState,
+    /// Back-facing triangle behavior.
+    pub back: StencilFaceState,
+    /// Mask applied when comparing values.
+    pub read_mask: u32,
+    /// Mask applied when writing values.
+    pub write_mask: u32,
+}
+
+/// Depth/stencil pipeline state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DepthStencilState {
+    /// Attachment format.
+    pub format: TextureFormat,
+    /// Whether depth writes are enabled.
+    pub depth_write_enabled: bool,
+    /// Depth comparison.
+    pub depth_compare: CompareFunction,
+    /// Stencil behavior.
+    pub stencil: StencilState,
+    /// Depth bias constant.
+    pub bias_constant: i32,
+    /// Depth bias slope scale.
+    pub bias_slope_scale: f32,
+    /// Depth bias clamp.
+    pub bias_clamp: f32,
+}
+
+/// Multisampling pipeline state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct MultisampleState {
+    /// Rasterization sample count.
+    pub count: u32,
+    /// Active sample mask.
+    pub mask: u64,
+    /// Enables alpha-to-coverage.
+    pub alpha_to_coverage_enabled: bool,
+}
+
+impl Default for MultisampleState {
+    fn default() -> Self {
+        Self {
+            count: 1,
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+        }
+    }
 }
 
 /// Vertex shader pipeline state.
@@ -766,6 +965,10 @@ pub struct RenderPipelineDescriptor {
     pub vertex: VertexState,
     /// Primitive state.
     pub primitive: PrimitiveState,
+    /// Optional depth/stencil state.
+    pub depth_stencil: Option<DepthStencilState>,
+    /// Multisampling state.
+    pub multisample: MultisampleState,
     /// Optional fragment stage.
     pub fragment: Option<FragmentState>,
 }
@@ -828,6 +1031,35 @@ pub struct RenderPassColorAttachment {
     pub store: StoreOp,
 }
 
+/// Load/store operations for an attachment aspect.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AttachmentOperations<T> {
+    /// Load behavior.
+    pub load: LoadOpValue<T>,
+    /// Store behavior.
+    pub store: StoreOp,
+}
+
+/// Generic attachment load behavior.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LoadOpValue<T> {
+    /// Preserve previous contents.
+    Load,
+    /// Clear to a value.
+    Clear(T),
+}
+
+/// Depth/stencil attachment description.
+#[derive(Clone, Debug)]
+pub struct RenderPassDepthStencilAttachment {
+    /// Attachment view.
+    pub view: crate::TextureView,
+    /// Optional depth operations.
+    pub depth_ops: Option<AttachmentOperations<f32>>,
+    /// Optional stencil operations.
+    pub stencil_ops: Option<AttachmentOperations<u32>>,
+}
+
 /// Render pass creation settings.
 #[derive(Clone, Debug, Default)]
 pub struct RenderPassDescriptor {
@@ -835,8 +1067,19 @@ pub struct RenderPassDescriptor {
     pub label: Option<String>,
     /// Color attachments.
     pub color_attachments: Vec<Option<RenderPassColorAttachment>>,
+    /// Optional depth/stencil attachment.
+    pub depth_stencil_attachment: Option<RenderPassDepthStencilAttachment>,
     /// Optional beginning/end timestamps.
     pub timestamp_writes: Option<RenderPassTimestampWrites>,
+}
+
+/// Index buffer element format.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum IndexFormat {
+    /// 16-bit unsigned indices.
+    Uint16,
+    /// 32-bit unsigned indices.
+    Uint32,
 }
 
 /// Compute pass creation settings.

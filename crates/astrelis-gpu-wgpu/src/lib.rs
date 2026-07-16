@@ -10,17 +10,18 @@ use std::{
 
 use astrelis_gpu::{
     self as gpu, AdapterInfo, AddressMode, BindGroupDescriptor, BindGroupLayoutDescriptor,
-    BindingResource, BindingType, BufferBindingType, BufferDescriptor, BufferTextureCopy,
-    CommandEncoderDescriptor, CompositeAlphaMode, ComputePassDescriptor, ComputePipelineDescriptor,
-    DeviceCapabilities, DeviceDescriptor, DeviceError, DeviceErrorKind, DeviceId, DeviceType,
-    Extent3d, Face, Features, FilterMode, FrontFace, GpuError, GraphicsApi, Limits, LoadOp,
+    BindingResource, BindingType, BlendComponent, BlendFactor, BlendOperation, BufferBindingType,
+    BufferDescriptor, BufferTextureCopy, CommandEncoderDescriptor, CompareFunction,
+    CompositeAlphaMode, ComputePassDescriptor, ComputePipelineDescriptor, DeviceCapabilities,
+    DeviceDescriptor, DeviceError, DeviceErrorKind, DeviceId, DeviceType, Extent3d, Face, Features,
+    FilterMode, FrontFace, GpuError, GraphicsApi, IndexFormat, Limits, LoadOp, LoadOpValue,
     MapMode, PipelineLayoutDescriptor, PollMode, PowerPreference, PresentMode, PrimitiveTopology,
     QuerySetDescriptor, QueryType, RenderPassDescriptor, RenderPipelineDescriptor,
     RequestAdapterOptions, SamplerBindingType, SamplerDescriptor, ShaderModuleDescriptor,
-    ShaderStages, StoreOp, SurfaceCapabilities, SurfaceConfiguration, SurfaceFrameStatus,
-    TextureCopy, TextureDataLayout, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension, VertexFormat,
-    VertexStepMode, backend,
+    ShaderStages, StencilOperation, StoreOp, SurfaceCapabilities, SurfaceConfiguration,
+    SurfaceFrameStatus, TextureCopy, TextureDataLayout, TextureDescriptor, TextureDimension,
+    TextureFormat, TextureSampleType, TextureUsages, TextureViewDescriptor, TextureViewDimension,
+    VertexFormat, VertexStepMode, backend,
 };
 
 #[cfg(feature = "profiling")]
@@ -688,7 +689,10 @@ impl backend::Device for WgpuDevice {
                     .map(|target| {
                         target.as_ref().map(|target| wgpu::ColorTargetState {
                             format: convert_texture_format(target.format),
-                            blend: None,
+                            blend: target.blend.map(|blend| wgpu::BlendState {
+                                color: convert_blend_component(blend.color),
+                                alpha: convert_blend_component(blend.alpha),
+                            }),
                             write_mask: wgpu::ColorWrites::from_bits_retain(
                                 target.write_mask.bits(),
                             ),
@@ -732,8 +736,43 @@ impl backend::Device for WgpuDevice {
                     cull_mode: descriptor.primitive.cull_mode.map(convert_face),
                     ..Default::default()
                 },
-                depth_stencil: None,
-                multisample: Default::default(),
+                depth_stencil: descriptor
+                    .depth_stencil
+                    .map(|state| wgpu::DepthStencilState {
+                        format: convert_texture_format(state.format),
+                        depth_write_enabled: Some(state.depth_write_enabled),
+                        depth_compare: Some(convert_compare_function(state.depth_compare)),
+                        stencil: wgpu::StencilState {
+                            front: wgpu::StencilFaceState {
+                                compare: convert_compare_function(state.stencil.front.compare),
+                                fail_op: convert_stencil_operation(state.stencil.front.fail_op),
+                                depth_fail_op: convert_stencil_operation(
+                                    state.stencil.front.depth_fail_op,
+                                ),
+                                pass_op: convert_stencil_operation(state.stencil.front.pass_op),
+                            },
+                            back: wgpu::StencilFaceState {
+                                compare: convert_compare_function(state.stencil.back.compare),
+                                fail_op: convert_stencil_operation(state.stencil.back.fail_op),
+                                depth_fail_op: convert_stencil_operation(
+                                    state.stencil.back.depth_fail_op,
+                                ),
+                                pass_op: convert_stencil_operation(state.stencil.back.pass_op),
+                            },
+                            read_mask: state.stencil.read_mask,
+                            write_mask: state.stencil.write_mask,
+                        },
+                        bias: wgpu::DepthBiasState {
+                            constant: state.bias_constant,
+                            slope_scale: state.bias_slope_scale,
+                            clamp: state.bias_clamp,
+                        },
+                    }),
+                multisample: wgpu::MultisampleState {
+                    count: descriptor.multisample.count,
+                    mask: descriptor.multisample.mask,
+                    alpha_to_coverage_enabled: descriptor.multisample.alpha_to_coverage_enabled,
+                },
                 fragment: fragment_state,
                 multiview_mask: None,
                 cache: None,
@@ -1374,10 +1413,43 @@ impl backend::CommandEncoder for WgpuCommandEncoder {
                     beginning_of_pass_write_index: writes.beginning_of_pass_write_index,
                     end_of_pass_write_index: writes.end_of_pass_write_index,
                 });
+        let depth_stencil_view = descriptor
+            .depth_stencil_attachment
+            .as_ref()
+            .map(|attachment| {
+                attachment
+                    .view
+                    .backend()
+                    .as_any()
+                    .downcast_ref::<WgpuTextureView>()
+                    .ok_or_else(|| GpuError::new("depth/stencil view belongs to another backend"))
+            })
+            .transpose()?;
+        let depth_stencil_attachment =
+            descriptor
+                .depth_stencil_attachment
+                .as_ref()
+                .map(|attachment| wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_stencil_view.expect("depth/stencil view exists").raw,
+                    depth_ops: attachment.depth_ops.map(|ops| wgpu::Operations {
+                        load: match ops.load {
+                            LoadOpValue::Load => wgpu::LoadOp::Load,
+                            LoadOpValue::Clear(value) => wgpu::LoadOp::Clear(value),
+                        },
+                        store: convert_store_op(ops.store),
+                    }),
+                    stencil_ops: attachment.stencil_ops.map(|ops| wgpu::Operations {
+                        load: match ops.load {
+                            LoadOpValue::Load => wgpu::LoadOp::Load,
+                            LoadOpValue::Clear(value) => wgpu::LoadOp::Clear(value),
+                        },
+                        store: convert_store_op(ops.store),
+                    }),
+                });
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: descriptor.label.as_deref(),
             color_attachments: &native_attachments,
-            depth_stencil_attachment: None,
+            depth_stencil_attachment,
             timestamp_writes,
             occlusion_query_set: None,
             multiview_mask: None,
@@ -1538,6 +1610,23 @@ impl backend::RenderPass for WgpuRenderPass {
         Ok(())
     }
 
+    fn set_index_buffer(
+        &mut self,
+        buffer: &dyn backend::Buffer,
+        range: Range<u64>,
+        format: IndexFormat,
+    ) -> Result<(), GpuError> {
+        let buffer = downcast_ref::<WgpuBuffer>(buffer)?;
+        self.raw.set_index_buffer(
+            buffer.raw.slice(range),
+            match format {
+                IndexFormat::Uint16 => wgpu::IndexFormat::Uint16,
+                IndexFormat::Uint32 => wgpu::IndexFormat::Uint32,
+            },
+        );
+        Ok(())
+    }
+
     fn set_bind_group(
         &mut self,
         index: u32,
@@ -1552,6 +1641,18 @@ impl backend::RenderPass for WgpuRenderPass {
 
     fn draw(&mut self, vertices: Range<u32>, instances: Range<u32>) {
         self.raw.draw(vertices, instances);
+    }
+
+    fn draw_indexed(&mut self, indices: Range<u32>, base_vertex: i32, instances: Range<u32>) {
+        self.raw.draw_indexed(indices, base_vertex, instances);
+    }
+
+    fn set_scissor_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
+        self.raw.set_scissor_rect(x, y, width, height);
+    }
+
+    fn set_stencil_reference(&mut self, reference: u32) {
+        self.raw.set_stencil_reference(reference);
     }
 }
 
@@ -1921,6 +2022,67 @@ fn convert_face(value: Face) -> wgpu::Face {
     match value {
         Face::Front => wgpu::Face::Front,
         Face::Back => wgpu::Face::Back,
+    }
+}
+
+fn convert_blend_component(value: BlendComponent) -> wgpu::BlendComponent {
+    wgpu::BlendComponent {
+        src_factor: match value.src_factor {
+            BlendFactor::Zero => wgpu::BlendFactor::Zero,
+            BlendFactor::One => wgpu::BlendFactor::One,
+            BlendFactor::SrcAlpha => wgpu::BlendFactor::SrcAlpha,
+            BlendFactor::OneMinusSrcAlpha => wgpu::BlendFactor::OneMinusSrcAlpha,
+            BlendFactor::DstAlpha => wgpu::BlendFactor::DstAlpha,
+            BlendFactor::OneMinusDstAlpha => wgpu::BlendFactor::OneMinusDstAlpha,
+        },
+        dst_factor: match value.dst_factor {
+            BlendFactor::Zero => wgpu::BlendFactor::Zero,
+            BlendFactor::One => wgpu::BlendFactor::One,
+            BlendFactor::SrcAlpha => wgpu::BlendFactor::SrcAlpha,
+            BlendFactor::OneMinusSrcAlpha => wgpu::BlendFactor::OneMinusSrcAlpha,
+            BlendFactor::DstAlpha => wgpu::BlendFactor::DstAlpha,
+            BlendFactor::OneMinusDstAlpha => wgpu::BlendFactor::OneMinusDstAlpha,
+        },
+        operation: match value.operation {
+            BlendOperation::Add => wgpu::BlendOperation::Add,
+            BlendOperation::Subtract => wgpu::BlendOperation::Subtract,
+            BlendOperation::ReverseSubtract => wgpu::BlendOperation::ReverseSubtract,
+            BlendOperation::Min => wgpu::BlendOperation::Min,
+            BlendOperation::Max => wgpu::BlendOperation::Max,
+        },
+    }
+}
+
+fn convert_compare_function(value: CompareFunction) -> wgpu::CompareFunction {
+    match value {
+        CompareFunction::Never => wgpu::CompareFunction::Never,
+        CompareFunction::Less => wgpu::CompareFunction::Less,
+        CompareFunction::Equal => wgpu::CompareFunction::Equal,
+        CompareFunction::LessEqual => wgpu::CompareFunction::LessEqual,
+        CompareFunction::Greater => wgpu::CompareFunction::Greater,
+        CompareFunction::NotEqual => wgpu::CompareFunction::NotEqual,
+        CompareFunction::GreaterEqual => wgpu::CompareFunction::GreaterEqual,
+        CompareFunction::Always => wgpu::CompareFunction::Always,
+    }
+}
+
+fn convert_stencil_operation(value: StencilOperation) -> wgpu::StencilOperation {
+    match value {
+        StencilOperation::Keep => wgpu::StencilOperation::Keep,
+        StencilOperation::Zero => wgpu::StencilOperation::Zero,
+        StencilOperation::Replace => wgpu::StencilOperation::Replace,
+        StencilOperation::IncrementClamp => wgpu::StencilOperation::IncrementClamp,
+        StencilOperation::DecrementClamp => wgpu::StencilOperation::DecrementClamp,
+        StencilOperation::Invert => wgpu::StencilOperation::Invert,
+        StencilOperation::IncrementWrap => wgpu::StencilOperation::IncrementWrap,
+        StencilOperation::DecrementWrap => wgpu::StencilOperation::DecrementWrap,
+    }
+}
+
+fn convert_store_op(value: StoreOp) -> wgpu::StoreOp {
+    match value {
+        StoreOp::Store => wgpu::StoreOp::Store,
+        StoreOp::Discard => wgpu::StoreOp::Discard,
     }
 }
 

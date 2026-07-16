@@ -280,6 +280,13 @@ pub trait RenderPass: Debug {
         buffer: &dyn Buffer,
         range: Range<u64>,
     ) -> Result<(), GpuError>;
+    /// Sets the index buffer.
+    fn set_index_buffer(
+        &mut self,
+        buffer: &dyn Buffer,
+        range: Range<u64>,
+        format: crate::IndexFormat,
+    ) -> Result<(), GpuError>;
     /// Sets a bind group.
     fn set_bind_group(
         &mut self,
@@ -289,6 +296,12 @@ pub trait RenderPass: Debug {
     ) -> Result<(), GpuError>;
     /// Draws vertices and instances.
     fn draw(&mut self, vertices: Range<u32>, instances: Range<u32>);
+    /// Draws indexed vertices and instances.
+    fn draw_indexed(&mut self, indices: Range<u32>, base_vertex: i32, instances: Range<u32>);
+    /// Sets the rasterization scissor rectangle.
+    fn set_scissor_rect(&mut self, x: u32, y: u32, width: u32, height: u32);
+    /// Sets the dynamic stencil reference.
+    fn set_stencil_reference(&mut self, reference: u32);
 }
 
 /// Backend compute pass commands.

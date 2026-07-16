@@ -656,6 +656,9 @@ impl CommandEncoder {
                 ensure_device(id, resolve.device_id())?;
             }
         }
+        if let Some(attachment) = &descriptor.depth_stencil_attachment {
+            ensure_device(id, attachment.view.device_id())?;
+        }
         if let Some(writes) = &descriptor.timestamp_writes {
             ensure_device(id, writes.query_set.device_id())?;
         }
@@ -802,6 +805,18 @@ impl RenderPass<'_> {
             .set_vertex_buffer(slot, buffer.inner_backend(), range)
     }
 
+    /// Binds an index buffer range.
+    pub fn set_index_buffer(
+        &mut self,
+        buffer: &Buffer,
+        range: std::ops::Range<u64>,
+        format: IndexFormat,
+    ) -> Result<(), GpuError> {
+        ensure_device(self.id, buffer.device_id())?;
+        self.inner
+            .set_index_buffer(buffer.inner_backend(), range, format)
+    }
+
     /// Binds resources at a bind-group index.
     pub fn set_bind_group(
         &mut self,
@@ -817,6 +832,26 @@ impl RenderPass<'_> {
     /// Draws vertices and instances.
     pub fn draw(&mut self, vertices: std::ops::Range<u32>, instances: std::ops::Range<u32>) {
         self.inner.draw(vertices, instances);
+    }
+
+    /// Draws indexed vertices and instances.
+    pub fn draw_indexed(
+        &mut self,
+        indices: std::ops::Range<u32>,
+        base_vertex: i32,
+        instances: std::ops::Range<u32>,
+    ) {
+        self.inner.draw_indexed(indices, base_vertex, instances);
+    }
+
+    /// Sets the rasterization scissor rectangle.
+    pub fn set_scissor_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
+        self.inner.set_scissor_rect(x, y, width, height);
+    }
+
+    /// Sets the dynamic stencil reference.
+    pub fn set_stencil_reference(&mut self, reference: u32) {
+        self.inner.set_stencil_reference(reference);
     }
 }
 

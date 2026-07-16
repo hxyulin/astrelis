@@ -69,6 +69,7 @@ fn clears_and_reads_back_one_pixel() {
                     }),
                     store: StoreOp::Store,
                 })],
+                depth_stencil_attachment: None,
                 timestamp_writes: None,
             })
             .expect("record clear");
@@ -174,9 +175,12 @@ fn draws_a_triangle_and_reads_back_a_pixel() {
                     entry_point: "fs_main".into(),
                     targets: vec![Some(ColorTargetState {
                         format: TextureFormat::Rgba8Unorm,
+                        blend: None,
                         write_mask: ColorWrites::ALL,
                     })],
                 }),
+                depth_stencil: None,
+                multisample: Default::default(),
             })
             .expect("pipeline");
 
@@ -207,6 +211,7 @@ fn draws_a_triangle_and_reads_back_a_pixel() {
                         load: LoadOp::Clear(Color::default()),
                         store: StoreOp::Store,
                     })],
+                    depth_stencil_attachment: None,
                     timestamp_writes: None,
                 })
                 .expect("begin render pass");

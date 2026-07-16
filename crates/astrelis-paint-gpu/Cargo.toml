@@ -1,0 +1,24 @@
+[package]
+name = "astrelis-paint-gpu"
+description = "GPU renderer for Astrelis backend-independent display lists"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-paint = { workspace = true }
+bytemuck = { workspace = true }
+lyon_tessellation = { workspace = true }
+
+[dev-dependencies]
+astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
+astrelis-platform = { workspace = true }
+astrelis-platform-winit = { path = "../astrelis-platform-winit" }
+pollster = { workspace = true }
+
+[lints]
+workspace = true
