@@ -17,7 +17,10 @@
 //! refreshed periodically (every 5 s). This module assumes the
 //! offset is already set when `report_gpu_frame` is called.
 
-use std::sync::OnceLock;
+use std::{
+    collections::HashMap,
+    sync::{OnceLock, RwLock},
+};
 
 use crate::data::{GpuLaneId, GpuSpan, SpanId, StringId};
 use crate::profiler::Profiler;
@@ -80,49 +83,62 @@ pub struct GpuFrame {
     pub scopes: Vec<GpuScope>,
 }
 
-/// Handle for the default GPU lane. Allocated on the first call to
-/// [`init_gpu_context`].
-static DEFAULT_LANE: OnceLock<GpuLaneId> = OnceLock::new();
-
-/// Registers the active GPU backend and allocates the default GPU
-/// lane on the timeline.
-///
-/// Safe to call multiple times — the lane is allocated only once.
-pub fn init_gpu_context(backend: GpuBackend) {
-    let p = Profiler::get();
-    DEFAULT_LANE.get_or_init(|| {
-        let lane = p.next_gpu_lane_id();
-        let name_id: StringId = p.strings.intern(backend.default_lane_name());
-        p.timeline.write().unwrap().register_gpu_lane(lane, name_id);
-        lane
-    });
+#[derive(Clone, Copy, Debug, Default)]
+struct LaneClock {
+    offset_ns: i64,
+    calibrated: bool,
 }
 
-/// Reports a completed GPU frame to the profiler.
-///
-/// Called once per processed frame by `astrelis-gpu`'s
-/// `process_profiling_frames`. Empty frames are ignored.
-pub fn report_gpu_frame(frame: GpuFrame) {
+static GPU_LANE_CLOCKS: OnceLock<RwLock<HashMap<GpuLaneId, LaneClock>>> = OnceLock::new();
+
+/// Registers one GPU queue lane.
+pub fn register_gpu_lane(backend: GpuBackend, label: Option<&str>) -> GpuLaneId {
+    let p = Profiler::get();
+    let lane = p.next_gpu_lane_id();
+    let name_id: StringId = p
+        .strings
+        .intern(label.unwrap_or_else(|| backend.default_lane_name()));
+    p.timeline.write().unwrap().register_gpu_lane(lane, name_id);
+    GPU_LANE_CLOCKS
+        .get_or_init(Default::default)
+        .write()
+        .expect("GPU lane clocks poisoned")
+        .insert(lane, LaneClock::default());
+    lane
+}
+
+/// Installs or refreshes the CPU-to-GPU clock offset for one queue.
+pub fn set_gpu_lane_offset_ns(lane: GpuLaneId, offset_ns: i64) {
+    GPU_LANE_CLOCKS
+        .get_or_init(Default::default)
+        .write()
+        .expect("GPU lane clocks poisoned")
+        .insert(
+            lane,
+            LaneClock {
+                offset_ns,
+                calibrated: true,
+            },
+        );
+}
+
+/// Reports a completed GPU frame on a registered queue lane.
+pub fn report_gpu_frame(lane: GpuLaneId, frame: GpuFrame) {
     if frame.scopes.is_empty() {
         return;
     }
     let p = Profiler::get();
-    let lane = match DEFAULT_LANE.get() {
-        Some(&lane) => lane,
-        // If the producer forgot to call init_gpu_context, allocate
-        // a generic lane so the data isn't dropped.
-        None => {
-            let lane = p.next_gpu_lane_id();
-            let name_id = p.strings.intern("GPU");
-            p.timeline.write().unwrap().register_gpu_lane(lane, name_id);
-            let _ = DEFAULT_LANE.set(lane);
-            lane
-        }
-    };
+    let clock = GPU_LANE_CLOCKS
+        .get_or_init(Default::default)
+        .read()
+        .expect("GPU lane clocks poisoned")
+        .get(&lane)
+        .copied()
+        .unwrap_or_default();
 
     let mut timeline = p.timeline.write().unwrap();
     for scope in &frame.scopes {
-        absorb_scope(&mut timeline, p, scope, lane, None);
+        absorb_scope(&mut timeline, p, scope, lane, clock, None);
     }
 }
 
@@ -131,6 +147,7 @@ fn absorb_scope(
     p: &Profiler,
     scope: &GpuScope,
     lane: GpuLaneId,
+    clock: LaneClock,
     parent: Option<SpanId>,
 ) {
     if scope.start_ns < 0 || scope.end_ns < scope.start_ns {
@@ -139,8 +156,8 @@ fn absorb_scope(
     let name_id = p.strings.intern(&scope.label);
     let scope_id = timeline.register_scope(name_id, "<gpu>", 0);
     let span_id = p.next_span_id();
-    let start_ns = p.clock.gpu_to_profiler_ns(scope.start_ns as u64);
-    let end_ns = p.clock.gpu_to_profiler_ns(scope.end_ns as u64);
+    let start_ns = convert_timestamp(scope.start_ns as u64, clock);
+    let end_ns = convert_timestamp(scope.end_ns as u64, clock);
 
     timeline.absorb_gpu_span(GpuSpan {
         id: span_id,
@@ -152,6 +169,17 @@ fn absorb_scope(
     });
 
     for child in &scope.nested {
-        absorb_scope(timeline, p, child, lane, Some(span_id));
+        absorb_scope(timeline, p, child, lane, clock, Some(span_id));
+    }
+}
+
+fn convert_timestamp(timestamp_ns: u64, clock: LaneClock) -> u64 {
+    if !clock.calibrated {
+        return timestamp_ns;
+    }
+    if clock.offset_ns >= 0 {
+        timestamp_ns.saturating_add(clock.offset_ns as u64)
+    } else {
+        timestamp_ns.saturating_sub((-clock.offset_ns) as u64)
     }
 }

@@ -1,0 +1,16 @@
+[package]
+name = "astrelis-gpu"
+description = "Backend-neutral GPU resource, command, and surface API for Astrelis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+bitflags = { workspace = true }
+raw-window-handle = { workspace = true }
+
+[lints]
+workspace = true

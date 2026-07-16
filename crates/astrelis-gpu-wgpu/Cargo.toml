@@ -1,0 +1,27 @@
+[package]
+name = "astrelis-gpu-wgpu"
+description = "Wgpu backend for the Astrelis GPU API"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-gpu = { workspace = true }
+astrelis-profiling = { workspace = true, optional = true }
+pollster = { workspace = true }
+wgpu = { workspace = true }
+wgpu-profiler = { workspace = true, optional = true }
+
+[features]
+default = ["profiling"]
+profiling = ["dep:astrelis-profiling", "dep:wgpu-profiler"]
+
+[dev-dependencies]
+astrelis-platform = { workspace = true }
+astrelis-platform-winit = { path = "../astrelis-platform-winit" }
+bytemuck = { workspace = true }
+
+[lints]
+workspace = true

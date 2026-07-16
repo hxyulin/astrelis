@@ -2,6 +2,8 @@
 resolver = "3"
 members = [
   "crates/astrelis-core",
+  "crates/astrelis-gpu",
+  "crates/astrelis-gpu-wgpu",
   "crates/astrelis-platform",
   "crates/astrelis-platform-test",
   "crates/astrelis-platform-winit",
@@ -17,10 +19,15 @@ repository = "https://github.com/hxyulin/astrelis"
 
 [workspace.dependencies]
 astrelis-core = { path = "crates/astrelis-core", version = "0.0.0" }
+astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.0.0" }
 astrelis-platform = { path = "crates/astrelis-platform", version = "0.0.0" }
 astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.0.0" }
 glam = { version = "0.33", features = ["mint", "bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
+bitflags = "2"
+pollster = "0.4"
+wgpu = { version = "=29.0.4", features = ["vulkan-portability"] }
+wgpu-profiler = "0.27"
 criterion = { version = "0.8", default-features = false, features = [
   "cargo_bench_support",
 ] }
