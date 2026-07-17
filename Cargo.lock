@@ -160,6 +160,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-compositor"
+version = "0.0.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-gpu-wgpu",
+ "astrelis-paint",
+ "astrelis-paint-gpu",
+ "astrelis-render",
+ "criterion",
+ "pollster",
+]
+
+[[package]]
 name = "astrelis-core"
 version = "0.0.0"
 dependencies = [
@@ -211,6 +225,7 @@ dependencies = [
  "astrelis-paint",
  "astrelis-platform",
  "astrelis-platform-winit",
+ "astrelis-render",
  "astrelis-text",
  "astrelis-text-gpu",
  "bytemuck",
@@ -366,6 +381,7 @@ name = "astrelis-ui-widgets"
 version = "0.0.0"
 dependencies = [
  "astrelis-app",
+ "astrelis-compositor",
  "astrelis-core",
  "astrelis-gpu",
  "astrelis-gpu-wgpu",

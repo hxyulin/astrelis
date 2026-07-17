@@ -11,8 +11,8 @@ Run the native texture-backed example with:
 cargo run -p astrelis-ui-widgets --example render_view
 ```
 
-Milestone 14's two scene renderers are demonstrated side by side, sharing one
-device while targeting independent hysteresis-sized render views, with:
+Milestone 15 demonstrates direct rectangular composition beside an automatic
+rounded texture fallback, with UI layers before and after both scenes:
 
 ```text
 cargo run -p astrelis-ui-widgets --example scene_views

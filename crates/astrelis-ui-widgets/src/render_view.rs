@@ -5,7 +5,8 @@ use astrelis_core::{
     geometry::{LogicalPoint, LogicalRect, LogicalSize, Physical, Rect, Size},
 };
 use astrelis_paint::{
-    Brush, CornerRadii, ExternalImage, ImageOptions, ImageSampling, Painter, RoundedRect,
+    Brush, CompositorViewId, CornerRadii, ExternalImage, ImageOptions, ImageSampling, Painter,
+    RoundedRect,
 };
 use astrelis_platform::{DeviceId, ElementState, ImeEvent, KeyboardInput, PointerButton};
 use astrelis_ui_core::{
@@ -23,6 +24,12 @@ pub enum RenderViewContent {
     Ready {
         image: ExternalImage,
         source_extent: Size<Physical, u32>,
+    },
+    /// A compositor-managed scene, with direct rendering explicitly preferred.
+    Composited {
+        id: CompositorViewId,
+        /// Whether exact rectangular views should use direct frame composition.
+        prefer_direct: bool,
     },
     /// Scene rendering failed.
     Error(String),
@@ -344,6 +351,18 @@ impl<Message: 'static> Widget<Message> for RenderView<Message> {
                     },
                 )
             }),
+            RenderViewContent::Composited { id, prefer_direct } => {
+                if self.corner_radius == 0.0 {
+                    painter.compositor_view(*id, bounds, *prefer_direct)
+                } else {
+                    // Rounded clips are intentionally represented in the display list;
+                    // the compositor will select its texture-backed path.
+                    painter.with_save(|painter| {
+                        painter.clip_rounded_rect(rounded)?;
+                        painter.compositor_view(*id, bounds, *prefer_direct)
+                    })
+                }
+            }
         }
         .map_err(|e| UiError::from_message(e.to_string()))
     }

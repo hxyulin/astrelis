@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "crates/astrelis-app",
   "crates/astrelis-core",
+  "crates/astrelis-compositor",
   "crates/astrelis-gpu",
   "crates/astrelis-gpu-wgpu",
   "crates/astrelis-paint",
@@ -31,6 +32,7 @@ repository = "https://github.com/hxyulin/astrelis"
 [workspace.dependencies]
 astrelis-app = { path = "crates/astrelis-app", version = "0.0.0" }
 astrelis-core = { path = "crates/astrelis-core", version = "0.0.0" }
+astrelis-compositor = { path = "crates/astrelis-compositor", version = "0.0.0" }
 astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.0.0" }
 astrelis-platform = { path = "crates/astrelis-platform", version = "0.0.0" }
 astrelis-paint = { path = "crates/astrelis-paint", version = "0.0.0" }

@@ -4,6 +4,7 @@
 
 use std::{sync::Arc, time::Instant};
 
+use astrelis_compositor::{Compositor, ViewOptions, ViewRenderTarget};
 use astrelis_core::{
     color::Color,
     geometry::Size,
@@ -11,17 +12,15 @@ use astrelis_core::{
 };
 use astrelis_gpu::{
     CompositeAlphaMode, DeviceDescriptor, PresentMode, RequestAdapterOptions, SurfaceConfiguration,
-    SurfaceFrameStatus, SurfaceTarget, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureUsages,
+    SurfaceFrameStatus, SurfaceTarget, TextureUsages,
 };
-use astrelis_paint::ExternalImage;
+use astrelis_paint::CompositorViewId;
 use astrelis_paint_gpu::{
     RenderTarget as PaintTarget, Renderer as PaintRenderer, RendererOptions as PaintOptions,
 };
 use astrelis_platform::{
     Application, PlatformContext, Window, WindowAttributes, WindowEvent, WindowId,
 };
-use astrelis_render::RenderTarget;
 use astrelis_render_2d::{
     Camera2D, DrawList2D, Renderer2D, SpriteDraw, TextureOptions as TextureOptions2D,
 };
@@ -29,30 +28,19 @@ use astrelis_render_3d::{
     Camera3D, DrawList3D, Lighting, MaterialDescriptor, MeshDraw, Renderer3D, cube,
 };
 use astrelis_text::{FontDatabase, FontFamily};
-use astrelis_ui_core::{ElementHandle, LayoutStyle, Length, Theme, Ui};
-use astrelis_ui_widgets::{
-    RenderView, RenderViewContent, RenderViewResizePolicy, render_view_snapshot,
-};
+use astrelis_ui_core::{LayoutStyle, Length, Theme, Ui};
+use astrelis_ui_widgets::{RenderView, RenderViewContent};
 
 const NOTO_SANS: &[u8] = include_bytes!("../../astrelis-ui-core/assets/NotoSans.ttf");
-
-struct SceneTexture {
-    _texture: astrelis_gpu::Texture,
-    view: astrelis_gpu::TextureView,
-    image: ExternalImage,
-    allocation: Size<astrelis_core::geometry::Physical, u32>,
-}
 
 struct GpuState {
     surface: astrelis_gpu::Surface,
     device: astrelis_gpu::Device,
     queue: astrelis_gpu::Queue,
     configuration: SurfaceConfiguration,
-    paint: PaintRenderer,
+    compositor: Compositor,
     renderer_2d: Renderer2D,
     renderer_3d: Renderer3D,
-    scene_2d: Option<SceneTexture>,
-    scene_3d: Option<SceneTexture>,
     sprite: astrelis_render_2d::TextureHandle,
     cube: astrelis_render_3d::MeshHandle,
     material: astrelis_render_3d::MaterialHandle,
@@ -63,8 +51,8 @@ struct Demo {
     window: Option<Window>,
     gpu: Option<GpuState>,
     ui: Ui<()>,
-    view_2d: ElementHandle<RenderView<()>>,
-    view_3d: ElementHandle<RenderView<()>>,
+    scene_2d: CompositorViewId,
+    scene_3d: CompositorViewId,
     started: Instant,
 }
 
@@ -85,7 +73,7 @@ impl Demo {
         let column = ui.add_column(root).expect("column");
         ui.add_label(
             column,
-            "Milestone 14 — 2D and 3D renderers sharing one device",
+            "Milestone 15 — direct scene composition with texture fallback",
         )
         .expect("label");
         let row = ui.add_row(column).expect("row");
@@ -103,6 +91,23 @@ impl Demo {
         let view_3d = ui
             .add_widget(row, RenderView::new("Animated 3D scene", |_| ()))
             .expect("3D view");
+        let scene_2d = CompositorViewId::new();
+        let scene_3d = CompositorViewId::new();
+        ui.update_widget(view_2d, |view| {
+            view.set_corner_radius(0.0);
+            view.set_content(RenderViewContent::Composited {
+                id: scene_2d,
+                prefer_direct: true,
+            });
+        })
+        .expect("configure direct view");
+        ui.update_widget(view_3d, |view| {
+            view.set_content(RenderViewContent::Composited {
+                id: scene_3d,
+                prefer_direct: true,
+            });
+        })
+        .expect("configure fallback view");
         for view in [view_2d, view_3d] {
             ui.set_layout(
                 view,
@@ -115,13 +120,18 @@ impl Demo {
             )
             .expect("view layout");
         }
+        ui.add_label(
+            column,
+            "This UI layer is painted after both scene slots; the rounded 3D view uses fallback.",
+        )
+        .expect("post-scene label");
         Self {
             instance: astrelis_gpu_wgpu::create_instance(Default::default()),
             window: None,
             gpu: None,
             ui,
-            view_2d,
-            view_3d,
+            scene_2d,
+            scene_3d,
             started: Instant::now(),
         }
     }
@@ -146,66 +156,7 @@ impl Demo {
         );
     }
 
-    fn ensure_scene(
-        &mut self,
-        which_2d: bool,
-    ) -> Option<Size<astrelis_core::geometry::Physical, u32>> {
-        let handle = if which_2d { self.view_2d } else { self.view_3d };
-        let snapshot = render_view_snapshot(&mut self.ui, handle).ok()?;
-        if !snapshot.should_render {
-            return None;
-        }
-        let gpu = self.gpu.as_mut()?;
-        let slot = if which_2d {
-            &mut gpu.scene_2d
-        } else {
-            &mut gpu.scene_3d
-        };
-        let allocation = RenderViewResizePolicy::default().allocation(
-            slot.as_ref().map(|scene| scene.allocation),
-            snapshot.desired_physical_size,
-            true,
-        )?;
-        if slot.as_ref().map(|scene| scene.allocation) != Some(allocation) {
-            if let Some(old) = slot.take() {
-                gpu.paint.unregister_external_image(&old.image);
-            }
-            let texture = gpu.device.create_texture(TextureDescriptor {
-                label: Some("scene view allocation".into()),
-                size: astrelis_gpu::Extent3d::d2(allocation.width, allocation.height),
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Rgba8UnormSrgb,
-                usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-            });
-            let view = texture.create_view(Default::default());
-            let image = ExternalImage::new(allocation).expect("image token");
-            gpu.paint
-                .register_external_image(&image, view.clone())
-                .expect("register scene image");
-            *slot = Some(SceneTexture {
-                _texture: texture,
-                view,
-                image,
-                allocation,
-            });
-        }
-        let image = slot.as_ref().unwrap().image.clone();
-        self.ui
-            .update_widget(handle, |view| {
-                view.set_content(RenderViewContent::Ready {
-                    image,
-                    source_extent: snapshot.desired_physical_size,
-                })
-            })
-            .expect("update view");
-        Some(snapshot.desired_physical_size)
-    }
-
     fn redraw(&mut self) {
-        let size_2d = self.ensure_scene(true);
-        let size_3d = self.ensure_scene(false);
         let list = self.ui.display_list().expect("display list");
         let Some(gpu) = &mut self.gpu else { return };
         let frame = match gpu.surface.acquire().expect("acquire") {
@@ -221,72 +172,39 @@ impl Demo {
         };
         let time = self.started.elapsed().as_secs_f32();
         let mut encoder = gpu.device.create_command_encoder(Default::default());
-        if let (Some(render_size), Some(scene)) = (size_2d, &gpu.scene_2d) {
-            let camera = Camera2D::default();
-            let mut draws = DrawList2D::new();
-            draws.draw_sprite(SpriteDraw {
-                texture: gpu.sprite,
-                source: None,
-                transform: Affine2::from_scale_angle_translation(
-                    Vec2::splat(3.0),
-                    time,
-                    Vec2::ZERO,
-                ),
-                size: Vec2::splat(32.0),
-                pivot: Vec2::splat(0.5),
-                tint: Color::WHITE,
-                layer: 0,
-            });
-            gpu.renderer_2d
-                .render(
-                    &mut encoder,
-                    &RenderTarget {
-                        view: scene.view.clone(),
-                        allocation_size: scene.allocation,
-                        render_size,
-                        scale_factor: self
-                            .window
-                            .as_ref()
-                            .map_or(1.0, |window| window.scale_factor() as f32),
-                        clear_color: Color::rgb(0.03, 0.08, 0.16),
-                    },
-                    &camera,
-                    &draws,
-                )
-                .expect("2D render");
-        }
-        if let (Some(render_size), Some(scene)) = (size_3d, &gpu.scene_3d) {
-            let mut camera = Camera3D {
-                position: Vec3::new(time.sin() * 4.0, 2.5, time.cos() * 4.0),
-                ..Default::default()
-            };
-            camera.look_at(Vec3::ZERO, Vec3::Y);
-            let mut draws = DrawList3D::new();
-            draws.draw_mesh(MeshDraw {
-                mesh: gpu.cube,
-                material: gpu.material,
-                transform: Mat4::from_quat(Quat::from_rotation_y(time)),
-                tint: Color::WHITE,
-            });
-            draws.draw_grid(5, 0.5, Color::new(0.3, 0.4, 0.6, 0.7));
-            draws.draw_axes(Mat4::IDENTITY, 1.4);
-            gpu.renderer_3d
-                .render(
-                    &mut encoder,
-                    &RenderTarget {
-                        view: scene.view.clone(),
-                        allocation_size: scene.allocation,
-                        render_size,
-                        scale_factor: 1.0,
-                        clear_color: Color::rgb(0.025, 0.035, 0.08),
-                    },
-                    &camera,
-                    &Lighting::default(),
-                    &draws,
-                )
-                .expect("3D render");
-        }
-        gpu.paint
+        let camera_2d = Camera2D::default();
+        let mut draws_2d = DrawList2D::new();
+        draws_2d.draw_sprite(SpriteDraw {
+            texture: gpu.sprite,
+            source: None,
+            transform: Affine2::from_scale_angle_translation(Vec2::splat(3.0), time, Vec2::ZERO),
+            size: Vec2::splat(32.0),
+            pivot: Vec2::splat(0.5),
+            tint: Color::WHITE,
+            layer: 0,
+        });
+        let mut camera_3d = Camera3D {
+            position: Vec3::new(time.sin() * 4.0, 2.5, time.cos() * 4.0),
+            ..Default::default()
+        };
+        camera_3d.look_at(Vec3::ZERO, Vec3::Y);
+        let mut draws_3d = DrawList3D::new();
+        draws_3d.draw_mesh(MeshDraw {
+            mesh: gpu.cube,
+            material: gpu.material,
+            transform: Mat4::from_quat(Quat::from_rotation_y(time)),
+            tint: Color::WHITE,
+        });
+        draws_3d.draw_grid(5, 0.5, Color::new(0.3, 0.4, 0.6, 0.7));
+        draws_3d.draw_axes(Mat4::IDENTITY, 1.4);
+        let scene_2d = self.scene_2d;
+        let scene_3d = self.scene_3d;
+        let (compositor, renderer_2d, renderer_3d) = (
+            &mut gpu.compositor,
+            &mut gpu.renderer_2d,
+            &mut gpu.renderer_3d,
+        );
+        compositor
             .render(
                 &mut encoder,
                 &list,
@@ -300,8 +218,46 @@ impl Demo {
                         .map_or(1.0, |window| window.scale_factor() as f32),
                     clear_color: Color::BLACK,
                 },
+                |id| ViewOptions {
+                    clear_color: if id == scene_2d {
+                        Color::rgb(0.03, 0.08, 0.16)
+                    } else {
+                        Color::rgb(0.025, 0.035, 0.08)
+                    },
+                },
+                |id, encoder, target| match (id, target) {
+                    (id, ViewRenderTarget::Direct(target)) if id == scene_2d => renderer_2d
+                        .render_composited(encoder, &target, &camera_2d, &draws_2d)
+                        .map(|_| ())
+                        .map_err(|e| e.to_string()),
+                    (id, ViewRenderTarget::Texture(target)) if id == scene_2d => renderer_2d
+                        .render(encoder, &target, &camera_2d, &draws_2d)
+                        .map(|_| ())
+                        .map_err(|e| e.to_string()),
+                    (id, ViewRenderTarget::Direct(target)) if id == scene_3d => renderer_3d
+                        .render_composited(
+                            encoder,
+                            &target,
+                            &camera_3d,
+                            &Lighting::default(),
+                            &draws_3d,
+                        )
+                        .map(|_| ())
+                        .map_err(|e| e.to_string()),
+                    (id, ViewRenderTarget::Texture(target)) if id == scene_3d => renderer_3d
+                        .render(
+                            encoder,
+                            &target,
+                            &camera_3d,
+                            &Lighting::default(),
+                            &draws_3d,
+                        )
+                        .map(|_| ())
+                        .map_err(|e| e.to_string()),
+                    _ => Err("unknown compositor view".into()),
+                },
             )
-            .expect("paint UI");
+            .expect("compose UI and scenes");
         gpu.queue
             .submit([encoder.finish().expect("finish")])
             .expect("submit");
@@ -357,6 +313,7 @@ impl Application for Demo {
             .expect("configure");
         let paint = PaintRenderer::new(device.clone(), queue.clone(), PaintOptions::default())
             .expect("paint");
+        let compositor = Compositor::new(device.clone(), paint);
         let mut renderer_2d = Renderer2D::new(device.clone(), queue.clone(), Default::default())
             .expect("2D renderer");
         let sprite = renderer_2d
@@ -383,11 +340,9 @@ impl Application for Demo {
             device,
             queue,
             configuration: configuration.clone(),
-            paint,
+            compositor,
             renderer_2d,
             renderer_3d,
-            scene_2d: None,
-            scene_3d: None,
             sprite,
             cube,
             material,

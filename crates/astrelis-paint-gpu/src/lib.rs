@@ -468,6 +468,79 @@ impl Renderer {
         list: &DisplayList,
         target: RenderTarget,
     ) -> Result<RenderStats, RenderError> {
+        self.render_internal(encoder, list, target, false, true, false)
+    }
+
+    /// Records the first compositor UI layer without resolving shared MSAA.
+    pub fn render_first_layer(
+        &mut self,
+        encoder: &mut gpu::CommandEncoder,
+        list: &DisplayList,
+        target: RenderTarget,
+    ) -> Result<RenderStats, RenderError> {
+        self.render_internal(encoder, list, target, false, false, true)
+    }
+
+    /// Records a display-list layer while preserving existing color and stencil.
+    ///
+    /// This is intended for compositor-generated layers after the first UI layer.
+    pub fn render_layer(
+        &mut self,
+        encoder: &mut gpu::CommandEncoder,
+        list: &DisplayList,
+        target: RenderTarget,
+    ) -> Result<RenderStats, RenderError> {
+        self.render_internal(encoder, list, target, true, false, true)
+    }
+
+    /// Records the final compositor UI layer and resolves shared MSAA.
+    pub fn render_final_layer(
+        &mut self,
+        encoder: &mut gpu::CommandEncoder,
+        list: &DisplayList,
+        target: RenderTarget,
+    ) -> Result<RenderStats, RenderError> {
+        self.render_internal(encoder, list, target, true, true, true)
+    }
+
+    /// Returns the compositor-owned color attachment used by subsequent layers.
+    pub fn compositor_color_view(
+        &self,
+        target: &RenderTarget,
+    ) -> Result<gpu::TextureView, RenderError> {
+        let samples = self.options.antialiasing.samples();
+        let attachments = self.attachments.as_ref().ok_or_else(|| {
+            RenderError::new(
+                "render the first UI layer before requesting its compositor attachment",
+            )
+        })?;
+        if attachments.key
+            != (
+                target.size.width,
+                target.size.height,
+                target.format,
+                samples,
+            )
+        {
+            return Err(RenderError::new(
+                "compositor attachment does not match the frame target",
+            ));
+        }
+        Ok(attachments
+            .color
+            .clone()
+            .unwrap_or_else(|| target.view.clone()))
+    }
+
+    fn render_internal(
+        &mut self,
+        encoder: &mut gpu::CommandEncoder,
+        list: &DisplayList,
+        target: RenderTarget,
+        load: bool,
+        resolve: bool,
+        transient_buffers: bool,
+    ) -> Result<RenderStats, RenderError> {
         if target.view.device_id() != self.device.id() {
             return Err(RenderError::new("render target belongs to another device"));
         }
@@ -512,7 +585,29 @@ impl Renderer {
             }
         }
 
-        self.upload(&vertices, &indices)?;
+        let transient_vertex = if transient_buffers && !vertices.is_empty() {
+            Some(self.device.create_buffer_init(
+                &self.queue,
+                Some("compositor UI layer vertices".into()),
+                bytemuck::cast_slice(&vertices),
+                gpu::BufferUsages::VERTEX,
+            )?)
+        } else {
+            None
+        };
+        let transient_index = if transient_buffers && !indices.is_empty() {
+            Some(self.device.create_buffer_init(
+                &self.queue,
+                Some("compositor UI layer indices".into()),
+                bytemuck::cast_slice(&indices),
+                gpu::BufferUsages::INDEX,
+            )?)
+        } else {
+            None
+        };
+        if !transient_buffers {
+            self.upload(&vertices, &indices)?;
+        }
         let attachments = self.attachments.as_ref().expect("attachments exist");
         let pipeline = self
             .pipelines
@@ -522,33 +617,53 @@ impl Renderer {
             .color
             .clone()
             .unwrap_or_else(|| target.view.clone());
-        let resolve_target = attachments.color.as_ref().map(|_| target.view.clone());
+        let resolve_target = if resolve {
+            attachments.color.as_ref().map(|_| target.view.clone())
+        } else {
+            None
+        };
         let mut pass = encoder.begin_render_pass(gpu::RenderPassDescriptor {
             label: Some("astrelis paint".into()),
             color_attachments: vec![Some(gpu::RenderPassColorAttachment {
                 view,
                 resolve_target,
-                load: gpu::LoadOp::Clear(gpu::Color {
-                    r: target.clear_color.r as f64,
-                    g: target.clear_color.g as f64,
-                    b: target.clear_color.b as f64,
-                    a: target.clear_color.a as f64,
-                }),
+                load: if load {
+                    gpu::LoadOp::Load
+                } else {
+                    gpu::LoadOp::Clear(gpu::Color {
+                        r: target.clear_color.r as f64,
+                        g: target.clear_color.g as f64,
+                        b: target.clear_color.b as f64,
+                        a: target.clear_color.a as f64,
+                    })
+                },
                 store: gpu::StoreOp::Store,
             })],
             depth_stencil_attachment: Some(gpu::RenderPassDepthStencilAttachment {
                 view: attachments.stencil.clone(),
                 depth_ops: None,
                 stencil_ops: Some(gpu::AttachmentOperations {
-                    load: gpu::LoadOpValue::Clear(0),
-                    store: gpu::StoreOp::Discard,
+                    load: if load {
+                        gpu::LoadOpValue::Load
+                    } else {
+                        gpu::LoadOpValue::Clear(0)
+                    },
+                    store: if resolve {
+                        gpu::StoreOp::Discard
+                    } else {
+                        gpu::StoreOp::Store
+                    },
                 }),
             }),
             timestamp_writes: None,
         })?;
         if !indices.is_empty() {
-            let vb = &self.vertex_buffer.as_ref().expect("vertex buffer").buffer;
-            let ib = &self.index_buffer.as_ref().expect("index buffer").buffer;
+            let vb = transient_vertex
+                .as_ref()
+                .unwrap_or_else(|| &self.vertex_buffer.as_ref().expect("vertex buffer").buffer);
+            let ib = transient_index
+                .as_ref()
+                .unwrap_or_else(|| &self.index_buffer.as_ref().expect("index buffer").buffer);
             pass.set_vertex_buffer(0, vb, 0..(vertices.len() * size_of::<Vertex>()) as u64)?;
             pass.set_index_buffer(
                 ib,
@@ -843,6 +958,10 @@ impl Renderer {
                     stats,
                 );
                 stats.draws += 1;
+            }
+            Command::CompositorView { .. } => {
+                // Compositor markers are consumed by `astrelis-compositor` and
+                // remain inert when a display list is rendered conventionally.
             }
             Command::DrawText {
                 text,

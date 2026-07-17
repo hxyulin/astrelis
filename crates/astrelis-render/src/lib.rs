@@ -10,6 +10,52 @@ use astrelis_core::{
 };
 use astrelis_gpu::{DeviceId, TextureDimension, TextureView};
 
+/// A rectangular scene destination supplied by a frame compositor.
+///
+/// The color attachment may be multisampled and already contains earlier UI
+/// layers. Scene renderers must load it and restrict every draw to `scissor`.
+#[derive(Clone, Debug)]
+pub struct CompositedRenderTarget {
+    /// Compositor-owned color attachment.
+    pub view: TextureView,
+    /// Full attachment dimensions.
+    pub size: Size<Physical, u32>,
+    /// Full physical viewport occupied by the scene.
+    pub viewport: astrelis_core::geometry::Rect<Physical, u32>,
+    /// Effective rectangular clip, which does not alter scene projection.
+    pub scissor: astrelis_core::geometry::Rect<Physical, u32>,
+    /// Logical-to-physical scale used by pixel-oriented cameras.
+    pub scale_factor: f32,
+    /// Linear scene background, cleared only inside `viewport`.
+    pub clear_color: Color,
+}
+
+impl CompositedRenderTarget {
+    /// Validates compositor metadata for an expected device.
+    pub fn validate(&self, device: DeviceId) -> Result<(), TargetError> {
+        if self.view.device_id() != device || self.view.dimension() != TextureDimension::D2 {
+            return Err(TargetError::new(
+                "composited target is incompatible with the device",
+            ));
+        }
+        if self.size.width == 0
+            || self.size.height == 0
+            || self.viewport.origin.x + self.viewport.size.width > self.size.width
+            || self.viewport.origin.y + self.viewport.size.height > self.size.height
+            || self.scissor.origin.x + self.scissor.size.width > self.size.width
+            || self.scissor.origin.y + self.scissor.size.height > self.size.height
+        {
+            return Err(TargetError::new(
+                "composited target region is out of bounds",
+            ));
+        }
+        if !self.scale_factor.is_finite() || self.scale_factor <= 0.0 {
+            return Err(TargetError::new("composited target scale must be positive"));
+        }
+        Ok(())
+    }
+}
+
 /// Scene-renderer edge antialiasing policy.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Antialiasing {

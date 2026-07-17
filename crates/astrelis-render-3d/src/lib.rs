@@ -21,11 +21,12 @@ use std::{
 };
 
 use astrelis_core::{
-    geometry::{Physical, Size},
+    color::Color,
+    geometry::{Physical, Point, Rect, Size},
     math::{Mat3, Vec3},
 };
 use astrelis_gpu as gpu;
-use astrelis_render::{Antialiasing, RenderStats, RenderTarget};
+use astrelis_render::{Antialiasing, CompositedRenderTarget, RenderStats, RenderTarget};
 use bytemuck::{Pod, Zeroable};
 
 const SHADER: &str = include_str!("shader.wgsl");
@@ -159,6 +160,18 @@ struct Attachments {
     color: Option<gpu::TextureView>,
     _depth_texture: gpu::Texture,
     depth: gpu::TextureView,
+}
+
+struct FrameTarget {
+    view: gpu::TextureView,
+    allocation_size: Size<Physical, u32>,
+    render_size: Size<Physical, u32>,
+    origin: Point<Physical, u32>,
+    scissor: Rect<Physical, u32>,
+    scale_factor: f32,
+    clear_color: Color,
+    samples: u32,
+    load: bool,
 }
 
 /// Basic forward renderer tied to one device and queue.
@@ -513,9 +526,65 @@ impl Renderer3D {
         lighting: &Lighting,
         draw_list: &DrawList3D,
     ) -> Result<RenderStats, RenderError> {
-        astrelis_profiling::profile_function!();
         target.validate(self.device.id())?;
-        if target.is_empty() {
+        self.render_impl(
+            encoder,
+            FrameTarget {
+                view: target.view.clone(),
+                allocation_size: target.allocation_size,
+                render_size: target.render_size,
+                origin: Point::new(0, 0),
+                scissor: Rect::from_xywh(0, 0, target.render_size.width, target.render_size.height),
+                scale_factor: target.scale_factor,
+                clear_color: target.clear_color,
+                samples: self.options.antialiasing.sample_count(),
+                load: false,
+            },
+            camera,
+            lighting,
+            draw_list,
+        )
+    }
+
+    /// Records a scene into a compositor-owned rectangular frame region.
+    pub fn render_composited(
+        &mut self,
+        encoder: &mut gpu::CommandEncoder,
+        target: &CompositedRenderTarget,
+        camera: &Camera3D,
+        lighting: &Lighting,
+        draw_list: &DrawList3D,
+    ) -> Result<RenderStats, RenderError> {
+        target.validate(self.device.id())?;
+        self.render_impl(
+            encoder,
+            FrameTarget {
+                view: target.view.clone(),
+                allocation_size: target.size,
+                render_size: target.viewport.size,
+                origin: target.viewport.origin,
+                scissor: target.scissor,
+                scale_factor: target.scale_factor,
+                clear_color: target.clear_color,
+                samples: target.view.sample_count(),
+                load: true,
+            },
+            camera,
+            lighting,
+            draw_list,
+        )
+    }
+
+    fn render_impl(
+        &mut self,
+        encoder: &mut gpu::CommandEncoder,
+        target: FrameTarget,
+        camera: &Camera3D,
+        lighting: &Lighting,
+        draw_list: &DrawList3D,
+    ) -> Result<RenderStats, RenderError> {
+        astrelis_profiling::profile_function!();
+        if target.render_size.width == 0 || target.render_size.height == 0 {
             return Ok(RenderStats::default());
         }
         let aspect = target.render_size.width as f32 / target.render_size.height as f32;
@@ -617,7 +686,7 @@ impl Renderer3D {
                 .total_cmp(&a.distance)
                 .then(a.order.cmp(&b.order)),
         });
-        let sample_count = self.options.antialiasing.sample_count();
+        let sample_count = target.samples;
         let material_keys = prepared
             .iter()
             .map(|draw| {
@@ -638,7 +707,16 @@ impl Renderer3D {
         if !draw_list.lines.is_empty() {
             self.ensure_line_pipeline(target.view.format(), sample_count)?;
         }
-        self.ensure_attachments(target, sample_count);
+        self.ensure_attachments(
+            &RenderTarget {
+                view: target.view.clone(),
+                allocation_size: target.allocation_size,
+                render_size: target.render_size,
+                scale_factor: target.scale_factor,
+                clear_color: target.clear_color,
+            },
+            sample_count,
+        );
         let instance_data = prepared
             .iter()
             .map(|draw| draw.instance)
@@ -688,23 +766,35 @@ impl Renderer3D {
             .iter()
             .find(|attachments| attachments.key == attachment_key)
             .expect("attachments were ensured");
-        let color_view = attachments
-            .color
-            .clone()
-            .unwrap_or_else(|| target.view.clone());
-        let resolve_target = attachments.color.as_ref().map(|_| target.view.clone());
+        let color_view = if target.load {
+            target.view.clone()
+        } else {
+            attachments
+                .color
+                .clone()
+                .unwrap_or_else(|| target.view.clone())
+        };
+        let resolve_target = if target.load {
+            None
+        } else {
+            attachments.color.as_ref().map(|_| target.view.clone())
+        };
         let clear = target.clear_color;
         let mut pass = encoder.begin_render_pass(gpu::RenderPassDescriptor {
             label: Some("render-3d scene".into()),
             color_attachments: vec![Some(gpu::RenderPassColorAttachment {
                 view: color_view,
                 resolve_target,
-                load: gpu::LoadOp::Clear(gpu::Color {
-                    r: clear.r as f64,
-                    g: clear.g as f64,
-                    b: clear.b as f64,
-                    a: clear.a as f64,
-                }),
+                load: if target.load {
+                    gpu::LoadOp::Load
+                } else {
+                    gpu::LoadOp::Clear(gpu::Color {
+                        r: clear.r as f64,
+                        g: clear.g as f64,
+                        b: clear.b as f64,
+                        a: clear.a as f64,
+                    })
+                },
                 store: gpu::StoreOp::Store,
             })],
             depth_stencil_attachment: Some(gpu::RenderPassDepthStencilAttachment {
@@ -718,14 +808,19 @@ impl Renderer3D {
             timestamp_writes: None,
         })?;
         pass.set_viewport(
-            0.0,
-            0.0,
+            target.origin.x as f32,
+            target.origin.y as f32,
             target.render_size.width as f32,
             target.render_size.height as f32,
             0.0,
             1.0,
         );
-        pass.set_scissor_rect(0, 0, target.render_size.width, target.render_size.height);
+        pass.set_scissor_rect(
+            target.scissor.origin.x,
+            target.scissor.origin.y,
+            target.scissor.size.width,
+            target.scissor.size.height,
+        );
         pass.set_bind_group(0, &self.frame_bind_group, &[])?;
         if let Some(buffer) = &instance_buffer {
             pass.set_vertex_buffer(1, buffer, 0..buffer.size())?;

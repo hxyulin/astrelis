@@ -15,6 +15,7 @@ astrelis-ui-core = { workspace = true }
 
 [dev-dependencies]
 astrelis-app = { workspace = true }
+astrelis-compositor = { workspace = true }
 astrelis-gpu = { workspace = true }
 astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
 astrelis-paint-gpu = { path = "../astrelis-paint-gpu" }

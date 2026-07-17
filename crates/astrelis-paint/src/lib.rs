@@ -22,6 +22,30 @@ use astrelis_text::TextLayout;
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_IMAGE_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_GRADIENT_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_COMPOSITOR_VIEW_ID: AtomicU64 = AtomicU64::new(1);
+
+/// Stable identity for a scene slot inserted into paint order by a compositor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CompositorViewId(u64);
+
+impl CompositorViewId {
+    /// Allocates a process-unique compositor view identity.
+    pub fn new() -> Self {
+        Self(NEXT_COMPOSITOR_VIEW_ID.fetch_add(1, Ordering::Relaxed))
+    }
+
+    /// Returns the numeric identity used by renderer registries.
+    #[doc(hidden)]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl Default for CompositorViewId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Error produced while constructing paint data.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -719,6 +743,12 @@ pub enum Command {
         destination: LogicalRect,
         options: ImageOptions,
     },
+    /// Inserts an application-rendered scene into the current paint order.
+    CompositorView {
+        id: CompositorViewId,
+        destination: LogicalRect,
+        prefer_direct: bool,
+    },
     /// Draws a retained text layout at a logical origin.
     DrawText {
         text: TextRef,
@@ -735,6 +765,32 @@ pub struct DisplayList {
     images: Arc<[Image]>,
     external_images: Arc<[ExternalImage]>,
     texts: Arc<[TextLayout]>,
+}
+
+/// One scene insertion discovered while splitting a display list into UI layers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompositorMarker {
+    /// Application identity supplied by the render view.
+    pub id: CompositorViewId,
+    /// View rectangle before the accumulated transform.
+    pub destination: LogicalRect,
+    /// Accumulated transform at the insertion point.
+    pub transform: Affine2,
+    /// Rectangular clips active at the insertion point.
+    pub rectangular_clips: Vec<(LogicalRect, Affine2)>,
+    /// Whether a rounded/path clip makes direct scissoring inexact.
+    pub has_complex_clip: bool,
+    /// Whether the widget explicitly requested the direct fast path.
+    pub prefer_direct: bool,
+}
+
+/// Ordered UI layers and scene insertions for one composited frame.
+#[derive(Clone, Debug)]
+pub struct CompositionPlan {
+    /// UI layers; there is exactly one more layer than marker.
+    pub layers: Vec<DisplayList>,
+    /// Scene insertions between adjacent layers.
+    pub markers: Vec<CompositorMarker>,
 }
 
 impl DisplayList {
@@ -781,6 +837,177 @@ impl DisplayList {
     /// Resource text layouts in local-index order.
     pub fn texts(&self) -> &[TextLayout] {
         &self.texts
+    }
+
+    /// Splits paint draws around compositor markers while retaining balanced state.
+    pub fn composition_plan(&self) -> CompositionPlan {
+        #[derive(Clone)]
+        struct MarkerState {
+            transform: Affine2,
+            rectangular_clips: Vec<(LogicalRect, Affine2)>,
+            has_complex_clip: bool,
+        }
+        let mut state = MarkerState {
+            transform: Affine2::IDENTITY,
+            rectangular_clips: Vec::new(),
+            has_complex_clip: false,
+        };
+        let mut stack = Vec::new();
+        let mut markers = Vec::new();
+        for command in self.commands() {
+            match command {
+                Command::Save => stack.push(state.clone()),
+                Command::Restore => state = stack.pop().expect("validated display list"),
+                Command::Transform(value) => state.transform *= *value,
+                Command::ClipRect(rect) => state.rectangular_clips.push((*rect, state.transform)),
+                Command::ClipRoundedRect(_) | Command::ClipPath { .. } => {
+                    state.has_complex_clip = true;
+                }
+                Command::CompositorView {
+                    id,
+                    destination,
+                    prefer_direct,
+                } => {
+                    markers.push(CompositorMarker {
+                        id: *id,
+                        destination: *destination,
+                        transform: state.transform,
+                        rectangular_clips: state.rectangular_clips.clone(),
+                        has_complex_clip: state.has_complex_clip,
+                        prefer_direct: *prefer_direct,
+                    });
+                }
+                _ => {}
+            }
+        }
+        let layer_count = markers.len() + 1;
+        let mut layer_commands = vec![Vec::new(); layer_count];
+        let mut active = 0;
+        for command in self.commands() {
+            match command {
+                Command::CompositorView { .. } => active += 1,
+                Command::FillRect { .. }
+                | Command::FillRoundedRect { .. }
+                | Command::FillEllipse { .. }
+                | Command::StrokeRect { .. }
+                | Command::StrokeRoundedRect { .. }
+                | Command::StrokeEllipse { .. }
+                | Command::FillPath { .. }
+                | Command::StrokePath { .. }
+                | Command::DrawImage { .. }
+                | Command::DrawExternalImage { .. }
+                | Command::DrawText { .. } => layer_commands[active].push(command.clone()),
+                _ => {
+                    for commands in &mut layer_commands {
+                        commands.push(command.clone());
+                    }
+                }
+            }
+        }
+        let layers = layer_commands
+            .into_iter()
+            .map(|commands| DisplayList {
+                commands: commands.into(),
+                paths: self.paths.clone(),
+                images: self.images.clone(),
+                external_images: self.external_images.clone(),
+                texts: self.texts.clone(),
+            })
+            .collect();
+        CompositionPlan { layers, markers }
+    }
+
+    /// Builds the texture-composite layer for one compositor marker.
+    pub fn compositor_fallback_layer(
+        &self,
+        marker_index: usize,
+        image: ExternalImage,
+        source_extent: Size<Physical, u32>,
+    ) -> Result<DisplayList, PaintError> {
+        let mut commands = Vec::new();
+        let mut seen = 0;
+        let mut external_images = self.external_images.to_vec();
+        let reference = ExternalImageRef(external_images.len() as u32);
+        external_images.push(image);
+        for command in self.commands() {
+            match command {
+                Command::CompositorView { destination, .. } => {
+                    if seen == marker_index {
+                        commands.push(Command::DrawExternalImage {
+                            image: reference,
+                            destination: *destination,
+                            options: ImageOptions {
+                                source: Some(Rect::from_xywh(
+                                    0.0,
+                                    0.0,
+                                    source_extent.width as f32,
+                                    source_extent.height as f32,
+                                )),
+                                ..Default::default()
+                            },
+                        });
+                    }
+                    seen += 1;
+                }
+                Command::FillRect { .. }
+                | Command::FillRoundedRect { .. }
+                | Command::FillEllipse { .. }
+                | Command::StrokeRect { .. }
+                | Command::StrokeRoundedRect { .. }
+                | Command::StrokeEllipse { .. }
+                | Command::FillPath { .. }
+                | Command::StrokePath { .. }
+                | Command::DrawImage { .. }
+                | Command::DrawExternalImage { .. }
+                | Command::DrawText { .. } => {}
+                _ => commands.push(command.clone()),
+            }
+        }
+        Ok(DisplayList {
+            commands: commands.into(),
+            paths: self.paths.clone(),
+            images: self.images.clone(),
+            external_images: external_images.into(),
+            texts: self.texts.clone(),
+        })
+    }
+
+    /// Builds a clipped solid background layer for one compositor marker.
+    pub fn compositor_clear_layer(&self, marker_index: usize, color: Color) -> DisplayList {
+        let mut commands = Vec::new();
+        let mut seen = 0;
+        for command in self.commands() {
+            match command {
+                Command::CompositorView { destination, .. } => {
+                    if seen == marker_index {
+                        commands.push(Command::FillRect {
+                            rect: *destination,
+                            brush: Brush::Solid(color),
+                        });
+                    }
+                    seen += 1;
+                }
+                Command::FillRect { .. }
+                | Command::FillRoundedRect { .. }
+                | Command::FillEllipse { .. }
+                | Command::StrokeRect { .. }
+                | Command::StrokeRoundedRect { .. }
+                | Command::StrokeEllipse { .. }
+                | Command::FillPath { .. }
+                | Command::StrokePath { .. }
+                | Command::DrawImage { .. }
+                | Command::DrawExternalImage { .. }
+                | Command::DrawText { .. } => {}
+                _ => commands.push(command.clone()),
+            }
+        }
+        DisplayList {
+            commands: commands.into(),
+            paths: self.paths.clone(),
+            images: self.images.clone(),
+            external_images: self.external_images.clone(),
+            texts: self.texts.clone(),
+        }
     }
 }
 
@@ -1030,6 +1257,22 @@ impl Painter {
             image,
             destination,
             options,
+        });
+        Ok(())
+    }
+
+    /// Inserts a compositor-managed scene view.
+    pub fn compositor_view(
+        &mut self,
+        id: CompositorViewId,
+        destination: LogicalRect,
+        prefer_direct: bool,
+    ) -> Result<(), PaintError> {
+        validate_rect(destination)?;
+        self.commands.push(Command::CompositorView {
+            id,
+            destination,
+            prefer_direct,
         });
         Ok(())
     }

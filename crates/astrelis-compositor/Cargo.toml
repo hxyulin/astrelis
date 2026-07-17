@@ -1,6 +1,6 @@
 [package]
-name = "astrelis-paint-gpu"
-description = "GPU renderer for Astrelis backend-independent display lists"
+name = "astrelis-compositor"
+description = "Ordered UI and scene pass composition for Astrelis"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -11,17 +11,17 @@ repository.workspace = true
 astrelis-core = { workspace = true }
 astrelis-gpu = { workspace = true }
 astrelis-paint = { workspace = true }
+astrelis-paint-gpu = { path = "../astrelis-paint-gpu" }
 astrelis-render = { workspace = true }
-astrelis-text-gpu = { workspace = true }
-bytemuck = { workspace = true }
-lyon_tessellation = { workspace = true }
 
 [dev-dependencies]
 astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
-astrelis-platform = { workspace = true }
-astrelis-platform-winit = { path = "../astrelis-platform-winit" }
-astrelis-text = { workspace = true }
+criterion = { workspace = true }
 pollster = { workspace = true }
+
+[[bench]]
+name = "frame_paths"
+harness = false
 
 [lints]
 workspace = true
