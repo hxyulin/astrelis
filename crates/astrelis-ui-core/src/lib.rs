@@ -528,6 +528,7 @@ pub struct EventContext<'a, Message> {
     current_bounds: LogicalRect,
     parent_bounds: Option<LogicalRect>,
     modifiers: Modifiers,
+    route: &'a [ElementId],
     requests: &'a mut Vec<EventRequest>,
 }
 
@@ -568,6 +569,10 @@ impl<Message> EventContext<'_, Message> {
     pub const fn modifiers(&self) -> Modifiers {
         self.modifiers
     }
+    /// Returns whether the current event route passes through `handle`.
+    pub fn route_contains<T>(&self, handle: ElementHandle<T>) -> bool {
+        self.route.contains(&handle.id)
+    }
     /// Emits an application message after dispatch.
     pub fn emit(&mut self, message: Message) {
         self.messages.push_back(message);
@@ -583,6 +588,10 @@ impl<Message> EventContext<'_, Message> {
     /// Requests keyboard focus for the listener's current node.
     pub fn request_focus(&mut self) {
         self.requests.push(EventRequest::Focus(self.current_target));
+    }
+    /// Requests keyboard focus for another retained element after dispatch.
+    pub fn request_focus_for<T>(&mut self, handle: ElementHandle<T>) {
+        self.requests.push(EventRequest::Focus(handle.id));
     }
     /// Captures a normalized pointer for the listener's current node.
     pub fn capture_pointer(&mut self, device_id: DeviceId) {
@@ -1106,6 +1115,24 @@ pub enum SemanticRole {
     ScrollView,
     /// Adjustable divider between two regions.
     Separator,
+    /// Explanatory hover or focus content.
+    Tooltip,
+    /// Popup command collection.
+    Menu,
+    /// Command inside a menu.
+    MenuItem,
+    /// Container for tab selectors.
+    TabList,
+    /// One tab selector.
+    Tab,
+    /// Content controlled by a tab.
+    TabPanel,
+    /// Selectable item collection.
+    List,
+    /// One selectable list entry.
+    ListItem,
+    /// Group of labeled form controls.
+    Form,
 }
 
 /// Semantic operation supported by a node.
@@ -1394,6 +1421,7 @@ pub struct Ui<Message = ()> {
     checkbox_styles: HashMap<ElementId, CheckboxStyle>,
     slider_styles: HashMap<ElementId, SliderStyle>,
     scroll_styles: HashMap<ElementId, ScrollViewStyle>,
+    semantic_roles: HashMap<ElementId, SemanticRole>,
     event_requests: Vec<EventRequest>,
     drag_sessions: HashMap<DeviceId, DragSession>,
     next_drag_session: u64,
@@ -1408,6 +1436,12 @@ struct Listener<Message> {
 }
 
 type EventCallback<Message> = dyn FnMut(&mut EventContext<'_, Message>, &RoutedEvent);
+
+struct DispatchControl<'a> {
+    route: &'a [ElementId],
+    stopped: bool,
+    default_prevented: bool,
+}
 
 impl<Message: 'static> Ui<Message> {
     /// Creates a UI tree with a root column container.
@@ -1467,6 +1501,7 @@ impl<Message: 'static> Ui<Message> {
             checkbox_styles: HashMap::new(),
             slider_styles: HashMap::new(),
             scroll_styles: HashMap::new(),
+            semantic_roles: HashMap::new(),
             event_requests: Vec::new(),
             drag_sessions: HashMap::new(),
             next_drag_session: 1,
@@ -1935,6 +1970,7 @@ impl<Message: 'static> Ui<Message> {
         self.checkbox_styles.remove(&id);
         self.slider_styles.remove(&id);
         self.scroll_styles.remove(&id);
+        self.semantic_roles.remove(&id);
         if let Some(mut widget) = self.custom_widgets.remove(&id) {
             widget.unmounted();
         }
@@ -2028,10 +2064,37 @@ impl<Message: 'static> Ui<Message> {
         handle: ElementHandle<T>,
         visibility: Visibility,
     ) -> Result<(), UiError> {
-        let node = self.node_mut(handle.id)?;
-        if node.visibility != visibility {
-            node.visibility = visibility;
+        let changed = self.node(handle.id)?.visibility != visibility;
+        if changed {
+            if visibility == Visibility::Visible {
+                let current_focus = self.focus;
+                match &mut self.node_mut(handle.id)?.kind {
+                    Kind::FocusScope { options, restore } if options.restore_focus => {
+                        *restore = current_focus;
+                    }
+                    Kind::Overlay {
+                        options, restore, ..
+                    } if options.focus.restore_focus => {
+                        *restore = current_focus;
+                    }
+                    _ => {}
+                }
+            }
+            let restore = match self.node(handle.id)?.kind {
+                Kind::FocusScope { restore, .. } | Kind::Overlay { restore, .. } => restore,
+                _ => None,
+            };
+            let restore_focus = (visibility == Visibility::Hidden
+                && self
+                    .focus
+                    .is_some_and(|focus| self.is_descendant_of(focus, handle.id)))
+            .then_some(restore)
+            .flatten();
+            self.node_mut(handle.id)?.visibility = visibility;
             self.invalidate_layout();
+            if visibility == Visibility::Hidden {
+                self.set_focus(restore_focus)?;
+            }
         }
         Ok(())
     }
@@ -2318,6 +2381,18 @@ impl<Message: 'static> Ui<Message> {
         Ok(())
     }
 
+    /// Overrides the semantic role reported for one retained element.
+    pub fn set_semantic_role<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        role: SemanticRole,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        self.semantic_roles.insert(handle.id, role);
+        self.dirty |= Dirty::SEMANTICS;
+        Ok(())
+    }
+
     /// Returns whether painting is currently invalidated.
     pub fn needs_redraw(&self) -> bool {
         self.dirty
@@ -2377,8 +2452,11 @@ impl<Message: 'static> Ui<Message> {
             cursor = self.node(id)?.parent;
         }
         route.reverse();
-        let mut stopped = false;
-        let mut default_prevented = false;
+        let mut control = DispatchControl {
+            route: &route,
+            stopped: false,
+            default_prevented: false,
+        };
         let last = route.len().saturating_sub(1);
         for (index, current) in route.iter().copied().enumerate() {
             let phase = if index == last {
@@ -2386,35 +2464,21 @@ impl<Message: 'static> Ui<Message> {
             } else {
                 EventPhase::Capture
             };
-            self.deliver(
-                current,
-                target,
-                phase,
-                &kind,
-                &mut stopped,
-                &mut default_prevented,
-            );
-            if stopped {
+            self.deliver(current, target, phase, &kind, &mut control);
+            if control.stopped {
                 break;
             }
         }
-        if !stopped {
+        if !control.stopped {
             for current in route[..last].iter().rev().copied() {
-                self.deliver(
-                    current,
-                    target,
-                    EventPhase::Bubble,
-                    &kind,
-                    &mut stopped,
-                    &mut default_prevented,
-                );
-                if stopped {
+                self.deliver(current, target, EventPhase::Bubble, &kind, &mut control);
+                if control.stopped {
                     break;
                 }
             }
         }
         self.apply_event_requests()?;
-        Ok(default_prevented)
+        Ok(control.default_prevented)
     }
 
     fn deliver(
@@ -2423,8 +2487,7 @@ impl<Message: 'static> Ui<Message> {
         target: ElementId,
         phase: EventPhase,
         kind: &RoutedEventKind,
-        stopped: &mut bool,
-        default_prevented: &mut bool,
+        control: &mut DispatchControl<'_>,
     ) {
         let current_bounds = self
             .node(current)
@@ -2444,17 +2507,18 @@ impl<Message: 'static> Ui<Message> {
         if let Some(mut widget) = self.custom_widgets.remove(&current) {
             let mut context = EventContext {
                 messages: &mut self.messages,
-                stopped,
-                default_prevented,
+                stopped: &mut control.stopped,
+                default_prevented: &mut control.default_prevented,
                 current_target: current,
                 current_bounds,
                 parent_bounds,
                 modifiers: self.modifiers,
+                route: control.route,
                 requests: &mut self.event_requests,
             };
             widget.event(&mut context, &event);
             self.custom_widgets.insert(current, widget);
-            if *stopped {
+            if control.stopped {
                 return;
             }
         }
@@ -2466,16 +2530,17 @@ impl<Message: 'static> Ui<Message> {
             {
                 let mut context = EventContext {
                     messages: &mut self.messages,
-                    stopped,
-                    default_prevented,
+                    stopped: &mut control.stopped,
+                    default_prevented: &mut control.default_prevented,
                     current_target: current,
                     current_bounds,
                     parent_bounds,
                     modifiers: self.modifiers,
+                    route: control.route,
                     requests: &mut self.event_requests,
                 };
                 (listener.callback)(&mut context, &event);
-                if *stopped {
+                if control.stopped {
                     break;
                 }
             }
@@ -2766,6 +2831,20 @@ impl<Message: 'static> Ui<Message> {
                 style.padding.top = LengthPercentage::length(insets.top);
                 style.padding.right = LengthPercentage::length(insets.right);
                 style.padding.bottom = LengthPercentage::length(insets.bottom);
+                if node.children.iter().any(|child| {
+                    self.node(*child)
+                        .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
+                }) && let Some(size) = node.text_layout.as_ref().map(TextLayout::size)
+                {
+                    if node.style.min_width == Length::Auto {
+                        style.min_size.width =
+                            Dimension::length(size.width + insets.left + insets.right);
+                    }
+                    if node.style.min_height == Length::Auto {
+                        style.min_size.height =
+                            Dimension::length(size.height + insets.top + insets.bottom);
+                    }
+                }
             }
             Kind::Checkbox { .. } | Kind::Slider { .. } => {
                 style.min_size.height = Dimension::length(28.0);
@@ -3630,6 +3709,7 @@ impl<Message: 'static> Ui<Message> {
                 ),
             _ => (SemanticRole::Group, String::new(), None, None, vec![]),
         };
+        let role = self.semantic_roles.get(&id).copied().unwrap_or(role);
         Ok(SemanticNode {
             id,
             role,
@@ -3681,6 +3761,7 @@ impl<Message: 'static> Ui<Message> {
                     current_bounds: bounds,
                     parent_bounds,
                     modifiers: self.modifiers,
+                    route: &[],
                     requests: &mut self.event_requests,
                 },
                 &action,
@@ -4820,7 +4901,7 @@ impl<Message: 'static> Ui<Message> {
             } => (content_height, offset),
             _ => return Ok(()),
         };
-        if content_height <= bounds.size.height {
+        if content_height <= bounds.size.height || point.x < bounds.max_x() - 12.0 {
             return Ok(());
         }
         let thumb_height = (bounds.size.height * bounds.size.height / content_height)
@@ -5510,6 +5591,20 @@ mod tests {
             _ => unreachable!(),
         };
         assert!((ui.scroll_offset(scroll).unwrap() - max).abs() < 0.01);
+        ui.set_scroll_offset(scroll, 0.0).unwrap();
+        let bounds = ui.node(scroll.id()).unwrap().bounds;
+        ui.set_scroll_from_point(
+            scroll.id(),
+            Point::new(bounds.origin.x + 20.0, bounds.origin.y + 60.0),
+        )
+        .unwrap();
+        assert_eq!(ui.scroll_offset(scroll).unwrap(), 0.0);
+        ui.set_scroll_from_point(
+            scroll.id(),
+            Point::new(bounds.max_x() - 2.0, bounds.origin.y + 60.0),
+        )
+        .unwrap();
+        assert!(ui.scroll_offset(scroll).unwrap() > 0.0);
     }
 
     #[test]
@@ -5723,6 +5818,20 @@ mod tests {
         );
         ui.remove(overlay).unwrap();
         assert_eq!(ui.focus, Some(owner.id()));
+    }
+
+    #[test]
+    fn overlay_children_do_not_collapse_intrinsic_button_owners() {
+        let mut ui = ui();
+        let root = ui.root();
+        let owner = ui.add_button(root, "A reasonably wide owner").unwrap();
+        let before = ui.layout_bounds(owner).unwrap();
+        let overlay = ui.add_overlay(owner, OverlayOptions::default()).unwrap();
+        ui.add_label(overlay, "Overlay content").unwrap();
+        let after = ui.layout_bounds(owner).unwrap();
+        assert!(before.size.width > 100.0);
+        assert!(after.size.width >= before.size.width);
+        assert!(after.size.height >= before.size.height);
     }
 
     #[test]

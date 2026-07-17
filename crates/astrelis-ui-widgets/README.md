@@ -2,9 +2,11 @@
 
 Reusable retained controls composed from the public `astrelis-ui-core` API.
 
-The first Milestone 11 slice provides generic in-process drag sources and
-painted drop targets. Split panes, overlay controls, and virtual lists follow
-in subsequent slices.
+Milestone 11 currently provides generic in-process drag sources and drop
+targets, resizable horizontal and vertical split panes, immediate tooltips,
+popovers, keyboard-accessible menus and tabs, selectable retained lists, and
+common labeled form compositions. Fixed-extent virtual lists follow in the
+final slice.
 
 Run the native gallery with:
 

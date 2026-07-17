@@ -15,7 +15,8 @@ use astrelis_ui_core::{
     DragPayload, DropOperation, ElementHandle, Label, LayoutStyle, Length, Theme, Ui,
 };
 use astrelis_ui_widgets::{
-    DropZone, SplitAxis, SplitPane, SplitPaneOptions, install_drag_source, move_drag_options,
+    DropZone, Form, List, ListItem, Menu, MenuItem, Popover, SplitAxis, SplitPane,
+    SplitPaneOptions, Tabs, Tooltip, install_drag_source, move_drag_options,
 };
 
 const NOTO_SANS: &[u8] = include_bytes!("../../astrelis-ui-core/assets/NotoSans.ttf");
@@ -31,8 +32,10 @@ struct GpuState {
 #[derive(Clone, Debug)]
 struct Card(&'static str);
 
+#[derive(Clone)]
 enum Message {
     Dropped(String),
+    Status(String),
 }
 
 struct Gallery {
@@ -219,6 +222,119 @@ impl Gallery {
         ui.add_button(vertical.second(), "Lower pane")
             .map_err(io::Error::other)?;
 
+        ui.add_label(column, "Overlay and navigation widgets")
+            .map_err(io::Error::other)?;
+        let controls = ui.add_row(column).map_err(io::Error::other)?;
+        let tooltip_owner = ui
+            .add_button(controls, "Hover or focus me")
+            .map_err(io::Error::other)?;
+        Tooltip::new(
+            &mut ui,
+            tooltip_owner,
+            "Immediate tooltip shared by pointer hover and keyboard focus.",
+        )
+        .map_err(io::Error::other)?;
+
+        let popover_owner = ui
+            .add_button(controls, "Toggle popover")
+            .map_err(io::Error::other)?;
+        let popover = Popover::new(
+            &mut ui,
+            popover_owner,
+            astrelis_ui_core::OverlayOptions {
+                offset: astrelis_core::geometry::Point::new(0.0, 6.0),
+                z_index: 70,
+                focus: astrelis_ui_core::FocusScopeOptions {
+                    trapped: true,
+                    autofocus: true,
+                    restore_focus: true,
+                },
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        ui.add_label(popover.content(), "Arbitrary popover content")
+            .map_err(io::Error::other)?;
+        ui.add_button(popover.content(), "Focusable popover action")
+            .map_err(io::Error::other)?;
+
+        let menu_owner = ui
+            .add_button(controls, "Open menu")
+            .map_err(io::Error::other)?;
+        Menu::new(
+            &mut ui,
+            menu_owner,
+            vec![
+                MenuItem {
+                    label: "New document".into(),
+                    message: Message::Status("Menu selected: New document.".into()),
+                    enabled: true,
+                },
+                MenuItem {
+                    label: "Disabled action".into(),
+                    message: Message::Status("Disabled item activated unexpectedly.".into()),
+                    enabled: false,
+                },
+                MenuItem {
+                    label: "Close document".into(),
+                    message: Message::Status("Menu selected: Close document.".into()),
+                    enabled: true,
+                },
+            ],
+        )
+        .map_err(io::Error::other)?;
+
+        let tabs = Tabs::new(&mut ui, column, ["General", "Display", "Advanced"])
+            .map_err(io::Error::other)?;
+        ui.add_label(tabs.panels()[0], "General tab content")
+            .map_err(io::Error::other)?;
+        ui.add_label(tabs.panels()[1], "Display tab content")
+            .map_err(io::Error::other)?;
+        ui.add_label(tabs.panels()[2], "Advanced tab content")
+            .map_err(io::Error::other)?;
+
+        ui.add_label(column, "Selectable list")
+            .map_err(io::Error::other)?;
+        List::new(
+            &mut ui,
+            column,
+            vec![
+                ListItem {
+                    label: "Mercury".into(),
+                    message: Message::Status("Selected Mercury.".into()),
+                    enabled: true,
+                },
+                ListItem {
+                    label: "Venus (disabled)".into(),
+                    message: Message::Status("Disabled list item activated.".into()),
+                    enabled: false,
+                },
+                ListItem {
+                    label: "Earth".into(),
+                    message: Message::Status("Selected Earth.".into()),
+                    enabled: true,
+                },
+            ],
+        )
+        .map_err(io::Error::other)?;
+
+        ui.add_label(column, "Form compositions")
+            .map_err(io::Error::other)?;
+        let form = Form::new(&mut ui, column).map_err(io::Error::other)?;
+        form.add_text_field(
+            &mut ui,
+            "Workspace name",
+            "Astrelis",
+            Some("Names are stored locally for this gallery."),
+        )
+        .map_err(io::Error::other)?;
+        form.add_checkbox(&mut ui, "Enable previews", true)
+            .map_err(io::Error::other)?;
+        form.add_slider(&mut ui, "Preview scale", 0.5..=2.0, 0.1, 1.0)
+            .map_err(io::Error::other)?;
+        form.add_status(&mut ui, "Validation: ready")
+            .map_err(io::Error::other)?;
+
         #[cfg(target_arch = "wasm32")]
         let descriptor = astrelis_gpu_wgpu::InstanceDescriptor {
             use_environment: false,
@@ -276,7 +392,9 @@ impl Gallery {
 
     fn consume_messages(&mut self) -> io::Result<()> {
         for message in self.ui.drain_messages().collect::<Vec<_>>() {
-            let Message::Dropped(status) = message;
+            let status = match message {
+                Message::Dropped(status) | Message::Status(status) => status,
+            };
             self.ui
                 .set_label_text(self.status, status)
                 .map_err(io::Error::other)?;
