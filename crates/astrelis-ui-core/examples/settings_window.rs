@@ -8,11 +8,13 @@ use astrelis_gpu::{
     CompositeAlphaMode, DeviceDescriptor, PresentMode, RequestAdapterOptions, SurfaceConfiguration,
     SurfaceFrameStatus, SurfaceTarget, TextureUsages, TextureViewDescriptor,
 };
+use astrelis_paint::{Brush, CornerRadii, Painter, RoundedRect, StrokeStyle};
 use astrelis_paint_gpu::{RenderTarget, Renderer, RendererOptions};
 use astrelis_platform::{Window, WindowAttributes, WindowEvent, WindowId};
 use astrelis_text::{FontDatabase, FontFamily};
 use astrelis_ui_core::{
-    Column, ElementHandle, Insets, Label, LayoutStyle, TextField, Theme, Ui, UiEventKind,
+    Column, ElementHandle, EventFilter, Insets, Label, LayoutStyle, MountContext, SemanticRole,
+    TextField, Theme, Ui, Widget,
 };
 
 const NOTO_SANS: &[u8] = include_bytes!("../assets/NotoSans.ttf");
@@ -31,11 +33,77 @@ struct Handles {
     status: ElementHandle<Label>,
 }
 
+enum Message {
+    Save,
+    Edited,
+    Notifications(bool),
+    Scale(f32),
+}
+
+struct SettingsSection {
+    title: String,
+    content: Option<ElementHandle<Column>>,
+}
+
+impl SettingsSection {
+    fn new(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            content: None,
+        }
+    }
+    fn content(&self) -> ElementHandle<Column> {
+        self.content.expect("settings section is mounted")
+    }
+}
+
+impl Widget<Message> for SettingsSection {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+    fn mounted(
+        &mut self,
+        context: &mut MountContext<'_, Message>,
+    ) -> Result<(), astrelis_ui_core::UiError> {
+        context.add_label(self.title.clone())?;
+        self.content = Some(context.add_column()?);
+        Ok(())
+    }
+    fn paint(
+        &self,
+        painter: &mut Painter,
+        bounds: astrelis_core::geometry::LogicalRect,
+        theme: &Theme,
+    ) -> Result<(), astrelis_ui_core::UiError> {
+        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(theme.corner_radius * 1.5))
+            .map_err(|error| astrelis_ui_core::UiError::from_message(error.to_string()))?;
+        painter
+            .fill_rounded_rect(rounded, Brush::Solid(theme.field_background))
+            .map_err(|error| astrelis_ui_core::UiError::from_message(error.to_string()))?;
+        painter
+            .stroke_rounded_rect(
+                rounded,
+                StrokeStyle {
+                    width: 1.0,
+                    ..Default::default()
+                },
+                Brush::Solid(theme.button.hovered),
+            )
+            .map_err(|error| astrelis_ui_core::UiError::from_message(error.to_string()))
+    }
+    fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
+        Some((SemanticRole::Group, self.title.clone(), None))
+    }
+}
+
 struct Settings {
     instance: astrelis_gpu::Instance,
     window: Option<Window>,
     gpu: Option<GpuState>,
-    ui: Ui,
+    ui: Ui<Message>,
     handles: Handles,
 }
 
@@ -49,12 +117,29 @@ impl Settings {
             font_families: vec![FontFamily::Named("Noto Sans".into())],
             ..Default::default()
         };
-        let mut ui = Ui::new(fonts, theme);
+        let mut ui = Ui::<Message>::new(fonts, theme);
         let root = ui.root();
         let padding = ui
             .add_padding(root, Insets::all(28.0))
             .map_err(io::Error::other)?;
-        let column: ElementHandle<Column> = ui.add_column(padding).map_err(io::Error::other)?;
+        ui.set_layout(
+            padding,
+            LayoutStyle {
+                grow: 1.0,
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        let scroll = ui.add_scroll_view(padding).map_err(io::Error::other)?;
+        ui.set_layout(
+            scroll,
+            LayoutStyle {
+                grow: 1.0,
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        let column: ElementHandle<Column> = ui.add_column(scroll).map_err(io::Error::other)?;
         ui.add_label(column, "Astrelis settings")
             .map_err(io::Error::other)?;
         ui.add_label(column, "Display name")
@@ -86,8 +171,50 @@ impl Settings {
             },
         )
         .map_err(io::Error::other)?;
-        ui.add_button(column, "Save settings")
+        let preferences = ui
+            .add_widget(column, SettingsSection::new("Preferences"))
             .map_err(io::Error::other)?;
+        let preferences_content = ui.widget(preferences).map_err(io::Error::other)?.content();
+        ui.add_label(preferences_content, "Enable notifications")
+            .map_err(io::Error::other)?;
+        let notifications = ui
+            .add_checkbox(preferences_content, true)
+            .map_err(io::Error::other)?;
+        ui.add_label(preferences_content, "Interface scale")
+            .map_err(io::Error::other)?;
+        let scale = ui
+            .add_slider(preferences_content, 0.75, 1.5, 0.05, 1.0)
+            .map_err(io::Error::other)?;
+        let save = ui
+            .add_button(column, "Save settings")
+            .map_err(io::Error::other)?;
+        ui.listen(save, None, EventFilter::Activate, |context, _| {
+            context.emit(Message::Save)
+        })
+        .map_err(io::Error::other)?;
+        ui.listen(
+            notifications,
+            None,
+            EventFilter::ValueChanged,
+            |context, event| {
+                if let astrelis_ui_core::RoutedEventKind::CheckedChanged(value) = event.kind {
+                    context.emit(Message::Notifications(value));
+                }
+            },
+        )
+        .map_err(io::Error::other)?;
+        ui.listen(scale, None, EventFilter::ValueChanged, |context, event| {
+            if let astrelis_ui_core::RoutedEventKind::SliderChanged(value) = event.kind {
+                context.emit(Message::Scale(value));
+            }
+        })
+        .map_err(io::Error::other)?;
+        for field in [name, secret] {
+            ui.listen(field, None, EventFilter::ValueChanged, |context, _| {
+                context.emit(Message::Edited)
+            })
+            .map_err(io::Error::other)?;
+        }
         let clipboard_note = if cfg!(target_arch = "wasm32") {
             "Tab through controls; browser clipboard is not enabled in this slice."
         } else {
@@ -201,10 +328,10 @@ impl Settings {
     }
 
     fn consume_events(&mut self) -> io::Result<()> {
-        let events = self.ui.drain_events().collect::<Vec<_>>();
-        for event in events {
-            match event.kind {
-                UiEventKind::ButtonActivated => {
+        let messages = self.ui.drain_messages().collect::<Vec<_>>();
+        for message in messages {
+            match message {
+                Message::Save => {
                     let name = self.ui.text(self.handles.name).map_err(io::Error::other)?;
                     let token_set = !self
                         .ui
@@ -218,7 +345,7 @@ impl Settings {
                         )
                         .map_err(io::Error::other)?;
                 }
-                UiEventKind::TextSubmitted(_) => {
+                Message::Edited => {
                     self.ui
                         .set_label_text(
                             self.handles.status,
@@ -226,7 +353,20 @@ impl Settings {
                         )
                         .map_err(io::Error::other)?;
                 }
-                UiEventKind::TextChanged(_) | UiEventKind::FocusChanged(_) => {}
+                Message::Notifications(value) => self
+                    .ui
+                    .set_label_text(
+                        self.handles.status,
+                        format!("Notifications enabled: {value}."),
+                    )
+                    .map_err(io::Error::other)?,
+                Message::Scale(value) => self
+                    .ui
+                    .set_label_text(
+                        self.handles.status,
+                        format!("Interface scale: {value:.2}×."),
+                    )
+                    .map_err(io::Error::other)?,
             }
         }
         Ok(())

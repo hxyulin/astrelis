@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 use std::{
+    any::Any,
     collections::{HashMap, VecDeque},
     error::Error,
     fmt,
@@ -12,11 +13,13 @@ use std::{
 use astrelis_core::{
     color::Color,
     geometry::{LogicalPoint, LogicalRect, LogicalSize, Point, Rect, Size},
+    math::{Affine2, Vec2},
 };
-use astrelis_paint::{Brush, CornerRadii, DisplayList, Painter, RoundedRect};
+use astrelis_paint::{Brush, CornerRadii, DisplayList, Painter, RoundedRect, StrokeStyle};
 use astrelis_platform::{
-    Clipboard, CursorIcon, DeviceId, ElementState, ImeEvent, ImePurpose, Key, Modifiers, NamedKey,
-    PlatformError, PointerButton, Window, WindowEvent,
+    Clipboard, CursorIcon, DeviceId, ElementState, ImeEvent, ImePurpose, Key, KeyboardInput,
+    Modifiers, NamedKey, PlatformError, PointerButton, ScrollDelta, TouchPhase, Window,
+    WindowEvent,
 };
 use astrelis_text::{
     Affinity, CaretMovement, FontDatabase, FontFamily, ParagraphStyle, TextLayout,
@@ -45,6 +48,11 @@ pub struct UiError(String);
 
 impl UiError {
     fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+
+    /// Creates an error reported by an application-defined widget.
+    pub fn from_message(message: impl Into<String>) -> Self {
         Self(message.into())
     }
 }
@@ -107,6 +115,258 @@ pub enum Padding {}
 /// Single-line editable text-field marker.
 pub enum TextField {}
 
+/// Checkbox widget marker.
+pub enum Checkbox {}
+/// Horizontal slider widget marker.
+pub enum Slider {}
+/// Vertically scrolling container marker.
+pub enum ScrollView {}
+
+/// Phase of a routed UI event.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventPhase {
+    /// Routing from the root toward the target.
+    Capture,
+    /// Dispatch at the target.
+    Target,
+    /// Routing from the target back toward the root.
+    Bubble,
+}
+
+/// Public category used to filter routed events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventFilter {
+    /// Every routed event.
+    Any,
+    /// A control was activated.
+    Activate,
+    /// A control value changed.
+    ValueChanged,
+    /// Keyboard focus changed.
+    Focus,
+    /// Pointer input.
+    Pointer,
+    /// Keyboard input.
+    Keyboard,
+    /// Wheel or trackpad scrolling.
+    Scroll,
+}
+
+/// Data delivered to a routed listener.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RoutedEventKind {
+    /// A control was activated.
+    Activate,
+    /// A checkbox changed.
+    CheckedChanged(bool),
+    /// A slider changed.
+    SliderChanged(f32),
+    /// Editable text changed.
+    TextChanged(String),
+    /// Editable text was submitted.
+    TextSubmitted(String),
+    /// Keyboard focus changed.
+    FocusChanged(bool),
+    /// A pointer moved in logical coordinates.
+    PointerMoved {
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Logical window position.
+        position: LogicalPoint,
+    },
+    /// A pointer button changed in logical coordinates.
+    PointerButton {
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Logical window position.
+        position: LogicalPoint,
+        /// Changed button.
+        button: PointerButton,
+        /// New button state.
+        state: ElementState,
+    },
+    /// A captured pointer or touch contact was cancelled.
+    PointerCancelled {
+        /// Cancelled pointer identity.
+        device_id: DeviceId,
+    },
+    /// Keyboard input.
+    Keyboard(KeyboardInput),
+    /// Input-method composition.
+    Ime(ImeEvent),
+    /// Scrolling input.
+    Scroll {
+        /// Scrolling device.
+        device_id: DeviceId,
+        /// Logical pixel displacement.
+        delta: LogicalPoint,
+    },
+}
+
+impl RoutedEventKind {
+    fn matches(&self, filter: EventFilter) -> bool {
+        filter == EventFilter::Any
+            || matches!(
+                (filter, self),
+                (EventFilter::Activate, Self::Activate)
+                    | (
+                        EventFilter::ValueChanged,
+                        Self::CheckedChanged(_) | Self::SliderChanged(_) | Self::TextChanged(_)
+                    )
+                    | (EventFilter::Focus, Self::FocusChanged(_))
+                    | (
+                        EventFilter::Pointer,
+                        Self::PointerMoved { .. }
+                            | Self::PointerButton { .. }
+                            | Self::PointerCancelled { .. }
+                    )
+                    | (EventFilter::Keyboard, Self::Keyboard(_) | Self::Ime(_))
+                    | (EventFilter::Scroll, Self::Scroll { .. })
+            )
+    }
+}
+
+/// One event as observed at a node along its route.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RoutedEvent {
+    /// Original target.
+    pub target: ElementId,
+    /// Node currently receiving the event.
+    pub current_target: ElementId,
+    /// Current routing phase.
+    pub phase: EventPhase,
+    /// Event payload.
+    pub kind: RoutedEventKind,
+}
+
+/// Opaque identity for an installed event listener.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ListenerId(u64);
+
+/// Context passed to routed listeners.
+pub struct EventContext<'a, Message> {
+    messages: &'a mut VecDeque<Message>,
+    stopped: &'a mut bool,
+    default_prevented: &'a mut bool,
+    current_target: ElementId,
+    requests: &'a mut Vec<EventRequest>,
+}
+
+enum EventRequest {
+    Focus(ElementId),
+    Capture(DeviceId, ElementId),
+    Release(DeviceId),
+    Layout,
+    Paint,
+}
+
+impl<Message> EventContext<'_, Message> {
+    /// Emits an application message after dispatch.
+    pub fn emit(&mut self, message: Message) {
+        self.messages.push_back(message);
+    }
+    /// Stops delivery to the rest of the route.
+    pub fn stop_propagation(&mut self) {
+        *self.stopped = true;
+    }
+    /// Prevents the control's queued default action.
+    pub fn prevent_default(&mut self) {
+        *self.default_prevented = true;
+    }
+    /// Requests keyboard focus for the listener's current node.
+    pub fn request_focus(&mut self) {
+        self.requests.push(EventRequest::Focus(self.current_target));
+    }
+    /// Captures a normalized pointer for the listener's current node.
+    pub fn capture_pointer(&mut self, device_id: DeviceId) {
+        self.requests
+            .push(EventRequest::Capture(device_id, self.current_target));
+    }
+    /// Releases a normalized pointer capture.
+    pub fn release_pointer(&mut self, device_id: DeviceId) {
+        self.requests.push(EventRequest::Release(device_id));
+    }
+    /// Invalidates measurement and layout after dispatch.
+    pub fn request_layout(&mut self) {
+        self.requests.push(EventRequest::Layout);
+    }
+    /// Invalidates painting after dispatch.
+    pub fn request_paint(&mut self) {
+        self.requests.push(EventRequest::Paint);
+    }
+}
+
+/// Lifecycle implemented by application-defined retained widgets.
+///
+/// Custom widgets are retained as ordinary tree nodes. Their children use the
+/// same layout, routing, semantics, and painting machinery as built-ins.
+pub trait Widget<Message>: Any {
+    /// Returns this widget for typed retained access.
+    fn as_any(&self) -> &dyn Any;
+    /// Returns this widget for typed retained updates.
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+    /// Called after the widget is attached to a UI tree.
+    fn mounted(&mut self, _context: &mut MountContext<'_, Message>) -> Result<(), UiError> {
+        Ok(())
+    }
+    /// Called immediately before the widget is removed.
+    fn unmounted(&mut self) {}
+    /// Called after application code mutates the retained widget.
+    fn updated(&mut self) {}
+    /// Returns the widget's intrinsic leaf size before Taffy constraints.
+    fn intrinsic_size(&self, _theme: &Theme) -> LogicalSize {
+        Size::ZERO
+    }
+    /// Observes normalized events at each phase along this node's route.
+    fn event(&mut self, _context: &mut EventContext<'_, Message>, _event: &RoutedEvent) {}
+    /// Whether this node may be the target of pointer input.
+    fn hit_testable(&self) -> bool {
+        false
+    }
+    /// Whether this node participates in keyboard focus traversal.
+    fn focusable(&self) -> bool {
+        false
+    }
+    /// Paints behind the widget's retained children.
+    fn paint(
+        &self,
+        _painter: &mut Painter,
+        _bounds: LogicalRect,
+        _theme: &Theme,
+    ) -> Result<(), UiError> {
+        Ok(())
+    }
+    /// Supplies semantics for this node.
+    fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
+        None
+    }
+}
+
+/// Restricted tree-building context available during custom-widget mounting.
+pub struct MountContext<'a, Message: 'static> {
+    ui: &'a mut Ui<Message>,
+    parent: ElementId,
+}
+
+impl<Message: 'static> MountContext<'_, Message> {
+    /// Adds a label owned by the mounting widget.
+    pub fn add_label(&mut self, text: impl Into<String>) -> Result<ElementHandle<Label>, UiError> {
+        self.ui
+            .insert(self.parent, Kind::Label { text: text.into() })
+    }
+    /// Adds a column owned by the mounting widget.
+    pub fn add_column(&mut self) -> Result<ElementHandle<Column>, UiError> {
+        let gap = self.ui.theme.gap;
+        self.ui.insert(
+            self.parent,
+            Kind::Column {
+                gap,
+                alignment: Alignment::Stretch,
+            },
+        )
+    }
+}
+
 /// Four-sided logical inset.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Insets {
@@ -168,6 +428,39 @@ pub struct WidgetStyle {
     pub foreground: Option<Color>,
     /// Background color override.
     pub background: Option<Color>,
+}
+
+/// Typed visual style for a checkbox.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CheckboxStyle {
+    /// Box background.
+    pub background: Color,
+    /// Checked indicator.
+    pub indicator: Color,
+    /// Corner radius.
+    pub radius: f32,
+}
+
+/// Typed visual style for a horizontal slider.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SliderStyle {
+    /// Track color.
+    pub track: Color,
+    /// Thumb color.
+    pub thumb: Color,
+    /// Thumb diameter.
+    pub thumb_size: f32,
+}
+
+/// Typed visual style for a vertical scroll view.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScrollViewStyle {
+    /// Scrollbar track color.
+    pub track: Color,
+    /// Scrollbar thumb color.
+    pub thumb: Color,
+    /// Scrollbar width.
+    pub width: f32,
 }
 
 /// Visual state colors for an interactive control.
@@ -252,6 +545,12 @@ pub enum SemanticRole {
     Button,
     /// Editable single-line text field.
     TextField,
+    /// Boolean checkbox.
+    Checkbox,
+    /// Numeric slider.
+    Slider,
+    /// Scrollable grouping container.
+    ScrollView,
 }
 
 /// Semantic operation supported by a node.
@@ -265,6 +564,10 @@ pub enum SemanticActionKind {
     SetText,
     /// Change editable selection.
     SetSelection,
+    /// Set a numeric value.
+    SetValue,
+    /// Scroll vertically.
+    ScrollBy,
 }
 
 /// Requested semantic operation.
@@ -283,6 +586,10 @@ pub enum SemanticAction {
         /// Selection focus byte index.
         focus: usize,
     },
+    /// Sets a numeric control value.
+    SetValue(f32),
+    /// Scrolls a container by logical units.
+    ScrollBy(f32),
 }
 
 /// Snapshot-friendly semantic node.
@@ -352,12 +659,38 @@ pub struct UiUpdate {
 
 #[derive(Clone, Debug)]
 enum Kind {
-    Label { text: String },
-    Button { text: String },
-    Row { gap: f32, alignment: Alignment },
-    Column { gap: f32, alignment: Alignment },
-    Padding { insets: Insets },
+    Label {
+        text: String,
+    },
+    Button {
+        text: String,
+    },
+    Row {
+        gap: f32,
+        alignment: Alignment,
+    },
+    Column {
+        gap: f32,
+        alignment: Alignment,
+    },
+    Padding {
+        insets: Insets,
+    },
     TextField(TextFieldState),
+    Checkbox {
+        checked: bool,
+    },
+    Slider {
+        min: f32,
+        max: f32,
+        step: f32,
+        value: f32,
+    },
+    ScrollView {
+        offset: f32,
+        content_height: f32,
+    },
+    Custom,
 }
 
 #[derive(Clone, Debug)]
@@ -415,7 +748,7 @@ struct Slot {
 }
 
 /// Persistent UI tree associated with one native window.
-pub struct Ui {
+pub struct Ui<Message = ()> {
     slots: Vec<Slot>,
     free: Vec<u32>,
     root: ElementId,
@@ -432,9 +765,26 @@ pub struct Ui {
     modifiers: Modifiers,
     window_focused: bool,
     events: VecDeque<UiEvent>,
+    messages: VecDeque<Message>,
+    listeners: HashMap<ElementId, Vec<Listener<Message>>>,
+    next_listener: u64,
+    custom_widgets: HashMap<ElementId, Box<dyn Widget<Message>>>,
+    checkbox_styles: HashMap<ElementId, CheckboxStyle>,
+    slider_styles: HashMap<ElementId, SliderStyle>,
+    scroll_styles: HashMap<ElementId, ScrollViewStyle>,
+    event_requests: Vec<EventRequest>,
 }
 
-impl Ui {
+struct Listener<Message> {
+    id: ListenerId,
+    phase: Option<EventPhase>,
+    filter: EventFilter,
+    callback: Box<EventCallback<Message>>,
+}
+
+type EventCallback<Message> = dyn FnMut(&mut EventContext<'_, Message>, &RoutedEvent);
+
+impl<Message: 'static> Ui<Message> {
     /// Creates a UI tree with a root column container.
     pub fn new(fonts: FontDatabase, theme: Theme) -> Self {
         let root = ElementId {
@@ -475,6 +825,14 @@ impl Ui {
             modifiers: Modifiers::default(),
             window_focused: true,
             events: VecDeque::new(),
+            messages: VecDeque::new(),
+            listeners: HashMap::new(),
+            next_listener: 1,
+            custom_widgets: HashMap::new(),
+            checkbox_styles: HashMap::new(),
+            slider_styles: HashMap::new(),
+            scroll_styles: HashMap::new(),
+            event_requests: Vec::new(),
         }
     }
 
@@ -564,6 +922,124 @@ impl Ui {
         text: impl Into<String>,
     ) -> Result<ElementHandle<TextField>, UiError> {
         self.insert(parent.id, Kind::TextField(TextFieldState::new(text.into())))
+    }
+
+    /// Adds a retained checkbox.
+    pub fn add_checkbox<T>(
+        &mut self,
+        parent: ElementHandle<T>,
+        checked: bool,
+    ) -> Result<ElementHandle<Checkbox>, UiError> {
+        let handle = self.insert(parent.id, Kind::Checkbox { checked })?;
+        self.checkbox_styles.insert(
+            handle.id,
+            CheckboxStyle {
+                background: self.theme.button.normal,
+                indicator: self.theme.accent,
+                radius: self.theme.corner_radius,
+            },
+        );
+        Ok(handle)
+    }
+
+    /// Adds a retained horizontal slider.
+    pub fn add_slider<T>(
+        &mut self,
+        parent: ElementHandle<T>,
+        min: f32,
+        max: f32,
+        step: f32,
+        value: f32,
+    ) -> Result<ElementHandle<Slider>, UiError> {
+        if !min.is_finite() || !max.is_finite() || !step.is_finite() || min >= max || step <= 0.0 {
+            return Err(UiError::new(
+                "slider requires finite min < max and a positive step",
+            ));
+        }
+        let value = snap_slider(value, min, max, step);
+        let handle = self.insert(
+            parent.id,
+            Kind::Slider {
+                min,
+                max,
+                step,
+                value,
+            },
+        )?;
+        self.slider_styles.insert(
+            handle.id,
+            SliderStyle {
+                track: self.theme.button.normal,
+                thumb: self.theme.accent,
+                thumb_size: 16.0,
+            },
+        );
+        Ok(handle)
+    }
+
+    /// Adds a vertically scrolling retained container.
+    pub fn add_scroll_view<T>(
+        &mut self,
+        parent: ElementHandle<T>,
+    ) -> Result<ElementHandle<ScrollView>, UiError> {
+        let handle = self.insert(
+            parent.id,
+            Kind::ScrollView {
+                offset: 0.0,
+                content_height: 0.0,
+            },
+        )?;
+        self.scroll_styles.insert(
+            handle.id,
+            ScrollViewStyle {
+                track: self.theme.button.normal,
+                thumb: self.theme.accent,
+                width: 8.0,
+            },
+        );
+        Ok(handle)
+    }
+
+    /// Adds an application-defined retained widget.
+    pub fn add_widget<T, W: Widget<Message>>(
+        &mut self,
+        parent: ElementHandle<T>,
+        mut widget: W,
+    ) -> Result<ElementHandle<W>, UiError> {
+        let handle = self.insert(parent.id, Kind::Custom)?;
+        widget.mounted(&mut MountContext {
+            ui: self,
+            parent: handle.id,
+        })?;
+        self.custom_widgets.insert(handle.id, Box::new(widget));
+        Ok(handle)
+    }
+
+    /// Reads an application-defined widget through its typed handle.
+    pub fn widget<W: Widget<Message>>(&self, handle: ElementHandle<W>) -> Result<&W, UiError> {
+        self.node(handle.id)?;
+        self.custom_widgets
+            .get(&handle.id)
+            .and_then(|widget| widget.as_any().downcast_ref())
+            .ok_or_else(|| UiError::new("handle has the wrong widget type"))
+    }
+
+    /// Mutates an application-defined widget and invalidates all dependent phases.
+    pub fn update_widget<W: Widget<Message>>(
+        &mut self,
+        handle: ElementHandle<W>,
+        update: impl FnOnce(&mut W),
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        let widget = self
+            .custom_widgets
+            .get_mut(&handle.id)
+            .and_then(|widget| widget.as_any_mut().downcast_mut())
+            .ok_or_else(|| UiError::new("handle has the wrong widget type"))?;
+        update(widget);
+        widget.updated();
+        self.dirty = Dirty::all();
+        Ok(())
     }
 
     fn insert<T>(&mut self, parent: ElementId, kind: Kind) -> Result<ElementHandle<T>, UiError> {
@@ -692,6 +1168,13 @@ impl Ui {
             self.hover = None;
         }
         self.capture.retain(|_, captured| *captured != id);
+        self.listeners.remove(&id);
+        self.checkbox_styles.remove(&id);
+        self.slider_styles.remove(&id);
+        self.scroll_styles.remove(&id);
+        if let Some(mut widget) = self.custom_widgets.remove(&id) {
+            widget.unmounted();
+        }
         let slot = &mut self.slots[id.index as usize];
         slot.node = None;
         self.free.push(id.index);
@@ -839,6 +1322,103 @@ impl Ui {
         Ok(())
     }
 
+    /// Returns a checkbox's retained value.
+    pub fn checked(&self, handle: ElementHandle<Checkbox>) -> Result<bool, UiError> {
+        match self.node(handle.id)?.kind {
+            Kind::Checkbox { checked } => Ok(checked),
+            _ => Err(UiError::new("handle has the wrong widget type")),
+        }
+    }
+
+    /// Sets a checkbox's retained value.
+    pub fn set_checked(
+        &mut self,
+        handle: ElementHandle<Checkbox>,
+        checked: bool,
+    ) -> Result<(), UiError> {
+        let Kind::Checkbox { checked: current } = &mut self.node_mut(handle.id)?.kind else {
+            return Err(UiError::new("handle has the wrong widget type"));
+        };
+        if *current != checked {
+            *current = checked;
+            self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+        }
+        Ok(())
+    }
+
+    /// Returns a slider's retained value.
+    pub fn slider_value(&self, handle: ElementHandle<Slider>) -> Result<f32, UiError> {
+        match self.node(handle.id)?.kind {
+            Kind::Slider { value, .. } => Ok(value),
+            _ => Err(UiError::new("handle has the wrong widget type")),
+        }
+    }
+
+    /// Sets and snaps a slider's retained value.
+    pub fn set_slider_value(
+        &mut self,
+        handle: ElementHandle<Slider>,
+        value: f32,
+    ) -> Result<(), UiError> {
+        let Kind::Slider {
+            min,
+            max,
+            step,
+            value: current,
+        } = &mut self.node_mut(handle.id)?.kind
+        else {
+            return Err(UiError::new("handle has the wrong widget type"));
+        };
+        let value = snap_slider(value, *min, *max, *step);
+        if *current != value {
+            *current = value;
+            self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+        }
+        Ok(())
+    }
+
+    /// Returns a scroll view's vertical offset.
+    pub fn scroll_offset(&self, handle: ElementHandle<ScrollView>) -> Result<f32, UiError> {
+        match self.node(handle.id)?.kind {
+            Kind::ScrollView { offset, .. } => Ok(offset),
+            _ => Err(UiError::new("handle has the wrong widget type")),
+        }
+    }
+
+    /// Replaces a checkbox's typed visual style.
+    pub fn set_checkbox_style(
+        &mut self,
+        handle: ElementHandle<Checkbox>,
+        style: CheckboxStyle,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        self.checkbox_styles.insert(handle.id, style);
+        self.dirty |= Dirty::PAINT;
+        Ok(())
+    }
+    /// Replaces a slider's typed visual style.
+    pub fn set_slider_style(
+        &mut self,
+        handle: ElementHandle<Slider>,
+        style: SliderStyle,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        self.slider_styles.insert(handle.id, style);
+        self.dirty |= Dirty::PAINT;
+        Ok(())
+    }
+    /// Replaces a scroll view's typed visual style.
+    pub fn set_scroll_view_style(
+        &mut self,
+        handle: ElementHandle<ScrollView>,
+        style: ScrollViewStyle,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        self.scroll_styles.insert(handle.id, style);
+        self.dirty |= Dirty::PAINT;
+        Ok(())
+    }
+
     /// Returns whether painting is currently invalidated.
     pub fn needs_redraw(&self) -> bool {
         self.dirty
@@ -848,6 +1428,162 @@ impl Ui {
     /// Drains application-visible UI events.
     pub fn drain_events(&mut self) -> impl Iterator<Item = UiEvent> + '_ {
         self.events.drain(..)
+    }
+
+    /// Drains typed application messages emitted by routed listeners.
+    pub fn drain_messages(&mut self) -> impl Iterator<Item = Message> + '_ {
+        self.messages.drain(..)
+    }
+
+    /// Installs a listener on one retained node.
+    pub fn listen<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        phase: Option<EventPhase>,
+        filter: EventFilter,
+        listener: impl FnMut(&mut EventContext<'_, Message>, &RoutedEvent) + 'static,
+    ) -> Result<ListenerId, UiError> {
+        self.node(handle.id)?;
+        let id = ListenerId(self.next_listener);
+        self.next_listener = self.next_listener.wrapping_add(1).max(1);
+        self.listeners.entry(handle.id).or_default().push(Listener {
+            id,
+            phase,
+            filter,
+            callback: Box::new(listener),
+        });
+        Ok(id)
+    }
+
+    /// Removes a previously installed listener.
+    pub fn remove_listener(&mut self, id: ListenerId) -> bool {
+        let mut removed = false;
+        for listeners in self.listeners.values_mut() {
+            let before = listeners.len();
+            listeners.retain(|listener| listener.id != id);
+            removed |= listeners.len() != before;
+        }
+        removed
+    }
+
+    fn dispatch_routed(
+        &mut self,
+        target: ElementId,
+        kind: RoutedEventKind,
+    ) -> Result<bool, UiError> {
+        let mut route = Vec::new();
+        let mut cursor = Some(target);
+        while let Some(id) = cursor {
+            route.push(id);
+            cursor = self.node(id)?.parent;
+        }
+        route.reverse();
+        let mut stopped = false;
+        let mut default_prevented = false;
+        let last = route.len().saturating_sub(1);
+        for (index, current) in route.iter().copied().enumerate() {
+            let phase = if index == last {
+                EventPhase::Target
+            } else {
+                EventPhase::Capture
+            };
+            self.deliver(
+                current,
+                target,
+                phase,
+                &kind,
+                &mut stopped,
+                &mut default_prevented,
+            );
+            if stopped {
+                break;
+            }
+        }
+        if !stopped {
+            for current in route[..last].iter().rev().copied() {
+                self.deliver(
+                    current,
+                    target,
+                    EventPhase::Bubble,
+                    &kind,
+                    &mut stopped,
+                    &mut default_prevented,
+                );
+                if stopped {
+                    break;
+                }
+            }
+        }
+        self.apply_event_requests()?;
+        Ok(default_prevented)
+    }
+
+    fn deliver(
+        &mut self,
+        current: ElementId,
+        target: ElementId,
+        phase: EventPhase,
+        kind: &RoutedEventKind,
+        stopped: &mut bool,
+        default_prevented: &mut bool,
+    ) {
+        let event = RoutedEvent {
+            target,
+            current_target: current,
+            phase,
+            kind: kind.clone(),
+        };
+        if let Some(mut widget) = self.custom_widgets.remove(&current) {
+            let mut context = EventContext {
+                messages: &mut self.messages,
+                stopped,
+                default_prevented,
+                current_target: current,
+                requests: &mut self.event_requests,
+            };
+            widget.event(&mut context, &event);
+            self.custom_widgets.insert(current, widget);
+            if *stopped {
+                return;
+            }
+        }
+        let Some(mut listeners) = self.listeners.remove(&current) else {
+            return;
+        };
+        for listener in &mut listeners {
+            if listener.phase.is_none_or(|wanted| wanted == phase) && kind.matches(listener.filter)
+            {
+                let mut context = EventContext {
+                    messages: &mut self.messages,
+                    stopped,
+                    default_prevented,
+                    current_target: current,
+                    requests: &mut self.event_requests,
+                };
+                (listener.callback)(&mut context, &event);
+                if *stopped {
+                    break;
+                }
+            }
+        }
+        self.listeners.insert(current, listeners);
+    }
+
+    fn apply_event_requests(&mut self) -> Result<(), UiError> {
+        for request in std::mem::take(&mut self.event_requests) {
+            match request {
+                EventRequest::Focus(id) => self.set_focus(Some(id))?,
+                EventRequest::Capture(device, id) => {
+                    self.capture.insert(device, id);
+                }
+                EventRequest::Release(device) => {
+                    self.capture.remove(&device);
+                }
+                EventRequest::Layout => self.invalidate_layout(),
+                EventRequest::Paint => self.dirty |= Dirty::PAINT,
+            }
+        }
+        Ok(())
     }
 
     fn invalidate_layout(&mut self) {
@@ -1003,6 +1739,27 @@ impl Ui {
                 style.padding.right = LengthPercentage::length(insets.right);
                 style.padding.bottom = LengthPercentage::length(insets.bottom);
             }
+            Kind::Checkbox { .. } | Kind::Slider { .. } => {
+                style.min_size.height = Dimension::length(28.0);
+                style.min_size.width =
+                    Dimension::length(if matches!(node.kind, Kind::Slider { .. }) {
+                        160.0
+                    } else {
+                        28.0
+                    });
+            }
+            Kind::ScrollView { .. } => {
+                style.flex_direction = FlexDirection::Column;
+            }
+            Kind::Custom => {
+                style.flex_direction = FlexDirection::Column;
+                style.gap.height = LengthPercentage::length(self.theme.gap);
+                let insets = self.theme.control_padding;
+                style.padding.left = LengthPercentage::length(insets.left);
+                style.padding.top = LengthPercentage::length(insets.top);
+                style.padding.right = LengthPercentage::length(insets.right);
+                style.padding.bottom = LengthPercentage::length(insets.bottom);
+            }
             Kind::Label { .. } => {}
         }
         style
@@ -1046,7 +1803,7 @@ impl Ui {
         tree.disable_rounding();
         let mut mapping = HashMap::new();
         let root = self.build_taffy(&mut tree, self.root, &mut mapping)?;
-        let layouts = self
+        let mut layouts = self
             .all_ids()
             .into_iter()
             .filter_map(|id| {
@@ -1055,6 +1812,12 @@ impl Ui {
                     .and_then(|node| node.text_layout.as_ref().map(|layout| (id, layout.size())))
             })
             .collect::<HashMap<_, _>>();
+        for (id, widget) in &self.custom_widgets {
+            let size = widget.intrinsic_size(&self.theme);
+            if size != Size::ZERO {
+                layouts.insert(*id, size);
+            }
+        }
         tree.compute_layout_with_measure(
             root,
             TaffySize {
@@ -1126,6 +1889,23 @@ impl Ui {
         for child in children {
             self.assign_layout(tree, mapping, child, origin)?;
         }
+        if matches!(self.node(id)?.kind, Kind::ScrollView { .. }) {
+            let bottom = self
+                .node(id)?
+                .children
+                .iter()
+                .filter_map(|child| self.node(*child).ok().map(|node| node.bounds.max_y()))
+                .fold(origin.y, f32::max);
+            let content_height = (bottom - origin.y).max(self.node(id)?.bounds.size.height);
+            if let Kind::ScrollView {
+                content_height: current,
+                offset,
+            } = &mut self.node_mut(id)?.kind
+            {
+                *current = content_height;
+                *offset = (*offset).clamp(0.0, (content_height - layout.size.height).max(0.0));
+            }
+        }
         Ok(())
     }
 
@@ -1176,10 +1956,81 @@ impl Ui {
                         .unwrap_or(self.theme.field_background),
                 )?;
             }
+            Kind::Checkbox { checked } => {
+                let style = self.checkbox_styles[&id];
+                self.fill_control(
+                    painter,
+                    node.bounds,
+                    node.visual.background.unwrap_or(style.background),
+                )?;
+                if *checked {
+                    let inset = 6.0;
+                    painter
+                        .fill_rounded_rect(
+                            RoundedRect::new(
+                                Rect::from_xywh(
+                                    node.bounds.origin.x + inset,
+                                    node.bounds.origin.y + inset,
+                                    (node.bounds.size.width - inset * 2.0).max(0.0),
+                                    (node.bounds.size.height - inset * 2.0).max(0.0),
+                                ),
+                                CornerRadii::uniform(3.0),
+                            )
+                            .map_err(|error| UiError::new(error.to_string()))?,
+                            Brush::Solid(style.indicator),
+                        )
+                        .map_err(|error| UiError::new(error.to_string()))?;
+                }
+            }
+            Kind::Slider {
+                min, max, value, ..
+            } => {
+                let style = self.slider_styles[&id];
+                let center_y = node.bounds.origin.y + node.bounds.size.height * 0.5;
+                let track = Rect::from_xywh(
+                    node.bounds.origin.x,
+                    center_y - 2.0,
+                    node.bounds.size.width,
+                    4.0,
+                );
+                painter
+                    .fill_rounded_rect(
+                        RoundedRect::new(track, CornerRadii::uniform(2.0))
+                            .map_err(|error| UiError::new(error.to_string()))?,
+                        Brush::Solid(style.track),
+                    )
+                    .map_err(|error| UiError::new(error.to_string()))?;
+                let t = (*value - *min) / (*max - *min);
+                let thumb = Rect::from_xywh(
+                    node.bounds.origin.x + t * node.bounds.size.width - style.thumb_size * 0.5,
+                    center_y - style.thumb_size * 0.5,
+                    style.thumb_size,
+                    style.thumb_size,
+                );
+                painter
+                    .fill_ellipse(thumb, Brush::Solid(style.thumb))
+                    .map_err(|error| UiError::new(error.to_string()))?;
+                painter
+                    .stroke_ellipse(
+                        thumb,
+                        StrokeStyle {
+                            width: 1.0,
+                            ..Default::default()
+                        },
+                        Brush::Solid(self.theme.foreground),
+                    )
+                    .map_err(|error| UiError::new(error.to_string()))?;
+            }
+            Kind::ScrollView { .. } => {}
+            Kind::Custom => {
+                if let Some(widget) = self.custom_widgets.get(&id) {
+                    widget.paint(painter, node.bounds, &self.theme)?;
+                }
+            }
             _ => {}
         }
 
-        if self.focus == Some(id) && is_focusable(&node.kind) {
+        if self.focus == Some(id) && self.is_focusable_id(id) {
             let thickness = 2.0;
             let bounds = Rect::from_xywh(
                 node.bounds.origin.x,
@@ -1275,8 +2126,67 @@ impl Ui {
                     .map_err(|error| UiError::new(error.to_string()))?;
             }
         }
+        let scroll_offset = match node.kind {
+            Kind::ScrollView { offset, .. } => Some(offset),
+            _ => None,
+        };
+        if let Some(offset) = scroll_offset {
+            painter.save();
+            painter
+                .clip_rect(node.bounds)
+                .map_err(|error| UiError::new(error.to_string()))?;
+            painter
+                .transform(Affine2::from_translation(Vec2::new(0.0, -offset)))
+                .map_err(|error| UiError::new(error.to_string()))?;
+        }
         for child in &node.children {
             self.paint_node(*child, painter)?;
+        }
+        if scroll_offset.is_some() {
+            painter
+                .restore()
+                .map_err(|error| UiError::new(error.to_string()))?;
+            if let Kind::ScrollView {
+                offset,
+                content_height,
+            } = &node.kind
+                && *content_height > node.bounds.size.height + f32::EPSILON
+            {
+                let style = self.scroll_styles[&id];
+                let width = style.width.max(1.0);
+                let track = Rect::from_xywh(
+                    node.bounds.max_x() - width,
+                    node.bounds.origin.y,
+                    width,
+                    node.bounds.size.height,
+                );
+                painter
+                    .fill_rounded_rect(
+                        RoundedRect::new(track, CornerRadii::uniform(width * 0.5))
+                            .map_err(|error| UiError::new(error.to_string()))?,
+                        Brush::Solid(style.track),
+                    )
+                    .map_err(|error| UiError::new(error.to_string()))?;
+                let thumb_height = (node.bounds.size.height * node.bounds.size.height
+                    / *content_height)
+                    .max(24.0)
+                    .min(node.bounds.size.height);
+                let travel = node.bounds.size.height - thumb_height;
+                let max_offset = *content_height - node.bounds.size.height;
+                let thumb = Rect::from_xywh(
+                    track.origin.x,
+                    track.origin.y + travel * *offset / max_offset,
+                    width,
+                    thumb_height,
+                );
+                painter
+                    .fill_rounded_rect(
+                        RoundedRect::new(thumb, CornerRadii::uniform(width * 0.5))
+                            .map_err(|error| UiError::new(error.to_string()))?,
+                        Brush::Solid(style.thumb),
+                    )
+                    .map_err(|error| UiError::new(error.to_string()))?;
+            }
         }
         Ok(())
     }
@@ -1331,6 +2241,35 @@ impl Ui {
                     SemanticActionKind::SetSelection,
                 ],
             ),
+            Kind::Checkbox { checked } => (
+                SemanticRole::Checkbox,
+                String::new(),
+                Some(checked.to_string()),
+                None,
+                vec![SemanticActionKind::Focus, SemanticActionKind::Activate],
+            ),
+            Kind::Slider { value, .. } => (
+                SemanticRole::Slider,
+                String::new(),
+                Some(value.to_string()),
+                None,
+                vec![SemanticActionKind::Focus, SemanticActionKind::SetValue],
+            ),
+            Kind::ScrollView { offset, .. } => (
+                SemanticRole::ScrollView,
+                String::new(),
+                Some(offset.to_string()),
+                None,
+                vec![SemanticActionKind::Focus, SemanticActionKind::ScrollBy],
+            ),
+            Kind::Custom => self
+                .custom_widgets
+                .get(&id)
+                .and_then(|widget| widget.semantics())
+                .map_or(
+                    (SemanticRole::Group, String::new(), None, None, vec![]),
+                    |(role, label, value)| (role, label, value, None, vec![]),
+                ),
             _ => (SemanticRole::Group, String::new(), None, None, vec![]),
         };
         Ok(SemanticNode {
@@ -1339,7 +2278,7 @@ impl Ui {
             bounds: node.bounds,
             label,
             value,
-            focusable: is_focusable(&node.kind),
+            focusable: self.is_focusable_id(id),
             focused: self.focus == Some(id),
             enabled: node.enabled,
             selection,
@@ -1361,13 +2300,20 @@ impl Ui {
         match action {
             SemanticAction::Focus => self.set_focus(Some(target))?,
             SemanticAction::Activate => {
-                if !matches!(self.node(target)?.kind, Kind::Button { .. }) {
-                    return Err(UiError::new("semantic activation requires a button"));
+                if matches!(self.node(target)?.kind, Kind::Checkbox { .. }) {
+                    self.toggle_checkbox_id(target)?;
+                } else if matches!(self.node(target)?.kind, Kind::Button { .. }) {
+                    if !self.dispatch_routed(target, RoutedEventKind::Activate)? {
+                        self.events.push_back(UiEvent {
+                            target,
+                            kind: UiEventKind::ButtonActivated,
+                        });
+                    }
+                } else {
+                    return Err(UiError::new(
+                        "semantic activation requires an activatable control",
+                    ));
                 }
-                self.events.push_back(UiEvent {
-                    target,
-                    kind: UiEventKind::ButtonActivated,
-                });
             }
             SemanticAction::SetText(text) => {
                 let length = self.text_field(target)?.text.len();
@@ -1388,6 +2334,26 @@ impl Ui {
                 field.anchor.byte_index = anchor;
                 field.caret.byte_index = focus;
                 self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+            }
+            SemanticAction::SetValue(value) => {
+                let value = {
+                    let Kind::Slider {
+                        min,
+                        max,
+                        step,
+                        value: current,
+                    } = &mut self.node_mut(target)?.kind
+                    else {
+                        return Err(UiError::new("set-value semantics require a slider"));
+                    };
+                    *current = snap_slider(value, *min, *max, *step);
+                    *current
+                };
+                self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+                self.dispatch_routed(target, RoutedEventKind::SliderChanged(value))?;
+            }
+            SemanticAction::ScrollBy(delta) => {
+                self.scroll_by_id(target, delta)?;
             }
         }
         Ok(UiUpdate {
@@ -1436,11 +2402,25 @@ impl Ui {
                     .copied()
                     .or_else(|| self.hit_test(logical));
                 self.set_hover(self.hit_test(logical))?;
+                if let Some(target) = target {
+                    self.dispatch_routed(
+                        target,
+                        RoutedEventKind::PointerMoved {
+                            device_id: *device_id,
+                            position: logical,
+                        },
+                    )?;
+                }
                 if let Some(target) = target
                     && self.capture.get(device_id) == Some(&target)
-                    && matches!(self.node(target)?.kind, Kind::TextField(_))
                 {
-                    self.place_text_caret(target, logical, true)?;
+                    if matches!(self.node(target)?.kind, Kind::TextField(_)) {
+                        self.place_text_caret(target, logical, true)?;
+                    } else if matches!(self.node(target)?.kind, Kind::Slider { .. }) {
+                        self.set_slider_from_point(target, logical)?;
+                    } else if matches!(self.node(target)?.kind, Kind::ScrollView { .. }) {
+                        self.set_scroll_from_point(target, logical)?;
+                    }
                 }
             }
             WindowEvent::PointerLeft { device_id } => {
@@ -1459,6 +2439,21 @@ impl Ui {
                     ElementState::Pressed => {
                         let target = position.and_then(|point| self.hit_test(point));
                         if let Some(target) = target {
+                            if self.dispatch_routed(
+                                target,
+                                RoutedEventKind::PointerButton {
+                                    device_id: *device_id,
+                                    position: position
+                                        .expect("hit target requires a pointer position"),
+                                    button: PointerButton::Primary,
+                                    state: ElementState::Pressed,
+                                },
+                            )? {
+                                return Ok(UiUpdate {
+                                    redraw: self.needs_redraw(),
+                                    platform_state_changed,
+                                });
+                            }
                             self.set_focus(Some(target))?;
                             self.capture.insert(*device_id, target);
                             self.node_mut(target)?.pressed = true;
@@ -1466,6 +2461,14 @@ impl Ui {
                                 && let Some(position) = position
                             {
                                 self.place_text_caret(target, position, self.modifiers.shift)?;
+                            } else if matches!(self.node(target)?.kind, Kind::Slider { .. })
+                                && let Some(position) = position
+                            {
+                                self.set_slider_from_point(target, position)?;
+                            } else if matches!(self.node(target)?.kind, Kind::ScrollView { .. })
+                                && let Some(position) = position
+                            {
+                                self.set_scroll_from_point(target, position)?;
                             }
                             self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
                         } else {
@@ -1475,14 +2478,29 @@ impl Ui {
                     }
                     ElementState::Released => {
                         if let Some(target) = self.capture.remove(device_id) {
+                            let prevented = self.dispatch_routed(
+                                target,
+                                RoutedEventKind::PointerButton {
+                                    device_id: *device_id,
+                                    position: position.unwrap_or(LogicalPoint::ZERO),
+                                    button: PointerButton::Primary,
+                                    state: ElementState::Released,
+                                },
+                            )?;
                             self.node_mut(target)?.pressed = false;
-                            if position.and_then(|point| self.hit_test(point)) == Some(target)
-                                && matches!(self.node(target)?.kind, Kind::Button { .. })
+                            if !prevented
+                                && position.and_then(|point| self.hit_test(point)) == Some(target)
                             {
-                                self.events.push_back(UiEvent {
-                                    target,
-                                    kind: UiEventKind::ButtonActivated,
-                                });
+                                if matches!(self.node(target)?.kind, Kind::Button { .. }) {
+                                    if !self.dispatch_routed(target, RoutedEventKind::Activate)? {
+                                        self.events.push_back(UiEvent {
+                                            target,
+                                            kind: UiEventKind::ButtonActivated,
+                                        });
+                                    }
+                                } else if matches!(self.node(target)?.kind, Kind::Checkbox { .. }) {
+                                    self.toggle_checkbox_id(target)?;
+                                }
                             }
                             self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
                         }
@@ -1494,6 +2512,13 @@ impl Ui {
                     self.move_focus(!self.modifiers.shift)?;
                     platform_state_changed = true;
                 } else if let Some(focus) = self.focus {
+                    if self.dispatch_routed(focus, RoutedEventKind::Keyboard(input.clone()))? {
+                        self.sync_platform_state(window)?;
+                        return Ok(UiUpdate {
+                            redraw: self.needs_redraw(),
+                            platform_state_changed,
+                        });
+                    }
                     match self.node(focus)?.kind {
                         Kind::Button { .. }
                             if matches!(
@@ -1501,11 +2526,22 @@ impl Ui {
                                 Key::Named(NamedKey::Enter | NamedKey::Space)
                             ) =>
                         {
-                            self.events.push_back(UiEvent {
-                                target: focus,
-                                kind: UiEventKind::ButtonActivated,
-                            });
+                            if !self.dispatch_routed(focus, RoutedEventKind::Activate)? {
+                                self.events.push_back(UiEvent {
+                                    target: focus,
+                                    kind: UiEventKind::ButtonActivated,
+                                });
+                            }
                             self.dirty |= Dirty::PAINT;
+                        }
+                        Kind::Checkbox { .. }
+                            if matches!(input.logical_key, Key::Named(NamedKey::Space)) =>
+                        {
+                            self.toggle_checkbox_id(focus)?
+                        }
+                        Kind::Slider { .. } => self.handle_slider_key(focus, &input.logical_key)?,
+                        Kind::ScrollView { .. } => {
+                            self.handle_scroll_key(focus, &input.logical_key)?
                         }
                         Kind::TextField(_) => {
                             self.handle_text_key(focus, input, clipboard)?;
@@ -1515,11 +2551,122 @@ impl Ui {
                     }
                 }
             }
+            WindowEvent::PointerWheel {
+                device_id, delta, ..
+            } => {
+                self.ensure_layout()?;
+                if let Some(position) = self.pointer_positions.get(device_id).copied()
+                    && let Some(target) = self.hit_test(position)
+                {
+                    let amount = match delta {
+                        ScrollDelta::Lines { y, .. } => -*y * 40.0,
+                        ScrollDelta::Pixels(point) => -(point.y as f32) / self.scale_factor,
+                    };
+                    if !self.dispatch_routed(
+                        target,
+                        RoutedEventKind::Scroll {
+                            device_id: *device_id,
+                            delta: Point::new(0.0, amount),
+                        },
+                    )? {
+                        let mut current = Some(target);
+                        while let Some(id) = current {
+                            if matches!(self.node(id)?.kind, Kind::ScrollView { .. })
+                                && self.scroll_by_id(id, amount)?
+                            {
+                                break;
+                            }
+                            current = self.node(id)?.parent;
+                        }
+                    }
+                }
+            }
+            WindowEvent::Touch(touch) => {
+                let device_id = DeviceId(touch.device_id.0 ^ touch.id.rotate_left(32));
+                let logical = Point::new(
+                    touch.position.x as f32 / self.scale_factor,
+                    touch.position.y as f32 / self.scale_factor,
+                );
+                self.pointer_positions.insert(device_id, logical);
+                match touch.phase {
+                    TouchPhase::Started => {
+                        if let Some(target) = self.hit_test(logical)
+                            && !self.dispatch_routed(
+                                target,
+                                RoutedEventKind::PointerButton {
+                                    device_id,
+                                    position: logical,
+                                    button: PointerButton::Primary,
+                                    state: ElementState::Pressed,
+                                },
+                            )?
+                        {
+                            self.set_focus(Some(target))?;
+                            self.capture.insert(device_id, target);
+                            self.node_mut(target)?.pressed = true;
+                            if matches!(self.node(target)?.kind, Kind::Slider { .. }) {
+                                self.set_slider_from_point(target, logical)?;
+                            } else if matches!(self.node(target)?.kind, Kind::ScrollView { .. }) {
+                                self.set_scroll_from_point(target, logical)?;
+                            }
+                        }
+                    }
+                    TouchPhase::Moved => {
+                        if let Some(target) = self.capture.get(&device_id).copied() {
+                            self.dispatch_routed(
+                                target,
+                                RoutedEventKind::PointerMoved {
+                                    device_id,
+                                    position: logical,
+                                },
+                            )?;
+                            if matches!(self.node(target)?.kind, Kind::Slider { .. }) {
+                                self.set_slider_from_point(target, logical)?;
+                            } else if matches!(self.node(target)?.kind, Kind::ScrollView { .. }) {
+                                self.set_scroll_from_point(target, logical)?;
+                            }
+                        }
+                    }
+                    TouchPhase::Ended => {
+                        if let Some(target) = self.capture.remove(&device_id) {
+                            self.node_mut(target)?.pressed = false;
+                            if !self.dispatch_routed(
+                                target,
+                                RoutedEventKind::PointerButton {
+                                    device_id,
+                                    position: logical,
+                                    button: PointerButton::Primary,
+                                    state: ElementState::Released,
+                                },
+                            )? && self.hit_test(logical) == Some(target)
+                            {
+                                if matches!(self.node(target)?.kind, Kind::Checkbox { .. }) {
+                                    self.toggle_checkbox_id(target)?;
+                                } else if matches!(self.node(target)?.kind, Kind::Button { .. }) {
+                                    self.dispatch_routed(target, RoutedEventKind::Activate)?;
+                                }
+                            }
+                        }
+                    }
+                    TouchPhase::Cancelled => {
+                        if let Some(target) = self.capture.remove(&device_id) {
+                            self.node_mut(target)?.pressed = false;
+                            self.dispatch_routed(
+                                target,
+                                RoutedEventKind::PointerCancelled { device_id },
+                            )?;
+                        }
+                    }
+                }
+                self.dirty |= Dirty::PAINT;
+            }
             WindowEvent::Ime(ime) => {
                 if let Some(focus) = self.focus
                     && matches!(self.node(focus)?.kind, Kind::TextField(_))
                 {
-                    self.handle_ime(focus, ime)?;
+                    if !self.dispatch_routed(focus, RoutedEventKind::Ime(ime.clone()))? {
+                        self.handle_ime(focus, ime)?;
+                    }
                     platform_state_changed = true;
                 }
             }
@@ -1541,12 +2688,21 @@ impl Ui {
         if !node.bounds.contains(point) {
             return None;
         }
+        if matches!(node.kind, Kind::ScrollView { content_height, .. } if content_height > node.bounds.size.height)
+            && point.x >= node.bounds.max_x() - 12.0
+        {
+            return Some(id);
+        }
+        let child_point = match node.kind {
+            Kind::ScrollView { offset, .. } => Point::new(point.x, point.y + offset),
+            _ => point,
+        };
         for child in node.children.iter().rev() {
-            if let Some(hit) = self.hit_test_node(*child, point) {
+            if let Some(hit) = self.hit_test_node(*child, child_point) {
                 return Some(hit);
             }
         }
-        (node.enabled && is_focusable(&node.kind)).then_some(id)
+        (node.enabled && self.is_hit_testable_id(id)).then_some(id)
     }
 
     fn set_hover(&mut self, target: Option<ElementId>) -> Result<(), UiError> {
@@ -1569,7 +2725,7 @@ impl Ui {
     fn set_focus(&mut self, target: Option<ElementId>) -> Result<(), UiError> {
         let target = target.filter(|id| {
             self.node(*id)
-                .is_ok_and(|node| node.enabled && is_focusable(&node.kind))
+                .is_ok_and(|node| node.enabled && self.is_focusable_id(*id))
         });
         if self.focus == target {
             return Ok(());
@@ -1584,6 +2740,7 @@ impl Ui {
             {
                 field.preedit.clear();
             }
+            self.dispatch_routed(old, RoutedEventKind::FocusChanged(false))?;
         }
         self.focus = target;
         if let Some(target) = target {
@@ -1591,6 +2748,8 @@ impl Ui {
                 target,
                 kind: UiEventKind::FocusChanged(true),
             });
+            self.dispatch_routed(target, RoutedEventKind::FocusChanged(true))?;
+            self.reveal_focused_descendant(target)?;
         }
         self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
         Ok(())
@@ -1602,7 +2761,7 @@ impl Ui {
             .into_iter()
             .filter(|id| {
                 self.node(*id)
-                    .is_ok_and(|node| node.enabled && is_focusable(&node.kind))
+                    .is_ok_and(|node| node.enabled && self.is_focusable_id(*id))
             })
             .collect::<Vec<_>>();
         if focusable.is_empty() {
@@ -1718,6 +2877,7 @@ impl Ui {
             }
             Key::Named(NamedKey::Enter) => {
                 let text = self.text_field(id)?.text.clone();
+                self.dispatch_routed(id, RoutedEventKind::TextSubmitted(text.clone()))?;
                 self.events.push_back(UiEvent {
                     target: id,
                     kind: UiEventKind::TextSubmitted(text),
@@ -1818,8 +2978,9 @@ impl Ui {
         let text = field.text.clone();
         self.events.push_back(UiEvent {
             target: id,
-            kind: UiEventKind::TextChanged(text),
+            kind: UiEventKind::TextChanged(text.clone()),
         });
+        self.dispatch_routed(id, RoutedEventKind::TextChanged(text))?;
         self.invalidate_layout();
         Ok(())
     }
@@ -1836,6 +2997,173 @@ impl Ui {
             return Err(UiError::new("element is not a text field"));
         };
         Ok(field)
+    }
+
+    fn toggle_checkbox_id(&mut self, id: ElementId) -> Result<(), UiError> {
+        let checked = {
+            let Kind::Checkbox { checked } = &mut self.node_mut(id)?.kind else {
+                return Err(UiError::new("element is not a checkbox"));
+            };
+            *checked = !*checked;
+            *checked
+        };
+        self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+        self.dispatch_routed(id, RoutedEventKind::CheckedChanged(checked))?;
+        Ok(())
+    }
+
+    fn set_slider_from_point(&mut self, id: ElementId, point: LogicalPoint) -> Result<(), UiError> {
+        let bounds = self.node(id)?.bounds;
+        let ratio = ((point.x - bounds.origin.x) / bounds.size.width.max(1.0)).clamp(0.0, 1.0);
+        let value = {
+            let Kind::Slider {
+                min,
+                max,
+                step,
+                value,
+            } = &mut self.node_mut(id)?.kind
+            else {
+                return Err(UiError::new("element is not a slider"));
+            };
+            let next = snap_slider(*min + ratio * (*max - *min), *min, *max, *step);
+            if *value == next {
+                return Ok(());
+            }
+            *value = next;
+            next
+        };
+        self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+        self.dispatch_routed(id, RoutedEventKind::SliderChanged(value))?;
+        Ok(())
+    }
+
+    fn handle_slider_key(&mut self, id: ElementId, key: &Key) -> Result<(), UiError> {
+        let name = match key {
+            Key::Named(NamedKey::Other(name)) => name.as_str(),
+            _ => return Ok(()),
+        };
+        let value = {
+            let Kind::Slider {
+                min,
+                max,
+                step,
+                value,
+            } = &mut self.node_mut(id)?.kind
+            else {
+                return Ok(());
+            };
+            let next = match name {
+                "ArrowLeft" | "ArrowDown" => *value - *step,
+                "ArrowRight" | "ArrowUp" => *value + *step,
+                "Home" => *min,
+                "End" => *max,
+                _ => return Ok(()),
+            };
+            let next = snap_slider(next, *min, *max, *step);
+            if next == *value {
+                return Ok(());
+            }
+            *value = next;
+            next
+        };
+        self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+        self.dispatch_routed(id, RoutedEventKind::SliderChanged(value))?;
+        Ok(())
+    }
+
+    fn handle_scroll_key(&mut self, id: ElementId, key: &Key) -> Result<(), UiError> {
+        let Key::Named(NamedKey::Other(name)) = key else {
+            return Ok(());
+        };
+        let height = self.node(id)?.bounds.size.height;
+        let delta = match name.as_str() {
+            "ArrowUp" => -40.0,
+            "ArrowDown" => 40.0,
+            "PageUp" => -height * 0.9,
+            "PageDown" => height * 0.9,
+            "Home" => -f32::MAX,
+            "End" => f32::MAX,
+            _ => return Ok(()),
+        };
+        self.scroll_by_id(id, delta)?;
+        Ok(())
+    }
+
+    fn set_scroll_from_point(&mut self, id: ElementId, point: LogicalPoint) -> Result<(), UiError> {
+        let bounds = self.node(id)?.bounds;
+        let (content_height, previous) = match self.node(id)?.kind {
+            Kind::ScrollView {
+                content_height,
+                offset,
+            } => (content_height, offset),
+            _ => return Ok(()),
+        };
+        if content_height <= bounds.size.height {
+            return Ok(());
+        }
+        let thumb_height = (bounds.size.height * bounds.size.height / content_height)
+            .max(24.0)
+            .min(bounds.size.height);
+        let travel = (bounds.size.height - thumb_height).max(1.0);
+        let ratio = ((point.y - bounds.origin.y - thumb_height * 0.5) / travel).clamp(0.0, 1.0);
+        let next = ratio * (content_height - bounds.size.height);
+        if next != previous {
+            if let Kind::ScrollView { offset, .. } = &mut self.node_mut(id)?.kind {
+                *offset = next;
+            }
+            self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+        }
+        Ok(())
+    }
+
+    fn scroll_by_id(&mut self, id: ElementId, delta: f32) -> Result<bool, UiError> {
+        let viewport = self.node(id)?.bounds.size.height;
+        let changed = {
+            let Kind::ScrollView {
+                offset,
+                content_height,
+            } = &mut self.node_mut(id)?.kind
+            else {
+                return Err(UiError::new("element is not a scroll view"));
+            };
+            let previous = *offset;
+            *offset = (*offset + delta).clamp(0.0, (*content_height - viewport).max(0.0));
+            previous != *offset
+        };
+        if changed {
+            self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+        }
+        Ok(changed)
+    }
+
+    fn reveal_focused_descendant(&mut self, target: ElementId) -> Result<(), UiError> {
+        let target_bounds = self.node(target)?.bounds;
+        let mut ancestor = self.node(target)?.parent;
+        while let Some(id) = ancestor {
+            if let Kind::ScrollView {
+                offset,
+                content_height,
+            } = self.node(id)?.kind
+            {
+                let viewport = self.node(id)?.bounds;
+                let mut next = offset;
+                if target_bounds.origin.y < viewport.origin.y + offset {
+                    next = target_bounds.origin.y - viewport.origin.y;
+                } else if target_bounds.max_y() > viewport.max_y() + offset {
+                    next = target_bounds.max_y() - viewport.max_y();
+                }
+                let max = (content_height - viewport.size.height).max(0.0);
+                next = next.clamp(0.0, max);
+                if next != offset {
+                    if let Kind::ScrollView { offset, .. } = &mut self.node_mut(id)?.kind {
+                        *offset = next;
+                    }
+                    self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+                }
+            }
+            ancestor = self.node(id)?.parent;
+        }
+        Ok(())
     }
 
     fn sync_platform_state(&mut self, window: &Window) -> Result<(), UiError> {
@@ -1883,6 +3211,36 @@ impl Ui {
         }
         Ok(())
     }
+
+    fn is_focusable_id(&self, id: ElementId) -> bool {
+        self.node(id).is_ok_and(|node| match node.kind {
+            Kind::Button { .. }
+            | Kind::TextField(_)
+            | Kind::Checkbox { .. }
+            | Kind::Slider { .. }
+            | Kind::ScrollView { .. } => true,
+            Kind::Custom => self
+                .custom_widgets
+                .get(&id)
+                .is_some_and(|widget| widget.focusable()),
+            _ => false,
+        })
+    }
+
+    fn is_hit_testable_id(&self, id: ElementId) -> bool {
+        self.node(id).is_ok_and(|node| match node.kind {
+            Kind::Button { .. }
+            | Kind::TextField(_)
+            | Kind::Checkbox { .. }
+            | Kind::Slider { .. }
+            | Kind::ScrollView { .. } => true,
+            Kind::Custom => self
+                .custom_widgets
+                .get(&id)
+                .is_some_and(|widget| widget.hit_testable()),
+            _ => false,
+        })
+    }
 }
 
 fn map_alignment(alignment: Alignment) -> AlignItems {
@@ -1894,8 +3252,9 @@ fn map_alignment(alignment: Alignment) -> AlignItems {
     }
 }
 
-fn is_focusable(kind: &Kind) -> bool {
-    matches!(kind, Kind::Button { .. } | Kind::TextField(_))
+fn snap_slider(value: f32, min: f32, max: f32, step: f32) -> f32 {
+    let value = if value.is_finite() { value } else { min };
+    (min + ((value.clamp(min, max) - min) / step).round() * step).clamp(min, max)
 }
 
 fn previous_grapheme(text: &str, index: usize) -> Option<usize> {
@@ -2184,7 +3543,7 @@ mod tests {
             font_families: vec![FontFamily::Named("Noto Sans".into())],
             ..Default::default()
         };
-        let mut ui = Ui::new(fonts, theme);
+        let mut ui: Ui = Ui::new(fonts, theme);
         let root = ui.root();
         ui.add_label(root, "Astrelis on WebGPU").unwrap();
         assert!(!ui.display_list().unwrap().texts().is_empty());
@@ -2205,5 +3564,134 @@ mod tests {
         let state = ui.text_field(field.id()).unwrap();
         let layout_position = to_layout_position(state, state.caret);
         assert_eq!(from_layout_position(state, layout_position), state.caret);
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum TestMessage {
+        Activated,
+        Checked(bool),
+    }
+
+    struct Compound {
+        content: Option<ElementHandle<Column>>,
+        unmounted: Arc<Mutex<bool>>,
+    }
+
+    impl Widget<TestMessage> for Compound {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+        fn mounted(&mut self, context: &mut MountContext<'_, TestMessage>) -> Result<(), UiError> {
+            context.add_label("Mounted")?;
+            self.content = Some(context.add_column()?);
+            Ok(())
+        }
+        fn unmounted(&mut self) {
+            *self.unmounted.lock().unwrap() = true;
+        }
+        fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
+            Some((SemanticRole::Group, "Compound".into(), None))
+        }
+    }
+
+    #[test]
+    fn custom_widget_mounts_children_and_unmounts_with_subtree() {
+        let mut ui = Ui::<TestMessage>::new(FontDatabase::default(), Theme::default());
+        let root = ui.root();
+        let flag = Arc::new(Mutex::new(false));
+        let widget = ui
+            .add_widget(
+                root,
+                Compound {
+                    content: None,
+                    unmounted: flag.clone(),
+                },
+            )
+            .unwrap();
+        assert!(ui.widget(widget).unwrap().content.is_some());
+        assert_eq!(ui.semantic_tree().unwrap().children[0].label, "Compound");
+        ui.remove(widget).unwrap();
+        assert!(*flag.lock().unwrap());
+    }
+
+    #[test]
+    fn routed_listeners_emit_typed_messages_and_cancel_defaults() {
+        let mut ui = Ui::<TestMessage>::new(FontDatabase::default(), Theme::default());
+        let root = ui.root();
+        let column = ui.add_column(root).unwrap();
+        let checkbox = ui.add_checkbox(column, false).unwrap();
+        ui.listen(
+            column,
+            Some(EventPhase::Capture),
+            EventFilter::Activate,
+            |context, _| {
+                context.emit(TestMessage::Activated);
+                context.prevent_default();
+            },
+        )
+        .unwrap();
+        assert!(
+            ui.dispatch_routed(checkbox.id(), RoutedEventKind::Activate)
+                .unwrap()
+        );
+        assert_eq!(
+            ui.drain_messages().collect::<Vec<_>>(),
+            vec![TestMessage::Activated]
+        );
+        assert!(!ui.checked(checkbox).unwrap());
+        ui.listen(
+            checkbox,
+            None,
+            EventFilter::ValueChanged,
+            |context, event| {
+                if let RoutedEventKind::CheckedChanged(value) = event.kind {
+                    context.emit(TestMessage::Checked(value));
+                }
+            },
+        )
+        .unwrap();
+        ui.toggle_checkbox_id(checkbox.id()).unwrap();
+        assert_eq!(
+            ui.drain_messages().collect::<Vec<_>>(),
+            vec![TestMessage::Checked(true)]
+        );
+    }
+
+    #[test]
+    fn slider_snaps_and_scroll_view_clamps_and_reveals_focus() {
+        let mut ui = Ui::<TestMessage>::new(FontDatabase::default(), Theme::default());
+        ui.set_viewport(Size::new(320.0, 200.0), 1.0);
+        let root = ui.root();
+        let slider = ui.add_slider(root, 0.0, 1.0, 0.25, 0.6).unwrap();
+        assert_eq!(ui.slider_value(slider).unwrap(), 0.5);
+        let scroll = ui.add_scroll_view(root).unwrap();
+        ui.set_layout(
+            scroll,
+            LayoutStyle {
+                height: Some(80.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let column = ui.add_column(scroll).unwrap();
+        let mut last = None;
+        for index in 0..8 {
+            last = Some(ui.add_button(column, format!("Button {index}")).unwrap());
+        }
+        ui.ensure_layout().unwrap();
+        assert!(
+            matches!(ui.node(scroll.id()).unwrap().kind, Kind::ScrollView { content_height, .. } if content_height > 80.0)
+        );
+        ui.set_focus(last.map(|handle| handle.id())).unwrap();
+        assert!(ui.scroll_offset(scroll).unwrap() > 0.0);
+        ui.scroll_by_id(scroll.id(), f32::MAX).unwrap();
+        let max = match ui.node(scroll.id()).unwrap().kind {
+            Kind::ScrollView { content_height, .. } => content_height - 80.0,
+            _ => unreachable!(),
+        };
+        assert!((ui.scroll_offset(scroll).unwrap() - max).abs() < 0.01);
     }
 }

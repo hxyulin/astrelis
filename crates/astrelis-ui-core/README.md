@@ -6,8 +6,11 @@ paint generation for Astrelis.
 The crate owns no native windows or GPU objects. Taffy is an internal layout
 implementation detail, and output is an `astrelis-paint` display list.
 
-The initial vertical slice includes labels, buttons, rows, columns, padding,
-and a Unicode-aware single-line text field.
+The retained widget lifecycle supports application-defined compound widgets,
+typed application messages, and cancelable capture/target/bubble listeners.
+Built-ins include labels, buttons, rows, columns, padding, a Unicode-aware
+single-line text field, checkboxes, horizontal sliders, and vertical scroll
+views. Mouse and touch contacts share pointer capture and control defaults.
 
 ```text
 cargo run -p astrelis-ui-core --example settings_window

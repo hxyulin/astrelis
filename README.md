@@ -14,8 +14,8 @@ workspace contains:
 - `astrelis-platform-winit`: desktop and browser-canvas winit implementation;
 - `astrelis-platform-test`: deterministic display-free scripted backend;
 - `astrelis-profiling`: dependency-free CPU/GPU timeline profiling.
-- `astrelis-ui-core`: retained UI trees, Taffy layout, routed input, semantics,
-  widgets, and display-list generation.
+- `astrelis-ui-core`: extensible retained widgets, Taffy layout, typed messages,
+  capture/target/bubble input, semantics, controls, and display-list generation.
 
 Painting, text, and the first retained UI vertical slice are available as
 separately testable layers above the shared application runtime. The Painter
