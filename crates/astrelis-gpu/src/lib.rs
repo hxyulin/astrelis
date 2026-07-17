@@ -864,6 +864,20 @@ impl RenderPass<'_> {
         self.inner.set_scissor_rect(x, y, width, height);
     }
 
+    /// Sets the rasterization viewport and depth range.
+    pub fn set_viewport(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        min_depth: f32,
+        max_depth: f32,
+    ) {
+        self.inner
+            .set_viewport(x, y, width, height, min_depth, max_depth);
+    }
+
     /// Sets the dynamic stencil reference.
     pub fn set_stencil_reference(&mut self, reference: u32) {
         self.inner.set_stencil_reference(reference);

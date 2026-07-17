@@ -306,6 +306,16 @@ pub trait RenderPass: Debug {
     fn draw_indexed(&mut self, indices: Range<u32>, base_vertex: i32, instances: Range<u32>);
     /// Sets the rasterization scissor rectangle.
     fn set_scissor_rect(&mut self, x: u32, y: u32, width: u32, height: u32);
+    /// Sets the rasterization viewport and depth range.
+    fn set_viewport(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        min_depth: f32,
+        max_depth: f32,
+    );
     /// Sets the dynamic stencil reference.
     fn set_stencil_reference(&mut self, reference: u32);
 }

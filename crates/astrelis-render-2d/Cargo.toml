@@ -1,0 +1,24 @@
+[package]
+name = "astrelis-render-2d"
+description = "Sprite and tilemap scene rendering for Astrelis"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-profiling = { workspace = true }
+astrelis-render = { workspace = true }
+bytemuck = { workspace = true }
+
+[dev-dependencies]
+astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
+astrelis-platform = { workspace = true }
+astrelis-platform-winit = { path = "../astrelis-platform-winit" }
+pollster = { workspace = true }
+
+[lints]
+workspace = true

@@ -14,6 +14,9 @@ workspace contains:
 - `astrelis-platform-winit`: desktop and browser-canvas winit implementation;
 - `astrelis-platform-test`: deterministic display-free scripted backend;
 - `astrelis-profiling`: dependency-free CPU/GPU timeline profiling.
+- `astrelis-render`: shared scene target, antialiasing, and frame statistics.
+- `astrelis-render-2d`: batched sprites, atlases, cameras, and chunked tilemaps.
+- `astrelis-render-3d`: reverse-Z lit meshes, materials, culling, and debug geometry.
 - `astrelis-ui-core`: extensible retained widgets, Taffy layout, typed messages,
   capture/target/bubble input, semantics, controls, and display-list generation.
 - `astrelis-ui-widgets`: reusable drag/drop, split, navigation, virtualization,

@@ -11,6 +11,13 @@ Run the native texture-backed example with:
 cargo run -p astrelis-ui-widgets --example render_view
 ```
 
+Milestone 14's two scene renderers are demonstrated side by side, sharing one
+device while targeting independent hysteresis-sized render views, with:
+
+```text
+cargo run -p astrelis-ui-widgets --example scene_views
+```
+
 The animated color scene responds to pointer position and focused keyboard
 input. Its pause control cancels the window-scoped repeating timer so the
 desktop runtime returns to waiting for events.

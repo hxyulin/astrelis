@@ -11,6 +11,9 @@ members = [
   "crates/astrelis-platform-test",
   "crates/astrelis-platform-winit",
   "crates/astrelis-profiling",
+  "crates/astrelis-render",
+  "crates/astrelis-render-2d",
+  "crates/astrelis-render-3d",
   "crates/astrelis-text",
   "crates/astrelis-text-gpu",
   "crates/astrelis-ui-core",
@@ -32,6 +35,9 @@ astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.0.0" }
 astrelis-platform = { path = "crates/astrelis-platform", version = "0.0.0" }
 astrelis-paint = { path = "crates/astrelis-paint", version = "0.0.0" }
 astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.0.0" }
+astrelis-render = { path = "crates/astrelis-render", version = "0.0.0" }
+astrelis-render-2d = { path = "crates/astrelis-render-2d", version = "0.0.0" }
+astrelis-render-3d = { path = "crates/astrelis-render-3d", version = "0.0.0" }
 astrelis-text = { path = "crates/astrelis-text", version = "0.0.0" }
 astrelis-text-gpu = { path = "crates/astrelis-text-gpu", version = "0.0.0" }
 astrelis-ui-core = { path = "crates/astrelis-ui-core", version = "0.0.0" }

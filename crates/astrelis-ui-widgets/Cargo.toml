@@ -20,9 +20,10 @@ astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
 astrelis-paint-gpu = { path = "../astrelis-paint-gpu" }
 astrelis-platform-test = { path = "../astrelis-platform-test" }
 astrelis-platform-winit = { path = "../astrelis-platform-winit" }
+astrelis-render = { workspace = true }
+astrelis-render-2d = { workspace = true }
+astrelis-render-3d = { workspace = true }
 astrelis-text = { workspace = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 pollster = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

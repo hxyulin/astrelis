@@ -261,6 +261,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-render"
+version = "0.0.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-gpu",
+]
+
+[[package]]
+name = "astrelis-render-2d"
+version = "0.0.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-gpu-wgpu",
+ "astrelis-platform",
+ "astrelis-platform-winit",
+ "astrelis-profiling",
+ "astrelis-render",
+ "bytemuck",
+ "pollster",
+]
+
+[[package]]
+name = "astrelis-render-3d"
+version = "0.0.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-gpu-wgpu",
+ "astrelis-platform",
+ "astrelis-platform-winit",
+ "astrelis-profiling",
+ "astrelis-render",
+ "bytemuck",
+ "pollster",
+]
+
+[[package]]
 name = "astrelis-text"
 version = "0.0.0"
 dependencies = [
@@ -336,6 +374,9 @@ dependencies = [
  "astrelis-platform",
  "astrelis-platform-test",
  "astrelis-platform-winit",
+ "astrelis-render",
+ "astrelis-render-2d",
+ "astrelis-render-3d",
  "astrelis-text",
  "astrelis-ui-core",
  "pollster",

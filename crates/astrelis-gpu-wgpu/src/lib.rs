@@ -1679,6 +1679,19 @@ impl backend::RenderPass for WgpuRenderPass {
         self.raw.set_scissor_rect(x, y, width, height);
     }
 
+    fn set_viewport(
+        &mut self,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        min_depth: f32,
+        max_depth: f32,
+    ) {
+        self.raw
+            .set_viewport(x, y, width, height, min_depth, max_depth);
+    }
+
     fn set_stencil_reference(&mut self, reference: u32) {
         self.raw.set_stencil_reference(reference);
     }
