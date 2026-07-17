@@ -2,14 +2,16 @@
 
 #![warn(missing_docs)]
 
-use std::any::Any;
+use std::{any::Any, cell::Cell, rc::Rc};
 
 use astrelis_core::geometry::{LogicalRect, LogicalSize, Size};
 use astrelis_paint::{Brush, CornerRadii, Painter, RoundedRect, StrokeStyle};
-use astrelis_platform::ElementState;
+use astrelis_platform::{CursorIcon, DeviceId, ElementState, Key, NamedKey, PointerButton};
 use astrelis_ui_core::{
-    DragOperations, DragOptions, DragPayload, DropOperation, ElementHandle, EventFilter,
-    ListenerId, MountContext, RoutedEventKind, SemanticRole, Theme, Ui, UiError, Widget,
+    Alignment, Column, DragOperations, DragOptions, DragPayload, DropOperation, ElementHandle,
+    ElementId, EventFilter, FlexStyle, LayoutStyle, Length, ListenerId, MountContext,
+    RoutedEventKind, Row, SemanticAction, SemanticActionKind, SemanticRole, Theme, Ui, UiError,
+    Widget,
 };
 
 type PayloadAcceptance = dyn Fn(&DragPayload) -> bool;
@@ -162,5 +164,605 @@ pub fn move_drag_options() -> DragOptions {
     DragOptions {
         allowed: DragOperations::MOVE,
         ..Default::default()
+    }
+}
+
+/// Direction in which a split pane arranges its two regions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SplitAxis {
+    /// Regions are side by side and the divider moves horizontally.
+    Horizontal,
+    /// Regions are stacked and the divider moves vertically.
+    Vertical,
+}
+
+/// Configuration for a resizable split pane.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SplitPaneOptions {
+    /// Arrangement and resize direction.
+    pub axis: SplitAxis,
+    /// Initial first-region fraction.
+    pub ratio: f32,
+    /// Minimum logical extent of the first region.
+    pub first_min: f32,
+    /// Minimum logical extent of the second region.
+    pub second_min: f32,
+    /// Logical divider thickness.
+    pub divider_size: f32,
+    /// Painted line thickness inside the divider hit target.
+    pub divider_visual_size: f32,
+    /// Fraction changed by one Arrow-key press.
+    pub keyboard_step: f32,
+}
+
+impl Default for SplitPaneOptions {
+    fn default() -> Self {
+        Self {
+            axis: SplitAxis::Horizontal,
+            ratio: 0.5,
+            first_min: 80.0,
+            second_min: 80.0,
+            divider_size: 8.0,
+            divider_visual_size: 2.0,
+            keyboard_step: 0.02,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SplitContainer {
+    Row(ElementHandle<Row>),
+    Column(ElementHandle<Column>),
+}
+
+impl SplitContainer {
+    fn id(self) -> ElementId {
+        match self {
+            Self::Row(handle) => handle.id(),
+            Self::Column(handle) => handle.id(),
+        }
+    }
+}
+
+/// Controller and content handles for one resizable split pane.
+pub struct SplitPane {
+    container: SplitContainer,
+    first: ElementHandle<Column>,
+    second: ElementHandle<Column>,
+    divider: ElementHandle<Splitter>,
+    ratio: Rc<Cell<f32>>,
+}
+
+impl SplitPane {
+    /// Builds a split pane beneath `parent`.
+    pub fn new<Message: 'static, T>(
+        ui: &mut Ui<Message>,
+        parent: ElementHandle<T>,
+        options: SplitPaneOptions,
+    ) -> Result<Self, UiError> {
+        validate_split_options(options)?;
+        let ratio = Rc::new(Cell::new(options.ratio.clamp(0.0, 1.0)));
+        let (container, first, second, divider) = match options.axis {
+            SplitAxis::Horizontal => {
+                let container = ui.add_row(parent)?;
+                ui.set_flex_style(
+                    container,
+                    FlexStyle {
+                        align_items: Alignment::Stretch,
+                        ..Default::default()
+                    },
+                )?;
+                let first = ui.add_column(container)?;
+                let divider =
+                    ui.add_widget(container, Splitter::new(first, options, ratio.clone()))?;
+                let second = ui.add_column(container)?;
+                ui.update_widget(divider, |splitter| splitter.second = Some(second))?;
+                (SplitContainer::Row(container), first, second, divider)
+            }
+            SplitAxis::Vertical => {
+                let container = ui.add_column(parent)?;
+                ui.set_flex_style(
+                    container,
+                    FlexStyle {
+                        align_items: Alignment::Stretch,
+                        ..Default::default()
+                    },
+                )?;
+                let first = ui.add_column(container)?;
+                let divider =
+                    ui.add_widget(container, Splitter::new(first, options, ratio.clone()))?;
+                let second = ui.add_column(container)?;
+                ui.update_widget(divider, |splitter| splitter.second = Some(second))?;
+                (SplitContainer::Column(container), first, second, divider)
+            }
+        };
+        apply_split_layout(ui, first, second, divider, options, ratio.get())?;
+        Ok(Self {
+            container,
+            first,
+            second,
+            divider,
+            ratio,
+        })
+    }
+
+    /// Returns the erased identity of the outer row or column.
+    pub fn container_id(&self) -> ElementId {
+        self.container.id()
+    }
+
+    /// Changes the outer split container's layout constraints.
+    pub fn set_container_layout<Message: 'static>(
+        &self,
+        ui: &mut Ui<Message>,
+        layout: LayoutStyle,
+    ) -> Result<(), UiError> {
+        match self.container {
+            SplitContainer::Row(handle) => ui.set_layout(handle, layout),
+            SplitContainer::Column(handle) => ui.set_layout(handle, layout),
+        }
+    }
+
+    /// Returns the first region's content column.
+    pub const fn first(&self) -> ElementHandle<Column> {
+        self.first
+    }
+
+    /// Returns the second region's content column.
+    pub const fn second(&self) -> ElementHandle<Column> {
+        self.second
+    }
+
+    /// Returns the interactive divider.
+    pub const fn divider(&self) -> ElementHandle<Splitter> {
+        self.divider
+    }
+
+    /// Returns the current first-region fraction.
+    pub fn ratio(&self) -> f32 {
+        self.ratio.get()
+    }
+
+    /// Changes the split fraction and immediately updates both regions.
+    pub fn set_ratio<Message: 'static>(
+        &self,
+        ui: &mut Ui<Message>,
+        ratio: f32,
+    ) -> Result<(), UiError> {
+        ui.update_widget(self.divider, |splitter| splitter.set_ratio(ratio))?;
+        let options = ui.widget(self.divider)?.options;
+        apply_split_layout(
+            ui,
+            self.first,
+            self.second,
+            self.divider,
+            options,
+            self.ratio.get(),
+        )
+    }
+}
+
+fn validate_split_options(options: SplitPaneOptions) -> Result<(), UiError> {
+    let values = [
+        options.ratio,
+        options.first_min,
+        options.second_min,
+        options.divider_size,
+        options.divider_visual_size,
+        options.keyboard_step,
+    ];
+    if values.into_iter().any(|value| !value.is_finite())
+        || options.first_min < 0.0
+        || options.second_min < 0.0
+        || options.divider_size <= 0.0
+        || options.divider_visual_size <= 0.0
+        || options.divider_visual_size > options.divider_size
+        || options.keyboard_step <= 0.0
+    {
+        return Err(UiError::from_message(
+            "split pane values must be finite and sizes/steps valid",
+        ));
+    }
+    Ok(())
+}
+
+fn pane_layout(axis: SplitAxis, ratio: f32, minimum: f32) -> LayoutStyle {
+    let mut layout = LayoutStyle {
+        grow: ratio.max(0.0),
+        shrink: 1.0,
+        basis: Length::Px(0.0),
+        ..Default::default()
+    };
+    match axis {
+        SplitAxis::Horizontal => layout.min_width = Length::Px(minimum),
+        SplitAxis::Vertical => layout.min_height = Length::Px(minimum),
+    }
+    layout
+}
+
+fn divider_layout(axis: SplitAxis, size: f32) -> LayoutStyle {
+    match axis {
+        SplitAxis::Horizontal => LayoutStyle {
+            width: Length::Px(size),
+            min_width: Length::Px(size),
+            shrink: 0.0,
+            ..Default::default()
+        },
+        SplitAxis::Vertical => LayoutStyle {
+            height: Length::Px(size),
+            min_height: Length::Px(size),
+            shrink: 0.0,
+            ..Default::default()
+        },
+    }
+}
+
+fn apply_split_layout<Message: 'static>(
+    ui: &mut Ui<Message>,
+    first: ElementHandle<Column>,
+    second: ElementHandle<Column>,
+    divider: ElementHandle<Splitter>,
+    options: SplitPaneOptions,
+    ratio: f32,
+) -> Result<(), UiError> {
+    ui.set_layout(first, pane_layout(options.axis, ratio, options.first_min))?;
+    ui.set_layout(
+        second,
+        pane_layout(options.axis, 1.0 - ratio, options.second_min),
+    )?;
+    ui.set_layout(divider, divider_layout(options.axis, options.divider_size))
+}
+
+/// Interactive separator used by [`SplitPane`].
+pub struct Splitter {
+    first: ElementHandle<Column>,
+    second: Option<ElementHandle<Column>>,
+    options: SplitPaneOptions,
+    ratio: Rc<Cell<f32>>,
+    drag: Option<(DeviceId, f32, f32)>,
+    hovered: bool,
+    focused: bool,
+}
+
+impl Splitter {
+    fn new(first: ElementHandle<Column>, options: SplitPaneOptions, ratio: Rc<Cell<f32>>) -> Self {
+        Self {
+            first,
+            second: None,
+            options,
+            ratio,
+            drag: None,
+            hovered: false,
+            focused: false,
+        }
+    }
+
+    fn set_ratio(&mut self, ratio: f32) {
+        if ratio.is_finite() {
+            self.ratio.set(ratio.clamp(0.0, 1.0));
+        }
+    }
+
+    fn legal_ratio(&self, ratio: f32, parent_extent: f32) -> f32 {
+        let available = (parent_extent - self.options.divider_size).max(1.0);
+        let minimum = (self.options.first_min / available).clamp(0.0, 1.0);
+        let maximum = (1.0 - self.options.second_min / available).clamp(0.0, 1.0);
+        if minimum <= maximum {
+            ratio.clamp(minimum, maximum)
+        } else {
+            (self.options.first_min / (self.options.first_min + self.options.second_min).max(1.0))
+                .clamp(0.0, 1.0)
+        }
+    }
+
+    fn update_layout<Message>(&self, context: &mut astrelis_ui_core::EventContext<'_, Message>) {
+        let Some(second) = self.second else {
+            return;
+        };
+        let ratio = self.ratio.get();
+        context.set_layout(
+            self.first,
+            pane_layout(self.options.axis, ratio, self.options.first_min),
+        );
+        context.set_layout(
+            second,
+            pane_layout(self.options.axis, 1.0 - ratio, self.options.second_min),
+        );
+        context.request_paint();
+    }
+
+    fn parent_extent<Message>(
+        context: &astrelis_ui_core::EventContext<'_, Message>,
+        axis: SplitAxis,
+    ) -> f32 {
+        context.parent_bounds().map_or(1.0, |bounds| match axis {
+            SplitAxis::Horizontal => bounds.size.width,
+            SplitAxis::Vertical => bounds.size.height,
+        })
+    }
+}
+
+impl<Message: 'static> Widget<Message> for Splitter {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn event(
+        &mut self,
+        context: &mut astrelis_ui_core::EventContext<'_, Message>,
+        event: &astrelis_ui_core::RoutedEvent,
+    ) {
+        match &event.kind {
+            RoutedEventKind::PointerEntered { .. } => {
+                self.hovered = true;
+                context.request_paint();
+            }
+            RoutedEventKind::PointerLeft { .. } if self.drag.is_none() => {
+                self.hovered = false;
+                context.request_paint();
+            }
+            RoutedEventKind::FocusChanged(focused) => {
+                self.focused = *focused;
+                context.request_paint();
+            }
+            RoutedEventKind::PointerButton {
+                device_id,
+                position,
+                button: PointerButton::Primary,
+                state: ElementState::Pressed,
+            } => {
+                let coordinate = match self.options.axis {
+                    SplitAxis::Horizontal => position.x,
+                    SplitAxis::Vertical => position.y,
+                };
+                self.drag = Some((*device_id, coordinate, self.ratio.get()));
+                context.request_focus();
+                context.capture_pointer(*device_id);
+                context.prevent_default();
+                context.request_paint();
+            }
+            RoutedEventKind::PointerMoved {
+                device_id,
+                position,
+            } if self.drag.is_some_and(|drag| drag.0 == *device_id) => {
+                let (_, start, start_ratio) = self.drag.expect("drag was matched above");
+                let coordinate = match self.options.axis {
+                    SplitAxis::Horizontal => position.x,
+                    SplitAxis::Vertical => position.y,
+                };
+                let extent = Self::parent_extent(context, self.options.axis);
+                let available = (extent - self.options.divider_size).max(1.0);
+                self.ratio
+                    .set(self.legal_ratio(start_ratio + (coordinate - start) / available, extent));
+                self.update_layout(context);
+            }
+            RoutedEventKind::PointerButton {
+                device_id,
+                button: PointerButton::Primary,
+                state: ElementState::Released,
+                ..
+            }
+            | RoutedEventKind::PointerCancelled { device_id }
+                if self.drag.is_some_and(|drag| drag.0 == *device_id) =>
+            {
+                self.drag = None;
+                self.hovered = false;
+                context.release_pointer(*device_id);
+                context.prevent_default();
+                context.request_paint();
+            }
+            RoutedEventKind::Keyboard(input) if input.state == ElementState::Pressed => {
+                let Key::Named(NamedKey::Other(key)) = &input.logical_key else {
+                    return;
+                };
+                let direction = match (self.options.axis, key.as_str()) {
+                    (SplitAxis::Horizontal, "ArrowLeft") | (SplitAxis::Vertical, "ArrowUp") => {
+                        Some(-1.0)
+                    }
+                    (SplitAxis::Horizontal, "ArrowRight") | (SplitAxis::Vertical, "ArrowDown") => {
+                        Some(1.0)
+                    }
+                    _ => None,
+                };
+                let extent = Self::parent_extent(context, self.options.axis);
+                let next = match key.as_str() {
+                    "Home" => 0.0,
+                    "End" => 1.0,
+                    _ if direction.is_some() => {
+                        let multiplier = if context.modifiers().shift { 5.0 } else { 1.0 };
+                        self.ratio.get()
+                            + direction.expect("direction was checked")
+                                * self.options.keyboard_step
+                                * multiplier
+                    }
+                    _ => return,
+                };
+                self.ratio.set(self.legal_ratio(next, extent));
+                self.update_layout(context);
+                context.prevent_default();
+            }
+            _ => {}
+        }
+    }
+
+    fn hit_testable(&self) -> bool {
+        true
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn cursor_icon(&self) -> Option<CursorIcon> {
+        Some(match self.options.axis {
+            SplitAxis::Horizontal => CursorIcon::EwResize,
+            SplitAxis::Vertical => CursorIcon::NsResize,
+        })
+    }
+
+    fn paint(
+        &self,
+        painter: &mut Painter,
+        bounds: LogicalRect,
+        theme: &Theme,
+    ) -> Result<(), UiError> {
+        let visual_size = self
+            .options
+            .divider_visual_size
+            .min(self.options.divider_size);
+        let visual_bounds = match self.options.axis {
+            SplitAxis::Horizontal => LogicalRect::from_xywh(
+                bounds.origin.x + (bounds.size.width - visual_size) * 0.5,
+                bounds.origin.y,
+                visual_size,
+                bounds.size.height,
+            ),
+            SplitAxis::Vertical => LogicalRect::from_xywh(
+                bounds.origin.x,
+                bounds.origin.y + (bounds.size.height - visual_size) * 0.5,
+                bounds.size.width,
+                visual_size,
+            ),
+        };
+        painter
+            .fill_rect(
+                visual_bounds,
+                Brush::Solid(if self.hovered || self.focused || self.drag.is_some() {
+                    theme.accent
+                } else {
+                    theme.button.hovered
+                }),
+            )
+            .map_err(|error| UiError::from_message(error.to_string()))
+    }
+
+    fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
+        Some((
+            SemanticRole::Separator,
+            "Resize panes".into(),
+            Some(format!("{:.0}%", self.ratio.get() * 100.0)),
+        ))
+    }
+
+    fn semantic_actions(&self) -> Vec<SemanticActionKind> {
+        vec![SemanticActionKind::Focus, SemanticActionKind::SetValue]
+    }
+
+    fn semantic_action(
+        &mut self,
+        context: &mut astrelis_ui_core::EventContext<'_, Message>,
+        action: &SemanticAction,
+    ) -> bool {
+        match action {
+            SemanticAction::Focus => {
+                context.request_focus();
+                true
+            }
+            SemanticAction::SetValue(value) if value.is_finite() => {
+                let extent = Self::parent_extent(context, self.options.axis);
+                self.ratio.set(self.legal_ratio(*value, extent));
+                self.update_layout(context);
+                true
+            }
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use astrelis_core::geometry::Size;
+    use astrelis_text::FontDatabase;
+    use astrelis_ui_core::{SemanticAction, SemanticActionKind, SemanticRole};
+
+    use super::*;
+
+    #[test]
+    fn split_pane_semantics_resize_regions_and_respect_minima() {
+        let mut ui: Ui = Ui::new(FontDatabase::default(), Theme::default());
+        ui.set_viewport(Size::new(600.0, 300.0), 1.0);
+        let root = ui.root();
+        let split = SplitPane::new(
+            &mut ui,
+            root,
+            SplitPaneOptions {
+                first_min: 120.0,
+                second_min: 150.0,
+                divider_size: 10.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        split
+            .set_container_layout(
+                &mut ui,
+                LayoutStyle {
+                    width: Length::Px(500.0),
+                    height: Length::Px(200.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        ui.display_list().unwrap();
+
+        let semantics = ui.semantic_tree().unwrap();
+        let separator = semantics
+            .children
+            .iter()
+            .flat_map(|node| &node.children)
+            .find(|node| node.id == split.divider().id())
+            .unwrap();
+        assert_eq!(separator.role, SemanticRole::Separator);
+        assert!(separator.actions.contains(&SemanticActionKind::SetValue));
+
+        ui.perform_semantic_action(split.divider().id(), SemanticAction::SetValue(0.0))
+            .unwrap();
+        ui.display_list().unwrap();
+        let first = ui.layout_bounds(split.first()).unwrap();
+        let second = ui.layout_bounds(split.second()).unwrap();
+        assert!(first.size.width >= 120.0);
+        assert!(second.size.width >= 150.0);
+        assert!(split.ratio() > 0.0);
+
+        split.set_ratio(&mut ui, 0.7).unwrap();
+        ui.display_list().unwrap();
+        let resized = ui.layout_bounds(split.first()).unwrap();
+        assert!(resized.size.width > first.size.width);
+    }
+
+    #[test]
+    fn vertical_split_uses_height_constraints() {
+        let mut ui: Ui = Ui::new(FontDatabase::default(), Theme::default());
+        ui.set_viewport(Size::new(400.0, 500.0), 1.0);
+        let root = ui.root();
+        let split = SplitPane::new(
+            &mut ui,
+            root,
+            SplitPaneOptions {
+                axis: SplitAxis::Vertical,
+                ratio: 0.6,
+                first_min: 90.0,
+                second_min: 110.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        split
+            .set_container_layout(
+                &mut ui,
+                LayoutStyle {
+                    width: Length::Px(300.0),
+                    height: Length::Px(400.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        ui.display_list().unwrap();
+        assert!(ui.layout_bounds(split.first()).unwrap().size.height > 90.0);
+        assert!(ui.layout_bounds(split.second()).unwrap().size.height > 110.0);
     }
 }

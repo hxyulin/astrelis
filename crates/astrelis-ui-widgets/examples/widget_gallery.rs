@@ -14,7 +14,9 @@ use astrelis_text::{FontDatabase, FontFamily};
 use astrelis_ui_core::{
     DragPayload, DropOperation, ElementHandle, Label, LayoutStyle, Length, Theme, Ui,
 };
-use astrelis_ui_widgets::{DropZone, install_drag_source, move_drag_options};
+use astrelis_ui_widgets::{
+    DropZone, SplitAxis, SplitPane, SplitPaneOptions, install_drag_source, move_drag_options,
+};
 
 const NOTO_SANS: &[u8] = include_bytes!("../../astrelis-ui-core/assets/NotoSans.ttf");
 
@@ -66,7 +68,16 @@ impl Gallery {
             },
         )
         .map_err(io::Error::other)?;
-        let column = ui.add_column(padding).map_err(io::Error::other)?;
+        let scroll = ui.add_scroll_view(padding).map_err(io::Error::other)?;
+        ui.set_layout(
+            scroll,
+            LayoutStyle {
+                grow: 1.0,
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        let column = ui.add_column(scroll).map_err(io::Error::other)?;
         ui.add_label(column, "Milestone 11 widget gallery")
             .map_err(io::Error::other)?;
         ui.add_label(
@@ -141,6 +152,71 @@ impl Gallery {
         .map_err(io::Error::other)?;
         let status = ui
             .add_label(column, "No drop yet. Escape cancels an active drag.")
+            .map_err(io::Error::other)?;
+
+        ui.add_label(column, "Horizontal split pane")
+            .map_err(io::Error::other)?;
+        let horizontal = SplitPane::new(
+            &mut ui,
+            column,
+            SplitPaneOptions {
+                ratio: 0.35,
+                first_min: 120.0,
+                second_min: 140.0,
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        horizontal
+            .set_container_layout(
+                &mut ui,
+                LayoutStyle {
+                    width: Length::Percent(1.0),
+                    height: Length::Px(150.0),
+                    ..Default::default()
+                },
+            )
+            .map_err(io::Error::other)?;
+        ui.add_label(horizontal.first(), "Navigation\nMinimum 120 px")
+            .map_err(io::Error::other)?;
+        ui.add_button(horizontal.first(), "First pane")
+            .map_err(io::Error::other)?;
+        ui.add_label(horizontal.second(), "Inspector\nMinimum 140 px")
+            .map_err(io::Error::other)?;
+        ui.add_button(horizontal.second(), "Second pane")
+            .map_err(io::Error::other)?;
+
+        ui.add_label(column, "Vertical split pane")
+            .map_err(io::Error::other)?;
+        let vertical = SplitPane::new(
+            &mut ui,
+            column,
+            SplitPaneOptions {
+                axis: SplitAxis::Vertical,
+                ratio: 0.55,
+                first_min: 60.0,
+                second_min: 60.0,
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        vertical
+            .set_container_layout(
+                &mut ui,
+                LayoutStyle {
+                    width: Length::Percent(1.0),
+                    height: Length::Px(210.0),
+                    ..Default::default()
+                },
+            )
+            .map_err(io::Error::other)?;
+        ui.add_label(vertical.first(), "Editor region")
+            .map_err(io::Error::other)?;
+        ui.add_button(vertical.first(), "Upper pane")
+            .map_err(io::Error::other)?;
+        ui.add_label(vertical.second(), "Output region")
+            .map_err(io::Error::other)?;
+        ui.add_button(vertical.second(), "Lower pane")
             .map_err(io::Error::other)?;
 
         #[cfg(target_arch = "wasm32")]
@@ -312,7 +388,7 @@ impl App for Gallery {
             .create_window(WindowAttributes {
                 title: "Astrelis widget gallery".into(),
                 #[cfg(not(target_arch = "wasm32"))]
-                inner_size: Some(Size::new(760.0, 480.0)),
+                inner_size: Some(Size::new(820.0, 720.0)),
                 ..Default::default()
             })
             .map_err(io::Error::other)?;

@@ -525,6 +525,9 @@ pub struct EventContext<'a, Message> {
     stopped: &'a mut bool,
     default_prevented: &'a mut bool,
     current_target: ElementId,
+    current_bounds: LogicalRect,
+    parent_bounds: Option<LogicalRect>,
+    modifiers: Modifiers,
     requests: &'a mut Vec<EventRequest>,
 }
 
@@ -553,6 +556,18 @@ enum EventRequest {
 }
 
 impl<Message> EventContext<'_, Message> {
+    /// Returns the current listener node's logical layout bounds.
+    pub const fn bounds(&self) -> LogicalRect {
+        self.current_bounds
+    }
+    /// Returns the current listener node's parent layout bounds.
+    pub const fn parent_bounds(&self) -> Option<LogicalRect> {
+        self.parent_bounds
+    }
+    /// Returns the modifier state current during dispatch.
+    pub const fn modifiers(&self) -> Modifiers {
+        self.modifiers
+    }
     /// Emits an application message after dispatch.
     pub fn emit(&mut self, message: Message) {
         self.messages.push_back(message);
@@ -678,6 +693,18 @@ pub trait Widget<Message>: Any {
     /// Supplies semantics for this node.
     fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
         None
+    }
+    /// Lists semantic operations supported by this custom widget.
+    fn semantic_actions(&self) -> Vec<SemanticActionKind> {
+        Vec::new()
+    }
+    /// Handles one semantic operation, returning whether it was accepted.
+    fn semantic_action(
+        &mut self,
+        _context: &mut EventContext<'_, Message>,
+        _action: &SemanticAction,
+    ) -> bool {
+        false
     }
 }
 
@@ -1077,6 +1104,8 @@ pub enum SemanticRole {
     Slider,
     /// Scrollable grouping container.
     ScrollView,
+    /// Adjustable divider between two regions.
+    Separator,
 }
 
 /// Semantic operation supported by a node.
@@ -2397,6 +2426,15 @@ impl<Message: 'static> Ui<Message> {
         stopped: &mut bool,
         default_prevented: &mut bool,
     ) {
+        let current_bounds = self
+            .node(current)
+            .map_or(LogicalRect::default(), |node| node.bounds);
+        let parent_bounds = self
+            .node(current)
+            .ok()
+            .and_then(|node| node.parent)
+            .and_then(|parent| self.node(parent).ok())
+            .map(|parent| parent.bounds);
         let event = RoutedEvent {
             target,
             current_target: current,
@@ -2409,6 +2447,9 @@ impl<Message: 'static> Ui<Message> {
                 stopped,
                 default_prevented,
                 current_target: current,
+                current_bounds,
+                parent_bounds,
+                modifiers: self.modifiers,
                 requests: &mut self.event_requests,
             };
             widget.event(&mut context, &event);
@@ -2428,6 +2469,9 @@ impl<Message: 'static> Ui<Message> {
                     stopped,
                     default_prevented,
                     current_target: current,
+                    current_bounds,
+                    parent_bounds,
+                    modifiers: self.modifiers,
                     requests: &mut self.event_requests,
                 };
                 (listener.callback)(&mut context, &event);
@@ -3576,7 +3620,13 @@ impl<Message: 'static> Ui<Message> {
                 .and_then(|widget| widget.semantics())
                 .map_or(
                     (SemanticRole::Group, String::new(), None, None, vec![]),
-                    |(role, label, value)| (role, label, value, None, vec![]),
+                    |(role, label, value)| {
+                        let actions = self
+                            .custom_widgets
+                            .get(&id)
+                            .map_or_else(Vec::new, |widget| widget.semantic_actions());
+                        (role, label, value, None, actions)
+                    },
                 ),
             _ => (SemanticRole::Group, String::new(), None, None, vec![]),
         };
@@ -3609,6 +3659,44 @@ impl<Message: 'static> Ui<Message> {
         target: ElementId,
         action: SemanticAction,
     ) -> Result<UiUpdate, UiError> {
+        if matches!(self.node(target)?.kind, Kind::Custom) {
+            let bounds = self.node(target)?.bounds;
+            let parent_bounds = self
+                .node(target)?
+                .parent
+                .and_then(|parent| self.node(parent).ok())
+                .map(|parent| parent.bounds);
+            let mut widget = self
+                .custom_widgets
+                .remove(&target)
+                .ok_or_else(|| UiError::new("custom widget state is unavailable"))?;
+            let mut stopped = false;
+            let mut default_prevented = false;
+            let handled = widget.semantic_action(
+                &mut EventContext {
+                    messages: &mut self.messages,
+                    stopped: &mut stopped,
+                    default_prevented: &mut default_prevented,
+                    current_target: target,
+                    current_bounds: bounds,
+                    parent_bounds,
+                    modifiers: self.modifiers,
+                    requests: &mut self.event_requests,
+                },
+                &action,
+            );
+            self.custom_widgets.insert(target, widget);
+            if !handled {
+                return Err(UiError::new(
+                    "semantic action is unsupported by this widget",
+                ));
+            }
+            self.apply_event_requests()?;
+            return Ok(UiUpdate {
+                redraw: self.needs_redraw(),
+                platform_state_changed: true,
+            });
+        }
         match action {
             SemanticAction::Focus => self.set_focus(Some(target))?,
             SemanticAction::Activate => {
