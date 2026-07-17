@@ -113,6 +113,7 @@ impl Compositor {
     where
         E: fmt::Display,
     {
+        astrelis_profiling::profile_scope!("compositor.render");
         let plan = list.composition_plan();
         let mut unique = HashSet::new();
         for marker in &plan.markers {

@@ -24,6 +24,7 @@ astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
 astrelis-paint-gpu = { path = "../astrelis-paint-gpu" }
 astrelis-platform-test = { path = "../astrelis-platform-test" }
 astrelis-platform-winit = { path = "../astrelis-platform-winit" }
+criterion = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 pollster = { workspace = true }
@@ -32,6 +33,10 @@ pollster = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 web-sys = { workspace = true, features = ["Document", "Element", "HtmlCanvasElement", "Window"] }
+
+[[bench]]
+name = "ui_hot_paths"
+harness = false
 
 [lints]
 workspace = true

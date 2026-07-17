@@ -11,6 +11,7 @@ repository.workspace = true
 astrelis-core = { workspace = true }
 astrelis-gpu = { workspace = true }
 astrelis-paint = { workspace = true }
+astrelis-profiling = { workspace = true }
 astrelis-paint-gpu = { path = "../astrelis-paint-gpu" }
 astrelis-render = { workspace = true }
 

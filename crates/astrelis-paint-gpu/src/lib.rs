@@ -1890,6 +1890,7 @@ fn to_lyon(path: &Path) -> LyonPath {
 }
 
 fn tessellate_fill(path: &Path, rule: FillRule, tolerance: f32) -> Result<Mesh, RenderError> {
+    astrelis_profiling::profile_scope!("paint.tessellate_fill");
     let path = to_lyon(path);
     let mut buffers: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
     FillTessellator::new()
@@ -1913,6 +1914,7 @@ fn tessellate_fill(path: &Path, rule: FillRule, tolerance: f32) -> Result<Mesh, 
 }
 
 fn tessellate_stroke(path: &Path, style: StrokeStyle, tolerance: f32) -> Result<Mesh, RenderError> {
+    astrelis_profiling::profile_scope!("paint.tessellate_stroke");
     if style.width == 0.0 {
         return Ok(Mesh {
             vertices: Vec::new(),
