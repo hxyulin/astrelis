@@ -4,10 +4,10 @@ use astrelis_core::geometry::{LogicalPoint, LogicalRect, LogicalSize, Size};
 use astrelis_paint::{Brush, Painter, StrokeStyle};
 use astrelis_platform::{CursorIcon, DeviceId, ElementState, Key, NamedKey, PointerButton};
 use astrelis_ui_core::{
-    Column, DragOperations, DragOptions, DragPayload, DropOperation, Edges, ElementHandle,
-    ElementId, EventFilter, EventPhase, Insets, LayoutStyle, Length, ListenerId, Positioning,
-    RoutedEventKind, SemanticAction, SemanticActionKind, SemanticRole, Theme, Ui, UiError,
-    Visibility, Widget, WidgetContainerStyle,
+    Column, ControlState, DragOperations, DragOptions, DragPayload, DropOperation, Edges,
+    ElementHandle, ElementId, EventFilter, EventPhase, Insets, LayoutStyle, Length, ListenerId,
+    Positioning, RoutedEventKind, SemanticAction, SemanticActionKind, SemanticRole, Theme, Ui,
+    UiError, Visibility, Widget, WidgetContainerStyle,
 };
 use astrelis_ui_widgets::{SplitAxis, SplitPane, SplitPaneOptions};
 
@@ -639,13 +639,11 @@ impl<Message: 'static> Widget<Message> for DockTab<Message> {
         bounds: LogicalRect,
         theme: &Theme,
     ) -> Result<(), UiError> {
-        let color = if self.selected || self.dragging {
-            theme.button.pressed
-        } else if self.hovered || self.pressed.is_some() {
-            theme.button.hovered
-        } else {
-            theme.button.normal
-        };
+        let color = theme.button.resolve(ControlState {
+            enabled: true,
+            hovered: self.hovered || self.pressed.is_some(),
+            pressed: self.selected || self.dragging,
+        });
         painter
             .fill_rect(bounds, Brush::Solid(color))
             .map_err(|error| UiError::from_message(error.to_string()))

@@ -5,7 +5,7 @@ use super::*;
 impl<Message: 'static> Ui<Message> {
     pub(crate) fn toggle_checkbox_id(&mut self, id: ElementId) -> Result<(), UiError> {
         let checked = {
-            let Kind::Checkbox { checked } = &mut self.node_mut(id)?.kind else {
+            let Kind::Checkbox { checked, .. } = &mut self.node_mut(id)?.kind else {
                 return Err(UiError::new("element is not a checkbox"));
             };
             *checked = !*checked;
@@ -29,6 +29,7 @@ impl<Message: 'static> Ui<Message> {
                 max,
                 step,
                 value,
+                ..
             } = &mut self.node_mut(id)?.kind
             else {
                 return Err(UiError::new("element is not a slider"));
@@ -56,6 +57,7 @@ impl<Message: 'static> Ui<Message> {
                 max,
                 step,
                 value,
+                ..
             } = &mut self.node_mut(id)?.kind
             else {
                 return Ok(());
@@ -107,6 +109,7 @@ impl<Message: 'static> Ui<Message> {
             Kind::ScrollView {
                 content_height,
                 offset,
+                ..
             } => (content_height, offset),
             _ => return Ok(()),
         };
@@ -134,6 +137,7 @@ impl<Message: 'static> Ui<Message> {
             let Kind::ScrollView {
                 offset,
                 content_height,
+                ..
             } = &mut self.node_mut(id)?.kind
             else {
                 return Err(UiError::new("element is not a scroll view"));
@@ -155,6 +159,7 @@ impl<Message: 'static> Ui<Message> {
             if let Kind::ScrollView {
                 offset,
                 content_height,
+                ..
             } = self.node(id)?.kind
             {
                 let viewport = self.node(id)?.bounds;

@@ -146,7 +146,7 @@ impl<Message: 'static> Ui<Message> {
                     SemanticActionKind::SetSelection,
                 ],
             ),
-            Kind::Checkbox { checked } => (
+            Kind::Checkbox { checked, .. } => (
                 SemanticRole::Checkbox,
                 String::new(),
                 Some(checked.to_string()),
@@ -299,6 +299,7 @@ impl<Message: 'static> Ui<Message> {
                         max,
                         step,
                         value: current,
+                        ..
                     } = &mut self.node_mut(target)?.kind
                     else {
                         return Err(UiError::new("set-value semantics require a slider"));

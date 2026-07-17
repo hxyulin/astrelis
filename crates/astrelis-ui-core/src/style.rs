@@ -14,37 +14,58 @@ pub struct WidgetStyle {
     pub background: Option<Color>,
 }
 
-/// Typed visual style for a checkbox.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Optional visual overrides for a checkbox.
+///
+/// Every field defaults to `None`, meaning "resolve from the active theme when
+/// painting." Overrides therefore stay live across `set_theme`: an unset field
+/// always tracks the current theme rather than snapshotting it at creation.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CheckboxStyle {
-    /// Box background.
-    pub background: Color,
-    /// Checked indicator.
-    pub indicator: Color,
-    /// Corner radius.
-    pub radius: f32,
+    /// Box background; unset falls back to `theme.button.normal`.
+    pub background: Option<Color>,
+    /// Checked indicator; unset falls back to `theme.accent`.
+    pub indicator: Option<Color>,
+    /// Corner radius; unset falls back to `theme.corner_radius`.
+    pub radius: Option<f32>,
 }
 
-/// Typed visual style for a horizontal slider.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Optional visual overrides for a horizontal slider.
+///
+/// Unset fields resolve from the active theme at paint time; see
+/// [`CheckboxStyle`] for the rationale.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SliderStyle {
-    /// Track color.
-    pub track: Color,
-    /// Thumb color.
-    pub thumb: Color,
-    /// Thumb diameter.
-    pub thumb_size: f32,
+    /// Track color; unset falls back to `theme.button.normal`.
+    pub track: Option<Color>,
+    /// Thumb color; unset falls back to `theme.accent`.
+    pub thumb: Option<Color>,
+    /// Thumb diameter; unset falls back to the built-in default.
+    pub thumb_size: Option<f32>,
 }
 
-/// Typed visual style for a vertical scroll view.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// Optional visual overrides for a vertical scroll view.
+///
+/// Unset fields resolve from the active theme at paint time; see
+/// [`CheckboxStyle`] for the rationale.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ScrollViewStyle {
-    /// Scrollbar track color.
-    pub track: Color,
-    /// Scrollbar thumb color.
-    pub thumb: Color,
-    /// Scrollbar width.
-    pub width: f32,
+    /// Scrollbar track color; unset falls back to `theme.button.normal`.
+    pub track: Option<Color>,
+    /// Scrollbar thumb color; unset falls back to `theme.accent`.
+    pub thumb: Option<Color>,
+    /// Scrollbar width; unset falls back to the built-in default.
+    pub width: Option<f32>,
+}
+
+/// Interaction state of a control, used to resolve state-dependent colors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ControlState {
+    /// Whether the control accepts input.
+    pub enabled: bool,
+    /// Whether the pointer is over the control.
+    pub hovered: bool,
+    /// Whether the control is actively pressed.
+    pub pressed: bool,
 }
 
 /// Visual state colors for an interactive control.
@@ -58,6 +79,26 @@ pub struct ControlColors {
     pub pressed: Color,
     /// Disabled background.
     pub disabled: Color,
+}
+
+impl ControlColors {
+    /// Selects the background color for a given interaction state.
+    ///
+    /// Precedence is disabled, then pressed, then hovered, then normal. This is
+    /// the single resolution path shared by every built-in control and by
+    /// application widgets (such as docking tabs) that map their own states
+    /// onto a [`ControlState`].
+    pub fn resolve(&self, state: ControlState) -> Color {
+        if !state.enabled {
+            self.disabled
+        } else if state.pressed {
+            self.pressed
+        } else if state.hovered {
+            self.hovered
+        } else {
+            self.normal
+        }
+    }
 }
 
 /// Typed visual tokens used by the built-in widgets.

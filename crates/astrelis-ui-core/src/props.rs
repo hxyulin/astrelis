@@ -57,9 +57,6 @@ impl<Message: 'static> Ui<Message> {
         }
         self.capture.retain(|_, captured| *captured != id);
         self.listeners.remove(&id);
-        self.checkbox_styles.remove(&id);
-        self.slider_styles.remove(&id);
-        self.scroll_styles.remove(&id);
         self.semantic_roles.remove(&id);
         if let Some(mut widget) = self.custom_widgets.remove(&id) {
             widget.unmounted();
@@ -346,7 +343,7 @@ impl<Message: 'static> Ui<Message> {
     /// Returns a checkbox's retained value.
     pub fn checked(&self, handle: ElementHandle<Checkbox>) -> Result<bool, UiError> {
         match self.node(handle.id)?.kind {
-            Kind::Checkbox { checked } => Ok(checked),
+            Kind::Checkbox { checked, .. } => Ok(checked),
             _ => Err(UiError::new("handle has the wrong widget type")),
         }
     }
@@ -357,7 +354,10 @@ impl<Message: 'static> Ui<Message> {
         handle: ElementHandle<Checkbox>,
         checked: bool,
     ) -> Result<(), UiError> {
-        let Kind::Checkbox { checked: current } = &mut self.node_mut(handle.id)?.kind else {
+        let Kind::Checkbox {
+            checked: current, ..
+        } = &mut self.node_mut(handle.id)?.kind
+        else {
             return Err(UiError::new("handle has the wrong widget type"));
         };
         if *current != checked {
@@ -386,6 +386,7 @@ impl<Message: 'static> Ui<Message> {
             max,
             step,
             value: current,
+            ..
         } = &mut self.node_mut(handle.id)?.kind
         else {
             return Err(UiError::new("handle has the wrong widget type"));
@@ -441,38 +442,53 @@ impl<Message: 'static> Ui<Message> {
         Ok(())
     }
 
-    /// Replaces a checkbox's typed visual style.
+    /// Replaces a checkbox's visual overrides.
+    ///
+    /// Unset (`None`) fields continue to track the active theme; see
+    /// [`CheckboxStyle`].
     pub fn set_checkbox_style(
         &mut self,
         handle: ElementHandle<Checkbox>,
         style: CheckboxStyle,
     ) -> Result<(), UiError> {
-        self.node(handle.id)?;
-        self.checkbox_styles.insert(handle.id, style);
+        match &mut self.node_mut(handle.id)?.kind {
+            Kind::Checkbox { style: current, .. } => *current = style,
+            _ => return Err(UiError::new("element is not a checkbox")),
+        }
         self.dirty |= Dirty::PAINT;
         Ok(())
     }
 
-    /// Replaces a slider's typed visual style.
+    /// Replaces a slider's visual overrides.
+    ///
+    /// Unset (`None`) fields continue to track the active theme; see
+    /// [`SliderStyle`].
     pub fn set_slider_style(
         &mut self,
         handle: ElementHandle<Slider>,
         style: SliderStyle,
     ) -> Result<(), UiError> {
-        self.node(handle.id)?;
-        self.slider_styles.insert(handle.id, style);
+        match &mut self.node_mut(handle.id)?.kind {
+            Kind::Slider { style: current, .. } => *current = style,
+            _ => return Err(UiError::new("element is not a slider")),
+        }
         self.dirty |= Dirty::PAINT;
         Ok(())
     }
 
-    /// Replaces a scroll view's typed visual style.
+    /// Replaces a scroll view's visual overrides.
+    ///
+    /// Unset (`None`) fields continue to track the active theme; see
+    /// [`ScrollViewStyle`].
     pub fn set_scroll_view_style(
         &mut self,
         handle: ElementHandle<ScrollView>,
         style: ScrollViewStyle,
     ) -> Result<(), UiError> {
-        self.node(handle.id)?;
-        self.scroll_styles.insert(handle.id, style);
+        match &mut self.node_mut(handle.id)?.kind {
+            Kind::ScrollView { style: current, .. } => *current = style,
+            _ => return Err(UiError::new("element is not a scroll view")),
+        }
         self.dirty |= Dirty::PAINT;
         Ok(())
     }

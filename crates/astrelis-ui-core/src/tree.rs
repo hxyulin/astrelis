@@ -95,16 +95,19 @@ pub(crate) enum Kind {
     TextField(TextFieldState),
     Checkbox {
         checked: bool,
+        style: CheckboxStyle,
     },
     Slider {
         min: f32,
         max: f32,
         step: f32,
         value: f32,
+        style: SliderStyle,
     },
     ScrollView {
         offset: f32,
         content_height: f32,
+        style: ScrollViewStyle,
     },
     Custom,
 }
@@ -235,9 +238,6 @@ impl<Message: 'static> Ui<Message> {
             listeners: HashMap::new(),
             next_listener: 1,
             custom_widgets: HashMap::new(),
-            checkbox_styles: HashMap::new(),
-            slider_styles: HashMap::new(),
-            scroll_styles: HashMap::new(),
             semantic_roles: HashMap::new(),
             event_requests: Vec::new(),
             drag_sessions: HashMap::new(),
@@ -380,16 +380,13 @@ impl<Message: 'static> Ui<Message> {
         parent: ElementHandle<T>,
         checked: bool,
     ) -> Result<ElementHandle<Checkbox>, UiError> {
-        let handle = self.insert(parent.id, Kind::Checkbox { checked })?;
-        self.checkbox_styles.insert(
-            handle.id,
-            CheckboxStyle {
-                background: self.theme.button.normal,
-                indicator: self.theme.accent,
-                radius: self.theme.corner_radius,
+        self.insert(
+            parent.id,
+            Kind::Checkbox {
+                checked,
+                style: CheckboxStyle::default(),
             },
-        );
-        Ok(handle)
+        )
     }
 
     /// Adds a retained horizontal slider.
@@ -407,24 +404,16 @@ impl<Message: 'static> Ui<Message> {
             ));
         }
         let value = snap_slider(value, min, max, step);
-        let handle = self.insert(
+        self.insert(
             parent.id,
             Kind::Slider {
                 min,
                 max,
                 step,
                 value,
+                style: SliderStyle::default(),
             },
-        )?;
-        self.slider_styles.insert(
-            handle.id,
-            SliderStyle {
-                track: self.theme.button.normal,
-                thumb: self.theme.accent,
-                thumb_size: 16.0,
-            },
-        );
-        Ok(handle)
+        )
     }
 
     /// Adds a vertically scrolling retained container.
@@ -432,22 +421,14 @@ impl<Message: 'static> Ui<Message> {
         &mut self,
         parent: ElementHandle<T>,
     ) -> Result<ElementHandle<ScrollView>, UiError> {
-        let handle = self.insert(
+        self.insert(
             parent.id,
             Kind::ScrollView {
                 offset: 0.0,
                 content_height: 0.0,
+                style: ScrollViewStyle::default(),
             },
-        )?;
-        self.scroll_styles.insert(
-            handle.id,
-            ScrollViewStyle {
-                track: self.theme.button.normal,
-                thumb: self.theme.accent,
-                width: 8.0,
-            },
-        );
-        Ok(handle)
+        )
     }
 
     /// Adds an application-defined retained widget.

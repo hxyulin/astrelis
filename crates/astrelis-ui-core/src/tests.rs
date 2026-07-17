@@ -906,3 +906,94 @@ fn hover_paths_route_enter_leave_and_retarget_after_layout() {
     assert_eq!(&*transitions.lock().unwrap(), &["enter", "leave"]);
     assert!(!ui.is_hovered(parent).unwrap());
 }
+
+#[test]
+fn set_theme_restyles_existing_typed_controls() {
+    use astrelis_paint::Command;
+
+    // The checkbox box is the only filled rounded rect in this tree, so its
+    // brush color is an unambiguous probe for the resolved background.
+    fn checkbox_fill(list: &DisplayList) -> Color {
+        for command in list.commands() {
+            if let Command::FillRoundedRect {
+                brush: Brush::Solid(color),
+                ..
+            } = command
+            {
+                return *color;
+            }
+        }
+        panic!("expected a filled checkbox box in the display list");
+    }
+
+    let mut ui = ui();
+    let root = ui.root();
+    ui.add_checkbox(root, false).unwrap();
+
+    let base = Theme::default();
+    assert_eq!(
+        checkbox_fill(&ui.display_list().unwrap()),
+        base.button.normal
+    );
+
+    // Regression: typed styles used to snapshot theme colors at creation, so
+    // set_theme left already-created checkboxes stale. Resolving at paint time
+    // means an unset override tracks the live theme.
+    let restyled = Theme {
+        button: ControlColors {
+            normal: Color::new(0.9, 0.1, 0.1, 1.0),
+            ..base.button
+        },
+        ..Theme::default()
+    };
+    ui.set_theme(restyled);
+
+    assert_eq!(
+        checkbox_fill(&ui.display_list().unwrap()),
+        Color::new(0.9, 0.1, 0.1, 1.0),
+        "set_theme must restyle an existing checkbox, not keep a snapshot"
+    );
+}
+
+#[test]
+fn checkbox_override_wins_over_theme() {
+    use astrelis_paint::Command;
+
+    fn checkbox_fill(list: &DisplayList) -> Color {
+        for command in list.commands() {
+            if let Command::FillRoundedRect {
+                brush: Brush::Solid(color),
+                ..
+            } = command
+            {
+                return *color;
+            }
+        }
+        panic!("expected a filled checkbox box in the display list");
+    }
+
+    let mut ui = ui();
+    let root = ui.root();
+    let checkbox = ui.add_checkbox(root, false).unwrap();
+    let override_color = Color::new(0.2, 0.8, 0.4, 1.0);
+    ui.set_checkbox_style(
+        checkbox,
+        CheckboxStyle {
+            background: Some(override_color),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // An explicit override is honored, and it survives a theme change because
+    // only the unset fields fall back to the theme.
+    assert_eq!(checkbox_fill(&ui.display_list().unwrap()), override_color);
+    ui.set_theme(Theme {
+        button: ControlColors {
+            normal: Color::new(0.9, 0.1, 0.1, 1.0),
+            ..Theme::default().button
+        },
+        ..Theme::default()
+    });
+    assert_eq!(checkbox_fill(&ui.display_list().unwrap()), override_color);
+}

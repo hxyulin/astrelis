@@ -652,6 +652,7 @@ impl<Message: 'static> Ui<Message> {
             if let Kind::ScrollView {
                 content_height: current,
                 offset,
+                ..
             } = &mut self.node_mut(id)?.kind
             {
                 *current = content_height;

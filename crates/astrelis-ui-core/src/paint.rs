@@ -96,15 +96,11 @@ impl<Message: 'static> Ui<Message> {
                     .map_err(|error| UiError::new(error.to_string()))?;
             }
             Kind::Button { .. } => {
-                let color = if !node.enabled {
-                    self.theme.button.disabled
-                } else if node.pressed {
-                    self.theme.button.pressed
-                } else if node.hovered {
-                    self.theme.button.hovered
-                } else {
-                    self.theme.button.normal
-                };
+                let color = self.theme.button.resolve(ControlState {
+                    enabled: node.enabled,
+                    hovered: node.hovered,
+                    pressed: node.pressed,
+                });
                 self.fill_control(
                     painter,
                     node.bounds,
@@ -120,13 +116,20 @@ impl<Message: 'static> Ui<Message> {
                         .unwrap_or(self.theme.field_background),
                 )?;
             }
-            Kind::Checkbox { checked } => {
-                let style = self.checkbox_styles[&id];
-                self.fill_control(
-                    painter,
-                    node.bounds,
-                    node.visual.background.unwrap_or(style.background),
-                )?;
+            Kind::Checkbox { checked, style } => {
+                let background = node
+                    .visual
+                    .background
+                    .or(style.background)
+                    .unwrap_or(self.theme.button.normal);
+                let radius = style.radius.unwrap_or(self.theme.corner_radius).max(0.0);
+                painter
+                    .fill_rounded_rect(
+                        RoundedRect::new(node.bounds, CornerRadii::uniform(radius))
+                            .map_err(|error| UiError::new(error.to_string()))?,
+                        Brush::Solid(background),
+                    )
+                    .map_err(|error| UiError::new(error.to_string()))?;
                 if *checked {
                     let inset = 6.0;
                     painter
@@ -141,15 +144,21 @@ impl<Message: 'static> Ui<Message> {
                                 CornerRadii::uniform(3.0),
                             )
                             .map_err(|error| UiError::new(error.to_string()))?,
-                            Brush::Solid(style.indicator),
+                            Brush::Solid(style.indicator.unwrap_or(self.theme.accent)),
                         )
                         .map_err(|error| UiError::new(error.to_string()))?;
                 }
             }
             Kind::Slider {
-                min, max, value, ..
+                min,
+                max,
+                value,
+                style,
+                ..
             } => {
-                let style = self.slider_styles[&id];
+                let track_color = style.track.unwrap_or(self.theme.button.normal);
+                let thumb_color = style.thumb.unwrap_or(self.theme.accent);
+                let thumb_size = style.thumb_size.unwrap_or(16.0);
                 let center_y = node.bounds.origin.y + node.bounds.size.height * 0.5;
                 let track = Rect::from_xywh(
                     node.bounds.origin.x,
@@ -161,18 +170,18 @@ impl<Message: 'static> Ui<Message> {
                     .fill_rounded_rect(
                         RoundedRect::new(track, CornerRadii::uniform(2.0))
                             .map_err(|error| UiError::new(error.to_string()))?,
-                        Brush::Solid(style.track),
+                        Brush::Solid(track_color),
                     )
                     .map_err(|error| UiError::new(error.to_string()))?;
                 let t = (*value - *min) / (*max - *min);
                 let thumb = Rect::from_xywh(
-                    node.bounds.origin.x + t * node.bounds.size.width - style.thumb_size * 0.5,
-                    center_y - style.thumb_size * 0.5,
-                    style.thumb_size,
-                    style.thumb_size,
+                    node.bounds.origin.x + t * node.bounds.size.width - thumb_size * 0.5,
+                    center_y - thumb_size * 0.5,
+                    thumb_size,
+                    thumb_size,
                 );
                 painter
-                    .fill_ellipse(thumb, Brush::Solid(style.thumb))
+                    .fill_ellipse(thumb, Brush::Solid(thumb_color))
                     .map_err(|error| UiError::new(error.to_string()))?;
                 painter
                     .stroke_ellipse(
@@ -337,11 +346,13 @@ impl<Message: 'static> Ui<Message> {
             if let Kind::ScrollView {
                 offset,
                 content_height,
+                style,
             } = &node.kind
                 && *content_height > node.bounds.size.height + f32::EPSILON
             {
-                let style = self.scroll_styles[&id];
-                let width = style.width.max(1.0);
+                let track_color = style.track.unwrap_or(self.theme.button.normal);
+                let thumb_color = style.thumb.unwrap_or(self.theme.accent);
+                let width = style.width.unwrap_or(8.0).max(1.0);
                 let track = Rect::from_xywh(
                     node.bounds.max_x() - width,
                     node.bounds.origin.y,
@@ -352,7 +363,7 @@ impl<Message: 'static> Ui<Message> {
                     .fill_rounded_rect(
                         RoundedRect::new(track, CornerRadii::uniform(width * 0.5))
                             .map_err(|error| UiError::new(error.to_string()))?,
-                        Brush::Solid(style.track),
+                        Brush::Solid(track_color),
                     )
                     .map_err(|error| UiError::new(error.to_string()))?;
                 let thumb_height = (node.bounds.size.height * node.bounds.size.height
@@ -371,7 +382,7 @@ impl<Message: 'static> Ui<Message> {
                     .fill_rounded_rect(
                         RoundedRect::new(thumb, CornerRadii::uniform(width * 0.5))
                             .map_err(|error| UiError::new(error.to_string()))?,
-                        Brush::Solid(style.thumb),
+                        Brush::Solid(thumb_color),
                     )
                     .map_err(|error| UiError::new(error.to_string()))?;
             }
