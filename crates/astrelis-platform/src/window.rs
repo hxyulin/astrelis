@@ -74,6 +74,10 @@ pub enum CursorIcon {
     EwResize,
     /// Vertical resize.
     NsResize,
+    /// Resize along the north-west to south-east diagonal.
+    NwseResize,
+    /// Resize along the north-east to south-west diagonal.
+    NeswResize,
     /// Hidden or invalid action.
     NotAllowed,
 }

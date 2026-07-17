@@ -16,6 +16,7 @@ use astrelis_ui_core::{
 
 type PayloadAcceptance = dyn Fn(&DragPayload) -> bool;
 type DropMessage<Message> = dyn Fn(&DragPayload, DropOperation) -> Message;
+type RatioChangeMessage<Message> = dyn Fn(f32) -> Message;
 
 mod composites;
 mod render_view;
@@ -236,23 +237,44 @@ impl SplitContainer {
 }
 
 /// Controller and content handles for one resizable split pane.
-pub struct SplitPane {
+pub struct SplitPane<Message = ()> {
     container: SplitContainer,
     first: ElementHandle<Column>,
     second: ElementHandle<Column>,
-    divider: ElementHandle<Splitter>,
+    divider: ElementHandle<Splitter<Message>>,
     ratio: Rc<Cell<f32>>,
 }
 
-impl SplitPane {
+impl<Message: 'static> SplitPane<Message> {
     /// Builds a split pane beneath `parent`.
-    pub fn new<Message: 'static, T>(
+    pub fn new<T>(
         ui: &mut Ui<Message>,
         parent: ElementHandle<T>,
         options: SplitPaneOptions,
     ) -> Result<Self, UiError> {
+        Self::new_inner(ui, parent, options, None)
+    }
+
+    /// Builds a split pane which emits a typed message whenever an interactive
+    /// pointer, keyboard, or semantic operation changes its ratio.
+    pub fn new_with_on_change<T>(
+        ui: &mut Ui<Message>,
+        parent: ElementHandle<T>,
+        options: SplitPaneOptions,
+        on_change: impl Fn(f32) -> Message + 'static,
+    ) -> Result<Self, UiError> {
+        Self::new_inner(ui, parent, options, Some(Box::new(on_change)))
+    }
+
+    fn new_inner<T>(
+        ui: &mut Ui<Message>,
+        parent: ElementHandle<T>,
+        options: SplitPaneOptions,
+        on_change: Option<Box<RatioChangeMessage<Message>>>,
+    ) -> Result<Self, UiError> {
         validate_split_options(options)?;
         let ratio = Rc::new(Cell::new(options.ratio.clamp(0.0, 1.0)));
+        let mut on_change = on_change;
         let (container, first, second, divider) = match options.axis {
             SplitAxis::Horizontal => {
                 let container = ui.add_row(parent)?;
@@ -264,8 +286,10 @@ impl SplitPane {
                     },
                 )?;
                 let first = ui.add_column(container)?;
-                let divider =
-                    ui.add_widget(container, Splitter::new(first, options, ratio.clone()))?;
+                let divider = ui.add_widget(
+                    container,
+                    Splitter::new(first, options, ratio.clone(), on_change.take()),
+                )?;
                 let second = ui.add_column(container)?;
                 ui.update_widget(divider, |splitter| splitter.second = Some(second))?;
                 (SplitContainer::Row(container), first, second, divider)
@@ -280,8 +304,10 @@ impl SplitPane {
                     },
                 )?;
                 let first = ui.add_column(container)?;
-                let divider =
-                    ui.add_widget(container, Splitter::new(first, options, ratio.clone()))?;
+                let divider = ui.add_widget(
+                    container,
+                    Splitter::new(first, options, ratio.clone(), on_change.take()),
+                )?;
                 let second = ui.add_column(container)?;
                 ui.update_widget(divider, |splitter| splitter.second = Some(second))?;
                 (SplitContainer::Column(container), first, second, divider)
@@ -303,7 +329,7 @@ impl SplitPane {
     }
 
     /// Changes the outer split container's layout constraints.
-    pub fn set_container_layout<Message: 'static>(
+    pub fn set_container_layout(
         &self,
         ui: &mut Ui<Message>,
         layout: LayoutStyle,
@@ -325,7 +351,7 @@ impl SplitPane {
     }
 
     /// Returns the interactive divider.
-    pub const fn divider(&self) -> ElementHandle<Splitter> {
+    pub const fn divider(&self) -> ElementHandle<Splitter<Message>> {
         self.divider
     }
 
@@ -335,11 +361,7 @@ impl SplitPane {
     }
 
     /// Changes the split fraction and immediately updates both regions.
-    pub fn set_ratio<Message: 'static>(
-        &self,
-        ui: &mut Ui<Message>,
-        ratio: f32,
-    ) -> Result<(), UiError> {
+    pub fn set_ratio(&self, ui: &mut Ui<Message>, ratio: f32) -> Result<(), UiError> {
         ui.update_widget(self.divider, |splitter| splitter.set_ratio(ratio))?;
         let options = ui.widget(self.divider)?.options;
         apply_split_layout(
@@ -412,7 +434,7 @@ fn apply_split_layout<Message: 'static>(
     ui: &mut Ui<Message>,
     first: ElementHandle<Column>,
     second: ElementHandle<Column>,
-    divider: ElementHandle<Splitter>,
+    divider: ElementHandle<Splitter<Message>>,
     options: SplitPaneOptions,
     ratio: f32,
 ) -> Result<(), UiError> {
@@ -425,7 +447,7 @@ fn apply_split_layout<Message: 'static>(
 }
 
 /// Interactive separator used by [`SplitPane`].
-pub struct Splitter {
+pub struct Splitter<Message = ()> {
     first: ElementHandle<Column>,
     second: Option<ElementHandle<Column>>,
     options: SplitPaneOptions,
@@ -433,10 +455,16 @@ pub struct Splitter {
     drag: Option<(DeviceId, f32, f32)>,
     hovered: bool,
     focused: bool,
+    on_change: Option<Box<RatioChangeMessage<Message>>>,
 }
 
-impl Splitter {
-    fn new(first: ElementHandle<Column>, options: SplitPaneOptions, ratio: Rc<Cell<f32>>) -> Self {
+impl<Message> Splitter<Message> {
+    fn new(
+        first: ElementHandle<Column>,
+        options: SplitPaneOptions,
+        ratio: Rc<Cell<f32>>,
+        on_change: Option<Box<RatioChangeMessage<Message>>>,
+    ) -> Self {
         Self {
             first,
             second: None,
@@ -445,6 +473,7 @@ impl Splitter {
             drag: None,
             hovered: false,
             focused: false,
+            on_change,
         }
     }
 
@@ -466,7 +495,7 @@ impl Splitter {
         }
     }
 
-    fn update_layout<Message>(&self, context: &mut astrelis_ui_core::EventContext<'_, Message>) {
+    fn update_layout(&self, context: &mut astrelis_ui_core::EventContext<'_, Message>) {
         let Some(second) = self.second else {
             return;
         };
@@ -482,7 +511,13 @@ impl Splitter {
         context.request_paint();
     }
 
-    fn parent_extent<Message>(
+    fn emit_change(&self, context: &mut astrelis_ui_core::EventContext<'_, Message>) {
+        if let Some(on_change) = &self.on_change {
+            context.emit(on_change(self.ratio.get()));
+        }
+    }
+
+    fn parent_extent(
         context: &astrelis_ui_core::EventContext<'_, Message>,
         axis: SplitAxis,
     ) -> f32 {
@@ -493,7 +528,7 @@ impl Splitter {
     }
 }
 
-impl<Message: 'static> Widget<Message> for Splitter {
+impl<Message: 'static> Widget<Message> for Splitter<Message> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -550,6 +585,7 @@ impl<Message: 'static> Widget<Message> for Splitter {
                 self.ratio
                     .set(self.legal_ratio(start_ratio + (coordinate - start) / available, extent));
                 self.update_layout(context);
+                self.emit_change(context);
             }
             RoutedEventKind::PointerButton {
                 device_id,
@@ -594,6 +630,7 @@ impl<Message: 'static> Widget<Message> for Splitter {
                 };
                 self.ratio.set(self.legal_ratio(next, extent));
                 self.update_layout(context);
+                self.emit_change(context);
                 context.prevent_default();
             }
             _ => {}
@@ -677,6 +714,7 @@ impl<Message: 'static> Widget<Message> for Splitter {
                 let extent = Self::parent_extent(context, self.options.axis);
                 self.ratio.set(self.legal_ratio(*value, extent));
                 self.update_layout(context);
+                self.emit_change(context);
                 true
             }
             _ => false,
@@ -775,5 +813,32 @@ mod tests {
         ui.display_list().unwrap();
         assert!(ui.layout_bounds(split.first()).unwrap().size.height > 90.0);
         assert!(ui.layout_bounds(split.second()).unwrap().size.height > 110.0);
+    }
+
+    #[test]
+    fn split_pane_emits_ratio_changes_from_semantic_resizing() {
+        let mut ui: Ui<f32> = Ui::new(FontDatabase::default(), Theme::default());
+        ui.set_viewport(Size::new(500.0, 300.0), 1.0);
+        let root = ui.root();
+        let split =
+            SplitPane::new_with_on_change(&mut ui, root, SplitPaneOptions::default(), |ratio| {
+                ratio
+            })
+            .unwrap();
+        split
+            .set_container_layout(
+                &mut ui,
+                LayoutStyle {
+                    width: Length::Px(400.0),
+                    height: Length::Px(200.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        ui.display_list().unwrap();
+        ui.perform_semantic_action(split.divider().id(), SemanticAction::SetValue(0.7))
+            .unwrap();
+        let messages = ui.drain_messages().collect::<Vec<_>>();
+        assert_eq!(messages, vec![split.ratio()]);
     }
 }

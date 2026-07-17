@@ -631,6 +631,11 @@ impl<Message> EventContext<'_, Message> {
         self.requests
             .push(EventRequest::SetLayout(handle.id, style));
     }
+    /// Defers a layout-style change for the listener's current node.
+    pub fn set_current_layout(&mut self, style: LayoutStyle) {
+        self.requests
+            .push(EventRequest::SetLayout(self.current_target, style));
+    }
     /// Defers a visibility change until routed dispatch completes.
     pub fn set_visibility<T>(&mut self, handle: ElementHandle<T>, visibility: Visibility) {
         self.requests
@@ -671,6 +676,25 @@ impl<Message> EventContext<'_, Message> {
     }
 }
 
+/// Child-layout defaults supplied by an application-defined widget.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WidgetContainerStyle {
+    /// Padding applied inside the custom widget.
+    pub padding: Insets,
+    /// Gap inserted between retained children.
+    pub gap: f32,
+}
+
+impl WidgetContainerStyle {
+    /// Creates a structural container without implicit padding or gaps.
+    pub const fn structural() -> Self {
+        Self {
+            padding: Insets::all(0.0),
+            gap: 0.0,
+        }
+    }
+}
+
 /// Lifecycle implemented by application-defined retained widgets.
 ///
 /// Custom widgets are retained as ordinary tree nodes. Their children use the
@@ -691,6 +715,13 @@ pub trait Widget<Message>: Any {
     /// Returns the widget's intrinsic leaf size before Taffy constraints.
     fn intrinsic_size(&self, _theme: &Theme) -> LogicalSize {
         Size::ZERO
+    }
+    /// Supplies padding and child gaps for this custom container.
+    fn container_style(&self, theme: &Theme) -> WidgetContainerStyle {
+        WidgetContainerStyle {
+            padding: theme.control_padding,
+            gap: theme.gap,
+        }
     }
     /// Observes normalized events at each phase along this node's route.
     fn event(&mut self, _context: &mut EventContext<'_, Message>, _event: &RoutedEvent) {}
@@ -2764,7 +2795,7 @@ impl<Message: 'static> Ui<Message> {
         Ok(())
     }
 
-    fn taffy_style(&self, node: &Node) -> Style {
+    fn taffy_style(&self, id: ElementId, node: &Node) -> Style {
         let dimension = |value: Length| match value {
             Length::Auto => Dimension::auto(),
             Length::Px(value) => Dimension::length(value.max(0.0)),
@@ -2896,13 +2927,19 @@ impl<Message: 'static> Ui<Message> {
                 }
             }
             Kind::Custom => {
+                let container = self.custom_widgets.get(&id).map_or(
+                    WidgetContainerStyle {
+                        padding: self.theme.control_padding,
+                        gap: self.theme.gap,
+                    },
+                    |widget| widget.container_style(&self.theme),
+                );
                 style.flex_direction = FlexDirection::Column;
-                style.gap.height = LengthPercentage::length(self.theme.gap);
-                let insets = self.theme.control_padding;
-                style.padding.left = LengthPercentage::length(insets.left);
-                style.padding.top = LengthPercentage::length(insets.top);
-                style.padding.right = LengthPercentage::length(insets.right);
-                style.padding.bottom = LengthPercentage::length(insets.bottom);
+                style.gap.height = LengthPercentage::length(container.gap.max(0.0));
+                style.padding.left = LengthPercentage::length(container.padding.left.max(0.0));
+                style.padding.top = LengthPercentage::length(container.padding.top.max(0.0));
+                style.padding.right = LengthPercentage::length(container.padding.right.max(0.0));
+                style.padding.bottom = LengthPercentage::length(container.padding.bottom.max(0.0));
             }
             Kind::Label { .. } => {}
         }
@@ -2939,7 +2976,7 @@ impl<Message: 'static> Ui<Message> {
             .iter()
             .map(|child| self.build_taffy(tree, *child, mapping))
             .collect::<Result<Vec<_>, _>>()?;
-        let style = self.taffy_style(node);
+        let style = self.taffy_style(id, node);
         let taffy_id = if children.is_empty() {
             tree.new_leaf_with_context(style, id)
         } else {
@@ -5604,6 +5641,77 @@ mod tests {
         assert_eq!(ui.semantic_tree().unwrap().children[0].label, "Compound");
         ui.remove(widget).unwrap();
         assert!(*flag.lock().unwrap());
+    }
+
+    struct StructuralSelfLayout;
+
+    impl Widget<TestMessage> for StructuralSelfLayout {
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn mounted(&mut self, context: &mut MountContext<'_, TestMessage>) -> Result<(), UiError> {
+            context.add_label("Structural child")?;
+            Ok(())
+        }
+
+        fn container_style(&self, _theme: &Theme) -> WidgetContainerStyle {
+            WidgetContainerStyle::structural()
+        }
+
+        fn event(&mut self, context: &mut EventContext<'_, TestMessage>, event: &RoutedEvent) {
+            if matches!(event.kind, RoutedEventKind::PointerMoved { .. }) {
+                context.set_current_layout(LayoutStyle {
+                    width: Length::Px(220.0),
+                    height: Length::Px(80.0),
+                    ..Default::default()
+                });
+            }
+        }
+
+        fn hit_testable(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn structural_widgets_can_update_their_own_layout_without_implicit_insets() {
+        let mut ui = Ui::<TestMessage>::new(FontDatabase::default(), Theme::default());
+        ui.set_viewport(Size::new(500.0, 300.0), 1.0);
+        let root = ui.root();
+        let widget = ui.add_widget(root, StructuralSelfLayout).unwrap();
+        ui.set_layout(
+            widget,
+            LayoutStyle {
+                width: Length::Px(100.0),
+                height: Length::Px(40.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let child = ElementHandle::<Label> {
+            id: ui.node(widget.id()).unwrap().children[0],
+            marker: PhantomData,
+        };
+        ui.display_list().unwrap();
+        let before = ui.layout_bounds(widget).unwrap();
+        let child_bounds = ui.layout_bounds(child).unwrap();
+        assert_eq!(child_bounds.origin, before.origin);
+
+        ui.dispatch_routed(
+            widget.id(),
+            RoutedEventKind::PointerMoved {
+                device_id: DeviceId(1),
+                position: Point::new(10.0, 10.0),
+            },
+        )
+        .unwrap();
+        ui.display_list().unwrap();
+        assert_eq!(ui.layout_bounds(widget).unwrap().size.width, 220.0);
     }
 
     #[test]

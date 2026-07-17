@@ -16,6 +16,10 @@ workspace contains:
 - `astrelis-profiling`: dependency-free CPU/GPU timeline profiling.
 - `astrelis-ui-core`: extensible retained widgets, Taffy layout, typed messages,
   capture/target/bubble input, semantics, controls, and display-list generation.
+- `astrelis-ui-widgets`: reusable drag/drop, split, navigation, virtualization,
+  and texture-backed render-view compositions.
+- `astrelis-ui-docking`: serializable editor docking trees, retained panel
+  hosts, tab/split drop policy, and in-window floating groups.
 
 Painting, text, and the first retained UI vertical slice are available as
 separately testable layers above the shared application runtime. The Painter

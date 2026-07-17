@@ -304,6 +304,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-ui-docking"
+version = "0.0.0"
+dependencies = [
+ "astrelis-app",
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-gpu-wgpu",
+ "astrelis-paint",
+ "astrelis-paint-gpu",
+ "astrelis-platform",
+ "astrelis-platform-winit",
+ "astrelis-text",
+ "astrelis-ui-core",
+ "astrelis-ui-widgets",
+ "pollster",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "astrelis-ui-widgets"
 version = "0.0.0"
 dependencies = [

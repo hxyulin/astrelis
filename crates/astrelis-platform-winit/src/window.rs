@@ -262,7 +262,26 @@ fn map_cursor(value: CursorIcon) -> winit::window::CursorIcon {
         CursorIcon::Move => winit::window::CursorIcon::Move,
         CursorIcon::EwResize => winit::window::CursorIcon::EwResize,
         CursorIcon::NsResize => winit::window::CursorIcon::NsResize,
+        CursorIcon::NwseResize => winit::window::CursorIcon::NwseResize,
+        CursorIcon::NeswResize => winit::window::CursorIcon::NeswResize,
         CursorIcon::NotAllowed => winit::window::CursorIcon::NotAllowed,
         _ => winit::window::CursorIcon::Default,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagonal_resize_cursors_map_to_native_equivalents() {
+        assert_eq!(
+            map_cursor(CursorIcon::NwseResize),
+            winit::window::CursorIcon::NwseResize
+        );
+        assert_eq!(
+            map_cursor(CursorIcon::NeswResize),
+            winit::window::CursorIcon::NeswResize
+        );
     }
 }

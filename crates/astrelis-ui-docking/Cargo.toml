@@ -1,0 +1,29 @@
+[package]
+name = "astrelis-ui-docking"
+description = "Serializable editor docking workspaces for Astrelis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-paint = { workspace = true }
+astrelis-platform = { workspace = true }
+astrelis-ui-core = { workspace = true }
+astrelis-ui-widgets = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+astrelis-app = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
+astrelis-paint-gpu = { path = "../astrelis-paint-gpu" }
+astrelis-platform-winit = { path = "../astrelis-platform-winit" }
+astrelis-text = { workspace = true }
+pollster = { workspace = true }
+serde_json = "1"
+
+[lints]
+workspace = true
