@@ -557,6 +557,21 @@ impl TextureView {
         self.inner.device_id()
     }
 
+    /// Texture sample count represented by this view.
+    pub fn sample_count(&self) -> u32 {
+        self.inner.sample_count()
+    }
+
+    /// Texture dimension represented by this view.
+    pub fn dimension(&self) -> TextureDimension {
+        self.inner.dimension()
+    }
+
+    /// Pixel format represented by this view.
+    pub fn format(&self) -> TextureFormat {
+        self.inner.format()
+    }
+
     /// Borrows unstable backend storage.
     #[doc(hidden)]
     pub fn backend(&self) -> &dyn backend::TextureView {

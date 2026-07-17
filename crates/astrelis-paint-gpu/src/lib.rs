@@ -11,8 +11,9 @@ use astrelis_core::{
 };
 use astrelis_gpu as gpu;
 use astrelis_paint::{
-    Brush, Command, CornerRadii, DisplayList, FillRule, Image, ImageOptions, ImageSampling,
-    LineCap, LineJoin, LinearGradient, Path, PathVerb, RadialGradient, RoundedRect, StrokeStyle,
+    Brush, Command, CornerRadii, DisplayList, ExternalImage, FillRule, Image, ImageOptions,
+    ImageSampling, LineCap, LineJoin, LinearGradient, Path, PathVerb, RadialGradient, RoundedRect,
+    StrokeStyle,
 };
 use astrelis_text_gpu::{AtlasKind, GlyphCache, GlyphCacheOptions};
 use bytemuck::{Pod, Zeroable};
@@ -182,6 +183,12 @@ struct CachedImage {
     used: u64,
 }
 
+struct RegisteredExternalImage {
+    _view: gpu::TextureView,
+    nearest: gpu::BindGroup,
+    linear: gpu::BindGroup,
+}
+
 struct CachedGradient {
     _header: gpu::Buffer,
     _stops: gpu::Buffer,
@@ -291,6 +298,7 @@ pub struct Renderer {
     attachments: Option<Attachments>,
     meshes: HashMap<MeshKey, CachedMesh>,
     images: HashMap<u64, CachedImage>,
+    external_images: HashMap<u64, RegisteredExternalImage>,
     gradients: HashMap<u64, CachedGradient>,
     glyphs: GlyphCache,
     vertex_buffer: Option<FrameBuffer>,
@@ -299,6 +307,79 @@ pub struct Renderer {
 }
 
 impl Renderer {
+    /// Registers or replaces the texture view sampled for an external image token.
+    ///
+    /// The view must belong to this renderer's device and must be a filterable,
+    /// single-sampled two-dimensional color view matching the token's allocation.
+    pub fn register_external_image(
+        &mut self,
+        image: &ExternalImage,
+        view: gpu::TextureView,
+    ) -> Result<(), RenderError> {
+        if view.device_id() != self.device.id() {
+            return Err(RenderError::new(
+                "external image texture view belongs to a different device",
+            ));
+        }
+        if view.sample_count() != 1
+            || view.dimension() != gpu::TextureDimension::D2
+            || !matches!(
+                view.format(),
+                gpu::TextureFormat::R8Unorm
+                    | gpu::TextureFormat::Rgba8Unorm
+                    | gpu::TextureFormat::Rgba8UnormSrgb
+                    | gpu::TextureFormat::Bgra8Unorm
+                    | gpu::TextureFormat::Bgra8UnormSrgb
+            )
+        {
+            return Err(RenderError::new(
+                "external image registration is incompatible (expected a filterable, single-sampled 2D color texture view)",
+            ));
+        }
+        let nearest_sampler = self.device.create_sampler(Default::default());
+        let linear_sampler = self.device.create_sampler(gpu::SamplerDescriptor {
+            mag_filter: gpu::FilterMode::Linear,
+            min_filter: gpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let create = |sampler| {
+            self.device.create_bind_group(gpu::BindGroupDescriptor {
+                label: Some("paint external image bind group".into()),
+                layout: self.image_layout.clone(),
+                entries: vec![
+                    gpu::BindGroupEntry {
+                        binding: 0,
+                        resource: gpu::BindingResource::TextureView(view.clone()),
+                    },
+                    gpu::BindGroupEntry {
+                        binding: 1,
+                        resource: gpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            })
+        };
+        let nearest = create(nearest_sampler).map_err(|error| RenderError::new(format!(
+            "external image registration is incompatible (expected a filterable, single-sampled 2D texture view): {error}"
+        )))?;
+        let linear = create(linear_sampler).map_err(|error| RenderError::new(format!(
+            "external image registration is incompatible (expected a filterable, single-sampled 2D texture view): {error}"
+        )))?;
+        self.external_images.insert(
+            image.cache_id(),
+            RegisteredExternalImage {
+                _view: view,
+                nearest,
+                linear,
+            },
+        );
+        Ok(())
+    }
+
+    /// Removes a previously registered external image, returning whether it existed.
+    pub fn unregister_external_image(&mut self, image: &ExternalImage) -> bool {
+        self.external_images.remove(&image.cache_id()).is_some()
+    }
+
     /// Creates a renderer for one device/queue pair.
     pub fn new(
         device: gpu::Device,
@@ -371,6 +452,7 @@ impl Renderer {
             attachments: None,
             meshes: HashMap::new(),
             images: HashMap::new(),
+            external_images: HashMap::new(),
             gradients: HashMap::new(),
             glyphs,
             vertex_buffer: None,
@@ -717,6 +799,41 @@ impl Renderer {
                     size,
                     [options.opacity * state.opacity; 4],
                     Some(image_uv(image, *options)),
+                    vertices,
+                    indices,
+                    draws,
+                    DrawKind::Image(bind),
+                    state.scissor,
+                    state.clips.len() as u32,
+                    stats,
+                );
+                stats.draws += 1;
+            }
+            Command::DrawExternalImage {
+                image,
+                destination,
+                options,
+            } => {
+                if options.opacity == 0.0 {
+                    return Ok(());
+                }
+                let image = list.external_image(*image);
+                let registered = self.external_images.get(&image.cache_id()).ok_or_else(|| {
+                    RenderError::new(format!(
+                        "external image {} is not registered; call Renderer::register_external_image before rendering",
+                        image.cache_id()
+                    ))
+                })?;
+                let bind = match options.sampling {
+                    ImageSampling::Nearest => registered.nearest.clone(),
+                    ImageSampling::Linear => registered.linear.clone(),
+                };
+                append(
+                    &rect_mesh(*destination),
+                    dpi * state.transform,
+                    size,
+                    [options.opacity * state.opacity; 4],
+                    Some(image_uv_for_size(image.size(), *options)),
                     vertices,
                     indices,
                     draws,
@@ -1844,7 +1961,10 @@ fn paint_error(value: astrelis_paint::PaintError) -> RenderError {
 }
 
 fn image_uv(image: &Image, options: ImageOptions) -> [f32; 4] {
-    let size = image.size();
+    image_uv_for_size(image.size(), options)
+}
+
+fn image_uv_for_size(size: Size<Physical, u32>, options: ImageOptions) -> [f32; 4] {
     let source = options
         .source
         .unwrap_or_else(|| Rect::from_xywh(0.0, 0.0, size.width as f32, size.height as f32));

@@ -13,7 +13,7 @@ use std::{
 
 use astrelis_core::{
     color::Color,
-    geometry::{LogicalPoint, LogicalRect, LogicalSize, Point, Rect, Size},
+    geometry::{LogicalPoint, LogicalRect, LogicalSize, PhysicalRect, Point, Rect, Size},
     math::{Affine2, Vec2},
 };
 use astrelis_paint::{Brush, CornerRadii, DisplayList, Painter, RoundedRect, StrokeStyle};
@@ -526,6 +526,7 @@ pub struct EventContext<'a, Message> {
     default_prevented: &'a mut bool,
     current_target: ElementId,
     current_bounds: LogicalRect,
+    current_world_transform: Affine2,
     parent_bounds: Option<LogicalRect>,
     modifiers: Modifiers,
     route: &'a [ElementId],
@@ -560,6 +561,21 @@ impl<Message> EventContext<'_, Message> {
     /// Returns the current listener node's logical layout bounds.
     pub const fn bounds(&self) -> LogicalRect {
         self.current_bounds
+    }
+    /// Converts a logical window position into coordinates relative to this element.
+    pub fn window_to_local(&self, position: LogicalPoint) -> Option<LogicalPoint> {
+        let determinant = self.current_world_transform.matrix2.determinant();
+        if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
+            return None;
+        }
+        let point = self
+            .current_world_transform
+            .inverse()
+            .transform_point2(Vec2::new(position.x, position.y));
+        Some(Point::new(
+            point.x - self.current_bounds.origin.x,
+            point.y - self.current_bounds.origin.y,
+        ))
     }
     /// Returns the current listener node's parent layout bounds.
     pub const fn parent_bounds(&self) -> Option<LogicalRect> {
@@ -681,6 +697,10 @@ pub trait Widget<Message>: Any {
     /// Whether this node may be the target of pointer input.
     fn hit_testable(&self) -> bool {
         false
+    }
+    /// Tests the widget's custom local hit shape after layout and transforms.
+    fn hit_test(&self, point: LogicalPoint, bounds: LogicalRect) -> bool {
+        bounds.contains(point)
     }
     /// Whether this node participates in keyboard focus traversal.
     fn focusable(&self) -> bool {
@@ -1250,14 +1270,20 @@ pub struct ElementInspection {
     pub layout_bounds: LogicalRect,
     /// Axis-aligned transformed bounds.
     pub world_bounds: LogicalRect,
+    /// Axis-aligned transformed bounds in physical pixels.
+    pub physical_bounds: PhysicalRect,
     /// Effective axis-aligned clip, when present.
     pub clip: Option<LogicalRect>,
+    /// Effective clip in physical pixels.
+    pub physical_clip: Option<PhysicalRect>,
     /// Composed visual transform.
     pub world_transform: Affine2,
     /// Stable paint rank.
     pub paint_rank: usize,
     /// Local visibility.
     pub visibility: Visibility,
+    /// Whether this node and every ancestor are visible.
+    pub effectively_visible: bool,
     /// Effective enabled and visible state.
     pub interactive: bool,
     /// Whether any pointer hover path contains this node.
@@ -1275,6 +1301,8 @@ pub struct ElementInspection {
 pub struct UiInspection {
     /// Current logical viewport.
     pub viewport: LogicalSize,
+    /// Current logical-to-physical scale.
+    pub scale_factor: f32,
     /// Nodes in retained-tree order.
     pub nodes: Vec<ElementInspection>,
 }
@@ -2498,6 +2526,9 @@ impl<Message: 'static> Ui<Message> {
             .and_then(|node| node.parent)
             .and_then(|parent| self.node(parent).ok())
             .map(|parent| parent.bounds);
+        let current_world_transform = self
+            .world_transform_for(current)
+            .unwrap_or(Affine2::IDENTITY);
         let event = RoutedEvent {
             target,
             current_target: current,
@@ -2511,6 +2542,7 @@ impl<Message: 'static> Ui<Message> {
                 default_prevented: &mut control.default_prevented,
                 current_target: current,
                 current_bounds,
+                current_world_transform,
                 parent_bounds,
                 modifiers: self.modifiers,
                 route: control.route,
@@ -2534,6 +2566,7 @@ impl<Message: 'static> Ui<Message> {
                     default_prevented: &mut control.default_prevented,
                     current_target: current,
                     current_bounds,
+                    current_world_transform,
                     parent_bounds,
                     modifiers: self.modifiers,
                     route: control.route,
@@ -3229,10 +3262,16 @@ impl<Message: 'static> Ui<Message> {
                 parent: node.parent,
                 layout_bounds: node.bounds,
                 world_bounds: transformed_bounds(node.bounds, world),
+                physical_bounds: scale_rect(
+                    transformed_bounds(node.bounds, world),
+                    self.scale_factor,
+                ),
                 clip,
+                physical_clip: clip.map(|rect| scale_rect(rect, self.scale_factor)),
                 world_transform: world,
                 paint_rank: ranks.get(&id).copied().unwrap_or(0),
                 visibility: node.visibility,
+                effectively_visible: route_is_visible(self, id),
                 interactive: self.is_effectively_interactive(id),
                 hovered: node.hovered,
                 focused: self.focus == Some(id),
@@ -3242,8 +3281,21 @@ impl<Message: 'static> Ui<Message> {
         }
         Ok(UiInspection {
             viewport: self.viewport,
+            scale_factor: self.scale_factor,
             nodes,
         })
+    }
+
+    /// Inspects one retained element after ensuring layout is current.
+    pub fn inspect_element<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+    ) -> Result<ElementInspection, UiError> {
+        self.inspect()?
+            .nodes
+            .into_iter()
+            .find(|node| node.id == handle.id)
+            .ok_or_else(|| UiError::new("element is no longer retained"))
     }
 
     fn collect_paint_order(
@@ -3755,6 +3807,7 @@ impl<Message: 'static> Ui<Message> {
                 .ok_or_else(|| UiError::new("custom widget state is unavailable"))?;
             let mut stopped = false;
             let mut default_prevented = false;
+            let current_world_transform = self.world_transform_for(target)?;
             let handled = widget.semantic_action(
                 &mut EventContext {
                     messages: &mut self.messages,
@@ -3762,6 +3815,7 @@ impl<Message: 'static> Ui<Message> {
                     default_prevented: &mut default_prevented,
                     current_target: target,
                     current_bounds: bounds,
+                    current_world_transform,
                     parent_bounds,
                     modifiers: self.modifiers,
                     route: &[],
@@ -4449,7 +4503,11 @@ impl<Message: 'static> Ui<Message> {
                 return Some(hit);
             }
         }
-        (node.enabled && node.bounds.contains(point) && self.is_hit_testable_id(id)).then_some(id)
+        let shape_hit = self.custom_widgets.get(&id).map_or_else(
+            || node.bounds.contains(point),
+            |widget| widget.hit_test(point, node.bounds),
+        );
+        (node.enabled && shape_hit && self.is_hit_testable_id(id)).then_some(id)
     }
 
     fn set_hover(
@@ -4511,6 +4569,18 @@ impl<Message: 'static> Ui<Message> {
         }
         route.reverse();
         Ok(route)
+    }
+
+    fn world_transform_for(&self, target: ElementId) -> Result<Affine2, UiError> {
+        let mut world = Affine2::IDENTITY;
+        for current in self.route_to(target)? {
+            let node = self.node(current)?;
+            world *= node_local_transform(node);
+            if let Kind::ScrollView { offset, .. } = node.kind {
+                world *= Affine2::from_translation(Vec2::new(0.0, -offset));
+            }
+        }
+        Ok(world)
     }
 
     fn set_focus(&mut self, target: Option<ElementId>) -> Result<(), UiError> {
@@ -5124,6 +5194,24 @@ fn intersect_rect(a: LogicalRect, b: LogicalRect) -> LogicalRect {
     let max_x = a.max_x().min(b.max_x());
     let max_y = a.max_y().min(b.max_y());
     Rect::from_xywh(x, y, (max_x - x).max(0.0), (max_y - y).max(0.0))
+}
+
+fn scale_rect(rect: LogicalRect, scale: f32) -> PhysicalRect {
+    Rect::from_xywh(
+        rect.origin.x * scale,
+        rect.origin.y * scale,
+        rect.size.width * scale,
+        rect.size.height * scale,
+    )
+}
+
+fn route_is_visible<Message: 'static>(ui: &Ui<Message>, id: ElementId) -> bool {
+    ui.route_to(id).is_ok_and(|route| {
+        route.into_iter().all(|current| {
+            ui.node(current)
+                .is_ok_and(|node| node.visibility == Visibility::Visible)
+        })
+    })
 }
 
 fn apply_flex(style: &mut Style, flex: FlexStyle) {

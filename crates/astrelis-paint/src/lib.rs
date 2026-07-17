@@ -508,6 +508,42 @@ struct ImageData {
 #[derive(Clone)]
 pub struct Image(Arc<ImageData>);
 
+/// Cloneable identity for an application-owned GPU image allocation.
+///
+/// The token contains no backend object and does not imply ownership. Applications
+/// explicitly associate it with a texture view in the GPU paint renderer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExternalImage {
+    id: u64,
+    size: Size<Physical, u32>,
+}
+
+impl ExternalImage {
+    /// Creates a token for a non-empty physical allocation.
+    pub fn new(size: Size<Physical, u32>) -> Result<Self, PaintError> {
+        if size.width == 0 || size.height == 0 {
+            return Err(PaintError::new(
+                "external image dimensions must be non-zero",
+            ));
+        }
+        Ok(Self {
+            id: NEXT_IMAGE_ID.fetch_add(1, Ordering::Relaxed),
+            size,
+        })
+    }
+
+    /// Physical allocation dimensions.
+    pub const fn size(&self) -> Size<Physical, u32> {
+        self.size
+    }
+
+    /// Stable identity used for display-list interning and renderer registration.
+    #[doc(hidden)]
+    pub const fn cache_id(&self) -> u64 {
+        self.id
+    }
+}
+
 impl Image {
     /// Creates an image after validating byte length and dimensions.
     pub fn from_rgba8(
@@ -609,6 +645,10 @@ pub struct PathRef(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ImageRef(pub u32);
 
+/// Display-list-local external-image reference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ExternalImageRef(pub u32);
+
 /// Display-list-local retained text-layout reference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TextRef(pub u32);
@@ -673,6 +713,12 @@ pub enum Command {
         destination: LogicalRect,
         options: ImageOptions,
     },
+    /// Draws a registered application-owned GPU image.
+    DrawExternalImage {
+        image: ExternalImageRef,
+        destination: LogicalRect,
+        options: ImageOptions,
+    },
     /// Draws a retained text layout at a logical origin.
     DrawText {
         text: TextRef,
@@ -687,6 +733,7 @@ pub struct DisplayList {
     commands: Arc<[Command]>,
     paths: Arc<[Path]>,
     images: Arc<[Image]>,
+    external_images: Arc<[ExternalImage]>,
     texts: Arc<[TextLayout]>,
 }
 
@@ -716,6 +763,16 @@ impl DisplayList {
         &self.images
     }
 
+    /// Resolves an external-image reference.
+    pub fn external_image(&self, reference: ExternalImageRef) -> &ExternalImage {
+        &self.external_images[reference.0 as usize]
+    }
+
+    /// External-image resources in local-index order.
+    pub fn external_images(&self) -> &[ExternalImage] {
+        &self.external_images
+    }
+
     /// Resolves a retained text-layout reference.
     pub fn text(&self, reference: TextRef) -> &TextLayout {
         &self.texts[reference.0 as usize]
@@ -733,9 +790,11 @@ pub struct Painter {
     commands: Vec<Command>,
     paths: Vec<Path>,
     images: Vec<Image>,
+    external_images: Vec<ExternalImage>,
     texts: Vec<TextLayout>,
     path_refs: HashMap<u64, PathRef>,
     image_refs: HashMap<u64, ImageRef>,
+    external_image_refs: HashMap<u64, ExternalImageRef>,
     text_refs: HashMap<u64, TextRef>,
     save_depth: usize,
 }
@@ -957,6 +1016,24 @@ impl Painter {
         Ok(())
     }
 
+    /// Draws an application-owned image registered with the GPU renderer.
+    pub fn draw_external_image(
+        &mut self,
+        image: &ExternalImage,
+        destination: LogicalRect,
+        options: ImageOptions,
+    ) -> Result<(), PaintError> {
+        validate_rect(destination)?;
+        validate_image_options(options, image.size())?;
+        let image = self.intern_external_image(image);
+        self.commands.push(Command::DrawExternalImage {
+            image,
+            destination,
+            options,
+        });
+        Ok(())
+    }
+
     /// Draws a retained text layout.
     pub fn draw_text(
         &mut self,
@@ -989,6 +1066,7 @@ impl Painter {
             commands: self.commands.into(),
             paths: self.paths.into(),
             images: self.images.into(),
+            external_images: self.external_images.into(),
             texts: self.texts.into(),
         })
     }
@@ -1009,6 +1087,17 @@ impl Painter {
         })
     }
 
+    fn intern_external_image(&mut self, image: &ExternalImage) -> ExternalImageRef {
+        *self
+            .external_image_refs
+            .entry(image.cache_id())
+            .or_insert_with(|| {
+                let reference = ExternalImageRef(self.external_images.len() as u32);
+                self.external_images.push(image.clone());
+                reference
+            })
+    }
+
     fn intern_text(&mut self, text: &TextLayout) -> TextRef {
         *self.text_refs.entry(text.cache_id()).or_insert_with(|| {
             let reference = TextRef(self.texts.len() as u32);
@@ -1024,6 +1113,24 @@ fn validate_point<S>(point: Point<S>) -> Result<(), PaintError> {
     } else {
         Err(PaintError::new("point coordinates must be finite"))
     }
+}
+
+fn validate_image_options(
+    options: ImageOptions,
+    size: Size<Physical, u32>,
+) -> Result<(), PaintError> {
+    if !options.opacity.is_finite() || !(0.0..=1.0).contains(&options.opacity) {
+        return Err(PaintError::new("image opacity must be within 0..=1"));
+    }
+    if let Some(source) = options.source {
+        validate_rect(source)?;
+        if source.max_x() > size.width as f32 || source.max_y() > size.height as f32 {
+            return Err(PaintError::new(
+                "image source rectangle exceeds image dimensions",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn validate_rect<S>(rect: Rect<S>) -> Result<(), PaintError> {
@@ -1265,5 +1372,41 @@ mod tests {
         path=Path { verbs: [MoveTo(Point { x: 1.0, y: 2.0, _space: PhantomData<astrelis_core::geometry::Logical> }), LineTo(Point { x: 8.0, y: 2.0, _space: PhantomData<astrelis_core::geometry::Logical> }), QuadTo(Point { x: 9.0, y: 5.0, _space: PhantomData<astrelis_core::geometry::Logical> }, Point { x: 8.0, y: 8.0, _space: PhantomData<astrelis_core::geometry::Logical> }), Close], bounds: Some(Rect { origin: Point { x: 1.0, y: 2.0, _space: PhantomData<astrelis_core::geometry::Logical> }, size: Size { width: 8.0, height: 6.0, _space: PhantomData<astrelis_core::geometry::Logical> } }) }
         image=Image { size: Size { width: 1, height: 1, _space: PhantomData<astrelis_core::geometry::Physical> }, checksum: be1f5b6705cd0753 }
         "###);
+    }
+
+    #[test]
+    fn external_images_validate_deduplicate_and_bound_sources() {
+        assert!(ExternalImage::new(Size::new(0, 1)).is_err());
+        let image = ExternalImage::new(Size::new(64, 32)).unwrap();
+        let mut painter = Painter::new();
+        painter
+            .draw_external_image(
+                &image,
+                Rect::from_xywh(0.0, 0.0, 10.0, 10.0),
+                ImageOptions::default(),
+            )
+            .unwrap();
+        painter
+            .draw_external_image(
+                &image,
+                Rect::from_xywh(10.0, 0.0, 10.0, 10.0),
+                ImageOptions::default(),
+            )
+            .unwrap();
+        assert!(
+            painter
+                .draw_external_image(
+                    &image,
+                    Rect::from_xywh(0.0, 0.0, 10.0, 10.0),
+                    ImageOptions {
+                        source: Some(Rect::from_xywh(0.0, 0.0, 65.0, 1.0)),
+                        ..Default::default()
+                    },
+                )
+                .is_err()
+        );
+        let list = painter.finish().unwrap();
+        assert_eq!(list.external_images(), &[image]);
+        assert_eq!(list.images().len(), 0);
     }
 }

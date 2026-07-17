@@ -2,7 +2,20 @@
 
 Reusable retained controls composed from the public `astrelis-ui-core` API.
 
-Milestone 11 currently provides generic in-process drag sources and drop
+Milestone 12 adds `RenderView`, a retained texture-backed scene viewport with
+rounded clipping, typed input, scheduling snapshots, and allocation hysteresis.
+
+Run the native texture-backed example with:
+
+```text
+cargo run -p astrelis-ui-widgets --example render_view
+```
+
+The animated color scene responds to pointer position and focused keyboard
+input. Its pause control cancels the window-scoped repeating timer so the
+desktop runtime returns to waiting for events.
+
+Milestone 11 provides generic in-process drag sources and drop
 targets, resizable horizontal and vertical split panes, immediate tooltips,
 popovers, keyboard-accessible menus and tabs, selectable retained lists, and
 common labeled form compositions. Fixed-extent virtual lists retain only the

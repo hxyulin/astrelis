@@ -471,6 +471,9 @@ impl backend::Device for WgpuDevice {
         Arc::new(WgpuTexture {
             id: self.id,
             raw: texture,
+            sample_count: descriptor.sample_count,
+            dimension: descriptor.dimension,
+            format: descriptor.format,
         })
     }
 
@@ -1038,6 +1041,10 @@ impl WgpuSurfaceFrame {
         let texture = Arc::new(WgpuTexture {
             id: device_id,
             raw: frame.texture.clone(),
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: convert_texture_format_from_wgpu(frame.texture.format())
+                .expect("surface format is supported"),
         });
         Self { frame, texture }
     }
@@ -1124,6 +1131,9 @@ impl backend::Buffer for WgpuBuffer {
 struct WgpuTexture {
     id: DeviceId,
     raw: wgpu::Texture,
+    sample_count: u32,
+    dimension: TextureDimension,
+    format: TextureFormat,
 }
 
 impl backend::NativeHandle for WgpuTexture {
@@ -1149,6 +1159,9 @@ impl backend::Texture for WgpuTexture {
                 array_layer_count: descriptor.array_layer_count,
                 ..Default::default()
             }),
+            sample_count: self.sample_count,
+            dimension: self.dimension,
+            format: descriptor.format.unwrap_or(self.format),
         })
     }
 }
@@ -1157,6 +1170,9 @@ impl backend::Texture for WgpuTexture {
 struct WgpuTextureView {
     id: DeviceId,
     raw: wgpu::TextureView,
+    sample_count: u32,
+    dimension: TextureDimension,
+    format: TextureFormat,
 }
 
 impl backend::NativeHandle for WgpuTextureView {
@@ -1168,6 +1184,18 @@ impl backend::NativeHandle for WgpuTextureView {
 impl backend::TextureView for WgpuTextureView {
     fn device_id(&self) -> DeviceId {
         self.id
+    }
+
+    fn sample_count(&self) -> u32 {
+        self.sample_count
+    }
+
+    fn dimension(&self) -> TextureDimension {
+        self.dimension
+    }
+
+    fn format(&self) -> TextureFormat {
+        self.format
     }
 }
 

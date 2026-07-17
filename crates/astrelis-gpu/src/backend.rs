@@ -9,7 +9,7 @@ use crate::{
     Limits, MapMode, PipelineLayoutDescriptor, PollMode, QuerySetDescriptor, RenderPassDescriptor,
     RenderPipelineDescriptor, RequestAdapterOptions, SamplerDescriptor, ShaderModuleDescriptor,
     SurfaceCapabilities, SurfaceConfiguration, SurfaceFrameStatus, TextureCopy, TextureDataLayout,
-    TextureDescriptor, TextureViewDescriptor,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureViewDescriptor,
 };
 
 /// Boxed backend future.
@@ -171,6 +171,12 @@ pub trait Texture: NativeHandle {
 pub trait TextureView: NativeHandle {
     /// Owning device.
     fn device_id(&self) -> DeviceId;
+    /// Texture sample count represented by this view.
+    fn sample_count(&self) -> u32;
+    /// Texture dimension represented by this view.
+    fn dimension(&self) -> TextureDimension;
+    /// Pixel format represented by this view.
+    fn format(&self) -> TextureFormat;
 }
 
 /// Backend sampler.

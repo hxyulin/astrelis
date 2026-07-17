@@ -7,11 +7,12 @@ use astrelis_core::{
 };
 use astrelis_gpu::{
     BufferDescriptor, BufferTextureCopy, BufferUsages, CommandEncoderDescriptor, DeviceDescriptor,
-    Extent3d, MapMode, PollMode, RequestAdapterOptions, TextureCopy, TextureDescriptor,
-    TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
+    Extent3d, MapMode, PollMode, RequestAdapterOptions, TextureCopy, TextureDataLayout,
+    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
 };
 use astrelis_paint::{
-    Brush, FillRule, GradientStop, LinearGradient, Painter, Path, RadialGradient,
+    Brush, ExternalImage, FillRule, GradientStop, ImageOptions, LinearGradient, Painter, Path,
+    RadialGradient,
 };
 use astrelis_paint_gpu::{Antialiasing, RenderTarget, Renderer, RendererOptions};
 use astrelis_text::{FontDatabase, TextLayoutContext, TextLayoutRequest};
@@ -19,6 +20,248 @@ use astrelis_text::{FontDatabase, TextLayoutContext, TextLayoutRequest};
 fn gpu_test_lock() -> &'static std::sync::Mutex<()> {
     static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| std::sync::Mutex::new(()))
+}
+
+#[test]
+fn external_images_render_replace_unregister_and_reject_wrong_device() {
+    let _guard = gpu_test_lock().lock().expect("GPU test lock poisoned");
+    pollster::block_on(async {
+        let instance = astrelis_gpu_wgpu::create_instance(Default::default());
+        let adapter = match instance
+            .request_adapter(RequestAdapterOptions::default())
+            .await
+        {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                eprintln!("skipping external image GPU test: {error}");
+                return;
+            }
+        };
+        let (device, queue) = adapter
+            .request_device(DeviceDescriptor::default())
+            .await
+            .expect("request first device");
+        let (other_device, _other_queue) = adapter
+            .request_device(DeviceDescriptor::default())
+            .await
+            .expect("request second device");
+
+        let image = ExternalImage::new(Size::new(2, 2)).expect("external image token");
+        let mut painter = Painter::new();
+        painter
+            .draw_external_image(
+                &image,
+                Rect::from_xywh(0.0, 0.0, 2.0, 2.0),
+                ImageOptions::default(),
+            )
+            .expect("record external image");
+        let list = painter.finish().expect("finish display list");
+        let target = device.create_texture(TextureDescriptor {
+            label: Some("external image paint target".into()),
+            size: Extent3d::d2(2, 2),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+        });
+        let target_view = target.create_view(TextureViewDescriptor::default());
+        let mut renderer = Renderer::new(
+            device.clone(),
+            queue.clone(),
+            RendererOptions {
+                antialiasing: Antialiasing::None,
+                ..Default::default()
+            },
+        )
+        .expect("renderer");
+
+        let mut encoder = device.create_command_encoder(CommandEncoderDescriptor::default());
+        let missing = renderer
+            .render(
+                &mut encoder,
+                &list,
+                RenderTarget {
+                    view: target_view.clone(),
+                    format: TextureFormat::Rgba8Unorm,
+                    size: Size::new(2, 2),
+                    scale_factor: 1.0,
+                    clear_color: Color::BLACK,
+                },
+            )
+            .expect_err("unregistered image must fail");
+        assert!(missing.to_string().contains("register_external_image"));
+
+        let wrong_texture = other_device.create_texture(TextureDescriptor {
+            label: Some("wrong-device external image".into()),
+            size: Extent3d::d2(2, 2),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING,
+        });
+        let wrong = renderer
+            .register_external_image(
+                &image,
+                wrong_texture.create_view(TextureViewDescriptor::default()),
+            )
+            .expect_err("cross-device registration must fail");
+        assert!(wrong.to_string().contains("different device"));
+
+        let multisampled = device.create_texture(TextureDescriptor {
+            label: Some("incompatible multisampled external image".into()),
+            size: Extent3d::d2(2, 2),
+            mip_level_count: 1,
+            sample_count: 4,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::RENDER_ATTACHMENT,
+        });
+        let incompatible = renderer
+            .register_external_image(
+                &image,
+                multisampled.create_view(TextureViewDescriptor::default()),
+            )
+            .expect_err("multisampled registration must fail");
+        assert!(incompatible.to_string().contains("single-sampled 2D"));
+
+        let first = solid_texture(&device, &queue, [255, 0, 0, 255]);
+        renderer
+            .register_external_image(&image, first.create_view(TextureViewDescriptor::default()))
+            .expect("register red texture");
+        assert_eq!(
+            render_external_pixel(&device, &queue, &mut renderer, &list, &target, &target_view,)
+                .await,
+            [255, 0, 0, 255]
+        );
+
+        let replacement = solid_texture(&device, &queue, [0, 255, 0, 255]);
+        renderer
+            .register_external_image(
+                &image,
+                replacement.create_view(TextureViewDescriptor::default()),
+            )
+            .expect("replace with green texture");
+        assert_eq!(
+            render_external_pixel(&device, &queue, &mut renderer, &list, &target, &target_view,)
+                .await,
+            [0, 255, 0, 255]
+        );
+
+        assert!(renderer.unregister_external_image(&image));
+        assert!(!renderer.unregister_external_image(&image));
+        let mut encoder = device.create_command_encoder(CommandEncoderDescriptor::default());
+        assert!(
+            renderer
+                .render(
+                    &mut encoder,
+                    &list,
+                    RenderTarget {
+                        view: target_view,
+                        format: TextureFormat::Rgba8Unorm,
+                        size: Size::new(2, 2),
+                        scale_factor: 1.0,
+                        clear_color: Color::BLACK,
+                    },
+                )
+                .is_err()
+        );
+    });
+}
+
+fn solid_texture(
+    device: &astrelis_gpu::Device,
+    queue: &astrelis_gpu::Queue,
+    color: [u8; 4],
+) -> astrelis_gpu::Texture {
+    let texture = device.create_texture(TextureDescriptor {
+        label: Some("external image source".into()),
+        size: Extent3d::d2(2, 2),
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format: TextureFormat::Rgba8Unorm,
+        usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+    });
+    queue
+        .write_texture(
+            &TextureCopy {
+                texture: texture.clone(),
+                mip_level: 0,
+                origin: Default::default(),
+            },
+            &color.repeat(4),
+            TextureDataLayout {
+                offset: 0,
+                bytes_per_row: Some(8),
+                rows_per_image: Some(2),
+            },
+            Extent3d::d2(2, 2),
+        )
+        .expect("upload external image source");
+    texture
+}
+
+async fn render_external_pixel(
+    device: &astrelis_gpu::Device,
+    queue: &astrelis_gpu::Queue,
+    renderer: &mut Renderer,
+    list: &astrelis_paint::DisplayList,
+    target: &astrelis_gpu::Texture,
+    target_view: &astrelis_gpu::TextureView,
+) -> [u8; 4] {
+    let readback = device.create_buffer(BufferDescriptor {
+        label: Some("external image readback".into()),
+        size: 512,
+        usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(CommandEncoderDescriptor::default());
+    renderer
+        .render(
+            &mut encoder,
+            list,
+            RenderTarget {
+                view: target_view.clone(),
+                format: TextureFormat::Rgba8Unorm,
+                size: Size::new(2, 2),
+                scale_factor: 1.0,
+                clear_color: Color::BLACK,
+            },
+        )
+        .expect("render external image");
+    encoder
+        .copy_texture_to_buffer(
+            &TextureCopy {
+                texture: target.clone(),
+                mip_level: 0,
+                origin: Default::default(),
+            },
+            &BufferTextureCopy {
+                buffer: readback.clone(),
+                offset: 0,
+                bytes_per_row: Some(256),
+                rows_per_image: Some(2),
+            },
+            Extent3d::d2(2, 2),
+        )
+        .expect("copy external image result");
+    queue
+        .submit([encoder.finish().expect("finish external image encoder")])
+        .expect("submit external image render");
+    let mapping = readback.map_async(MapMode::Read, 0..512);
+    device
+        .poll(PollMode::Wait)
+        .expect("wait for external image");
+    mapping.await.expect("map external image result");
+    let bytes = readback
+        .read_mapped(0..4)
+        .expect("read external image pixel");
+    let pixel = [bytes[0], bytes[1], bytes[2], bytes[3]];
+    drop(bytes);
+    readback.unmap();
+    pixel
 }
 
 #[test]

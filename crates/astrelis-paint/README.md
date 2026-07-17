@@ -1,5 +1,9 @@
 # astrelis-paint
 
+Backend-independent display lists support immutable CPU-backed images and
+application-owned `ExternalImage` tokens. External images retain only stable
+identity and physical allocation size; GPU backends resolve them explicitly.
+
 Backend-independent paths, immutable images, retained text layouts, semantic
 display lists, and the `Painter` recording API.
 
