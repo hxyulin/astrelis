@@ -304,6 +304,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-ui-widgets"
+version = "0.0.0"
+dependencies = [
+ "astrelis-app",
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-gpu-wgpu",
+ "astrelis-paint",
+ "astrelis-paint-gpu",
+ "astrelis-platform",
+ "astrelis-platform-test",
+ "astrelis-platform-winit",
+ "astrelis-text",
+ "astrelis-ui-core",
+ "pollster",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

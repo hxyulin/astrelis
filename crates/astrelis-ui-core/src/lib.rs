@@ -8,6 +8,7 @@ use std::{
     error::Error,
     fmt,
     marker::PhantomData,
+    sync::Arc,
 };
 
 use astrelis_core::{
@@ -227,6 +228,103 @@ pub enum EventFilter {
     Keyboard,
     /// Wheel or trackpad scrolling.
     Scroll,
+    /// In-process drag-and-drop lifecycle events.
+    Drag,
+}
+
+bitflags! {
+    /// Operations a drag source permits a drop target to select.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct DragOperations: u8 {
+        /// Copy the dragged value.
+        const COPY = 1 << 0;
+        /// Move the dragged value.
+        const MOVE = 1 << 1;
+        /// Create a logical link to the dragged value.
+        const LINK = 1 << 2;
+    }
+}
+
+/// Operation selected by a drop target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DropOperation {
+    /// Copy the dragged value.
+    Copy,
+    /// Move the dragged value.
+    Move,
+    /// Create a logical link to the dragged value.
+    Link,
+}
+
+impl DropOperation {
+    fn flag(self) -> DragOperations {
+        match self {
+            Self::Copy => DragOperations::COPY,
+            Self::Move => DragOperations::MOVE,
+            Self::Link => DragOperations::LINK,
+        }
+    }
+}
+
+/// Cloneable, type-erased data carried by one in-process drag session.
+#[derive(Clone)]
+pub struct DragPayload(Arc<dyn Any>);
+
+impl DragPayload {
+    /// Erases a typed payload for transport through routed drag events.
+    pub fn new<T: Any>(value: T) -> Self {
+        Self(Arc::new(value))
+    }
+
+    /// Reads the payload when its concrete type is `T`.
+    pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        self.0.downcast_ref()
+    }
+}
+
+impl fmt::Debug for DragPayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DragPayload")
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for DragPayload {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+/// Stable identity of one drag session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DragSessionId(u64);
+
+/// Configuration supplied when a possible drag begins.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DragOptions {
+    /// Logical movement required before the drag becomes active.
+    pub threshold: f32,
+    /// Operations a target may select.
+    pub allowed: DragOperations,
+}
+
+impl Default for DragOptions {
+    fn default() -> Self {
+        Self {
+            threshold: 4.0,
+            allowed: DragOperations::COPY | DragOperations::MOVE,
+        }
+    }
+}
+
+/// Completion state reported to the drag source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DragOutcome {
+    /// The drag was cancelled or released without an accepting target.
+    Cancelled,
+    /// A target accepted the drop using the contained operation.
+    Dropped(DropOperation),
 }
 
 /// Data delivered to a routed listener.
@@ -296,6 +394,78 @@ pub enum RoutedEventKind {
         /// Logical pixel displacement.
         delta: LogicalPoint,
     },
+    /// A drag crossed its activation threshold.
+    DragStarted {
+        /// Drag identity.
+        session: DragSessionId,
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Logical pointer position.
+        position: LogicalPoint,
+        /// Type-erased application payload.
+        payload: DragPayload,
+        /// Operations permitted by the source.
+        allowed: DragOperations,
+    },
+    /// An active drag entered a candidate target route.
+    DragEntered {
+        /// Drag identity.
+        session: DragSessionId,
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Logical pointer position.
+        position: LogicalPoint,
+        /// Type-erased application payload.
+        payload: DragPayload,
+        /// Operations permitted by the source.
+        allowed: DragOperations,
+    },
+    /// An active drag moved over a candidate target route.
+    DragOver {
+        /// Drag identity.
+        session: DragSessionId,
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Logical pointer position.
+        position: LogicalPoint,
+        /// Type-erased application payload.
+        payload: DragPayload,
+        /// Operations permitted by the source.
+        allowed: DragOperations,
+    },
+    /// An active drag left its previous candidate target route.
+    DragLeft {
+        /// Drag identity.
+        session: DragSessionId,
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Logical pointer position.
+        position: LogicalPoint,
+        /// Type-erased application payload.
+        payload: DragPayload,
+    },
+    /// An accepted payload was dropped on a target.
+    Dropped {
+        /// Drag identity.
+        session: DragSessionId,
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Logical pointer position.
+        position: LogicalPoint,
+        /// Type-erased application payload.
+        payload: DragPayload,
+        /// Operation selected by the target.
+        operation: DropOperation,
+    },
+    /// A drag finished and reports its outcome to the source.
+    DragEnded {
+        /// Drag identity.
+        session: DragSessionId,
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Final outcome.
+        outcome: DragOutcome,
+    },
 }
 
 impl RoutedEventKind {
@@ -319,6 +489,15 @@ impl RoutedEventKind {
                     )
                     | (EventFilter::Keyboard, Self::Keyboard(_) | Self::Ime(_))
                     | (EventFilter::Scroll, Self::Scroll { .. })
+                    | (
+                        EventFilter::Drag,
+                        Self::DragStarted { .. }
+                            | Self::DragEntered { .. }
+                            | Self::DragOver { .. }
+                            | Self::DragLeft { .. }
+                            | Self::Dropped { .. }
+                            | Self::DragEnded { .. }
+                    )
             )
     }
 }
@@ -355,6 +534,22 @@ enum EventRequest {
     Release(DeviceId),
     Layout,
     Paint,
+    SetLayout(ElementId, LayoutStyle),
+    SetVisibility(ElementId, Visibility),
+    SetScrollOffset(ElementId, f32),
+    BeginDrag {
+        device_id: DeviceId,
+        source: ElementId,
+        position: LogicalPoint,
+        payload: DragPayload,
+        options: DragOptions,
+    },
+    AcceptDrop {
+        device_id: DeviceId,
+        target: ElementId,
+        operation: DropOperation,
+    },
+    CancelDrag(DeviceId),
 }
 
 impl<Message> EventContext<'_, Message> {
@@ -390,6 +585,49 @@ impl<Message> EventContext<'_, Message> {
     /// Invalidates painting after dispatch.
     pub fn request_paint(&mut self) {
         self.requests.push(EventRequest::Paint);
+    }
+    /// Defers a layout-style change until routed dispatch completes.
+    pub fn set_layout<T>(&mut self, handle: ElementHandle<T>, style: LayoutStyle) {
+        self.requests
+            .push(EventRequest::SetLayout(handle.id, style));
+    }
+    /// Defers a visibility change until routed dispatch completes.
+    pub fn set_visibility<T>(&mut self, handle: ElementHandle<T>, visibility: Visibility) {
+        self.requests
+            .push(EventRequest::SetVisibility(handle.id, visibility));
+    }
+    /// Defers a vertical scroll-position change until routed dispatch completes.
+    pub fn set_scroll_offset<T>(&mut self, handle: ElementHandle<T>, offset: f32) {
+        self.requests
+            .push(EventRequest::SetScrollOffset(handle.id, offset));
+    }
+    /// Arms an in-process drag which activates after its movement threshold.
+    pub fn begin_drag(
+        &mut self,
+        device_id: DeviceId,
+        position: LogicalPoint,
+        payload: DragPayload,
+        options: DragOptions,
+    ) {
+        self.requests.push(EventRequest::BeginDrag {
+            device_id,
+            source: self.current_target,
+            position,
+            payload,
+            options,
+        });
+    }
+    /// Accepts the current drag using one of its allowed operations.
+    pub fn accept_drop(&mut self, device_id: DeviceId, operation: DropOperation) {
+        self.requests.push(EventRequest::AcceptDrop {
+            device_id,
+            target: self.current_target,
+            operation,
+        });
+    }
+    /// Cancels a pending or active drag for a normalized pointer.
+    pub fn cancel_drag(&mut self, device_id: DeviceId) {
+        self.requests.push(EventRequest::CancelDrag(device_id));
     }
 }
 
@@ -1089,6 +1327,17 @@ struct Slot {
     node: Option<Node>,
 }
 
+struct DragSession {
+    id: DragSessionId,
+    source: ElementId,
+    payload: DragPayload,
+    options: DragOptions,
+    start: LogicalPoint,
+    active: bool,
+    candidate: Option<ElementId>,
+    accepted: Option<(ElementId, DropOperation)>,
+}
+
 /// Persistent UI tree associated with one native window.
 pub struct Ui<Message = ()> {
     slots: Vec<Slot>,
@@ -1117,6 +1366,9 @@ pub struct Ui<Message = ()> {
     slider_styles: HashMap<ElementId, SliderStyle>,
     scroll_styles: HashMap<ElementId, ScrollViewStyle>,
     event_requests: Vec<EventRequest>,
+    drag_sessions: HashMap<DeviceId, DragSession>,
+    next_drag_session: u64,
+    drop_acceptance: Option<(DeviceId, ElementId, DropOperation)>,
 }
 
 struct Listener<Message> {
@@ -1187,6 +1439,9 @@ impl<Message: 'static> Ui<Message> {
             slider_styles: HashMap::new(),
             scroll_styles: HashMap::new(),
             event_requests: Vec::new(),
+            drag_sessions: HashMap::new(),
+            next_drag_session: 1,
+            drop_acceptance: None,
         }
     }
 
@@ -1486,6 +1741,20 @@ impl<Message: 'static> Ui<Message> {
     pub fn remove<T>(&mut self, handle: ElementHandle<T>) -> Result<(), UiError> {
         if handle.id == self.root {
             return Err(UiError::new("the root element cannot be removed"));
+        }
+        let affected_drags = self
+            .drag_sessions
+            .iter()
+            .filter_map(|(device, session)| {
+                (self.is_descendant_of(session.source, handle.id)
+                    || session
+                        .candidate
+                        .is_some_and(|target| self.is_descendant_of(target, handle.id)))
+                .then_some(*device)
+            })
+            .collect::<Vec<_>>();
+        for device_id in affected_drags {
+            self.cancel_drag_id(device_id)?;
         }
         let restore = match self.node(handle.id)?.kind {
             Kind::FocusScope { restore, .. } | Kind::Overlay { restore, .. } => restore,
@@ -1955,6 +2224,37 @@ impl<Message: 'static> Ui<Message> {
         }
     }
 
+    /// Sets a vertical scroll view's logical offset, clamped to its content.
+    pub fn set_scroll_offset(
+        &mut self,
+        handle: ElementHandle<ScrollView>,
+        offset: f32,
+    ) -> Result<(), UiError> {
+        self.set_scroll_offset_id(handle.id, offset)
+    }
+
+    fn set_scroll_offset_id(&mut self, id: ElementId, offset: f32) -> Result<(), UiError> {
+        let (height, content_height) = {
+            let node = self.node(id)?;
+            let Kind::ScrollView { content_height, .. } = node.kind else {
+                return Err(UiError::new("element is not a scroll view"));
+            };
+            (node.bounds.size.height, content_height)
+        };
+        let offset = offset.clamp(0.0, (content_height - height).max(0.0));
+        let Kind::ScrollView {
+            offset: current, ..
+        } = &mut self.node_mut(id)?.kind
+        else {
+            unreachable!("kind was checked above")
+        };
+        if *current != offset {
+            *current = offset;
+            self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+        }
+        Ok(())
+    }
+
     /// Replaces a checkbox's typed visual style.
     pub fn set_checkbox_style(
         &mut self,
@@ -2140,6 +2440,7 @@ impl<Message: 'static> Ui<Message> {
     }
 
     fn apply_event_requests(&mut self) -> Result<(), UiError> {
+        let mut cancellations = Vec::new();
         for request in std::mem::take(&mut self.event_requests) {
             match request {
                 EventRequest::Focus(id) => self.set_focus(Some(id))?,
@@ -2151,7 +2452,67 @@ impl<Message: 'static> Ui<Message> {
                 }
                 EventRequest::Layout => self.invalidate_layout(),
                 EventRequest::Paint => self.dirty |= Dirty::PAINT,
+                EventRequest::SetLayout(id, style) => {
+                    self.set_layout(
+                        ElementHandle::<()> {
+                            id,
+                            marker: PhantomData,
+                        },
+                        style,
+                    )?;
+                }
+                EventRequest::SetVisibility(id, visibility) => {
+                    self.set_visibility(
+                        ElementHandle::<()> {
+                            id,
+                            marker: PhantomData,
+                        },
+                        visibility,
+                    )?;
+                }
+                EventRequest::SetScrollOffset(id, offset) => {
+                    self.set_scroll_offset_id(id, offset)?;
+                }
+                EventRequest::BeginDrag {
+                    device_id,
+                    source,
+                    position,
+                    payload,
+                    mut options,
+                } => {
+                    options.threshold = options.threshold.max(0.0);
+                    if !options.allowed.is_empty() {
+                        let id = DragSessionId(self.next_drag_session);
+                        self.next_drag_session = self.next_drag_session.wrapping_add(1).max(1);
+                        self.drag_sessions.insert(
+                            device_id,
+                            DragSession {
+                                id,
+                                source,
+                                payload,
+                                options,
+                                start: position,
+                                active: false,
+                                candidate: None,
+                                accepted: None,
+                            },
+                        );
+                    }
+                }
+                EventRequest::AcceptDrop {
+                    device_id,
+                    target,
+                    operation,
+                } => {
+                    if self.drop_acceptance.is_none() {
+                        self.drop_acceptance = Some((device_id, target, operation));
+                    }
+                }
+                EventRequest::CancelDrag(device_id) => cancellations.push(device_id),
             }
+        }
+        for device_id in cancellations {
+            self.cancel_drag_id(device_id)?;
         }
         Ok(())
     }
@@ -2661,6 +3022,28 @@ impl<Message: 'static> Ui<Message> {
     pub fn hit_test_at(&mut self, point: LogicalPoint) -> Result<Option<ElementId>, UiError> {
         self.ensure_layout()?;
         Ok(self.hit_test(point))
+    }
+
+    /// Returns the current untransformed logical layout bounds of an element.
+    pub fn layout_bounds<T>(&mut self, handle: ElementHandle<T>) -> Result<LogicalRect, UiError> {
+        self.ensure_layout()?;
+        Ok(self.node(handle.id)?.bounds)
+    }
+
+    /// Returns whether `element` belongs to `ancestor`'s retained subtree.
+    pub fn is_descendant<T, A>(
+        &self,
+        element: ElementHandle<T>,
+        ancestor: ElementHandle<A>,
+    ) -> Result<bool, UiError> {
+        self.node(element.id)?;
+        self.node(ancestor.id)?;
+        Ok(self.is_descendant_of(element.id, ancestor.id))
+    }
+
+    /// Returns the active drag session associated with a pointer, when any.
+    pub fn drag_session(&self, device_id: DeviceId) -> Option<DragSessionId> {
+        self.drag_sessions.get(&device_id).map(|session| session.id)
     }
 
     /// Returns whether an element belongs to any active pointer hover path.
@@ -3291,6 +3674,180 @@ impl<Message: 'static> Ui<Message> {
         })
     }
 
+    fn update_drag(&mut self, device_id: DeviceId, position: LogicalPoint) -> Result<(), UiError> {
+        let Some(mut session) = self.drag_sessions.remove(&device_id) else {
+            return Ok(());
+        };
+        if !session.active {
+            let delta = Vec2::new(position.x - session.start.x, position.y - session.start.y);
+            if delta.length() < session.options.threshold {
+                self.drag_sessions.insert(device_id, session);
+                return Ok(());
+            }
+            session.active = true;
+            self.dispatch_routed(
+                session.source,
+                RoutedEventKind::DragStarted {
+                    session: session.id,
+                    device_id,
+                    position,
+                    payload: session.payload.clone(),
+                    allowed: session.options.allowed,
+                },
+            )?;
+        }
+
+        let candidate = self.hit_test(position);
+        if candidate != session.candidate {
+            if let Some(previous) = session.candidate {
+                self.dispatch_routed(
+                    previous,
+                    RoutedEventKind::DragLeft {
+                        session: session.id,
+                        device_id,
+                        position,
+                        payload: session.payload.clone(),
+                    },
+                )?;
+            }
+            if let Some(candidate) = candidate {
+                self.dispatch_routed(
+                    candidate,
+                    RoutedEventKind::DragEntered {
+                        session: session.id,
+                        device_id,
+                        position,
+                        payload: session.payload.clone(),
+                        allowed: session.options.allowed,
+                    },
+                )?;
+            }
+            session.candidate = candidate;
+        }
+
+        self.drop_acceptance = None;
+        if let Some(candidate) = candidate {
+            self.dispatch_routed(
+                candidate,
+                RoutedEventKind::DragOver {
+                    session: session.id,
+                    device_id,
+                    position,
+                    payload: session.payload.clone(),
+                    allowed: session.options.allowed,
+                },
+            )?;
+        }
+        session.accepted = self
+            .drop_acceptance
+            .take()
+            .and_then(|(device, target, operation)| {
+                (device == device_id && session.options.allowed.contains(operation.flag()))
+                    .then_some((target, operation))
+            });
+        self.drag_sessions.insert(device_id, session);
+        self.dirty |= Dirty::PAINT;
+        Ok(())
+    }
+
+    fn finish_drag(
+        &mut self,
+        device_id: DeviceId,
+        position: LogicalPoint,
+    ) -> Result<bool, UiError> {
+        let Some(session) = self.drag_sessions.remove(&device_id) else {
+            return Ok(false);
+        };
+        if !session.active {
+            return Ok(false);
+        }
+        if let Some(candidate) = session
+            .candidate
+            .filter(|target| self.node(*target).is_ok())
+        {
+            self.dispatch_routed(
+                candidate,
+                RoutedEventKind::DragLeft {
+                    session: session.id,
+                    device_id,
+                    position,
+                    payload: session.payload.clone(),
+                },
+            )?;
+        }
+        let outcome = if let Some((target, operation)) = session.accepted {
+            self.dispatch_routed(
+                target,
+                RoutedEventKind::Dropped {
+                    session: session.id,
+                    device_id,
+                    position,
+                    payload: session.payload.clone(),
+                    operation,
+                },
+            )?;
+            DragOutcome::Dropped(operation)
+        } else {
+            DragOutcome::Cancelled
+        };
+        self.dispatch_routed(
+            session.source,
+            RoutedEventKind::DragEnded {
+                session: session.id,
+                device_id,
+                outcome,
+            },
+        )?;
+        if let Ok(node) = self.node_mut(session.source) {
+            node.pressed = false;
+        }
+        self.capture.remove(&device_id);
+        self.dirty |= Dirty::PAINT;
+        Ok(true)
+    }
+
+    fn cancel_drag_id(&mut self, device_id: DeviceId) -> Result<(), UiError> {
+        let Some(session) = self.drag_sessions.remove(&device_id) else {
+            return Ok(());
+        };
+        if session.active
+            && let Some(candidate) = session
+                .candidate
+                .filter(|target| self.node(*target).is_ok())
+        {
+            let position = self
+                .pointer_positions
+                .get(&device_id)
+                .copied()
+                .unwrap_or(session.start);
+            self.dispatch_routed(
+                candidate,
+                RoutedEventKind::DragLeft {
+                    session: session.id,
+                    device_id,
+                    position,
+                    payload: session.payload.clone(),
+                },
+            )?;
+        }
+        if session.active && self.node(session.source).is_ok() {
+            self.dispatch_routed(
+                session.source,
+                RoutedEventKind::DragEnded {
+                    session: session.id,
+                    device_id,
+                    outcome: DragOutcome::Cancelled,
+                },
+            )?;
+        }
+        if let Ok(node) = self.node_mut(session.source) {
+            node.pressed = false;
+        }
+        self.capture.remove(&device_id);
+        self.dirty |= Dirty::PAINT;
+        Ok(())
+    }
+
     /// Routes one platform window event through the retained UI tree.
     pub fn handle_window_event(
         &mut self,
@@ -3305,6 +3862,10 @@ impl<Message: 'static> Ui<Message> {
             WindowEvent::Focused(focused) => {
                 self.window_focused = *focused;
                 if !focused {
+                    let dragging = self.drag_sessions.keys().copied().collect::<Vec<_>>();
+                    for device_id in dragging {
+                        self.cancel_drag_id(device_id)?;
+                    }
                     self.capture.clear();
                     for id in self.all_ids() {
                         if let Ok(node) = self.node_mut(id) {
@@ -3340,6 +3901,7 @@ impl<Message: 'static> Ui<Message> {
                         },
                     )?;
                 }
+                self.update_drag(*device_id, logical)?;
                 if let Some(target) = target
                     && self.capture.get(device_id) == Some(&target)
                 {
@@ -3409,6 +3971,13 @@ impl<Message: 'static> Ui<Message> {
                         platform_state_changed = true;
                     }
                     ElementState::Released => {
+                        if self.finish_drag(*device_id, position.unwrap_or(LogicalPoint::ZERO))? {
+                            self.sync_platform_state(window)?;
+                            return Ok(UiUpdate {
+                                redraw: true,
+                                platform_state_changed,
+                            });
+                        }
                         if let Some(target) = self.capture.remove(device_id) {
                             let prevented = self.dispatch_routed(
                                 target,
@@ -3440,7 +4009,14 @@ impl<Message: 'static> Ui<Message> {
                 }
             }
             WindowEvent::KeyboardInput(input) if input.state == ElementState::Pressed => {
-                if matches!(input.logical_key, Key::Named(NamedKey::Tab)) {
+                if matches!(input.logical_key, Key::Named(NamedKey::Escape))
+                    && !self.drag_sessions.is_empty()
+                {
+                    let dragging = self.drag_sessions.keys().copied().collect::<Vec<_>>();
+                    for device_id in dragging {
+                        self.cancel_drag_id(device_id)?;
+                    }
+                } else if matches!(input.logical_key, Key::Named(NamedKey::Tab)) {
                     self.move_focus(!self.modifiers.shift)?;
                     platform_state_changed = true;
                 } else if let Some(focus) = self.focus {
@@ -3552,6 +4128,7 @@ impl<Message: 'static> Ui<Message> {
                                     position: logical,
                                 },
                             )?;
+                            self.update_drag(device_id, logical)?;
                             if matches!(self.node(target)?.kind, Kind::Slider { .. }) {
                                 self.set_slider_from_point(target, logical)?;
                             } else if matches!(self.node(target)?.kind, Kind::ScrollView { .. }) {
@@ -3560,6 +4137,14 @@ impl<Message: 'static> Ui<Message> {
                         }
                     }
                     TouchPhase::Ended => {
+                        if self.finish_drag(device_id, logical)? {
+                            self.dirty |= Dirty::PAINT;
+                            self.sync_platform_state(window)?;
+                            return Ok(UiUpdate {
+                                redraw: true,
+                                platform_state_changed,
+                            });
+                        }
                         if let Some(target) = self.capture.remove(&device_id) {
                             self.node_mut(target)?.pressed = false;
                             if !self.dispatch_routed(
@@ -3581,6 +4166,7 @@ impl<Message: 'static> Ui<Message> {
                         }
                     }
                     TouchPhase::Cancelled => {
+                        self.cancel_drag_id(device_id)?;
                         if let Some(target) = self.capture.remove(&device_id) {
                             self.node_mut(target)?.pressed = false;
                             self.dispatch_routed(
@@ -4216,26 +4802,38 @@ impl<Message: 'static> Ui<Message> {
 
     fn sync_platform_state(&mut self, window: &Window) -> Result<(), UiError> {
         self.ensure_layout()?;
-        let cursor = self
-            .hover
-            .and_then(|leaf| self.route_to(leaf).ok())
-            .and_then(|route| {
-                route.into_iter().rev().find_map(|id| {
-                    let node = self.node(id).ok()?;
-                    node.cursor
-                        .or_else(|| {
-                            self.custom_widgets
-                                .get(&id)
-                                .and_then(|widget| widget.cursor_icon())
-                        })
-                        .or(match node.kind {
-                            Kind::Button { .. } => Some(CursorIcon::Pointer),
-                            Kind::TextField(_) => Some(CursorIcon::Text),
-                            _ => None,
-                        })
+        let drag_cursor = self
+            .drag_sessions
+            .values()
+            .find(|session| session.active)
+            .map(|session| {
+                if session.accepted.is_some() {
+                    CursorIcon::Move
+                } else {
+                    CursorIcon::NotAllowed
+                }
+            });
+        let cursor = drag_cursor.unwrap_or_else(|| {
+            self.hover
+                .and_then(|leaf| self.route_to(leaf).ok())
+                .and_then(|route| {
+                    route.into_iter().rev().find_map(|id| {
+                        let node = self.node(id).ok()?;
+                        node.cursor
+                            .or_else(|| {
+                                self.custom_widgets
+                                    .get(&id)
+                                    .and_then(|widget| widget.cursor_icon())
+                            })
+                            .or(match node.kind {
+                                Kind::Button { .. } => Some(CursorIcon::Pointer),
+                                Kind::TextField(_) => Some(CursorIcon::Text),
+                                _ => None,
+                            })
+                    })
                 })
-            })
-            .unwrap_or(CursorIcon::Default);
+                .unwrap_or(CursorIcon::Default)
+        });
         if self.applied_cursor != Some(cursor) {
             window.set_cursor_icon(cursor);
             self.applied_cursor = Some(cursor);
@@ -5057,6 +5655,111 @@ mod tests {
             ui.hit_test_at(Point::new(bounds.origin.x + 1.0, bounds.origin.y + 1.0))
                 .unwrap(),
             Some(button.id())
+        );
+    }
+
+    #[test]
+    fn drag_threshold_routes_drop_and_reports_outcome() {
+        let mut ui = ui();
+        ui.set_viewport(Size::new(500.0, 200.0), 1.0);
+        let root = ui.root();
+        let row = ui.add_row(root).unwrap();
+        let source = ui.add_button(row, "source").unwrap();
+        let target = ui.add_button(row, "target").unwrap();
+        for handle in [source, target] {
+            ui.set_layout(
+                handle,
+                LayoutStyle {
+                    width: Length::Px(180.0),
+                    height: Length::Px(80.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        let device = DeviceId(9);
+        ui.listen(source, None, EventFilter::Pointer, move |context, event| {
+            if let RoutedEventKind::PointerButton {
+                position,
+                state: ElementState::Pressed,
+                ..
+            } = event.kind
+            {
+                context.begin_drag(
+                    device,
+                    position,
+                    DragPayload::new(42_u32),
+                    DragOptions {
+                        threshold: 5.0,
+                        allowed: DragOperations::MOVE,
+                    },
+                );
+            }
+        })
+        .unwrap();
+        let dropped = Arc::new(Mutex::new(Vec::new()));
+        let dropped_listener = dropped.clone();
+        ui.listen(
+            target,
+            None,
+            EventFilter::Drag,
+            move |context, event| match &event.kind {
+                RoutedEventKind::DragOver {
+                    device_id, payload, ..
+                } if payload.downcast_ref::<u32>() == Some(&42) => {
+                    context.accept_drop(*device_id, DropOperation::Move);
+                }
+                RoutedEventKind::Dropped {
+                    payload, operation, ..
+                } => dropped_listener
+                    .lock()
+                    .unwrap()
+                    .push((*payload.downcast_ref::<u32>().unwrap(), *operation)),
+                _ => {}
+            },
+        )
+        .unwrap();
+        let outcomes = Arc::new(Mutex::new(Vec::new()));
+        let outcome_listener = outcomes.clone();
+        ui.listen(source, None, EventFilter::Drag, move |_, event| {
+            if let RoutedEventKind::DragEnded { outcome, .. } = event.kind {
+                outcome_listener.lock().unwrap().push(outcome);
+            }
+        })
+        .unwrap();
+
+        ui.ensure_layout().unwrap();
+        let source_point = ui.node(source.id()).unwrap().bounds.origin;
+        let target_bounds = ui.node(target.id()).unwrap().bounds;
+        let target_point = Point::new(target_bounds.origin.x + 20.0, target_bounds.origin.y + 20.0);
+        ui.dispatch_routed(
+            source.id(),
+            RoutedEventKind::PointerButton {
+                device_id: device,
+                position: source_point,
+                button: PointerButton::Primary,
+                state: ElementState::Pressed,
+            },
+        )
+        .unwrap();
+        ui.update_drag(device, Point::new(source_point.x + 2.0, source_point.y))
+            .unwrap();
+        assert!(
+            ui.drag_sessions
+                .get(&device)
+                .is_some_and(|drag| !drag.active)
+        );
+        ui.update_drag(device, target_point).unwrap();
+        assert!(
+            ui.drag_sessions
+                .get(&device)
+                .is_some_and(|drag| drag.active)
+        );
+        assert!(ui.finish_drag(device, target_point).unwrap());
+        assert_eq!(*dropped.lock().unwrap(), vec![(42, DropOperation::Move)]);
+        assert_eq!(
+            *outcomes.lock().unwrap(),
+            vec![DragOutcome::Dropped(DropOperation::Move)]
         );
     }
 

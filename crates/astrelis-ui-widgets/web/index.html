@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Astrelis widget gallery</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #090c14;
+      }
+
+      #astrelis-canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+      }
+
+      #astrelis-status {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #e9efff;
+        font: 16px/1.5 system-ui, sans-serif;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="astrelis-canvas"></canvas>
+    <div id="astrelis-status" role="status">Starting Astrelis…</div>
+    <script type="module">
+      import init from "./pkg/astrelis_widgets.js";
+
+      init()
+        .then(() => document.querySelector("#astrelis-status").remove())
+        .catch((error) => {
+          document.querySelector("#astrelis-status").textContent =
+            `Unable to start Astrelis: ${error}`;
+          console.error(error);
+        });
+    </script>
+  </body>
+</html>
