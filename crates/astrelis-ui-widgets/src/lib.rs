@@ -18,8 +18,10 @@ type PayloadAcceptance = dyn Fn(&DragPayload) -> bool;
 type DropMessage<Message> = dyn Fn(&DragPayload, DropOperation) -> Message;
 
 mod composites;
+mod virtual_list;
 
 pub use composites::{Form, List, ListItem, Menu, MenuItem, Popover, Tabs, Tooltip};
+pub use virtual_list::{VirtualList, VirtualListItem, VirtualListOptions};
 
 /// Installs drag-source behavior on an arbitrary retained element.
 pub fn install_drag_source<Message: 'static, T>(

@@ -5,8 +5,9 @@ Reusable retained controls composed from the public `astrelis-ui-core` API.
 Milestone 11 currently provides generic in-process drag sources and drop
 targets, resizable horizontal and vertical split panes, immediate tooltips,
 popovers, keyboard-accessible menus and tabs, selectable retained lists, and
-common labeled form compositions. Fixed-extent virtual lists follow in the
-final slice.
+common labeled form compositions. Fixed-extent virtual lists retain only the
+visible rows plus configured overscan; users call `sync` after input, viewport,
+scroll, or data changes.
 
 Run the native gallery with:
 

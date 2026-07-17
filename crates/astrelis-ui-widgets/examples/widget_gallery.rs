@@ -16,7 +16,8 @@ use astrelis_ui_core::{
 };
 use astrelis_ui_widgets::{
     DropZone, Form, List, ListItem, Menu, MenuItem, Popover, SplitAxis, SplitPane,
-    SplitPaneOptions, Tabs, Tooltip, install_drag_source, move_drag_options,
+    SplitPaneOptions, Tabs, Tooltip, VirtualList, VirtualListOptions, install_drag_source,
+    move_drag_options,
 };
 
 const NOTO_SANS: &[u8] = include_bytes!("../../astrelis-ui-core/assets/NotoSans.ttf");
@@ -44,6 +45,8 @@ struct Gallery {
     gpu: Option<GpuState>,
     ui: Ui<Message>,
     status: ElementHandle<Label>,
+    virtual_list: VirtualList,
+    virtual_status: ElementHandle<Label>,
 }
 
 impl Gallery {
@@ -335,6 +338,30 @@ impl Gallery {
         form.add_status(&mut ui, "Validation: ready")
             .map_err(io::Error::other)?;
 
+        ui.add_label(column, "Virtual list: 10,000 retained-data rows")
+            .map_err(io::Error::other)?;
+        let virtual_status = ui
+            .add_label(column, "Realized range will appear after layout.")
+            .map_err(io::Error::other)?;
+        let virtual_list = VirtualList::new(
+            &mut ui,
+            column,
+            VirtualListOptions {
+                item_extent: 40.0,
+                overscan: 4,
+            },
+        )
+        .map_err(io::Error::other)?;
+        ui.set_layout(
+            virtual_list.scroll_view(),
+            LayoutStyle {
+                width: Length::Percent(1.0),
+                height: Length::Px(360.0),
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+
         #[cfg(target_arch = "wasm32")]
         let descriptor = astrelis_gpu_wgpu::InstanceDescriptor {
             use_environment: false,
@@ -348,7 +375,43 @@ impl Gallery {
             gpu: None,
             ui,
             status,
+            virtual_list,
+            virtual_status,
         })
+    }
+
+    fn sync_virtual_list(&mut self) -> io::Result<()> {
+        self.virtual_list
+            .sync(&mut self.ui, 10_000, |ui, item, index| {
+                ui.add_label(item, format!("Row {index:05} — retained only while nearby"))?;
+                Ok(())
+            })
+            .map_err(io::Error::other)?;
+        let range = self.virtual_list.realized_range();
+        self.ui
+            .set_label_text(
+                self.virtual_status,
+                format!(
+                    "Realized {} rows: {}..{}",
+                    self.virtual_list.realized_count(),
+                    range.start,
+                    range.end
+                ),
+            )
+            .map_err(io::Error::other)
+    }
+
+    fn resize_virtual_list(&mut self, viewport_height: f32) -> io::Result<()> {
+        self.ui
+            .set_layout(
+                self.virtual_list.scroll_view(),
+                LayoutStyle {
+                    width: Length::Percent(1.0),
+                    height: Length::Px((viewport_height * 0.5).clamp(220.0, 520.0)),
+                    ..Default::default()
+                },
+            )
+            .map_err(io::Error::other)
     }
 
     fn install_gpu(&mut self, gpu: GpuState) -> io::Result<()> {
@@ -357,14 +420,14 @@ impl Gallery {
             .as_ref()
             .ok_or_else(|| io::Error::other("window closed during GPU initialization"))?;
         let scale = window.scale_factor() as f32;
-        self.ui.set_viewport(
-            Size::new(
-                gpu.configuration.width as f32 / scale,
-                gpu.configuration.height as f32 / scale,
-            ),
-            scale,
+        let viewport = Size::new(
+            gpu.configuration.width as f32 / scale,
+            gpu.configuration.height as f32 / scale,
         );
+        self.ui.set_viewport(viewport, scale);
         self.gpu = Some(gpu);
+        self.resize_virtual_list(viewport.height)?;
+        self.sync_virtual_list()?;
         Ok(())
     }
 
@@ -386,6 +449,8 @@ impl Gallery {
                 Size::new(width as f32 / scale, height as f32 / scale),
                 scale,
             );
+            self.resize_virtual_list(height as f32 / scale)?;
+            self.sync_virtual_list()?;
         }
         Ok(())
     }
@@ -568,6 +633,7 @@ impl App for Gallery {
                 .ui
                 .handle_window_event(window, &context.clipboard(), &event)
                 .map_err(io::Error::other)?;
+            self.sync_virtual_list()?;
             self.consume_messages()?;
             if update.redraw || self.ui.needs_redraw() {
                 context.invalidate_window(id);

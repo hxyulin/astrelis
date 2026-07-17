@@ -3133,6 +3133,9 @@ impl<Message: 'static> Ui<Message> {
     fn subtree_bottom(&self, id: ElementId) -> Result<f32, UiError> {
         let node = self.node(id)?;
         let mut bottom = node.bounds.max_y();
+        if matches!(node.kind, Kind::ScrollView { .. }) {
+            return Ok(bottom);
+        }
         for child in &node.children {
             if !matches!(self.node(*child)?.kind, Kind::Overlay { .. }) {
                 bottom = bottom.max(self.subtree_bottom(*child)?);
@@ -5670,6 +5673,52 @@ mod tests {
                 scroll_bounds.max_y() - 2.0
             ))
             .is_some()
+        );
+    }
+
+    #[test]
+    fn outer_scroll_extent_stops_at_nested_scroll_view_bounds() {
+        let mut ui = ui();
+        ui.set_viewport(Size::new(400.0, 260.0), 1.0);
+        let root = ui.root();
+        let outer = ui.add_scroll_view(root).unwrap();
+        ui.set_layout(
+            outer,
+            LayoutStyle {
+                height: Length::Px(200.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let column = ui.add_column(outer).unwrap();
+        let inner = ui.add_scroll_view(column).unwrap();
+        ui.set_layout(
+            inner,
+            LayoutStyle {
+                height: Length::Px(100.0),
+                shrink: 0.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let tall = ui.add_stack(inner).unwrap();
+        ui.set_layout(
+            tall,
+            LayoutStyle {
+                height: Length::Px(10_000.0),
+                shrink: 0.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        ui.add_label(column, "After nested scroll").unwrap();
+        ui.ensure_layout().unwrap();
+        let Kind::ScrollView { content_height, .. } = ui.node(outer.id()).unwrap().kind else {
+            unreachable!()
+        };
+        assert!(
+            content_height < 500.0,
+            "outer extent leaked to {content_height}"
         );
     }
 
