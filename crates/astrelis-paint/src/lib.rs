@@ -21,6 +21,7 @@ use astrelis_text::TextLayout;
 
 static NEXT_PATH_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_IMAGE_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_GRADIENT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Error produced while constructing paint data.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -281,11 +282,137 @@ impl Default for StrokeStyle {
     }
 }
 
-/// Paint source for a draw operation.
+/// One color stop in a gradient.
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GradientStop {
+    /// Normalized position within the gradient.
+    pub offset: f32,
+    /// Linear-space color at this stop.
+    pub color: Color,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct LinearGradientData {
+    id: u64,
+    start: LogicalPoint,
+    end: LogicalPoint,
+    stops: Arc<[GradientStop]>,
+}
+
+/// Immutable linear gradient in local logical coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinearGradient(Arc<LinearGradientData>);
+
+impl LinearGradient {
+    /// Creates a clamped linear gradient.
+    pub fn new(
+        start: LogicalPoint,
+        end: LogicalPoint,
+        stops: impl Into<Arc<[GradientStop]>>,
+    ) -> Result<Self, PaintError> {
+        validate_point(start)?;
+        validate_point(end)?;
+        if start == end {
+            return Err(PaintError::new("linear gradient endpoints must differ"));
+        }
+        let stops = stops.into();
+        validate_gradient_stops(&stops)?;
+        Ok(Self(Arc::new(LinearGradientData {
+            id: NEXT_GRADIENT_ID.fetch_add(1, Ordering::Relaxed),
+            start,
+            end,
+            stops,
+        })))
+    }
+
+    /// Gradient start point.
+    pub fn start(&self) -> LogicalPoint {
+        self.0.start
+    }
+
+    /// Gradient end point.
+    pub fn end(&self) -> LogicalPoint {
+        self.0.end
+    }
+
+    /// Ordered color stops.
+    pub fn stops(&self) -> &[GradientStop] {
+        &self.0.stops
+    }
+
+    /// Internal immutable identity used for renderer caches.
+    #[doc(hidden)]
+    pub fn cache_id(&self) -> u64 {
+        self.0.id
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct RadialGradientData {
+    id: u64,
+    center: LogicalPoint,
+    radius: f32,
+    stops: Arc<[GradientStop]>,
+}
+
+/// Immutable circular radial gradient in local logical coordinates.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RadialGradient(Arc<RadialGradientData>);
+
+impl RadialGradient {
+    /// Creates a clamped circular radial gradient.
+    pub fn new(
+        center: LogicalPoint,
+        radius: f32,
+        stops: impl Into<Arc<[GradientStop]>>,
+    ) -> Result<Self, PaintError> {
+        validate_point(center)?;
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(PaintError::new(
+                "radial gradient radius must be finite and positive",
+            ));
+        }
+        let stops = stops.into();
+        validate_gradient_stops(&stops)?;
+        Ok(Self(Arc::new(RadialGradientData {
+            id: NEXT_GRADIENT_ID.fetch_add(1, Ordering::Relaxed),
+            center,
+            radius,
+            stops,
+        })))
+    }
+
+    /// Gradient center point.
+    pub fn center(&self) -> LogicalPoint {
+        self.0.center
+    }
+
+    /// Gradient radius.
+    pub fn radius(&self) -> f32 {
+        self.0.radius
+    }
+
+    /// Ordered color stops.
+    pub fn stops(&self) -> &[GradientStop] {
+        &self.0.stops
+    }
+
+    /// Internal immutable identity used for renderer caches.
+    #[doc(hidden)]
+    pub fn cache_id(&self) -> u64 {
+        self.0.id
+    }
+}
+
+/// Paint source for a draw operation.
+#[derive(Clone, Debug, PartialEq)]
 pub enum Brush {
     /// A solid linear-space color.
     Solid(Color),
+    /// A linear gradient.
+    LinearGradient(LinearGradient),
+    /// A circular radial gradient.
+    RadialGradient(RadialGradient),
 }
 
 /// Four rounded-rectangle corner radii.
@@ -496,6 +623,8 @@ pub enum Command {
     Restore,
     /// Post-concatenates an affine transform.
     Transform(Affine2),
+    /// Multiplies subsequent draw opacity until the matching restore.
+    MultiplyOpacity(f32),
     /// Intersects with a rectangular clip.
     ClipRect(LogicalRect),
     /// Intersects with a rounded-rectangle clip.
@@ -506,6 +635,26 @@ pub enum Command {
     FillRect { rect: LogicalRect, brush: Brush },
     /// Fills a rounded rectangle.
     FillRoundedRect { rect: RoundedRect, brush: Brush },
+    /// Fills an ellipse bounded by a rectangle.
+    FillEllipse { rect: LogicalRect, brush: Brush },
+    /// Strokes a rectangle with a centered stroke.
+    StrokeRect {
+        rect: LogicalRect,
+        style: StrokeStyle,
+        brush: Brush,
+    },
+    /// Strokes a rounded rectangle with a centered stroke.
+    StrokeRoundedRect {
+        rect: RoundedRect,
+        style: StrokeStyle,
+        brush: Brush,
+    },
+    /// Strokes an ellipse with a centered stroke.
+    StrokeEllipse {
+        rect: LogicalRect,
+        style: StrokeStyle,
+        brush: Brush,
+    },
     /// Fills a path.
     FillPath {
         path: PathRef,
@@ -643,6 +792,26 @@ impl Painter {
         Ok(())
     }
 
+    /// Multiplies the opacity of subsequent draw operations.
+    pub fn multiply_opacity(&mut self, opacity: f32) -> Result<(), PaintError> {
+        validate_opacity(opacity)?;
+        self.commands.push(Command::MultiplyOpacity(opacity));
+        Ok(())
+    }
+
+    /// Executes a closure with nested multiplicative opacity.
+    pub fn with_opacity<T>(
+        &mut self,
+        opacity: f32,
+        operation: impl FnOnce(&mut Self) -> Result<T, PaintError>,
+    ) -> Result<T, PaintError> {
+        validate_opacity(opacity)?;
+        self.with_save(|painter| {
+            painter.multiply_opacity(opacity)?;
+            operation(painter)
+        })
+    }
+
     /// Adds a rectangular clip.
     pub fn clip_rect(&mut self, rect: LogicalRect) -> Result<(), PaintError> {
         validate_rect(rect)?;
@@ -666,15 +835,67 @@ impl Painter {
     /// Fills a rectangle.
     pub fn fill_rect(&mut self, rect: LogicalRect, brush: Brush) -> Result<(), PaintError> {
         validate_rect(rect)?;
-        validate_brush(brush)?;
+        validate_brush(&brush)?;
         self.commands.push(Command::FillRect { rect, brush });
         Ok(())
     }
 
     /// Fills a rounded rectangle.
     pub fn fill_rounded_rect(&mut self, rect: RoundedRect, brush: Brush) -> Result<(), PaintError> {
-        validate_brush(brush)?;
+        validate_brush(&brush)?;
         self.commands.push(Command::FillRoundedRect { rect, brush });
+        Ok(())
+    }
+
+    /// Fills an ellipse bounded by a rectangle.
+    pub fn fill_ellipse(&mut self, rect: LogicalRect, brush: Brush) -> Result<(), PaintError> {
+        validate_rect(rect)?;
+        validate_brush(&brush)?;
+        self.commands.push(Command::FillEllipse { rect, brush });
+        Ok(())
+    }
+
+    /// Strokes a rectangle with a centered stroke.
+    pub fn stroke_rect(
+        &mut self,
+        rect: LogicalRect,
+        style: StrokeStyle,
+        brush: Brush,
+    ) -> Result<(), PaintError> {
+        validate_rect(rect)?;
+        validate_stroke(style)?;
+        validate_brush(&brush)?;
+        self.commands
+            .push(Command::StrokeRect { rect, style, brush });
+        Ok(())
+    }
+
+    /// Strokes a rounded rectangle with a centered stroke.
+    pub fn stroke_rounded_rect(
+        &mut self,
+        rect: RoundedRect,
+        style: StrokeStyle,
+        brush: Brush,
+    ) -> Result<(), PaintError> {
+        validate_stroke(style)?;
+        validate_brush(&brush)?;
+        self.commands
+            .push(Command::StrokeRoundedRect { rect, style, brush });
+        Ok(())
+    }
+
+    /// Strokes an ellipse with a centered stroke.
+    pub fn stroke_ellipse(
+        &mut self,
+        rect: LogicalRect,
+        style: StrokeStyle,
+        brush: Brush,
+    ) -> Result<(), PaintError> {
+        validate_rect(rect)?;
+        validate_stroke(style)?;
+        validate_brush(&brush)?;
+        self.commands
+            .push(Command::StrokeEllipse { rect, style, brush });
         Ok(())
     }
 
@@ -685,7 +906,7 @@ impl Painter {
         rule: FillRule,
         brush: Brush,
     ) -> Result<(), PaintError> {
-        validate_brush(brush)?;
+        validate_brush(&brush)?;
         let path = self.intern_path(path);
         self.commands.push(Command::FillPath { path, rule, brush });
         Ok(())
@@ -698,17 +919,8 @@ impl Painter {
         style: StrokeStyle,
         brush: Brush,
     ) -> Result<(), PaintError> {
-        if !style.width.is_finite() || style.width < 0.0 {
-            return Err(PaintError::new(
-                "stroke width must be finite and non-negative",
-            ));
-        }
-        if !style.miter_limit.is_finite() || style.miter_limit < 1.0 {
-            return Err(PaintError::new(
-                "stroke miter limit must be finite and at least 1",
-            ));
-        }
-        validate_brush(brush)?;
+        validate_stroke(style)?;
+        validate_brush(&brush)?;
         let path = self.intern_path(path);
         self.commands
             .push(Command::StrokePath { path, style, brush });
@@ -829,8 +1041,7 @@ fn validate_rect<S>(rect: Rect<S>) -> Result<(), PaintError> {
     }
 }
 
-fn validate_brush(brush: Brush) -> Result<(), PaintError> {
-    let Brush::Solid(color) = brush;
+fn validate_color(color: Color) -> Result<(), PaintError> {
     if [color.r, color.g, color.b, color.a]
         .into_iter()
         .all(f32::is_finite)
@@ -839,6 +1050,55 @@ fn validate_brush(brush: Brush) -> Result<(), PaintError> {
     } else {
         Err(PaintError::new("brush components must be finite"))
     }
+}
+
+fn validate_brush(brush: &Brush) -> Result<(), PaintError> {
+    match brush {
+        Brush::Solid(color) => validate_color(*color),
+        Brush::LinearGradient(_) | Brush::RadialGradient(_) => Ok(()),
+    }
+}
+
+fn validate_gradient_stops(stops: &[GradientStop]) -> Result<(), PaintError> {
+    if stops.len() < 2 {
+        return Err(PaintError::new("gradients require at least two stops"));
+    }
+    let mut previous = 0.0;
+    for (index, stop) in stops.iter().enumerate() {
+        if !stop.offset.is_finite() || !(0.0..=1.0).contains(&stop.offset) {
+            return Err(PaintError::new(
+                "gradient stop offsets must be within 0..=1",
+            ));
+        }
+        if index > 0 && stop.offset < previous {
+            return Err(PaintError::new("gradient stops must be ordered by offset"));
+        }
+        validate_color(stop.color)?;
+        previous = stop.offset;
+    }
+    Ok(())
+}
+
+fn validate_opacity(opacity: f32) -> Result<(), PaintError> {
+    if opacity.is_finite() && (0.0..=1.0).contains(&opacity) {
+        Ok(())
+    } else {
+        Err(PaintError::new("opacity must be within 0..=1"))
+    }
+}
+
+fn validate_stroke(style: StrokeStyle) -> Result<(), PaintError> {
+    if !style.width.is_finite() || style.width < 0.0 {
+        return Err(PaintError::new(
+            "stroke width must be finite and non-negative",
+        ));
+    }
+    if !style.miter_limit.is_finite() || style.miter_limit < 1.0 {
+        return Err(PaintError::new(
+            "stroke miter limit must be finite and at least 1",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -884,6 +1144,82 @@ mod tests {
     fn validates_images() {
         assert!(Image::from_rgba8(Size::new(2, 2), vec![0; 15]).is_err());
         assert!(Image::from_rgba8(Size::new(2, 2), vec![0; 16]).is_ok());
+    }
+
+    #[test]
+    fn validates_gradients() {
+        let point = Point::new;
+        let stops = [
+            GradientStop {
+                offset: 0.0,
+                color: Color::BLACK,
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::WHITE,
+            },
+        ];
+        assert!(LinearGradient::new(point(0.0, 0.0), point(10.0, 0.0), stops).is_ok());
+        assert!(LinearGradient::new(point(0.0, 0.0), point(0.0, 0.0), stops).is_err());
+        assert!(RadialGradient::new(point(0.0, 0.0), 10.0, stops).is_ok());
+        assert!(RadialGradient::new(point(0.0, 0.0), 0.0, stops).is_err());
+        assert!(
+            LinearGradient::new(
+                point(0.0, 0.0),
+                point(1.0, 0.0),
+                [
+                    GradientStop {
+                        offset: 0.8,
+                        color: Color::BLACK,
+                    },
+                    GradientStop {
+                        offset: 0.2,
+                        color: Color::WHITE,
+                    },
+                ],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn records_shapes_and_nested_opacity() {
+        let gradient = LinearGradient::new(
+            Point::new(0.0, 0.0),
+            Point::new(20.0, 0.0),
+            [
+                GradientStop {
+                    offset: 0.0,
+                    color: Color::RED,
+                },
+                GradientStop {
+                    offset: 1.0,
+                    color: Color::WHITE,
+                },
+            ],
+        )
+        .unwrap();
+        let mut painter = Painter::new();
+        painter
+            .with_opacity(0.5, |painter| {
+                painter.fill_ellipse(
+                    Rect::from_xywh(0.0, 0.0, 20.0, 10.0),
+                    Brush::LinearGradient(gradient.clone()),
+                )?;
+                painter.stroke_rect(
+                    Rect::from_xywh(1.0, 2.0, 8.0, 9.0),
+                    StrokeStyle::default(),
+                    Brush::Solid(Color::WHITE),
+                )
+            })
+            .unwrap();
+        let list = painter.finish().unwrap();
+        assert!(matches!(list.commands()[0], Command::Save));
+        assert!(matches!(list.commands()[1], Command::MultiplyOpacity(0.5)));
+        assert!(matches!(list.commands()[2], Command::FillEllipse { .. }));
+        assert!(matches!(list.commands()[3], Command::StrokeRect { .. }));
+        assert!(matches!(list.commands()[4], Command::Restore));
+        assert!(Painter::new().multiply_opacity(f32::NAN).is_err());
     }
 
     #[test]

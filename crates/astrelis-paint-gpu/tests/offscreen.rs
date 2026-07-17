@@ -3,13 +3,16 @@
 use astrelis_core::{
     color::Color,
     geometry::{Point, Rect, Size},
+    math::{Affine2, Vec2},
 };
 use astrelis_gpu::{
     BufferDescriptor, BufferTextureCopy, BufferUsages, CommandEncoderDescriptor, DeviceDescriptor,
     Extent3d, MapMode, PollMode, RequestAdapterOptions, TextureCopy, TextureDescriptor,
     TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
 };
-use astrelis_paint::{Brush, FillRule, Painter, Path};
+use astrelis_paint::{
+    Brush, FillRule, GradientStop, LinearGradient, Painter, Path, RadialGradient,
+};
 use astrelis_paint_gpu::{Antialiasing, RenderTarget, Renderer, RendererOptions};
 use astrelis_text::{FontDatabase, TextLayoutContext, TextLayoutRequest};
 
@@ -56,6 +59,34 @@ fn renders_solid_stencil_clip_and_reuses_mesh() {
         path.close().unwrap();
         let path = path.finish();
         let mut painter = Painter::new();
+        let gradient = LinearGradient::new(
+            Point::new(0.0, 0.0),
+            Point::new(12.0, 0.0),
+            [
+                GradientStop {
+                    offset: 0.0,
+                    color: Color::RED,
+                },
+                GradientStop {
+                    offset: 1.0,
+                    color: Color::BLUE,
+                },
+            ],
+        )
+        .unwrap();
+        painter.save();
+        painter
+            .transform(Affine2::from_translation(Vec2::new(2.0, 0.0)))
+            .unwrap();
+        painter
+            .with_opacity(0.5, |painter| {
+                painter.fill_rect(
+                    Rect::from_xywh(0.0, 0.0, 12.0, 4.0),
+                    Brush::LinearGradient(gradient),
+                )
+            })
+            .unwrap();
+        painter.restore().unwrap();
         painter.save();
         painter
             .clip_rect(Rect::from_xywh(4.5, 4.5, 7.0, 7.0))
@@ -64,6 +95,27 @@ fn renders_solid_stencil_clip_and_reuses_mesh() {
             .fill_path(&path, FillRule::NonZero, Brush::Solid(Color::RED))
             .unwrap();
         painter.restore().unwrap();
+        let radial = RadialGradient::new(
+            Point::new(14.0, 14.0),
+            2.0,
+            [
+                GradientStop {
+                    offset: 0.0,
+                    color: Color::WHITE,
+                },
+                GradientStop {
+                    offset: 1.0,
+                    color: Color::BLUE,
+                },
+            ],
+        )
+        .unwrap();
+        painter
+            .fill_ellipse(
+                Rect::from_xywh(12.0, 12.0, 4.0, 4.0),
+                Brush::RadialGradient(radial),
+            )
+            .unwrap();
         let mut fonts = FontDatabase::default();
         let mut text_context = TextLayoutContext::new();
         let mut request = TextLayoutRequest::new("I");
@@ -106,6 +158,8 @@ fn renders_solid_stencil_clip_and_reuses_mesh() {
             .expect("second paint render");
         assert_eq!(first.mesh_cache_misses, 1);
         assert_eq!(second.mesh_cache_hits, 1);
+        assert_eq!(first.gradient_cache_misses, 2);
+        assert_eq!(second.gradient_cache_hits, 2);
         assert!(first.glyph_cache_misses > 0);
         assert!(first.glyph_uploads > 0);
         assert!(second.glyph_cache_hits > 0);
@@ -144,6 +198,9 @@ fn renders_solid_stencil_clip_and_reuses_mesh() {
             &bytes[offset..offset + 4]
         };
         assert_eq!(pixel(8, 8), [255, 0, 0, 255]);
+        assert!(pixel(3, 1)[0] > pixel(3, 1)[2]);
+        assert!(pixel(12, 1)[2] > pixel(12, 1)[0]);
+        assert!(pixel(14, 14)[0] > pixel(12, 14)[0]);
         assert!(
             (0..16).any(|y| (0..8).any(|x| {
                 let value = pixel(x, y);

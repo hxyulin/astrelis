@@ -12,7 +12,7 @@ use astrelis_core::{
 use astrelis_gpu as gpu;
 use astrelis_paint::{
     Brush, Command, CornerRadii, DisplayList, FillRule, Image, ImageOptions, ImageSampling,
-    LineCap, LineJoin, Path, PathVerb, RoundedRect, StrokeStyle,
+    LineCap, LineJoin, LinearGradient, Path, PathVerb, RadialGradient, RoundedRect, StrokeStyle,
 };
 use astrelis_text_gpu::{AtlasKind, GlyphCache, GlyphCacheOptions};
 use bytemuck::{Pod, Zeroable};
@@ -47,6 +47,8 @@ pub struct CacheLimits {
     pub mesh_bytes: usize,
     /// Maximum cached uploaded image bytes.
     pub image_bytes: usize,
+    /// Maximum cached gradient buffer bytes.
+    pub gradient_bytes: usize,
     /// Maximum glyph atlas texture bytes.
     pub glyph_bytes: usize,
 }
@@ -56,6 +58,7 @@ impl Default for CacheLimits {
         Self {
             mesh_bytes: 32 << 20,
             image_bytes: 128 << 20,
+            gradient_bytes: 4 << 20,
             glyph_bytes: 64 << 20,
         }
     }
@@ -100,6 +103,10 @@ pub struct RenderStats {
     pub image_cache_hits: u32,
     /// Newly uploaded images.
     pub image_cache_misses: u32,
+    /// Reused uploaded gradient resources.
+    pub gradient_cache_hits: u32,
+    /// Newly uploaded gradient resources.
+    pub gradient_cache_misses: u32,
     /// Reused rasterized glyphs.
     pub glyph_cache_hits: u32,
     /// Newly rasterized glyphs.
@@ -138,6 +145,7 @@ struct Vertex {
     position: [f32; 2],
     uv: [f32; 2],
     color: [f32; 4],
+    local_position: [f32; 2],
 }
 
 #[derive(Clone)]
@@ -174,11 +182,20 @@ struct CachedImage {
     used: u64,
 }
 
+struct CachedGradient {
+    _header: gpu::Buffer,
+    _stops: gpu::Buffer,
+    bind_group: gpu::BindGroup,
+    bytes: usize,
+    used: u64,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PipelineKey(gpu::TextureFormat, u32);
 
 struct Pipelines {
     solid: gpu::RenderPipeline,
+    gradient: gpu::RenderPipeline,
     image: gpu::RenderPipeline,
     text_mask: gpu::RenderPipeline,
     text_color: gpu::RenderPipeline,
@@ -243,10 +260,12 @@ struct State {
     transform: Affine2,
     scissor: Scissor,
     clips: Vec<Clip>,
+    opacity: f32,
 }
 
 enum DrawKind {
     Solid,
+    Gradient(gpu::BindGroup),
     Image(gpu::BindGroup),
     TextMask(gpu::BindGroup),
     TextColor(gpu::BindGroup),
@@ -267,10 +286,12 @@ pub struct Renderer {
     queue: gpu::Queue,
     options: RendererOptions,
     image_layout: gpu::BindGroupLayout,
+    gradient_layout: gpu::BindGroupLayout,
     pipelines: HashMap<PipelineKey, Pipelines>,
     attachments: Option<Attachments>,
     meshes: HashMap<MeshKey, CachedMesh>,
     images: HashMap<u64, CachedImage>,
+    gradients: HashMap<u64, CachedGradient>,
     glyphs: GlyphCache,
     vertex_buffer: Option<FrameBuffer>,
     index_buffer: Option<FrameBuffer>,
@@ -308,6 +329,29 @@ impl Renderer {
                 },
             ],
         });
+        let gradient_layout = device.create_bind_group_layout(gpu::BindGroupLayoutDescriptor {
+            label: Some("paint gradient layout".into()),
+            entries: vec![
+                gpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: gpu::ShaderStages::FRAGMENT,
+                    ty: gpu::BindingType::Buffer {
+                        ty: gpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                },
+                gpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: gpu::ShaderStages::FRAGMENT,
+                    ty: gpu::BindingType::Buffer {
+                        ty: gpu::BufferBindingType::ReadOnlyStorage,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                },
+            ],
+        });
         let glyphs = GlyphCache::new(
             device.clone(),
             queue.clone(),
@@ -322,10 +366,12 @@ impl Renderer {
             queue,
             options,
             image_layout,
+            gradient_layout,
             pipelines: HashMap::new(),
             attachments: None,
             meshes: HashMap::new(),
             images: HashMap::new(),
+            gradients: HashMap::new(),
             glyphs,
             vertex_buffer: None,
             index_buffer: None,
@@ -364,6 +410,7 @@ impl Renderer {
             transform: Affine2::IDENTITY,
             scissor: Scissor::full(target.size),
             clips: Vec::new(),
+            opacity: 1.0,
         };
         let mut stack = Vec::new();
         for (index, command) in list.commands().iter().enumerate() {
@@ -439,6 +486,10 @@ impl Renderer {
                 pass.set_stencil_reference(draw.stencil);
                 match draw.kind {
                     DrawKind::Solid => pass.set_pipeline(&pipeline.solid)?,
+                    DrawKind::Gradient(bind) => {
+                        pass.set_pipeline(&pipeline.gradient)?;
+                        pass.set_bind_group(0, &bind, &[])?;
+                    }
                     DrawKind::Image(bind) => {
                         pass.set_pipeline(&pipeline.image)?;
                         pass.set_bind_group(0, &bind, &[])?;
@@ -467,6 +518,7 @@ impl Renderer {
     pub fn trim_caches(&mut self) {
         self.meshes.clear();
         self.images.clear();
+        self.gradients.clear();
         self.glyphs.clear();
     }
 
@@ -510,6 +562,7 @@ impl Renderer {
                 *state = restored;
             }
             Command::Transform(value) => state.transform *= *value,
+            Command::MultiplyOpacity(value) => state.opacity *= *value,
             Command::ClipRect(rect) => {
                 if let Some(scissor) = exact_scissor(*rect, dpi * state.transform, size) {
                     state.scissor = state.scissor.intersect(scissor);
@@ -547,9 +600,9 @@ impl Renderer {
                 )?;
                 push_clip(mesh, state, dpi, size, vertices, indices, draws, stats)?;
             }
-            Command::FillRect { rect, brush } => draw_solid(
+            Command::FillRect { rect, brush } => self.draw_brush(
                 rect_mesh(*rect),
-                *brush,
+                brush,
                 state,
                 dpi,
                 size,
@@ -557,10 +610,10 @@ impl Renderer {
                 indices,
                 draws,
                 stats,
-            ),
-            Command::FillRoundedRect { rect, brush } => draw_solid(
+            )?,
+            Command::FillRoundedRect { rect, brush } => self.draw_brush(
                 rounded_mesh(*rect, local_tolerance(dpi * state.transform))?,
-                *brush,
+                brush,
                 state,
                 dpi,
                 size,
@@ -568,7 +621,59 @@ impl Renderer {
                 indices,
                 draws,
                 stats,
-            ),
+            )?,
+            Command::FillEllipse { rect, brush } => self.draw_brush(
+                ellipse_mesh(*rect, local_tolerance(dpi * state.transform), None)?,
+                brush,
+                state,
+                dpi,
+                size,
+                vertices,
+                indices,
+                draws,
+                stats,
+            )?,
+            Command::StrokeRect { rect, style, brush } => self.draw_brush(
+                shape_stroke_mesh(
+                    rect_path(*rect)?,
+                    *style,
+                    local_tolerance(dpi * state.transform),
+                )?,
+                brush,
+                state,
+                dpi,
+                size,
+                vertices,
+                indices,
+                draws,
+                stats,
+            )?,
+            Command::StrokeRoundedRect { rect, style, brush } => self.draw_brush(
+                shape_stroke_mesh(
+                    rounded_path(*rect)?,
+                    *style,
+                    local_tolerance(dpi * state.transform),
+                )?,
+                brush,
+                state,
+                dpi,
+                size,
+                vertices,
+                indices,
+                draws,
+                stats,
+            )?,
+            Command::StrokeEllipse { rect, style, brush } => self.draw_brush(
+                ellipse_mesh(*rect, local_tolerance(dpi * state.transform), Some(*style))?,
+                brush,
+                state,
+                dpi,
+                size,
+                vertices,
+                indices,
+                draws,
+                stats,
+            )?,
             Command::FillPath { path, rule, brush } => {
                 let mesh = self.path_mesh(
                     list.path(*path),
@@ -576,9 +681,9 @@ impl Renderer {
                     dpi * state.transform,
                     stats,
                 )?;
-                draw_solid(
-                    mesh, *brush, state, dpi, size, vertices, indices, draws, stats,
-                );
+                self.draw_brush(
+                    mesh, brush, state, dpi, size, vertices, indices, draws, stats,
+                )?;
             }
             Command::StrokePath { path, style, brush } => {
                 let mesh = self.path_mesh(
@@ -592,9 +697,9 @@ impl Renderer {
                     dpi * state.transform,
                     stats,
                 )?;
-                draw_solid(
-                    mesh, *brush, state, dpi, size, vertices, indices, draws, stats,
-                );
+                self.draw_brush(
+                    mesh, brush, state, dpi, size, vertices, indices, draws, stats,
+                )?;
             }
             Command::DrawImage {
                 image,
@@ -610,7 +715,7 @@ impl Renderer {
                     &rect_mesh(*destination),
                     dpi * state.transform,
                     size,
-                    [options.opacity; 4],
+                    [options.opacity * state.opacity; 4],
                     Some(image_uv(image, *options)),
                     vertices,
                     indices,
@@ -649,7 +754,7 @@ impl Renderer {
                         );
                         draw_solid(
                             rect_mesh(rect),
-                            Brush::Solid(run.color.with_alpha(run.color.a * *opacity)),
+                            run.color.with_alpha(run.color.a * *opacity),
                             state,
                             dpi,
                             size,
@@ -668,7 +773,8 @@ impl Renderer {
                         glyph.rect.size.width,
                         glyph.rect.size.height,
                     );
-                    let alpha = (run.color.a * *opacity).clamp(0.0, 1.0);
+                    let effective_opacity = *opacity * state.opacity;
+                    let alpha = (run.color.a * effective_opacity).clamp(0.0, 1.0);
                     let (color, kind) = match glyph.kind {
                         AtlasKind::Mask => (
                             [
@@ -679,7 +785,10 @@ impl Renderer {
                             ],
                             DrawKind::TextMask(glyph.bind_group),
                         ),
-                        AtlasKind::Color => ([*opacity; 4], DrawKind::TextColor(glyph.bind_group)),
+                        AtlasKind::Color => (
+                            [effective_opacity; 4],
+                            DrawKind::TextColor(glyph.bind_group),
+                        ),
                     };
                     append(
                         &rect_mesh(rect),
@@ -829,6 +938,198 @@ impl Renderer {
         Ok(result)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn draw_brush(
+        &mut self,
+        mesh: Mesh,
+        brush: &Brush,
+        state: &State,
+        dpi: Affine2,
+        size: Size<Physical, u32>,
+        vertices: &mut Vec<Vertex>,
+        indices: &mut Vec<u32>,
+        draws: &mut Vec<Draw>,
+        stats: &mut RenderStats,
+    ) -> Result<(), RenderError> {
+        if state.opacity <= 0.0 {
+            return Ok(());
+        }
+        match brush {
+            Brush::Solid(color) => draw_solid(
+                mesh, *color, state, dpi, size, vertices, indices, draws, stats,
+            ),
+            Brush::LinearGradient(gradient) => {
+                let bind = self.gradient_bind_linear(gradient, stats)?;
+                append(
+                    &mesh,
+                    dpi * state.transform,
+                    size,
+                    [state.opacity; 4],
+                    None,
+                    vertices,
+                    indices,
+                    draws,
+                    DrawKind::Gradient(bind),
+                    state.scissor,
+                    state.clips.len() as u32,
+                    stats,
+                );
+                stats.draws += u32::from(!mesh.indices.is_empty());
+            }
+            Brush::RadialGradient(gradient) => {
+                let bind = self.gradient_bind_radial(gradient, stats)?;
+                append(
+                    &mesh,
+                    dpi * state.transform,
+                    size,
+                    [state.opacity; 4],
+                    None,
+                    vertices,
+                    indices,
+                    draws,
+                    DrawKind::Gradient(bind),
+                    state.scissor,
+                    state.clips.len() as u32,
+                    stats,
+                );
+                stats.draws += u32::from(!mesh.indices.is_empty());
+            }
+        }
+        Ok(())
+    }
+
+    fn gradient_bind_linear(
+        &mut self,
+        gradient: &LinearGradient,
+        stats: &mut RenderStats,
+    ) -> Result<gpu::BindGroup, RenderError> {
+        let start = gradient.start();
+        let end = gradient.end();
+        self.gradient_bind(
+            gradient.cache_id(),
+            [
+                0.0,
+                gradient.stops().len() as f32,
+                start.x,
+                start.y,
+                end.x,
+                end.y,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            gradient.stops(),
+            stats,
+        )
+    }
+
+    fn gradient_bind_radial(
+        &mut self,
+        gradient: &RadialGradient,
+        stats: &mut RenderStats,
+    ) -> Result<gpu::BindGroup, RenderError> {
+        let center = gradient.center();
+        self.gradient_bind(
+            gradient.cache_id(),
+            [
+                1.0,
+                gradient.stops().len() as f32,
+                center.x,
+                center.y,
+                0.0,
+                0.0,
+                gradient.radius(),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            gradient.stops(),
+            stats,
+        )
+    }
+
+    fn gradient_bind(
+        &mut self,
+        id: u64,
+        header_data: [f32; 12],
+        stops: &[astrelis_paint::GradientStop],
+        stats: &mut RenderStats,
+    ) -> Result<gpu::BindGroup, RenderError> {
+        if let Some(cached) = self.gradients.get_mut(&id) {
+            cached.used = self.clock;
+            stats.gradient_cache_hits += 1;
+            return Ok(cached.bind_group.clone());
+        }
+        stats.gradient_cache_misses += 1;
+        let stop_data = stops
+            .iter()
+            .map(|stop| {
+                let alpha = stop.color.a.clamp(0.0, 1.0);
+                [
+                    stop.color.r * alpha,
+                    stop.color.g * alpha,
+                    stop.color.b * alpha,
+                    alpha,
+                    stop.offset,
+                    0.0,
+                    0.0,
+                    0.0,
+                ]
+            })
+            .collect::<Vec<_>>();
+        let header = self.device.create_buffer_init(
+            &self.queue,
+            Some("paint gradient header".into()),
+            bytemuck::cast_slice(&header_data),
+            gpu::BufferUsages::UNIFORM,
+        )?;
+        let stop_buffer = self.device.create_buffer_init(
+            &self.queue,
+            Some("paint gradient stops".into()),
+            bytemuck::cast_slice(&stop_data),
+            gpu::BufferUsages::STORAGE,
+        )?;
+        let bind_group = self.device.create_bind_group(gpu::BindGroupDescriptor {
+            label: Some("paint gradient bind group".into()),
+            layout: self.gradient_layout.clone(),
+            entries: vec![
+                gpu::BindGroupEntry {
+                    binding: 0,
+                    resource: gpu::BindingResource::Buffer(gpu::BufferBinding {
+                        buffer: header.clone(),
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+                gpu::BindGroupEntry {
+                    binding: 1,
+                    resource: gpu::BindingResource::Buffer(gpu::BufferBinding {
+                        buffer: stop_buffer.clone(),
+                        offset: 0,
+                        size: None,
+                    }),
+                },
+            ],
+        })?;
+        let result = bind_group.clone();
+        self.gradients.insert(
+            id,
+            CachedGradient {
+                _header: header,
+                _stops: stop_buffer,
+                bind_group,
+                bytes: size_of::<[f32; 12]>() + stop_data.len() * size_of::<[f32; 8]>(),
+                used: self.clock,
+            },
+        );
+        Ok(result)
+    }
+
     fn ensure_pipelines(
         &mut self,
         format: gpu::TextureFormat,
@@ -856,6 +1157,12 @@ impl Renderer {
                 label: Some("paint text pipeline layout".into()),
                 bind_group_layouts: vec![self.glyphs.bind_group_layout()],
             })?;
+        let gradient_layout =
+            self.device
+                .create_pipeline_layout(gpu::PipelineLayoutDescriptor {
+                    label: Some("paint gradient pipeline layout".into()),
+                    bind_group_layouts: vec![self.gradient_layout.clone()],
+                })?;
         let vertex = || gpu::VertexState {
             module: shader.clone(),
             entry_point: "vs_main".into(),
@@ -877,6 +1184,11 @@ impl Renderer {
                         offset: 16,
                         shader_location: 2,
                         format: gpu::VertexFormat::Float32x4,
+                    },
+                    gpu::VertexAttribute {
+                        offset: 32,
+                        shader_location: 3,
+                        format: gpu::VertexFormat::Float32x2,
                     },
                 ],
             }],
@@ -933,6 +1245,13 @@ impl Renderer {
             gpu::ColorWrites::ALL,
             content,
         )?;
+        let gradient = create(
+            "paint gradient",
+            Some(gradient_layout),
+            "fs_gradient",
+            gpu::ColorWrites::ALL,
+            content,
+        )?;
         let image = create(
             "paint image",
             Some(image_layout),
@@ -980,6 +1299,7 @@ impl Renderer {
             key,
             Pipelines {
                 solid,
+                gradient,
                 image,
                 text_mask,
                 text_color,
@@ -1091,6 +1411,23 @@ impl Renderer {
             };
             self.images.remove(&key);
         }
+        while self
+            .gradients
+            .values()
+            .map(|entry| entry.bytes)
+            .sum::<usize>()
+            > self.options.cache_limits.gradient_bytes
+        {
+            let Some(key) = self
+                .gradients
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            self.gradients.remove(&key);
+        }
     }
 }
 
@@ -1160,7 +1497,7 @@ fn push_clip(
 #[allow(clippy::too_many_arguments)]
 fn draw_solid(
     mesh: Mesh,
-    brush: Brush,
+    color: Color,
     state: &State,
     dpi: Affine2,
     size: Size<Physical, u32>,
@@ -1169,11 +1506,10 @@ fn draw_solid(
     draws: &mut Vec<Draw>,
     stats: &mut RenderStats,
 ) {
-    let Brush::Solid(color) = brush;
     if color.a <= 0.0 {
         return;
     }
-    let alpha = color.a.clamp(0.0, 1.0);
+    let alpha = (color.a * state.opacity).clamp(0.0, 1.0);
     append(
         &mesh,
         dpi * state.transform,
@@ -1229,6 +1565,7 @@ fn append(
             ],
             uv,
             color,
+            local_position: *point,
         });
     }
     indices.extend(mesh.indices.iter().map(|index| base + index));
@@ -1380,7 +1717,7 @@ fn tessellate_stroke(path: &Path, style: StrokeStyle, tolerance: f32) -> Result<
     })
 }
 
-fn rounded_mesh(rect: RoundedRect, tolerance: f32) -> Result<Mesh, RenderError> {
+fn rounded_path(rect: RoundedRect) -> Result<Path, RenderError> {
     let r = rect.rect();
     let CornerRadii {
         top_left,
@@ -1426,7 +1763,80 @@ fn rounded_mesh(rect: RoundedRect, tolerance: f32) -> Result<Mesh, RenderError> 
     )
     .map_err(paint_error)?;
     path.close().map_err(paint_error)?;
-    tessellate_fill(&path.finish(), FillRule::NonZero, tolerance)
+    Ok(path.finish())
+}
+
+fn rounded_mesh(rect: RoundedRect, tolerance: f32) -> Result<Mesh, RenderError> {
+    tessellate_fill(&rounded_path(rect)?, FillRule::NonZero, tolerance)
+}
+
+fn rect_path(rect: LogicalRect) -> Result<Path, RenderError> {
+    let p = astrelis_core::geometry::Point::new;
+    let mut path = Path::builder();
+    path.move_to(p(rect.min_x(), rect.min_y()))
+        .map_err(paint_error)?;
+    path.line_to(p(rect.max_x(), rect.min_y()))
+        .map_err(paint_error)?;
+    path.line_to(p(rect.max_x(), rect.max_y()))
+        .map_err(paint_error)?;
+    path.line_to(p(rect.min_x(), rect.max_y()))
+        .map_err(paint_error)?;
+    path.close().map_err(paint_error)?;
+    Ok(path.finish())
+}
+
+fn ellipse_path(rect: LogicalRect) -> Result<Path, RenderError> {
+    let center_x = rect.origin.x + rect.size.width * 0.5;
+    let center_y = rect.origin.y + rect.size.height * 0.5;
+    let radius_x = rect.size.width * 0.5;
+    let radius_y = rect.size.height * 0.5;
+    let k = 0.552_284_8;
+    let p = astrelis_core::geometry::Point::new;
+    let mut path = Path::builder();
+    path.move_to(p(center_x + radius_x, center_y))
+        .map_err(paint_error)?;
+    path.cubic_to(
+        p(center_x + radius_x, center_y + radius_y * k),
+        p(center_x + radius_x * k, center_y + radius_y),
+        p(center_x, center_y + radius_y),
+    )
+    .map_err(paint_error)?;
+    path.cubic_to(
+        p(center_x - radius_x * k, center_y + radius_y),
+        p(center_x - radius_x, center_y + radius_y * k),
+        p(center_x - radius_x, center_y),
+    )
+    .map_err(paint_error)?;
+    path.cubic_to(
+        p(center_x - radius_x, center_y - radius_y * k),
+        p(center_x - radius_x * k, center_y - radius_y),
+        p(center_x, center_y - radius_y),
+    )
+    .map_err(paint_error)?;
+    path.cubic_to(
+        p(center_x + radius_x * k, center_y - radius_y),
+        p(center_x + radius_x, center_y - radius_y * k),
+        p(center_x + radius_x, center_y),
+    )
+    .map_err(paint_error)?;
+    path.close().map_err(paint_error)?;
+    Ok(path.finish())
+}
+
+fn shape_stroke_mesh(path: Path, style: StrokeStyle, tolerance: f32) -> Result<Mesh, RenderError> {
+    tessellate_stroke(&path, style, tolerance)
+}
+
+fn ellipse_mesh(
+    rect: LogicalRect,
+    tolerance: f32,
+    stroke: Option<StrokeStyle>,
+) -> Result<Mesh, RenderError> {
+    let path = ellipse_path(rect)?;
+    match stroke {
+        Some(style) => tessellate_stroke(&path, style, tolerance),
+        None => tessellate_fill(&path, FillRule::NonZero, tolerance),
+    }
 }
 
 fn paint_error(value: astrelis_paint::PaintError) -> RenderError {
@@ -1509,21 +1919,61 @@ struct Input {
     @location(0) position: vec2<f32>,
     @location(1) uv: vec2<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) local_position: vec2<f32>,
 };
 struct Output {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) local_position: vec2<f32>,
 };
 @vertex fn vs_main(input: Input) -> Output {
     var output: Output;
     output.position = vec4<f32>(input.position, 0.0, 1.0);
     output.uv = input.uv;
     output.color = input.color;
+    output.local_position = input.local_position;
     return output;
 }
 @fragment fn fs_solid(input: Output) -> @location(0) vec4<f32> {
     return input.color;
+}
+struct GradientHeader {
+    metadata_and_start: vec4<f32>,
+    end_and_radius: vec4<f32>,
+    reserved: vec4<f32>,
+};
+struct GradientStopData {
+    color: vec4<f32>,
+    offset: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> gradient: GradientHeader;
+@group(0) @binding(1) var<storage, read> gradient_stops: array<GradientStopData>;
+@fragment fn fs_gradient(input: Output) -> @location(0) vec4<f32> {
+    let kind = gradient.metadata_and_start.x;
+    let count = u32(gradient.metadata_and_start.y);
+    let start = gradient.metadata_and_start.zw;
+    var position = 0.0;
+    if kind < 0.5 {
+        let direction = gradient.end_and_radius.xy - start;
+        position = dot(input.local_position - start, direction) / dot(direction, direction);
+    } else {
+        position = distance(input.local_position, start) / gradient.end_and_radius.z;
+    }
+    let t = clamp(position, 0.0, 1.0);
+    var color = gradient_stops[0].color;
+    for (var index = 1u; index < count; index += 1u) {
+        let previous = gradient_stops[index - 1u];
+        let next = gradient_stops[index];
+        if t <= next.offset.x {
+            let span = next.offset.x - previous.offset.x;
+            let amount = select(1.0, clamp((t - previous.offset.x) / span, 0.0, 1.0), span > 0.0);
+            color = mix(previous.color, next.color, amount);
+            break;
+        }
+        color = next.color;
+    }
+    return color * input.color.a;
 }
 @group(0) @binding(0) var image: texture_2d<f32>;
 @group(0) @binding(1) var image_sampler: sampler;

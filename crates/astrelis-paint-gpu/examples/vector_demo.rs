@@ -10,7 +10,8 @@ use astrelis_gpu::{
     SurfaceFrameStatus, SurfaceTarget, TextureUsages, TextureViewDescriptor,
 };
 use astrelis_paint::{
-    Brush, CornerRadii, FillRule, Image, ImageOptions, Painter, Path, RoundedRect, StrokeStyle,
+    Brush, CornerRadii, FillRule, GradientStop, Image, ImageOptions, LinearGradient, Painter, Path,
+    RadialGradient, RoundedRect, StrokeStyle,
 };
 use astrelis_paint_gpu::{RenderTarget, Renderer, RendererOptions};
 use astrelis_platform::{
@@ -60,20 +61,83 @@ fn display_list(width: f32, height: f32) -> astrelis_paint::DisplayList {
     .unwrap();
 
     let mut painter = Painter::new();
+    let panel = RoundedRect::new(
+        Rect::from_xywh(
+            24.0,
+            24.0,
+            (width - 48.0).max(0.0),
+            (height - 48.0).max(0.0),
+        ),
+        CornerRadii::uniform(22.0),
+    )
+    .unwrap();
+    let panel_gradient = LinearGradient::new(
+        panel.rect().origin,
+        Point::new(
+            panel.rect().origin.x + panel.rect().size.width.max(1.0),
+            panel.rect().origin.y + panel.rect().size.height.max(1.0),
+        ),
+        [
+            GradientStop {
+                offset: 0.0,
+                color: Color::new(0.07, 0.16, 0.3, 1.0),
+            },
+            GradientStop {
+                offset: 0.55,
+                color: Color::new(0.11, 0.08, 0.24, 1.0),
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::new(0.03, 0.04, 0.09, 1.0),
+            },
+        ],
+    )
+    .unwrap();
     painter
-        .fill_rounded_rect(
-            RoundedRect::new(
-                Rect::from_xywh(
-                    24.0,
-                    24.0,
-                    (width - 48.0).max(0.0),
-                    (height - 48.0).max(0.0),
-                ),
-                CornerRadii::uniform(22.0),
-            )
-            .unwrap(),
-            Brush::Solid(Color::new(0.08, 0.11, 0.18, 1.0)),
+        .fill_rounded_rect(panel, Brush::LinearGradient(panel_gradient))
+        .unwrap();
+    painter
+        .stroke_rounded_rect(
+            panel,
+            StrokeStyle {
+                width: 2.0,
+                ..Default::default()
+            },
+            Brush::Solid(Color::new(0.25, 0.65, 1.0, 0.65)),
         )
+        .unwrap();
+    let orb_bounds = Rect::from_xywh(54.0, 54.0, 108.0, 108.0);
+    let orb = RadialGradient::new(
+        Point::new(92.0, 88.0),
+        76.0,
+        [
+            GradientStop {
+                offset: 0.0,
+                color: Color::new(0.8, 0.95, 1.0, 1.0),
+            },
+            GradientStop {
+                offset: 0.35,
+                color: Color::new(0.15, 0.7, 1.0, 0.95),
+            },
+            GradientStop {
+                offset: 1.0,
+                color: Color::new(0.2, 0.05, 0.5, 0.0),
+            },
+        ],
+    )
+    .unwrap();
+    painter
+        .with_opacity(0.85, |painter| {
+            painter.fill_ellipse(orb_bounds, Brush::RadialGradient(orb))?;
+            painter.stroke_ellipse(
+                orb_bounds,
+                StrokeStyle {
+                    width: 3.0,
+                    ..Default::default()
+                },
+                Brush::Solid(Color::new(0.65, 0.9, 1.0, 0.8)),
+            )
+        })
         .unwrap();
     painter
         .with_save(|painter| {

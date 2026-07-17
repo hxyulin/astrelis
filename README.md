@@ -18,7 +18,9 @@ workspace contains:
   widgets, and display-list generation.
 
 Painting, text, and the first retained UI vertical slice are available as
-separately testable layers above the shared application runtime.
+separately testable layers above the shared application runtime. The Painter
+supports solid and gradient brushes, vector paths and UI shapes, nested
+opacity, images, text, transforms, and clipping.
 
 ## Development
 
