@@ -8,15 +8,17 @@ implementation detail, and output is an `astrelis-paint` display list.
 
 The retained widget lifecycle supports application-defined compound widgets,
 typed application messages, and cancelable capture/target/bubble listeners.
-Built-ins include labels, buttons, rows, columns, padding, a Unicode-aware
+Built-ins include labels, buttons, rich wrapping rows and columns, overlaying
+stacks, focus scopes, viewport-hosted overlays, padding, a Unicode-aware
 single-line text field, checkboxes, horizontal sliders, and vertical scroll
 views. Mouse and touch contacts share pointer capture and control defaults.
 
 ```text
 cargo run -p astrelis-ui-core --example settings_window
+cargo run -p astrelis-ui-core --example interaction_gallery
 ```
 
-The same settings example runs in a browser using WebGPU. Install the target
+The same settings/gallery UI runs in a browser using WebGPU. Install the target
 and the CLI version matching the workspace lockfile, then build bindings:
 
 ```sh

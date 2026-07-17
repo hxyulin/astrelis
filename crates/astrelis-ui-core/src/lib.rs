@@ -27,9 +27,11 @@ use astrelis_text::{
 };
 use bitflags::bitflags;
 use taffy::prelude::{
-    AlignItems, AvailableSpace, Dimension, Display, FlexDirection, LengthPercentage, NodeId,
-    Size as TaffySize, Style, TaffyTree,
+    AlignContent, AlignItems, AvailableSpace, Dimension, Display, FlexDirection,
+    FlexWrap as TaffyFlexWrap, JustifyContent, LengthPercentage, LengthPercentageAuto, NodeId,
+    Position as TaffyPosition, Rect as TaffyRect, Size as TaffySize, Style, TaffyTree,
 };
+use taffy::style::Overflow as TaffyOverflow;
 use unicode_segmentation::UnicodeSegmentation;
 
 bitflags! {
@@ -121,6 +123,81 @@ pub enum Checkbox {}
 pub enum Slider {}
 /// Vertically scrolling container marker.
 pub enum ScrollView {}
+/// Overlaying stack container marker.
+pub enum Stack {}
+/// Keyboard focus scope marker.
+pub enum FocusScope {}
+/// Viewport-hosted portal marker.
+pub enum Overlay {}
+
+/// Keyboard behavior of a focus scope.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FocusScopeOptions {
+    /// Keep Tab traversal inside this scope.
+    pub trapped: bool,
+    /// Focus the first eligible descendant when mounted.
+    pub autofocus: bool,
+    /// Restore the prior focus when removed.
+    pub restore_focus: bool,
+}
+
+/// Side of an anchor used to place an overlay.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OverlaySide {
+    /// Below the anchor.
+    #[default]
+    Below,
+    /// Above the anchor.
+    Above,
+    /// Left of the anchor.
+    Left,
+    /// Right of the anchor.
+    Right,
+    /// Centered over the anchor.
+    Center,
+}
+
+/// Alignment along an overlay anchor's side.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OverlayAlignment {
+    /// Align leading edges.
+    #[default]
+    Start,
+    /// Center along the side.
+    Center,
+    /// Align trailing edges.
+    End,
+}
+
+/// Viewport-hosted overlay configuration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct OverlayOptions {
+    /// Preferred side of the anchor.
+    pub side: OverlaySide,
+    /// Alignment along the chosen side.
+    pub alignment: OverlayAlignment,
+    /// Additional logical offset.
+    pub offset: LogicalPoint,
+    /// Keep the overlay inside the viewport.
+    pub clamp_to_viewport: bool,
+    /// Top-layer ordering.
+    pub z_index: i32,
+    /// Optional focus-scope behavior.
+    pub focus: FocusScopeOptions,
+}
+
+impl Default for OverlayOptions {
+    fn default() -> Self {
+        Self {
+            side: OverlaySide::Below,
+            alignment: OverlayAlignment::Start,
+            offset: LogicalPoint::ZERO,
+            clamp_to_viewport: true,
+            z_index: 0,
+            focus: FocusScopeOptions::default(),
+        }
+    }
+}
 
 /// Phase of a routed UI event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,6 +251,24 @@ pub enum RoutedEventKind {
         /// Logical window position.
         position: LogicalPoint,
     },
+    /// A pointer entered a target's hover path.
+    PointerEntered {
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Logical window position.
+        position: LogicalPoint,
+        /// Previous deepest hovered target.
+        related_target: Option<ElementId>,
+    },
+    /// A pointer left a target's hover path.
+    PointerLeft {
+        /// Normalized pointer identity.
+        device_id: DeviceId,
+        /// Logical window position.
+        position: LogicalPoint,
+        /// New deepest hovered target.
+        related_target: Option<ElementId>,
+    },
     /// A pointer button changed in logical coordinates.
     PointerButton {
         /// Normalized pointer identity.
@@ -217,6 +312,8 @@ impl RoutedEventKind {
                     | (
                         EventFilter::Pointer,
                         Self::PointerMoved { .. }
+                            | Self::PointerEntered { .. }
+                            | Self::PointerLeft { .. }
                             | Self::PointerButton { .. }
                             | Self::PointerCancelled { .. }
                     )
@@ -327,6 +424,10 @@ pub trait Widget<Message>: Any {
     fn focusable(&self) -> bool {
         false
     }
+    /// Preferred cursor while this widget is the deepest hovered node.
+    fn cursor_icon(&self) -> Option<CursorIcon> {
+        None
+    }
     /// Paints behind the widget's retained children.
     fn paint(
         &self,
@@ -356,14 +457,11 @@ impl<Message: 'static> MountContext<'_, Message> {
     }
     /// Adds a column owned by the mounting widget.
     pub fn add_column(&mut self) -> Result<ElementHandle<Column>, UiError> {
-        let gap = self.ui.theme.gap;
-        self.ui.insert(
-            self.parent,
-            Kind::Column {
-                gap,
-                alignment: Alignment::Stretch,
-            },
-        )
+        let flex = FlexStyle {
+            row_gap: self.ui.theme.gap,
+            ..Default::default()
+        };
+        self.ui.insert(self.parent, Kind::Column { flex })
     }
 }
 
@@ -406,19 +504,209 @@ pub enum Alignment {
     Stretch,
 }
 
-/// Optional per-element sizing constraints.
+/// A layout length resolved by Taffy.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Length {
+    /// Let layout determine the value.
+    #[default]
+    Auto,
+    /// Logical pixels.
+    Px(f32),
+    /// Fraction of the containing block (`1.0` is 100%).
+    Percent(f32),
+}
+
+impl Length {
+    /// Creates a logical-pixel length.
+    pub const fn px(value: f32) -> Self {
+        Self::Px(value)
+    }
+    /// Creates a fractional percentage length.
+    pub const fn percent(value: f32) -> Self {
+        Self::Percent(value)
+    }
+}
+
+/// Four independently configurable edges.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Edges<T> {
+    /// Left edge.
+    pub left: T,
+    /// Top edge.
+    pub top: T,
+    /// Right edge.
+    pub right: T,
+    /// Bottom edge.
+    pub bottom: T,
+}
+
+impl<T: Copy> Edges<T> {
+    /// Uses one value for every edge.
+    pub const fn all(value: T) -> Self {
+        Self {
+            left: value,
+            top: value,
+            right: value,
+            bottom: value,
+        }
+    }
+}
+
+impl<T: Default> Default for Edges<T> {
+    fn default() -> Self {
+        Self {
+            left: T::default(),
+            top: T::default(),
+            right: T::default(),
+            bottom: T::default(),
+        }
+    }
+}
+
+/// Whether an element participates in normal flow.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Positioning {
+    /// Normal flex layout.
+    #[default]
+    Flow,
+    /// Positioned relative to the containing block.
+    Absolute,
+}
+
+/// Flex line wrapping policy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum FlexWrap {
+    /// Keep one line.
+    #[default]
+    NoWrap,
+    /// Wrap onto additional lines.
+    Wrap,
+    /// Wrap in the reverse cross-axis direction.
+    WrapReverse,
+}
+
+/// Main-axis distribution of flex children.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Justification {
+    /// Pack at the start.
+    #[default]
+    Start,
+    /// Pack at the center.
+    Center,
+    /// Pack at the end.
+    End,
+    /// Equal space between children.
+    SpaceBetween,
+    /// Equal space around children.
+    SpaceAround,
+    /// Equal space around and at the edges.
+    SpaceEvenly,
+}
+
+/// Flex-container configuration.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FlexStyle {
+    /// Horizontal gap.
+    pub column_gap: f32,
+    /// Vertical gap.
+    pub row_gap: f32,
+    /// Cross-axis child alignment.
+    pub align_items: Alignment,
+    /// Main-axis distribution.
+    pub justify_content: Justification,
+    /// Wrapped-line distribution.
+    pub align_content: Alignment,
+    /// Wrapping policy.
+    pub wrap: FlexWrap,
+}
+
+impl Default for FlexStyle {
+    fn default() -> Self {
+        Self {
+            column_gap: 0.0,
+            row_gap: 0.0,
+            align_items: Alignment::Stretch,
+            justify_content: Justification::Start,
+            align_content: Alignment::Stretch,
+            wrap: FlexWrap::NoWrap,
+        }
+    }
+}
+
+/// Participation in layout, painting, semantics, and input.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Visibility {
+    /// Fully visible and interactive.
+    #[default]
+    Visible,
+    /// Retains layout space but is not painted or interactive.
+    Hidden,
+    /// Removed from layout and interaction.
+    Collapsed,
+}
+
+/// Child overflow policy.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Overflow {
+    /// Permit descendants outside the element bounds.
+    #[default]
+    Visible,
+    /// Clip descendants to the element bounds.
+    Clip,
+}
+
+/// Optional per-element sizing constraints.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LayoutStyle {
     /// Preferred width.
-    pub width: Option<f32>,
+    pub width: Length,
     /// Preferred height.
-    pub height: Option<f32>,
+    pub height: Length,
     /// Minimum width.
-    pub min_width: Option<f32>,
+    pub min_width: Length,
     /// Minimum height.
-    pub min_height: Option<f32>,
+    pub min_height: Length,
+    /// Maximum width.
+    pub max_width: Length,
+    /// Maximum height.
+    pub max_height: Length,
+    /// Outer spacing.
+    pub margin: Edges<Length>,
     /// Flex growth factor.
     pub grow: f32,
+    /// Flex shrink factor.
+    pub shrink: f32,
+    /// Initial main-axis size.
+    pub basis: Length,
+    /// Per-child cross-axis alignment override.
+    pub align_self: Option<Alignment>,
+    /// Flow or absolute positioning.
+    pub positioning: Positioning,
+    /// Absolute-position offsets.
+    pub inset: Edges<Length>,
+    /// Preferred width divided by height.
+    pub aspect_ratio: Option<f32>,
+}
+
+impl Default for LayoutStyle {
+    fn default() -> Self {
+        Self {
+            width: Length::Auto,
+            height: Length::Auto,
+            min_width: Length::Auto,
+            min_height: Length::Auto,
+            max_width: Length::Auto,
+            max_height: Length::Auto,
+            margin: Edges::all(Length::Px(0.0)),
+            grow: 0.0,
+            shrink: 1.0,
+            basis: Length::Auto,
+            align_self: None,
+            positioning: Positioning::Flow,
+            inset: Edges::default(),
+            aspect_ratio: None,
+        }
+    }
 }
 
 /// Optional direct visual overrides for one widget.
@@ -657,6 +945,46 @@ pub struct UiUpdate {
     pub platform_state_changed: bool,
 }
 
+/// Deterministic headless state for one retained element.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ElementInspection {
+    /// Element identity.
+    pub id: ElementId,
+    /// Logical parent.
+    pub parent: Option<ElementId>,
+    /// Untransformed layout bounds.
+    pub layout_bounds: LogicalRect,
+    /// Axis-aligned transformed bounds.
+    pub world_bounds: LogicalRect,
+    /// Effective axis-aligned clip, when present.
+    pub clip: Option<LogicalRect>,
+    /// Composed visual transform.
+    pub world_transform: Affine2,
+    /// Stable paint rank.
+    pub paint_rank: usize,
+    /// Local visibility.
+    pub visibility: Visibility,
+    /// Effective enabled and visible state.
+    pub interactive: bool,
+    /// Whether any pointer hover path contains this node.
+    pub hovered: bool,
+    /// Whether this node has keyboard focus.
+    pub focused: bool,
+    /// Whether this node can receive focus.
+    pub focusable: bool,
+    /// Whether this node can be a pointer target.
+    pub hit_testable: bool,
+}
+
+/// Deterministic headless snapshot of a UI tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiInspection {
+    /// Current logical viewport.
+    pub viewport: LogicalSize,
+    /// Nodes in retained-tree order.
+    pub nodes: Vec<ElementInspection>,
+}
+
 #[derive(Clone, Debug)]
 enum Kind {
     Label {
@@ -666,12 +994,20 @@ enum Kind {
         text: String,
     },
     Row {
-        gap: f32,
-        alignment: Alignment,
+        flex: FlexStyle,
     },
     Column {
-        gap: f32,
-        alignment: Alignment,
+        flex: FlexStyle,
+    },
+    Stack,
+    FocusScope {
+        options: FocusScopeOptions,
+        restore: Option<ElementId>,
+    },
+    Overlay {
+        owner: ElementId,
+        options: OverlayOptions,
+        restore: Option<ElementId>,
     },
     Padding {
         insets: Insets,
@@ -736,6 +1072,12 @@ struct Node {
     style: LayoutStyle,
     visual: WidgetStyle,
     enabled: bool,
+    visibility: Visibility,
+    overflow: Overflow,
+    z_index: i32,
+    transform: Affine2,
+    transform_origin: LogicalPoint,
+    cursor: Option<CursorIcon>,
     bounds: LogicalRect,
     text_layout: Option<TextLayout>,
     hovered: bool,
@@ -760,10 +1102,12 @@ pub struct Ui<Message = ()> {
     dirty: Dirty,
     focus: Option<ElementId>,
     hover: Option<ElementId>,
+    hover_paths: HashMap<DeviceId, Vec<ElementId>>,
     capture: HashMap<DeviceId, ElementId>,
     pointer_positions: HashMap<DeviceId, LogicalPoint>,
     modifiers: Modifiers,
     window_focused: bool,
+    applied_cursor: Option<CursorIcon>,
     events: VecDeque<UiEvent>,
     messages: VecDeque<Message>,
     listeners: HashMap<ElementId, Vec<Listener<Message>>>,
@@ -798,12 +1142,20 @@ impl<Message: 'static> Ui<Message> {
                     parent: None,
                     children: Vec::new(),
                     kind: Kind::Column {
-                        gap: theme.gap,
-                        alignment: Alignment::Stretch,
+                        flex: FlexStyle {
+                            row_gap: theme.gap,
+                            ..Default::default()
+                        },
                     },
                     style: LayoutStyle::default(),
                     visual: WidgetStyle::default(),
                     enabled: true,
+                    visibility: Visibility::Visible,
+                    overflow: Overflow::Visible,
+                    z_index: 0,
+                    transform: Affine2::IDENTITY,
+                    transform_origin: LogicalPoint::ZERO,
+                    cursor: None,
                     bounds: Rect::default(),
                     text_layout: None,
                     hovered: false,
@@ -820,10 +1172,12 @@ impl<Message: 'static> Ui<Message> {
             dirty: Dirty::all(),
             focus: None,
             hover: None,
+            hover_paths: HashMap::new(),
             capture: HashMap::new(),
             pointer_positions: HashMap::new(),
             modifiers: Modifiers::default(),
             window_focused: true,
+            applied_cursor: None,
             events: VecDeque::new(),
             messages: VecDeque::new(),
             listeners: HashMap::new(),
@@ -881,12 +1235,14 @@ impl<Message: 'static> Ui<Message> {
 
     /// Adds a horizontal flex container.
     pub fn add_row<T>(&mut self, parent: ElementHandle<T>) -> Result<ElementHandle<Row>, UiError> {
-        let gap = self.theme.gap;
         self.insert(
             parent.id,
             Kind::Row {
-                gap,
-                alignment: Alignment::Center,
+                flex: FlexStyle {
+                    column_gap: self.theme.gap,
+                    align_items: Alignment::Center,
+                    ..Default::default()
+                },
             },
         )
     }
@@ -896,14 +1252,52 @@ impl<Message: 'static> Ui<Message> {
         &mut self,
         parent: ElementHandle<T>,
     ) -> Result<ElementHandle<Column>, UiError> {
-        let gap = self.theme.gap;
         self.insert(
             parent.id,
             Kind::Column {
-                gap,
-                alignment: Alignment::Stretch,
+                flex: FlexStyle {
+                    row_gap: self.theme.gap,
+                    ..Default::default()
+                },
             },
         )
+    }
+
+    /// Adds an overlaying stack container.
+    pub fn add_stack<T>(
+        &mut self,
+        parent: ElementHandle<T>,
+    ) -> Result<ElementHandle<Stack>, UiError> {
+        self.insert(parent.id, Kind::Stack)
+    }
+
+    /// Adds a keyboard focus scope.
+    pub fn add_focus_scope<T>(
+        &mut self,
+        parent: ElementHandle<T>,
+        options: FocusScopeOptions,
+    ) -> Result<ElementHandle<FocusScope>, UiError> {
+        let restore = options.restore_focus.then_some(self.focus).flatten();
+        self.insert(parent.id, Kind::FocusScope { options, restore })
+    }
+
+    /// Adds a viewport-hosted portal logically owned by `owner`.
+    pub fn add_overlay<T>(
+        &mut self,
+        owner: ElementHandle<T>,
+        options: OverlayOptions,
+    ) -> Result<ElementHandle<Overlay>, UiError> {
+        let restore = options.focus.restore_focus.then_some(self.focus).flatten();
+        let handle = self.insert(
+            owner.id,
+            Kind::Overlay {
+                owner: owner.id,
+                options,
+                restore,
+            },
+        )?;
+        self.node_mut(handle.id)?.z_index = options.z_index;
+        Ok(handle)
     }
 
     /// Adds a one-child padding container.
@@ -1069,6 +1463,12 @@ impl<Message: 'static> Ui<Message> {
             style: LayoutStyle::default(),
             visual: WidgetStyle::default(),
             enabled: true,
+            visibility: Visibility::Visible,
+            overflow: Overflow::Visible,
+            z_index: 0,
+            transform: Affine2::IDENTITY,
+            transform_origin: LogicalPoint::ZERO,
+            cursor: None,
             bounds: Rect::default(),
             text_layout: None,
             hovered: false,
@@ -1087,15 +1487,68 @@ impl<Message: 'static> Ui<Message> {
         if handle.id == self.root {
             return Err(UiError::new("the root element cannot be removed"));
         }
+        let restore = match self.node(handle.id)?.kind {
+            Kind::FocusScope { restore, .. } | Kind::Overlay { restore, .. } => restore,
+            _ => None,
+        };
+        let restore_focus = self
+            .focus
+            .is_some_and(|focus| self.is_descendant_of(focus, handle.id))
+            .then_some(restore)
+            .flatten();
         let parent = self.node(handle.id)?.parent;
         if let Some(parent) = parent {
             self.node_mut(parent)?
                 .children
                 .retain(|child| *child != handle.id);
         }
+        let leaving = self
+            .hover_paths
+            .iter()
+            .filter_map(|(device, path)| {
+                path.last()
+                    .copied()
+                    .filter(|leaf| self.is_descendant_of(*leaf, handle.id))
+                    .map(|leaf| (*device, leaf))
+            })
+            .collect::<Vec<_>>();
+        for (device, leaf) in leaving {
+            let position = self
+                .pointer_positions
+                .get(&device)
+                .copied()
+                .unwrap_or(LogicalPoint::ZERO);
+            self.dispatch_routed(
+                leaf,
+                RoutedEventKind::PointerLeft {
+                    device_id: device,
+                    position,
+                    related_target: None,
+                },
+            )?;
+            self.hover_paths.remove(&device);
+        }
         self.remove_subtree(handle.id);
+        for id in self.all_ids() {
+            let hovered = self.hover_paths.values().any(|path| path.contains(&id));
+            self.node_mut(id)?.hovered = hovered;
+        }
         self.invalidate_layout();
+        if let Some(restore) = restore_focus.filter(|id| self.node(*id).is_ok()) {
+            self.set_focus(Some(restore))?;
+        }
         Ok(())
+    }
+
+    fn is_descendant_of(&self, child: ElementId, ancestor: ElementId) -> bool {
+        let mut current = Some(child);
+        while let Some(id) = current {
+            if id == ancestor {
+                return true;
+            }
+            current = self.node(id).ok().and_then(|node| node.parent);
+        }
+        false
     }
 
     /// Moves an existing subtree beneath a different parent.
@@ -1136,21 +1589,30 @@ impl<Message: 'static> Ui<Message> {
     ) -> Result<(), UiError> {
         let node = self.node_mut(handle.id)?;
         match &mut node.kind {
-            Kind::Row {
-                gap: current_gap,
-                alignment: current_alignment,
-            }
-            | Kind::Column {
-                gap: current_gap,
-                alignment: current_alignment,
-            } => {
-                *current_gap = gap.max(0.0);
-                *current_alignment = alignment;
+            Kind::Row { flex } | Kind::Column { flex } => {
+                flex.column_gap = gap.max(0.0);
+                flex.row_gap = gap.max(0.0);
+                flex.align_items = alignment;
                 self.invalidate_layout();
                 Ok(())
             }
             _ => Err(UiError::new("element is not a row or column")),
         }
+    }
+
+    /// Replaces a row or column's complete flex-container configuration.
+    pub fn set_flex_style<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        style: FlexStyle,
+    ) -> Result<(), UiError> {
+        let node = self.node_mut(handle.id)?;
+        match &mut node.kind {
+            Kind::Row { flex } | Kind::Column { flex } => *flex = style,
+            _ => return Err(UiError::new("element is not a row or column")),
+        }
+        self.invalidate_layout();
+        Ok(())
     }
 
     fn remove_subtree(&mut self, id: ElementId) {
@@ -1166,6 +1628,9 @@ impl<Message: 'static> Ui<Message> {
         }
         if self.hover == Some(id) {
             self.hover = None;
+        }
+        for path in self.hover_paths.values_mut() {
+            path.retain(|hovered| *hovered != id);
         }
         self.capture.retain(|_, captured| *captured != id);
         self.listeners.remove(&id);
@@ -1186,6 +1651,36 @@ impl<Message: 'static> Ui<Message> {
         handle: ElementHandle<T>,
         style: LayoutStyle,
     ) -> Result<(), UiError> {
+        let lengths = [
+            style.width,
+            style.height,
+            style.min_width,
+            style.min_height,
+            style.max_width,
+            style.max_height,
+            style.margin.left,
+            style.margin.top,
+            style.margin.right,
+            style.margin.bottom,
+            style.basis,
+            style.inset.left,
+            style.inset.top,
+            style.inset.right,
+            style.inset.bottom,
+        ];
+        if lengths.into_iter().any(|value| match value {
+            Length::Auto => false,
+            Length::Px(value) | Length::Percent(value) => !value.is_finite(),
+        }) || !style.grow.is_finite()
+            || !style.shrink.is_finite()
+            || style
+                .aspect_ratio
+                .is_some_and(|value| !value.is_finite() || value <= 0.0)
+        {
+            return Err(UiError::new(
+                "layout values must be finite and aspect ratios positive",
+            ));
+        }
         let node = self.node_mut(handle.id)?;
         if node.style != style {
             node.style = style;
@@ -1214,11 +1709,86 @@ impl<Message: 'static> Ui<Message> {
         handle: ElementHandle<T>,
         enabled: bool,
     ) -> Result<(), UiError> {
-        let node = self.node_mut(handle.id)?;
-        if node.enabled != enabled {
-            node.enabled = enabled;
+        let changed = self.node(handle.id)?.enabled != enabled;
+        if changed {
+            self.node_mut(handle.id)?.enabled = enabled;
             self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+            if !enabled
+                && self
+                    .focus
+                    .is_some_and(|focus| self.is_descendant_of(focus, handle.id))
+            {
+                self.set_focus(None)?;
+            }
         }
+        Ok(())
+    }
+
+    /// Changes layout/paint visibility for an element and its subtree.
+    pub fn set_visibility<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        visibility: Visibility,
+    ) -> Result<(), UiError> {
+        let node = self.node_mut(handle.id)?;
+        if node.visibility != visibility {
+            node.visibility = visibility;
+            self.invalidate_layout();
+        }
+        Ok(())
+    }
+
+    /// Changes whether descendants are clipped to an element's bounds.
+    pub fn set_overflow<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        overflow: Overflow,
+    ) -> Result<(), UiError> {
+        let node = self.node_mut(handle.id)?;
+        if node.overflow != overflow {
+            node.overflow = overflow;
+            self.dirty |= Dirty::PAINT;
+        }
+        Ok(())
+    }
+
+    /// Changes stable paint and targeting order among siblings.
+    pub fn set_z_index<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        z_index: i32,
+    ) -> Result<(), UiError> {
+        let node = self.node_mut(handle.id)?;
+        if node.z_index != z_index {
+            node.z_index = z_index;
+            self.dirty |= Dirty::PAINT;
+        }
+        Ok(())
+    }
+
+    /// Applies a visual transform around a logical origin without affecting layout.
+    pub fn set_transform<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        transform: Affine2,
+        origin: LogicalPoint,
+    ) -> Result<(), UiError> {
+        let node = self.node_mut(handle.id)?;
+        if node.transform != transform || node.transform_origin != origin {
+            node.transform = transform;
+            node.transform_origin = origin;
+            self.dirty |= Dirty::PAINT;
+        }
+        Ok(())
+    }
+
+    /// Overrides the cursor selected while this element is hovered.
+    pub fn set_cursor_icon<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        cursor: Option<CursorIcon>,
+    ) -> Result<(), UiError> {
+        self.node_mut(handle.id)?.cursor = cursor;
         Ok(())
     }
 
@@ -1692,11 +2262,22 @@ impl<Message: 'static> Ui<Message> {
     }
 
     fn taffy_style(&self, node: &Node) -> Style {
-        let dimension = |value: Option<f32>| {
-            value.map_or(Dimension::auto(), |value| Dimension::length(value.max(0.0)))
+        let dimension = |value: Length| match value {
+            Length::Auto => Dimension::auto(),
+            Length::Px(value) => Dimension::length(value.max(0.0)),
+            Length::Percent(value) => Dimension::percent(value.max(0.0)),
+        };
+        let edge = |value: Length| match value {
+            Length::Auto => LengthPercentageAuto::auto(),
+            Length::Px(value) => LengthPercentageAuto::length(value),
+            Length::Percent(value) => LengthPercentageAuto::percent(value),
         };
         let mut style = Style {
-            display: Display::Flex,
+            display: if node.visibility == Visibility::Collapsed {
+                Display::None
+            } else {
+                Display::Flex
+            },
             size: TaffySize {
                 width: dimension(node.style.width),
                 height: dimension(node.style.height),
@@ -1705,7 +2286,35 @@ impl<Message: 'static> Ui<Message> {
                 width: dimension(node.style.min_width),
                 height: dimension(node.style.min_height),
             },
+            max_size: TaffySize {
+                width: dimension(node.style.max_width),
+                height: dimension(node.style.max_height),
+            },
+            margin: TaffyRect {
+                left: edge(node.style.margin.left),
+                top: edge(node.style.margin.top),
+                right: edge(node.style.margin.right),
+                bottom: edge(node.style.margin.bottom),
+            },
+            inset: TaffyRect {
+                left: edge(node.style.inset.left),
+                top: edge(node.style.inset.top),
+                right: edge(node.style.inset.right),
+                bottom: edge(node.style.inset.bottom),
+            },
+            position: if node.style.positioning == Positioning::Absolute {
+                TaffyPosition::Absolute
+            } else {
+                TaffyPosition::Relative
+            },
             flex_grow: node.style.grow.max(0.0),
+            flex_shrink: node.style.shrink.max(0.0),
+            flex_basis: dimension(node.style.basis),
+            align_self: node.style.align_self.map(map_alignment),
+            aspect_ratio: node
+                .style
+                .aspect_ratio
+                .filter(|value| value.is_finite() && *value > 0.0),
             ..Default::default()
         };
         if node.parent.is_none() {
@@ -1714,16 +2323,30 @@ impl<Message: 'static> Ui<Message> {
                 height: Dimension::length(self.viewport.height.max(0.0)),
             };
         }
-        match node.kind {
-            Kind::Row { gap, alignment } => {
-                style.flex_direction = FlexDirection::Row;
-                style.gap.width = LengthPercentage::length(gap.max(0.0));
-                style.align_items = Some(map_alignment(alignment));
+        if node.style.grow > 0.0 {
+            if node.style.min_width == Length::Auto {
+                style.min_size.width = Dimension::length(0.0);
             }
-            Kind::Column { gap, alignment } => {
+            if node.style.min_height == Length::Auto {
+                style.min_size.height = Dimension::length(0.0);
+            }
+        }
+        match node.kind {
+            Kind::Row { flex } => {
+                style.flex_direction = FlexDirection::Row;
+                apply_flex(&mut style, flex);
+            }
+            Kind::Column { flex } => {
                 style.flex_direction = FlexDirection::Column;
-                style.gap.height = LengthPercentage::length(gap.max(0.0));
-                style.align_items = Some(map_alignment(alignment));
+                apply_flex(&mut style, flex);
+            }
+            Kind::Stack => {}
+            Kind::FocusScope { .. } => {
+                style.flex_direction = FlexDirection::Column;
+            }
+            Kind::Overlay { .. } => {
+                style.flex_direction = FlexDirection::Column;
+                style.position = TaffyPosition::Absolute;
             }
             Kind::Padding { insets } => {
                 style.flex_direction = FlexDirection::Column;
@@ -1750,6 +2373,10 @@ impl<Message: 'static> Ui<Message> {
             }
             Kind::ScrollView { .. } => {
                 style.flex_direction = FlexDirection::Column;
+                style.overflow.y = TaffyOverflow::Scroll;
+                if node.style.min_height == Length::Auto {
+                    style.min_size.height = Dimension::length(0.0);
+                }
             }
             Kind::Custom => {
                 style.flex_direction = FlexDirection::Column;
@@ -1761,6 +2388,24 @@ impl<Message: 'static> Ui<Message> {
                 style.padding.bottom = LengthPercentage::length(insets.bottom);
             }
             Kind::Label { .. } => {}
+        }
+        if node
+            .parent
+            .and_then(|id| self.node(id).ok())
+            .is_some_and(|parent| matches!(parent.kind, Kind::Stack))
+        {
+            style.position = TaffyPosition::Absolute;
+            if node.style.inset == Edges::all(Length::Auto)
+                && node.style.width == Length::Auto
+                && node.style.height == Length::Auto
+            {
+                style.inset = TaffyRect {
+                    left: LengthPercentageAuto::length(0.0),
+                    top: LengthPercentageAuto::length(0.0),
+                    right: LengthPercentageAuto::length(0.0),
+                    bottom: LengthPercentageAuto::length(0.0),
+                };
+            }
         }
         style
     }
@@ -1837,9 +2482,101 @@ impl<Message: 'static> Ui<Message> {
         )
         .map_err(|error| UiError::new(error.to_string()))?;
         self.assign_layout(&tree, &mapping, self.root, LogicalPoint::ZERO)?;
+        self.position_overlays()?;
+        if self.focus.is_none() {
+            let autofocus = self.all_ids().into_iter().find(|id| self.node(*id).is_ok_and(|node| matches!(node.kind, Kind::FocusScope { options, .. } if options.autofocus) || matches!(node.kind, Kind::Overlay { options, .. } if options.focus.autofocus)));
+            if let Some(scope) = autofocus
+                && let Some(target) = self.all_ids().into_iter().find(|id| {
+                    self.is_descendant_of(*id, scope)
+                        && self.is_effectively_interactive(*id)
+                        && self.is_focusable_id(*id)
+                })
+            {
+                self.set_focus(Some(target))?;
+            }
+        }
         self.ensure_caret_visible()?;
         self.dirty.remove(Dirty::MEASURE | Dirty::LAYOUT);
         self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+        if self
+            .focus
+            .is_some_and(|id| !self.is_effectively_interactive(id))
+        {
+            self.set_focus(None)?;
+        }
+        let hovered_devices = self.hover_paths.keys().copied().collect::<Vec<_>>();
+        for device in hovered_devices {
+            if let Some(position) = self.pointer_positions.get(&device).copied() {
+                let target = self.hit_test(position);
+                self.set_hover(device, position, target)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn position_overlays(&mut self) -> Result<(), UiError> {
+        let overlays = self
+            .all_ids()
+            .into_iter()
+            .filter(|id| {
+                self.node(*id)
+                    .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
+            })
+            .collect::<Vec<_>>();
+        for id in overlays {
+            let (owner, options) = match self.node(id)?.kind {
+                Kind::Overlay { owner, options, .. } => (owner, options),
+                _ => continue,
+            };
+            let anchor = self.node(owner)?.bounds;
+            let bounds = self.node(id)?.bounds;
+            let mut x = match options.side {
+                OverlaySide::Left => anchor.origin.x - bounds.size.width,
+                OverlaySide::Right => anchor.max_x(),
+                OverlaySide::Center => {
+                    anchor.origin.x + (anchor.size.width - bounds.size.width) * 0.5
+                }
+                OverlaySide::Above | OverlaySide::Below => match options.alignment {
+                    OverlayAlignment::Start => anchor.origin.x,
+                    OverlayAlignment::Center => {
+                        anchor.origin.x + (anchor.size.width - bounds.size.width) * 0.5
+                    }
+                    OverlayAlignment::End => anchor.max_x() - bounds.size.width,
+                },
+            };
+            let mut y = match options.side {
+                OverlaySide::Above => anchor.origin.y - bounds.size.height,
+                OverlaySide::Below => anchor.max_y(),
+                OverlaySide::Center => {
+                    anchor.origin.y + (anchor.size.height - bounds.size.height) * 0.5
+                }
+                OverlaySide::Left | OverlaySide::Right => match options.alignment {
+                    OverlayAlignment::Start => anchor.origin.y,
+                    OverlayAlignment::Center => {
+                        anchor.origin.y + (anchor.size.height - bounds.size.height) * 0.5
+                    }
+                    OverlayAlignment::End => anchor.max_y() - bounds.size.height,
+                },
+            };
+            x += options.offset.x;
+            y += options.offset.y;
+            if options.clamp_to_viewport {
+                x = x.clamp(0.0, (self.viewport.width - bounds.size.width).max(0.0));
+                y = y.clamp(0.0, (self.viewport.height - bounds.size.height).max(0.0));
+            }
+            self.translate_subtree(id, x - bounds.origin.x, y - bounds.origin.y)?;
+        }
+        Ok(())
+    }
+
+    fn translate_subtree(&mut self, id: ElementId, x: f32, y: f32) -> Result<(), UiError> {
+        let children = self.node(id)?.children.clone();
+        let node = self.node_mut(id)?;
+        node.bounds.origin.x += x;
+        node.bounds.origin.y += y;
+        for child in children {
+            self.translate_subtree(child, x, y)?;
+        }
         Ok(())
     }
 
@@ -1894,7 +2631,7 @@ impl<Message: 'static> Ui<Message> {
                 .node(id)?
                 .children
                 .iter()
-                .filter_map(|child| self.node(*child).ok().map(|node| node.bounds.max_y()))
+                .filter_map(|child| self.subtree_bottom(*child).ok())
                 .fold(origin.y, f32::max);
             let content_height = (bottom - origin.y).max(self.node(id)?.bounds.size.height);
             if let Kind::ScrollView {
@@ -1905,6 +2642,125 @@ impl<Message: 'static> Ui<Message> {
                 *current = content_height;
                 *offset = (*offset).clamp(0.0, (content_height - layout.size.height).max(0.0));
             }
+        }
+        Ok(())
+    }
+
+    fn subtree_bottom(&self, id: ElementId) -> Result<f32, UiError> {
+        let node = self.node(id)?;
+        let mut bottom = node.bounds.max_y();
+        for child in &node.children {
+            if !matches!(self.node(*child)?.kind, Kind::Overlay { .. }) {
+                bottom = bottom.max(self.subtree_bottom(*child)?);
+            }
+        }
+        Ok(bottom)
+    }
+
+    /// Returns the pointer target at a logical viewport position.
+    pub fn hit_test_at(&mut self, point: LogicalPoint) -> Result<Option<ElementId>, UiError> {
+        self.ensure_layout()?;
+        Ok(self.hit_test(point))
+    }
+
+    /// Returns whether an element belongs to any active pointer hover path.
+    pub fn is_hovered<T>(&self, handle: ElementHandle<T>) -> Result<bool, UiError> {
+        Ok(self.node(handle.id)?.hovered)
+    }
+
+    /// Returns whether an element currently owns keyboard focus.
+    pub fn is_focused<T>(&self, handle: ElementHandle<T>) -> Result<bool, UiError> {
+        self.node(handle.id)?;
+        Ok(self.focus == Some(handle.id))
+    }
+
+    /// Builds a deterministic headless layout and interaction snapshot.
+    pub fn inspect(&mut self) -> Result<UiInspection, UiError> {
+        self.ensure_layout()?;
+        let mut paint = Vec::new();
+        self.collect_paint_order(self.root, &mut paint)?;
+        let mut overlays = self
+            .all_ids()
+            .into_iter()
+            .filter(|id| {
+                self.node(*id)
+                    .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
+            })
+            .collect::<Vec<_>>();
+        overlays.sort_by_key(|id| self.node(*id).map_or(0, |node| node.z_index));
+        for overlay in overlays {
+            self.collect_paint_order(overlay, &mut paint)?;
+        }
+        let ranks = paint
+            .into_iter()
+            .enumerate()
+            .map(|(rank, id)| (id, rank))
+            .collect::<HashMap<_, _>>();
+        let mut nodes = Vec::new();
+        for id in self.all_ids() {
+            let node = self.node(id)?;
+            let route = self.route_to(id)?;
+            let mut world = Affine2::IDENTITY;
+            let mut clip: Option<LogicalRect> = None;
+            for current in route {
+                let current_node = self.node(current)?;
+                world *= node_local_transform(current_node);
+                if current_node.overflow == Overflow::Clip
+                    || matches!(current_node.kind, Kind::ScrollView { .. })
+                {
+                    let bounds = transformed_bounds(current_node.bounds, world);
+                    clip = Some(clip.map_or(bounds, |old| intersect_rect(old, bounds)));
+                }
+                if let Kind::ScrollView { offset, .. } = current_node.kind {
+                    world *= Affine2::from_translation(Vec2::new(0.0, -offset));
+                }
+            }
+            nodes.push(ElementInspection {
+                id,
+                parent: node.parent,
+                layout_bounds: node.bounds,
+                world_bounds: transformed_bounds(node.bounds, world),
+                clip,
+                world_transform: world,
+                paint_rank: ranks.get(&id).copied().unwrap_or(0),
+                visibility: node.visibility,
+                interactive: self.is_effectively_interactive(id),
+                hovered: node.hovered,
+                focused: self.focus == Some(id),
+                focusable: self.is_focusable_id(id),
+                hit_testable: self.is_hit_testable_id(id),
+            });
+        }
+        Ok(UiInspection {
+            viewport: self.viewport,
+            nodes,
+        })
+    }
+
+    fn collect_paint_order(
+        &self,
+        id: ElementId,
+        output: &mut Vec<ElementId>,
+    ) -> Result<(), UiError> {
+        let node = self.node(id)?;
+        if node.visibility != Visibility::Visible {
+            return Ok(());
+        }
+        output.push(id);
+        let mut children = node
+            .children
+            .iter()
+            .copied()
+            .enumerate()
+            .collect::<Vec<_>>();
+        children.sort_by_key(|(index, child)| {
+            (self.node(*child).map_or(0, |node| node.z_index), *index)
+        });
+        for (_, child) in children {
+            if matches!(self.node(child)?.kind, Kind::Overlay { .. }) {
+                continue;
+            }
+            self.collect_paint_order(child, output)?;
         }
         Ok(())
     }
@@ -1921,6 +2777,18 @@ impl<Message: 'static> Ui<Message> {
             )
             .map_err(|error| UiError::new(error.to_string()))?;
         self.paint_node(self.root, &mut painter)?;
+        let mut overlays = self
+            .all_ids()
+            .into_iter()
+            .filter(|id| {
+                self.node(*id)
+                    .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
+            })
+            .collect::<Vec<_>>();
+        overlays.sort_by_key(|id| self.node(*id).map_or(0, |node| node.z_index));
+        for overlay in overlays {
+            self.paint_node(overlay, &mut painter)?;
+        }
         let list = painter
             .finish()
             .map_err(|error| UiError::new(error.to_string()))?;
@@ -1930,7 +2798,37 @@ impl<Message: 'static> Ui<Message> {
 
     fn paint_node(&self, id: ElementId, painter: &mut Painter) -> Result<(), UiError> {
         let node = self.node(id)?;
+        if node.visibility != Visibility::Visible {
+            return Ok(());
+        }
+        painter.save();
+        let transform = node_local_transform(node);
+        if transform != Affine2::IDENTITY {
+            painter
+                .transform(transform)
+                .map_err(|error| UiError::new(error.to_string()))?;
+        }
+        if node.overflow == Overflow::Clip {
+            painter
+                .clip_rect(node.bounds)
+                .map_err(|error| UiError::new(error.to_string()))?;
+        }
         match &node.kind {
+            Kind::Row { .. }
+            | Kind::Column { .. }
+            | Kind::Stack
+            | Kind::FocusScope { .. }
+            | Kind::Overlay { .. }
+            | Kind::Padding { .. }
+                if node.visual.background.is_some() =>
+            {
+                painter
+                    .fill_rect(
+                        node.bounds,
+                        Brush::Solid(node.visual.background.expect("checked above")),
+                    )
+                    .map_err(|error| UiError::new(error.to_string()))?;
+            }
             Kind::Button { .. } => {
                 let color = if !node.enabled {
                     self.theme.button.disabled
@@ -2121,9 +3019,21 @@ impl<Message: 'static> Ui<Message> {
                     .restore()
                     .map_err(|error| UiError::new(error.to_string()))?;
             } else {
+                let clipped_control = matches!(node.kind, Kind::Button { .. });
+                if clipped_control {
+                    painter.save();
+                    painter
+                        .clip_rect(node.bounds)
+                        .map_err(|error| UiError::new(error.to_string()))?;
+                }
                 painter
                     .draw_text(layout, origin, 1.0)
                     .map_err(|error| UiError::new(error.to_string()))?;
+                if clipped_control {
+                    painter
+                        .restore()
+                        .map_err(|error| UiError::new(error.to_string()))?;
+                }
             }
         }
         let scroll_offset = match node.kind {
@@ -2139,8 +3049,20 @@ impl<Message: 'static> Ui<Message> {
                 .transform(Affine2::from_translation(Vec2::new(0.0, -offset)))
                 .map_err(|error| UiError::new(error.to_string()))?;
         }
-        for child in &node.children {
-            self.paint_node(*child, painter)?;
+        let mut children = node
+            .children
+            .iter()
+            .copied()
+            .enumerate()
+            .collect::<Vec<_>>();
+        children.sort_by_key(|(index, child)| {
+            (self.node(*child).map_or(0, |node| node.z_index), *index)
+        });
+        for (_, child) in children {
+            if matches!(self.node(child)?.kind, Kind::Overlay { .. }) {
+                continue;
+            }
+            self.paint_node(child, painter)?;
         }
         if scroll_offset.is_some() {
             painter
@@ -2188,6 +3110,9 @@ impl<Message: 'static> Ui<Message> {
                     .map_err(|error| UiError::new(error.to_string()))?;
             }
         }
+        painter
+            .restore()
+            .map_err(|error| UiError::new(error.to_string()))?;
         Ok(())
     }
 
@@ -2280,12 +3205,16 @@ impl<Message: 'static> Ui<Message> {
             value,
             focusable: self.is_focusable_id(id),
             focused: self.focus == Some(id),
-            enabled: node.enabled,
+            enabled: self.is_effectively_interactive(id),
             selection,
             actions,
             children: node
                 .children
                 .iter()
+                .filter(|child| {
+                    self.node(**child)
+                        .is_ok_and(|node| node.visibility == Visibility::Visible)
+                })
                 .map(|child| self.semantic_node(*child))
                 .collect::<Result<_, _>>()?,
         })
@@ -2401,7 +3330,7 @@ impl<Message: 'static> Ui<Message> {
                     .get(device_id)
                     .copied()
                     .or_else(|| self.hit_test(logical));
-                self.set_hover(self.hit_test(logical))?;
+                self.set_hover(*device_id, logical, self.hit_test(logical))?;
                 if let Some(target) = target {
                     self.dispatch_routed(
                         target,
@@ -2424,9 +3353,12 @@ impl<Message: 'static> Ui<Message> {
                 }
             }
             WindowEvent::PointerLeft { device_id } => {
-                if !self.capture.contains_key(device_id) {
-                    self.set_hover(None)?;
-                }
+                let position = self
+                    .pointer_positions
+                    .get(device_id)
+                    .copied()
+                    .unwrap_or(LogicalPoint::ZERO);
+                self.set_hover(*device_id, position, None)?;
             }
             WindowEvent::PointerButton {
                 device_id,
@@ -2680,15 +3612,57 @@ impl<Message: 'static> Ui<Message> {
     }
 
     fn hit_test(&self, point: LogicalPoint) -> Option<ElementId> {
-        self.hit_test_node(self.root, point)
+        let mut overlays = self
+            .all_ids()
+            .into_iter()
+            .filter(|id| {
+                self.node(*id)
+                    .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
+            })
+            .collect::<Vec<_>>();
+        overlays.sort_by_key(|id| self.node(*id).map_or(0, |node| node.z_index));
+        for overlay in overlays.into_iter().rev() {
+            let enabled = self
+                .node(overlay)
+                .ok()
+                .and_then(|node| match node.kind {
+                    Kind::Overlay { owner, .. } => Some(self.is_effectively_interactive(owner)),
+                    _ => None,
+                })
+                .unwrap_or(true);
+            if let Some(hit) = self.hit_test_node(overlay, point, enabled) {
+                return Some(hit);
+            }
+        }
+        self.hit_test_node(self.root, point, true)
     }
 
-    fn hit_test_node(&self, id: ElementId, point: LogicalPoint) -> Option<ElementId> {
+    fn hit_test_node(
+        &self,
+        id: ElementId,
+        point: LogicalPoint,
+        ancestors_enabled: bool,
+    ) -> Option<ElementId> {
         let node = self.node(id).ok()?;
-        if !node.bounds.contains(point) {
+        if node.visibility != Visibility::Visible || !ancestors_enabled {
+            return None;
+        }
+        let transform = node_local_transform(node);
+        let determinant = transform.matrix2.determinant();
+        if !determinant.is_finite() || determinant.abs() <= f32::EPSILON {
+            return None;
+        }
+        let local = transform
+            .inverse()
+            .transform_point2(Vec2::new(point.x, point.y));
+        let point = Point::new(local.x, local.y);
+        if (node.overflow == Overflow::Clip || matches!(node.kind, Kind::ScrollView { .. }))
+            && !node.bounds.contains(point)
+        {
             return None;
         }
         if matches!(node.kind, Kind::ScrollView { content_height, .. } if content_height > node.bounds.size.height)
+            && node.bounds.contains(point)
             && point.x >= node.bounds.max_x() - 12.0
         {
             return Some(id);
@@ -2697,35 +3671,94 @@ impl<Message: 'static> Ui<Message> {
             Kind::ScrollView { offset, .. } => Point::new(point.x, point.y + offset),
             _ => point,
         };
-        for child in node.children.iter().rev() {
-            if let Some(hit) = self.hit_test_node(*child, child_point) {
+        let mut children = node
+            .children
+            .iter()
+            .copied()
+            .enumerate()
+            .collect::<Vec<_>>();
+        children.sort_by_key(|(index, child)| {
+            (self.node(*child).map_or(0, |node| node.z_index), *index)
+        });
+        for (_, child) in children.into_iter().rev() {
+            if self
+                .node(child)
+                .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
+            {
+                continue;
+            }
+            if let Some(hit) = self.hit_test_node(child, child_point, node.enabled) {
                 return Some(hit);
             }
         }
-        (node.enabled && self.is_hit_testable_id(id)).then_some(id)
+        (node.enabled && node.bounds.contains(point) && self.is_hit_testable_id(id)).then_some(id)
     }
 
-    fn set_hover(&mut self, target: Option<ElementId>) -> Result<(), UiError> {
-        if self.hover == target {
+    fn set_hover(
+        &mut self,
+        device_id: DeviceId,
+        position: LogicalPoint,
+        target: Option<ElementId>,
+    ) -> Result<(), UiError> {
+        let old_path = self
+            .hover_paths
+            .get(&device_id)
+            .cloned()
+            .unwrap_or_default();
+        let old = old_path.last().copied();
+        if old == target {
+            self.hover = target;
             return Ok(());
         }
-        if let Some(old) = self.hover
-            && let Ok(node) = self.node_mut(old)
-        {
-            node.hovered = false;
-        }
+        let new_path = target
+            .map(|target| self.route_to(target))
+            .transpose()?
+            .unwrap_or_default();
+        self.hover_paths.insert(device_id, new_path);
         self.hover = target;
+        for id in self.all_ids() {
+            let hovered = self.hover_paths.values().any(|path| path.contains(&id));
+            self.node_mut(id)?.hovered = hovered;
+        }
+        if let Some(old) = old {
+            self.dispatch_routed(
+                old,
+                RoutedEventKind::PointerLeft {
+                    device_id,
+                    position,
+                    related_target: target,
+                },
+            )?;
+        }
         if let Some(target) = target {
-            self.node_mut(target)?.hovered = true;
+            self.dispatch_routed(
+                target,
+                RoutedEventKind::PointerEntered {
+                    device_id,
+                    position,
+                    related_target: old,
+                },
+            )?;
         }
         self.dirty |= Dirty::PAINT;
         Ok(())
     }
 
+    fn route_to(&self, target: ElementId) -> Result<Vec<ElementId>, UiError> {
+        let mut route = Vec::new();
+        let mut current = Some(target);
+        while let Some(id) = current {
+            route.push(id);
+            current = self.node(id)?.parent;
+        }
+        route.reverse();
+        Ok(route)
+    }
+
     fn set_focus(&mut self, target: Option<ElementId>) -> Result<(), UiError> {
         let target = target.filter(|id| {
             self.node(*id)
-                .is_ok_and(|node| node.enabled && self.is_focusable_id(*id))
+                .is_ok_and(|_| self.is_effectively_interactive(*id) && self.is_focusable_id(*id))
         });
         if self.focus == target {
             return Ok(());
@@ -2756,12 +3789,18 @@ impl<Message: 'static> Ui<Message> {
     }
 
     fn move_focus(&mut self, forward: bool) -> Result<(), UiError> {
+        let trapped = self.focus.and_then(|focus| {
+            self.route_to(focus).ok()?.into_iter().rev().find(|id| {
+                self.node(*id).is_ok_and(|node| matches!(node.kind, Kind::FocusScope { options, .. } if options.trapped) || matches!(node.kind, Kind::Overlay { options, .. } if options.focus.trapped))
+            })
+        });
         let focusable = self
             .all_ids()
             .into_iter()
             .filter(|id| {
-                self.node(*id)
-                    .is_ok_and(|node| node.enabled && self.is_focusable_id(*id))
+                self.is_effectively_interactive(*id)
+                    && self.is_focusable_id(*id)
+                    && trapped.is_none_or(|scope| self.is_descendant_of(*id, scope))
             })
             .collect::<Vec<_>>();
         if focusable.is_empty() {
@@ -2777,6 +3816,15 @@ impl<Message: 'static> Ui<Message> {
             (None, true) => focusable[0],
         };
         self.set_focus(Some(next))
+    }
+
+    fn is_effectively_interactive(&self, id: ElementId) -> bool {
+        self.route_to(id).is_ok_and(|route| {
+            route.into_iter().all(|id| {
+                self.node(id)
+                    .is_ok_and(|node| node.enabled && node.visibility == Visibility::Visible)
+            })
+        })
     }
 
     fn place_text_caret(
@@ -3168,22 +4216,30 @@ impl<Message: 'static> Ui<Message> {
 
     fn sync_platform_state(&mut self, window: &Window) -> Result<(), UiError> {
         self.ensure_layout()?;
-        window.set_cursor_icon(
-            if self.hover.is_some_and(|id| {
-                matches!(
-                    self.node(id).map(|node| &node.kind),
-                    Ok(Kind::Button { .. })
-                )
-            }) {
-                CursorIcon::Pointer
-            } else if self.hover.is_some_and(|id| {
-                matches!(self.node(id).map(|node| &node.kind), Ok(Kind::TextField(_)))
-            }) {
-                CursorIcon::Text
-            } else {
-                CursorIcon::Default
-            },
-        );
+        let cursor = self
+            .hover
+            .and_then(|leaf| self.route_to(leaf).ok())
+            .and_then(|route| {
+                route.into_iter().rev().find_map(|id| {
+                    let node = self.node(id).ok()?;
+                    node.cursor
+                        .or_else(|| {
+                            self.custom_widgets
+                                .get(&id)
+                                .and_then(|widget| widget.cursor_icon())
+                        })
+                        .or(match node.kind {
+                            Kind::Button { .. } => Some(CursorIcon::Pointer),
+                            Kind::TextField(_) => Some(CursorIcon::Text),
+                            _ => None,
+                        })
+                })
+            })
+            .unwrap_or(CursorIcon::Default);
+        if self.applied_cursor != Some(cursor) {
+            window.set_cursor_icon(cursor);
+            self.applied_cursor = Some(cursor);
+        }
         let Some(focus) = self.focus.filter(|_| self.window_focused) else {
             window.set_ime_allowed(false);
             return Ok(());
@@ -3250,6 +4306,81 @@ fn map_alignment(alignment: Alignment) -> AlignItems {
         Alignment::End => AlignItems::FLEX_END,
         Alignment::Stretch => AlignItems::STRETCH,
     }
+}
+
+fn node_local_transform(node: &Node) -> Affine2 {
+    let pivot = Vec2::new(
+        node.bounds.origin.x + node.transform_origin.x,
+        node.bounds.origin.y + node.transform_origin.y,
+    );
+    Affine2::from_translation(pivot) * node.transform * Affine2::from_translation(-pivot)
+}
+
+fn transformed_bounds(rect: LogicalRect, transform: Affine2) -> LogicalRect {
+    let points = [
+        Vec2::new(rect.min_x(), rect.min_y()),
+        Vec2::new(rect.max_x(), rect.min_y()),
+        Vec2::new(rect.max_x(), rect.max_y()),
+        Vec2::new(rect.min_x(), rect.max_y()),
+    ]
+    .map(|point| transform.transform_point2(point));
+    let min_x = points
+        .iter()
+        .map(|point| point.x)
+        .fold(f32::INFINITY, f32::min);
+    let min_y = points
+        .iter()
+        .map(|point| point.y)
+        .fold(f32::INFINITY, f32::min);
+    let max_x = points
+        .iter()
+        .map(|point| point.x)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let max_y = points
+        .iter()
+        .map(|point| point.y)
+        .fold(f32::NEG_INFINITY, f32::max);
+    Rect::from_xywh(
+        min_x,
+        min_y,
+        (max_x - min_x).max(0.0),
+        (max_y - min_y).max(0.0),
+    )
+}
+
+fn intersect_rect(a: LogicalRect, b: LogicalRect) -> LogicalRect {
+    let x = a.min_x().max(b.min_x());
+    let y = a.min_y().max(b.min_y());
+    let max_x = a.max_x().min(b.max_x());
+    let max_y = a.max_y().min(b.max_y());
+    Rect::from_xywh(x, y, (max_x - x).max(0.0), (max_y - y).max(0.0))
+}
+
+fn apply_flex(style: &mut Style, flex: FlexStyle) {
+    style.gap = TaffySize {
+        width: LengthPercentage::length(flex.column_gap.max(0.0)),
+        height: LengthPercentage::length(flex.row_gap.max(0.0)),
+    };
+    style.align_items = Some(map_alignment(flex.align_items));
+    style.align_content = Some(match flex.align_content {
+        Alignment::Start => AlignContent::FLEX_START,
+        Alignment::Center => AlignContent::CENTER,
+        Alignment::End => AlignContent::FLEX_END,
+        Alignment::Stretch => AlignContent::STRETCH,
+    });
+    style.justify_content = Some(match flex.justify_content {
+        Justification::Start => JustifyContent::FLEX_START,
+        Justification::Center => JustifyContent::CENTER,
+        Justification::End => JustifyContent::FLEX_END,
+        Justification::SpaceBetween => JustifyContent::SPACE_BETWEEN,
+        Justification::SpaceAround => JustifyContent::SPACE_AROUND,
+        Justification::SpaceEvenly => JustifyContent::SPACE_EVENLY,
+    });
+    style.flex_wrap = match flex.wrap {
+        FlexWrap::NoWrap => TaffyFlexWrap::NoWrap,
+        FlexWrap::Wrap => TaffyFlexWrap::Wrap,
+        FlexWrap::WrapReverse => TaffyFlexWrap::WrapReverse,
+    };
 }
 
 fn snap_slider(value: f32, min: f32, max: f32, step: f32) -> f32 {
@@ -3671,7 +4802,7 @@ mod tests {
         ui.set_layout(
             scroll,
             LayoutStyle {
-                height: Some(80.0),
+                height: Length::Px(80.0),
                 ..Default::default()
             },
         )
@@ -3693,5 +4824,284 @@ mod tests {
             _ => unreachable!(),
         };
         assert!((ui.scroll_offset(scroll).unwrap() - max).abs() < 0.01);
+    }
+
+    #[test]
+    fn flex_scroll_view_shrinks_tracks_nested_overflow_and_clips_input() {
+        let mut ui = Ui::<TestMessage>::new(FontDatabase::default(), Theme::default());
+        ui.set_viewport(Size::new(320.0, 180.0), 1.0);
+        let root = ui.root();
+        let padding = ui.add_padding(root, Insets::all(12.0)).unwrap();
+        ui.set_layout(
+            padding,
+            LayoutStyle {
+                grow: 1.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let scroll = ui.add_scroll_view(padding).unwrap();
+        ui.set_layout(
+            scroll,
+            LayoutStyle {
+                grow: 1.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let content = ui.add_column(scroll).unwrap();
+        let mut last = None;
+        for index in 0..12 {
+            last = Some(ui.add_button(content, format!("Item {index}")).unwrap());
+        }
+        ui.ensure_layout().unwrap();
+        let scroll_bounds = ui.node(scroll.id()).unwrap().bounds;
+        let last = last.unwrap();
+        let last_bounds = ui.node(last.id()).unwrap().bounds;
+        let content_height = match ui.node(scroll.id()).unwrap().kind {
+            Kind::ScrollView { content_height, .. } => content_height,
+            _ => unreachable!(),
+        };
+        assert!(
+            scroll_bounds.size.height <= 156.0 + f32::EPSILON,
+            "{scroll_bounds:?}"
+        );
+        assert!(content_height > scroll_bounds.size.height);
+        assert!(last_bounds.origin.y > scroll_bounds.max_y());
+        assert_ne!(
+            ui.hit_test(Point::new(
+                last_bounds.origin.x + 2.0,
+                last_bounds.origin.y + 2.0
+            )),
+            Some(last.id())
+        );
+        assert!(ui.scroll_by_id(scroll.id(), 40.0).unwrap());
+        assert!(ui.scroll_offset(scroll).unwrap() > 0.0);
+        ui.scroll_by_id(scroll.id(), -f32::MAX).unwrap();
+        for _ in 0..13 {
+            ui.move_focus(true).unwrap();
+        }
+        assert_eq!(ui.focus, Some(last.id()));
+        assert!(ui.scroll_offset(scroll).unwrap() > 0.0);
+        assert!(
+            ui.hit_test(Point::new(
+                scroll_bounds.origin.x + 2.0,
+                scroll_bounds.max_y() - 2.0
+            ))
+            .is_some()
+        );
+    }
+
+    #[test]
+    fn rich_layout_supports_percent_constraints_wrapping_and_absolute_stack_children() {
+        let mut ui = ui();
+        let root = ui.root();
+        let row = ui.add_row(root).unwrap();
+        ui.set_layout(
+            row,
+            LayoutStyle {
+                width: Length::Px(300.0),
+                height: Length::Px(120.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        ui.set_flex_style(
+            row,
+            FlexStyle {
+                wrap: FlexWrap::Wrap,
+                column_gap: 8.0,
+                row_gap: 8.0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        for label in ["One", "Two", "Three"] {
+            let button = ui.add_button(row, label).unwrap();
+            ui.set_layout(
+                button,
+                LayoutStyle {
+                    width: Length::Percent(0.48),
+                    min_height: Length::Px(40.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        let stack = ui.add_stack(root).unwrap();
+        ui.set_layout(
+            stack,
+            LayoutStyle {
+                width: Length::Px(100.0),
+                height: Length::Px(60.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let back = ui.add_button(stack, "Back").unwrap();
+        let front = ui.add_button(stack, "Front").unwrap();
+        ui.set_z_index(front, 4).unwrap();
+        ui.ensure_layout().unwrap();
+        let third = ui.node(row.id()).unwrap().children[2];
+        assert!(
+            ui.node(third).unwrap().bounds.origin.y > ui.node(row.id()).unwrap().bounds.origin.y
+        );
+        let origin = ui.node(front.id()).unwrap().bounds.origin;
+        let point = Point::new(origin.x + 5.0, origin.y + 5.0);
+        assert_eq!(ui.hit_test(point), Some(front.id()));
+        ui.set_visibility(front, Visibility::Hidden).unwrap();
+        ui.ensure_layout().unwrap();
+        assert_eq!(ui.hit_test(point), Some(back.id()));
+    }
+
+    #[test]
+    fn transformed_hit_testing_clipping_and_effective_enablement_match_painting() {
+        let mut ui = ui();
+        let root = ui.root();
+        let stack = ui.add_stack(root).unwrap();
+        ui.set_layout(
+            stack,
+            LayoutStyle {
+                width: Length::Px(100.0),
+                height: Length::Px(100.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        ui.set_overflow(stack, Overflow::Clip).unwrap();
+        let button = ui.add_button(stack, "Moved").unwrap();
+        ui.set_transform(
+            button,
+            Affine2::from_translation(Vec2::new(30.0, 0.0)),
+            LogicalPoint::ZERO,
+        )
+        .unwrap();
+        ui.ensure_layout().unwrap();
+        let bounds = ui.node(button.id()).unwrap().bounds;
+        assert_eq!(
+            ui.hit_test(Point::new(bounds.origin.x + 35.0, bounds.origin.y + 5.0)),
+            Some(button.id())
+        );
+        assert_eq!(
+            ui.hit_test(Point::new(bounds.max_x() + 20.0, bounds.origin.y + 5.0)),
+            None
+        );
+        ui.set_enabled(stack, false).unwrap();
+        assert_eq!(
+            ui.hit_test(Point::new(bounds.origin.x + 35.0, bounds.origin.y + 5.0)),
+            None
+        );
+    }
+
+    #[test]
+    fn focus_scope_restores_focus_and_overlay_is_viewport_hosted() {
+        let mut ui = ui();
+        let root = ui.root();
+        let owner = ui.add_button(root, "Owner").unwrap();
+        ui.set_focus(Some(owner.id())).unwrap();
+        let overlay = ui
+            .add_overlay(
+                owner,
+                OverlayOptions {
+                    focus: FocusScopeOptions {
+                        trapped: true,
+                        autofocus: false,
+                        restore_focus: true,
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        ui.set_layout(
+            overlay,
+            LayoutStyle {
+                width: Length::Px(140.0),
+                height: Length::Px(80.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let action = ui.add_button(overlay, "Action").unwrap();
+        ui.set_focus(Some(action.id())).unwrap();
+        ui.ensure_layout().unwrap();
+        assert!(
+            ui.node(overlay.id()).unwrap().bounds.origin.y
+                >= ui.node(owner.id()).unwrap().bounds.max_y()
+        );
+        let inspection = ui.inspect().unwrap();
+        assert!(
+            inspection
+                .nodes
+                .iter()
+                .any(|node| node.id == overlay.id() && !node.focused)
+        );
+        ui.remove(overlay).unwrap();
+        assert_eq!(ui.focus, Some(owner.id()));
+    }
+
+    #[test]
+    fn inspection_and_public_hit_test_are_deterministic() {
+        let mut ui = ui();
+        let root = ui.root();
+        let button = ui.add_button(root, "Inspect").unwrap();
+        let first = ui.inspect().unwrap();
+        let second = ui.inspect().unwrap();
+        assert_eq!(first, second);
+        let bounds = first
+            .nodes
+            .iter()
+            .find(|node| node.id == button.id())
+            .unwrap()
+            .world_bounds;
+        assert_eq!(
+            ui.hit_test_at(Point::new(bounds.origin.x + 1.0, bounds.origin.y + 1.0))
+                .unwrap(),
+            Some(button.id())
+        );
+    }
+
+    #[test]
+    fn default_root_button_targets_window_origin() {
+        let mut ui = ui();
+        let button = ui.add_button(ui.root(), "Save").unwrap();
+        ui.ensure_layout().unwrap();
+        assert_eq!(ui.hit_test(Point::new(5.0, 5.0)), Some(button.id()));
+    }
+
+    #[test]
+    fn hover_paths_route_enter_leave_and_retarget_after_layout() {
+        let mut ui = Ui::<TestMessage>::new(FontDatabase::default(), Theme::default());
+        ui.set_viewport(Size::new(300.0, 200.0), 1.0);
+        let root = ui.root();
+        let parent = ui.add_column(root).unwrap();
+        let button = ui.add_button(parent, "Hover").unwrap();
+        let transitions = Arc::new(Mutex::new(Vec::new()));
+        let observed = transitions.clone();
+        ui.listen(button, None, EventFilter::Pointer, move |_, event| {
+            if matches!(event.kind, RoutedEventKind::PointerEntered { .. }) {
+                observed.lock().unwrap().push("enter");
+            }
+            if matches!(event.kind, RoutedEventKind::PointerLeft { .. }) {
+                observed.lock().unwrap().push("leave");
+            }
+        })
+        .unwrap();
+        ui.ensure_layout().unwrap();
+        let bounds = ui.node(button.id()).unwrap().bounds;
+        let point = Point::new(bounds.origin.x + 2.0, bounds.origin.y + 2.0);
+        let device = DeviceId(9);
+        ui.pointer_positions.insert(device, point);
+        ui.set_hover(device, point, Some(button.id())).unwrap();
+        assert!(ui.is_hovered(parent).unwrap());
+        ui.set_transform(
+            button,
+            Affine2::from_translation(Vec2::new(500.0, 0.0)),
+            LogicalPoint::ZERO,
+        )
+        .unwrap();
+        ui.invalidate_layout();
+        ui.ensure_layout().unwrap();
+        assert_eq!(&*transitions.lock().unwrap(), &["enter", "leave"]);
+        assert!(!ui.is_hovered(parent).unwrap());
     }
 }

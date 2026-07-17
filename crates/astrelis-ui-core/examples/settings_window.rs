@@ -1,20 +1,21 @@
-//! Cross-platform settings window using the retained UI vertical slice.
+//! Cross-platform settings window and Milestone 10 interaction gallery.
 
 use std::{io, sync::Arc};
 
 use astrelis_app::{App, AppContext, Runtime, RuntimeConfig};
-use astrelis_core::geometry::Size;
+use astrelis_core::{geometry::Size, math::Affine2};
 use astrelis_gpu::{
     CompositeAlphaMode, DeviceDescriptor, PresentMode, RequestAdapterOptions, SurfaceConfiguration,
     SurfaceFrameStatus, SurfaceTarget, TextureUsages, TextureViewDescriptor,
 };
 use astrelis_paint::{Brush, CornerRadii, Painter, RoundedRect, StrokeStyle};
 use astrelis_paint_gpu::{RenderTarget, Renderer, RendererOptions};
-use astrelis_platform::{Window, WindowAttributes, WindowEvent, WindowId};
+use astrelis_platform::{CursorIcon, Window, WindowAttributes, WindowEvent, WindowId};
 use astrelis_text::{FontDatabase, FontFamily};
 use astrelis_ui_core::{
-    Column, ElementHandle, EventFilter, Insets, Label, LayoutStyle, MountContext, SemanticRole,
-    TextField, Theme, Ui, Widget,
+    Column, Edges, ElementHandle, EventFilter, FlexStyle, FlexWrap, FocusScopeOptions, Insets,
+    Label, LayoutStyle, Length, MountContext, Overflow, Overlay, OverlayOptions, Positioning,
+    SemanticRole, TextField, Theme, Ui, Visibility, Widget,
 };
 
 const NOTO_SANS: &[u8] = include_bytes!("../assets/NotoSans.ttf");
@@ -31,6 +32,7 @@ struct Handles {
     name: ElementHandle<TextField>,
     secret: ElementHandle<TextField>,
     status: ElementHandle<Label>,
+    overlay: ElementHandle<Overlay>,
 }
 
 enum Message {
@@ -38,6 +40,7 @@ enum Message {
     Edited,
     Notifications(bool),
     Scale(f32),
+    ToggleOverlay,
 }
 
 struct SettingsSection {
@@ -105,6 +108,7 @@ struct Settings {
     gpu: Option<GpuState>,
     ui: Ui<Message>,
     handles: Handles,
+    overlay_open: bool,
 }
 
 impl Settings {
@@ -142,6 +146,148 @@ impl Settings {
         let column: ElementHandle<Column> = ui.add_column(scroll).map_err(io::Error::other)?;
         ui.add_label(column, "Astrelis settings")
             .map_err(io::Error::other)?;
+        ui.add_label(column, "Milestone 10 interaction gallery")
+            .map_err(io::Error::other)?;
+        let cards = ui.add_row(column).map_err(io::Error::other)?;
+        ui.set_layout(
+            cards,
+            LayoutStyle {
+                width: Length::Percent(1.0),
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        ui.set_flex_style(
+            cards,
+            FlexStyle {
+                wrap: FlexWrap::Wrap,
+                column_gap: 8.0,
+                row_gap: 8.0,
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        for title in [
+            "Wrapped layout",
+            "Percent sizing",
+            "Keyboard focus",
+            "Custom cursor",
+        ] {
+            let card = ui.add_button(cards, title).map_err(io::Error::other)?;
+            ui.set_layout(
+                card,
+                LayoutStyle {
+                    width: Length::Percent(0.48),
+                    min_width: Length::Px(220.0),
+                    min_height: Length::Px(42.0),
+                    ..Default::default()
+                },
+            )
+            .map_err(io::Error::other)?;
+        }
+        let stage = ui.add_stack(column).map_err(io::Error::other)?;
+        ui.set_layout(
+            stage,
+            LayoutStyle {
+                width: Length::Percent(1.0),
+                height: Length::Px(92.0),
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        ui.set_overflow(stage, Overflow::Clip)
+            .map_err(io::Error::other)?;
+        let behind = ui
+            .add_button(stage, "Overlapping target")
+            .map_err(io::Error::other)?;
+        ui.set_layout(
+            behind,
+            LayoutStyle {
+                width: Length::Percent(0.58),
+                height: Length::Px(58.0),
+                positioning: Positioning::Absolute,
+                inset: Edges {
+                    left: Length::Px(12.0),
+                    top: Length::Px(12.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        let above = ui
+            .add_button(stage, "Transformed + z-index")
+            .map_err(io::Error::other)?;
+        ui.set_layout(
+            above,
+            LayoutStyle {
+                width: Length::Percent(0.48),
+                height: Length::Px(52.0),
+                positioning: Positioning::Absolute,
+                inset: Edges {
+                    left: Length::Percent(0.36),
+                    top: Length::Px(28.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        ui.set_z_index(above, 2).map_err(io::Error::other)?;
+        ui.set_transform(
+            above,
+            Affine2::from_angle(-0.04),
+            astrelis_core::geometry::Point::new(80.0, 30.0),
+        )
+        .map_err(io::Error::other)?;
+        ui.set_cursor_icon(behind, Some(CursorIcon::Crosshair))
+            .map_err(io::Error::other)?;
+        let overlay_owner = ui
+            .add_button(column, "Anchored overlay owner")
+            .map_err(io::Error::other)?;
+        ui.set_cursor_icon(overlay_owner, Some(CursorIcon::Pointer))
+            .map_err(io::Error::other)?;
+        ui.listen(overlay_owner, None, EventFilter::Activate, |context, _| {
+            context.emit(Message::ToggleOverlay)
+        })
+        .map_err(io::Error::other)?;
+        let overlay = ui
+            .add_overlay(
+                overlay_owner,
+                OverlayOptions {
+                    offset: astrelis_core::geometry::Point::new(0.0, 6.0),
+                    z_index: 20,
+                    focus: FocusScopeOptions {
+                        trapped: true,
+                        autofocus: false,
+                        restore_focus: true,
+                    },
+                    ..Default::default()
+                },
+            )
+            .map_err(io::Error::other)?;
+        ui.set_layout(
+            overlay,
+            LayoutStyle {
+                width: Length::Px(220.0),
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        ui.set_visibility(overlay, Visibility::Hidden)
+            .map_err(io::Error::other)?;
+        ui.set_widget_style(
+            overlay,
+            astrelis_ui_core::WidgetStyle {
+                background: Some(astrelis_core::color::Color::new(0.12, 0.16, 0.26, 1.0)),
+                ..Default::default()
+            },
+        )
+        .map_err(io::Error::other)?;
+        ui.add_label(overlay, "Viewport-hosted portal")
+            .map_err(io::Error::other)?;
+        ui.add_button(overlay, "Tab stays in this overlay")
+            .map_err(io::Error::other)?;
         ui.add_label(column, "Display name")
             .map_err(io::Error::other)?;
         let name = ui
@@ -152,7 +298,7 @@ impl Settings {
         ui.set_layout(
             name,
             LayoutStyle {
-                min_width: Some(340.0),
+                min_width: astrelis_ui_core::Length::Px(340.0),
                 ..Default::default()
             },
         )
@@ -166,7 +312,7 @@ impl Settings {
         ui.set_layout(
             secret,
             LayoutStyle {
-                min_width: Some(340.0),
+                min_width: astrelis_ui_core::Length::Px(340.0),
                 ..Default::default()
             },
         )
@@ -239,7 +385,9 @@ impl Settings {
                 name,
                 secret,
                 status,
+                overlay,
             },
+            overlay_open: false,
         })
     }
 
@@ -367,6 +515,19 @@ impl Settings {
                         format!("Interface scale: {value:.2}×."),
                     )
                     .map_err(io::Error::other)?,
+                Message::ToggleOverlay => {
+                    self.overlay_open = !self.overlay_open;
+                    self.ui
+                        .set_visibility(
+                            self.handles.overlay,
+                            if self.overlay_open {
+                                Visibility::Visible
+                            } else {
+                                Visibility::Hidden
+                            },
+                        )
+                        .map_err(io::Error::other)?;
+                }
             }
         }
         Ok(())
@@ -519,7 +680,8 @@ impl App for Settings {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn main() -> Result<(), astrelis_app::RuntimeError<io::Error>> {
+/// Runs the native interaction gallery.
+pub fn main() -> Result<(), astrelis_app::RuntimeError<io::Error>> {
     Runtime::finish(astrelis_platform_winit::run_return(Runtime::new(
         Settings::new().map_err(astrelis_app::RuntimeError::Application)?,
         RuntimeConfig::default(),
@@ -567,4 +729,5 @@ fn set_web_status(message: Option<&str>) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn main() {}
+/// WASM startup is driven by the exported async entry point above.
+pub fn main() {}
