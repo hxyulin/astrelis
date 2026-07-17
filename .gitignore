@@ -2,3 +2,4 @@ target/
 /.claude/*
 /.worktrees
 /docs/
+/crates/astrelis-ui-core/web/pkg/

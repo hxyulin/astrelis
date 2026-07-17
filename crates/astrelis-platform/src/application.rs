@@ -1,10 +1,10 @@
 //! Application lifecycle and active event-loop context.
 
-use std::{fmt, sync::Arc, time::Instant};
+use std::{fmt, sync::Arc};
 
 use crate::{
-    Clipboard, DeviceEvent, DeviceId, EventLoopClosed, Monitor, PlatformError, StartCause, Window,
-    WindowAttributes, WindowEvent, WindowId, backend,
+    Clipboard, DeviceEvent, DeviceId, EventLoopClosed, Instant, Monitor, PlatformError, StartCause,
+    Window, WindowAttributes, WindowEvent, WindowId, backend,
 };
 
 /// Determines how the event loop waits for new work.

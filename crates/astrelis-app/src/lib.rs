@@ -10,12 +10,13 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use astrelis_platform::{
     Application, Clipboard, ControlFlow, DeviceEvent, DeviceId, EventLoopClosed, EventLoopProxy,
-    PlatformContext, PlatformError, StartCause, Window, WindowAttributes, WindowEvent, WindowId,
+    Instant, PlatformContext, PlatformError, StartCause, Window, WindowAttributes, WindowEvent,
+    WindowId,
 };
 
 const DEFAULT_TASK_BATCH_LIMIT: usize = 1_024;

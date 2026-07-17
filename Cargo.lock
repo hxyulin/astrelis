@@ -224,6 +224,7 @@ version = "0.0.0"
 dependencies = [
  "astrelis-core",
  "raw-window-handle",
+ "web-time",
 ]
 
 [[package]]
@@ -244,6 +245,8 @@ dependencies = [
  "astrelis-platform",
  "astrelis-profiling",
  "raw-window-handle",
+ "wasm-bindgen-futures",
+ "web-sys",
  "winit",
 ]
 
@@ -254,6 +257,7 @@ dependencies = [
  "astrelis-core",
  "criterion",
  "tracing",
+ "web-time",
 ]
 
 [[package]]
@@ -294,6 +298,9 @@ dependencies = [
  "pollster",
  "taffy",
  "unicode-segmentation",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -3008,7 +3015,6 @@ dependencies = [
  "js-sys",
  "log",
  "naga",
- "parking_lot",
  "portable-atomic",
  "profiling",
  "raw-window-handle",

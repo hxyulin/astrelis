@@ -8,14 +8,17 @@ mod window;
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex, Weak,
+        Arc, Weak,
         atomic::{AtomicU64, Ordering},
     },
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Mutex;
+
 use astrelis_platform::{
-    Application, ControlFlow, DeviceId, EventLoopClosed, EventLoopProxy, PlatformContext,
-    PlatformError, WindowId, backend,
+    Application, Clipboard, ControlFlow, DeviceId, EventLoopClosed, EventLoopProxy,
+    PlatformContext, PlatformError, WindowId, backend,
 };
 use winit::{
     application::ApplicationHandler,
@@ -25,11 +28,13 @@ use winit::{
 use crate::window::WinitWindow;
 
 /// Runs an application on winit's portable owned event loop.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run<A: Application>(app: A) -> Result<(), PlatformError> {
     run_return(app).map(|_| ())
 }
 
 /// Runs an application and returns it after the event loop terminates.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_return<A: Application>(app: A) -> Result<A, PlatformError> {
     let event_loop = EventLoop::<A::UserEvent>::with_user_event()
         .build()
@@ -38,7 +43,7 @@ pub fn run_return<A: Application>(app: A) -> Result<A, PlatformError> {
     let mut adapter = Adapter {
         app,
         proxy,
-        clipboard: Arc::new(WinitClipboard::default()),
+        clipboard: Clipboard::from_backend(Arc::new(WinitClipboard::default())),
         windows: HashMap::new(),
         next_window_id: AtomicU64::new(1),
     };
@@ -48,10 +53,43 @@ pub fn run_return<A: Application>(app: A) -> Result<A, PlatformError> {
     Ok(adapter.app)
 }
 
+/// Browser-specific Winit integration.
+#[cfg(target_arch = "wasm32")]
+pub mod web {
+    use super::*;
+    use winit::platform::web::EventLoopExtWebSys;
+
+    /// Starts an application using an existing page canvas.
+    ///
+    /// This returns after scheduling Winit's browser event loop. The initial
+    /// vertical slice supports one Astrelis window for the supplied canvas.
+    pub fn spawn_on_canvas<A: Application>(
+        app: A,
+        canvas: web_sys::HtmlCanvasElement,
+    ) -> Result<(), PlatformError> {
+        let event_loop = EventLoop::<A::UserEvent>::with_user_event()
+            .build()
+            .map_err(|error| PlatformError::new(error.to_string()))?;
+        let proxy = event_loop.create_proxy();
+        let adapter = Adapter {
+            app,
+            proxy,
+            clipboard: Clipboard::from_backend(Arc::new(UnsupportedWebClipboard)),
+            canvas: Some(canvas),
+            windows: HashMap::new(),
+            next_window_id: AtomicU64::new(1),
+        };
+        event_loop.spawn_app(adapter);
+        Ok(())
+    }
+}
+
 struct Adapter<A: Application> {
     app: A,
     proxy: winit::event_loop::EventLoopProxy<A::UserEvent>,
-    clipboard: Arc<WinitClipboard>,
+    clipboard: Clipboard,
+    #[cfg(target_arch = "wasm32")]
+    canvas: Option<web_sys::HtmlCanvasElement>,
     windows: HashMap<winit::window::WindowId, (WindowId, Weak<WinitWindow>)>,
     next_window_id: AtomicU64,
 }
@@ -67,6 +105,8 @@ impl<A: Application> Adapter<A> {
             event_loop,
             proxy: self.proxy.clone(),
             clipboard: self.clipboard.clone(),
+            #[cfg(target_arch = "wasm32")]
+            canvas: &mut self.canvas,
             windows: &mut self.windows,
             next_window_id: &self.next_window_id,
         };
@@ -149,7 +189,9 @@ impl<A: Application> ApplicationHandler<A::UserEvent> for Adapter<A> {
 struct Context<'a, T: 'static> {
     event_loop: &'a ActiveEventLoop,
     proxy: winit::event_loop::EventLoopProxy<T>,
-    clipboard: Arc<WinitClipboard>,
+    clipboard: Clipboard,
+    #[cfg(target_arch = "wasm32")]
+    canvas: &'a mut Option<web_sys::HtmlCanvasElement>,
     windows: &'a mut HashMap<winit::window::WindowId, (WindowId, Weak<WinitWindow>)>,
     next_window_id: &'a AtomicU64,
 }
@@ -160,9 +202,22 @@ impl<T: Send + 'static> backend::ActiveContext<T> for Context<'_, T> {
         attributes: astrelis_platform::WindowAttributes,
     ) -> Result<astrelis_platform::Window, PlatformError> {
         astrelis_profiling::profile_scope!("platform.create_window");
+        let attributes = window::attributes(attributes);
+        #[cfg(target_arch = "wasm32")]
+        let attributes = {
+            use winit::platform::web::WindowAttributesExtWebSys;
+
+            let canvas = self.canvas.take().ok_or_else(|| {
+                PlatformError::new("the browser runner supports one canvas window")
+            })?;
+            attributes
+                .with_canvas(Some(canvas))
+                .with_focusable(true)
+                .with_prevent_default(true)
+        };
         let native = self
             .event_loop
-            .create_window(window::attributes(attributes))
+            .create_window(attributes)
             .map_err(|error| PlatformError::new(error.to_string()))?;
         let id = WindowId(self.next_window_id.fetch_add(1, Ordering::Relaxed));
         let backend = Arc::new(WinitWindow {
@@ -204,18 +259,20 @@ impl<T: Send + 'static> backend::ActiveContext<T> for Context<'_, T> {
         EventLoopProxy::from_backend(Arc::new(WinitProxy(self.proxy.clone())))
     }
     fn clipboard(&self) -> astrelis_platform::Clipboard {
-        astrelis_platform::Clipboard::from_backend(self.clipboard.clone())
+        self.clipboard.clone()
     }
     fn exit(&mut self) {
         self.event_loop.exit();
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 struct WinitClipboard {
     inner: Mutex<Option<arboard::Clipboard>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl std::fmt::Debug for WinitClipboard {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -224,6 +281,7 @@ impl std::fmt::Debug for WinitClipboard {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl WinitClipboard {
     fn with_clipboard<T>(
         &self,
@@ -243,7 +301,15 @@ impl WinitClipboard {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl backend::Clipboard for WinitClipboard {
+    fn capabilities(&self) -> astrelis_platform::ClipboardCapabilities {
+        astrelis_platform::ClipboardCapabilities {
+            read_text: true,
+            write_text: true,
+        }
+    }
+
     fn read_text(&self) -> Result<Option<String>, PlatformError> {
         self.with_clipboard(|clipboard| match clipboard.get_text() {
             Ok(text) => Ok(Some(text)),
@@ -254,6 +320,29 @@ impl backend::Clipboard for WinitClipboard {
 
     fn write_text(&self, text: String) -> Result<(), PlatformError> {
         self.with_clipboard(|clipboard| clipboard.set_text(text))
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug)]
+struct UnsupportedWebClipboard;
+
+#[cfg(target_arch = "wasm32")]
+impl backend::Clipboard for UnsupportedWebClipboard {
+    fn capabilities(&self) -> astrelis_platform::ClipboardCapabilities {
+        astrelis_platform::ClipboardCapabilities::default()
+    }
+
+    fn read_text(&self) -> Result<Option<String>, PlatformError> {
+        Err(PlatformError::new(
+            "synchronous clipboard reads are unavailable in browsers",
+        ))
+    }
+
+    fn write_text(&self, _text: String) -> Result<(), PlatformError> {
+        Err(PlatformError::new(
+            "synchronous clipboard writes are unavailable in browsers",
+        ))
     }
 }
 

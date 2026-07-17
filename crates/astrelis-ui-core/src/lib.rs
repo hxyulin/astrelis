@@ -19,8 +19,8 @@ use astrelis_platform::{
     PlatformError, PointerButton, Window, WindowEvent,
 };
 use astrelis_text::{
-    Affinity, CaretMovement, FontDatabase, ParagraphStyle, TextLayout, TextLayoutContext,
-    TextLayoutRequest, TextPosition, TextWrap,
+    Affinity, CaretMovement, FontDatabase, FontFamily, ParagraphStyle, TextLayout,
+    TextLayoutContext, TextLayoutRequest, TextPosition, TextWrap,
 };
 use bitflags::bitflags;
 use taffy::prelude::{
@@ -202,6 +202,8 @@ pub struct Theme {
     pub field_background: Color,
     /// Default logical font size.
     pub font_size: f32,
+    /// Ordered font families used by built-in widget text.
+    pub font_families: Vec<FontFamily>,
     /// Default inter-widget gap.
     pub gap: f32,
     /// Default control padding.
@@ -226,6 +228,7 @@ impl Default for Theme {
             },
             field_background: Color::new(0.065, 0.08, 0.13, 1.0),
             font_size: 16.0,
+            font_families: vec![FontFamily::SansSerif],
             gap: 10.0,
             control_padding: Insets {
                 left: 12.0,
@@ -895,6 +898,7 @@ impl Ui {
                 Kind::Label { text } | Kind::Button { text } => {
                     let mut request = TextLayoutRequest::new(text);
                     request.style.size = self.theme.font_size;
+                    request.style.families = self.theme.font_families.clone();
                     request.style.color = self
                         .node(id)?
                         .visual
@@ -924,6 +928,7 @@ impl Ui {
                     }
                     let mut request = TextLayoutRequest::new(shown);
                     request.style.size = self.theme.font_size;
+                    request.style.families = self.theme.font_families.clone();
                     request.style.color = self.node(id)?.visual.foreground.unwrap_or(
                         if field.text.is_empty() && field.preedit.is_empty() {
                             self.theme.muted_foreground
@@ -1668,7 +1673,7 @@ impl Ui {
         }
         if command && character.as_deref() == Some("c") {
             let field = self.text_field(id)?;
-            if !field.password {
+            if !field.password && clipboard.capabilities().write_text {
                 let (start, end) = field.selection();
                 if start != end {
                     clipboard
@@ -1680,7 +1685,7 @@ impl Ui {
         }
         if command && character.as_deref() == Some("x") {
             let field = self.text_field(id)?.clone();
-            if !field.password {
+            if !field.password && clipboard.capabilities().write_text {
                 let (start, end) = field.selection();
                 if start != end {
                     clipboard
@@ -1692,7 +1697,9 @@ impl Ui {
             return Ok(());
         }
         if command && character.as_deref() == Some("v") {
-            if let Some(text) = clipboard.read_text().map_err(platform_error)? {
+            if clipboard.capabilities().read_text
+                && let Some(text) = clipboard.read_text().map_err(platform_error)?
+            {
                 let text = text.replace(['\r', '\n'], " ");
                 self.replace_selection(id, &text)?;
             }
@@ -1957,6 +1964,13 @@ mod tests {
     struct MemoryClipboard(Mutex<Option<String>>);
 
     impl astrelis_platform::backend::Clipboard for MemoryClipboard {
+        fn capabilities(&self) -> astrelis_platform::ClipboardCapabilities {
+            astrelis_platform::ClipboardCapabilities {
+                read_text: true,
+                write_text: true,
+            }
+        }
+
         fn read_text(&self) -> Result<Option<String>, PlatformError> {
             Ok(self.0.lock().unwrap().clone())
         }
@@ -1964,6 +1978,23 @@ mod tests {
         fn write_text(&self, text: String) -> Result<(), PlatformError> {
             *self.0.lock().unwrap() = Some(text);
             Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct UnsupportedClipboard;
+
+    impl astrelis_platform::backend::Clipboard for UnsupportedClipboard {
+        fn capabilities(&self) -> astrelis_platform::ClipboardCapabilities {
+            astrelis_platform::ClipboardCapabilities::default()
+        }
+
+        fn read_text(&self) -> Result<Option<String>, PlatformError> {
+            panic!("unsupported clipboard read should not be attempted")
+        }
+
+        fn write_text(&self, _text: String) -> Result<(), PlatformError> {
+            panic!("unsupported clipboard write should not be attempted")
         }
     }
 
@@ -2115,6 +2146,48 @@ mod tests {
         ui.handle_ime(field.id(), &ImeEvent::Commit("中文".into()))
             .unwrap();
         assert_eq!(ui.text(field).unwrap(), "βeta中文");
+    }
+
+    #[test]
+    fn unsupported_clipboard_shortcuts_are_noops() {
+        let mut ui = ui();
+        let root = ui.root();
+        let field = ui.add_text_field(root, "alpha").unwrap();
+        ui.set_focus(Some(field.id())).unwrap();
+        {
+            let state = ui.text_field_mut(field.id()).unwrap();
+            state.anchor.byte_index = 0;
+            state.caret.byte_index = state.text.len();
+        }
+        ui.modifiers.control = true;
+        let clipboard = Clipboard::from_backend(Arc::new(UnsupportedClipboard));
+        for shortcut in ["c", "x", "v"] {
+            ui.handle_text_key(
+                field.id(),
+                &key(Key::Character(shortcut.into()), None),
+                &clipboard,
+            )
+            .unwrap();
+        }
+        assert_eq!(ui.text(field).unwrap(), "alpha");
+    }
+
+    #[test]
+    fn theme_font_family_resolves_an_embedded_font() {
+        let mut fonts = FontDatabase::empty();
+        fonts
+            .register_font(Arc::<[u8]>::from(
+                &include_bytes!("../assets/NotoSans.ttf")[..],
+            ))
+            .unwrap();
+        let theme = Theme {
+            font_families: vec![FontFamily::Named("Noto Sans".into())],
+            ..Default::default()
+        };
+        let mut ui = Ui::new(fonts, theme);
+        let root = ui.root();
+        ui.add_label(root, "Astrelis on WebGPU").unwrap();
+        assert!(!ui.display_list().unwrap().texts().is_empty());
     }
 
     #[test]

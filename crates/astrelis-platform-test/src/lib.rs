@@ -347,6 +347,13 @@ impl<T> fmt::Debug for TestClipboard<T> {
 }
 
 impl<T: Send + 'static> backend::Clipboard for TestClipboard<T> {
+    fn capabilities(&self) -> astrelis_platform::ClipboardCapabilities {
+        astrelis_platform::ClipboardCapabilities {
+            read_text: true,
+            write_text: true,
+        }
+    }
+
     fn read_text(&self) -> Result<Option<String>, PlatformError> {
         Ok(self
             .shared
@@ -542,6 +549,13 @@ mod tests {
             type UserEvent = ();
             fn resumed(&mut self, context: &mut PlatformContext<'_, ()>) {
                 let clipboard = context.clipboard();
+                assert_eq!(
+                    clipboard.capabilities(),
+                    astrelis_platform::ClipboardCapabilities {
+                        read_text: true,
+                        write_text: true,
+                    }
+                );
                 assert_eq!(clipboard.read_text().unwrap(), None);
                 clipboard.write_text("Astrelis").unwrap();
                 assert_eq!(clipboard.read_text().unwrap().as_deref(), Some("Astrelis"));

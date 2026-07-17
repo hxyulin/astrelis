@@ -6,7 +6,10 @@
 //! CPU and GPU spans on the same axis.
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+#[cfg(target_arch = "wasm32")]
+use web_time::Instant;
 
 /// Monotonic clock rooted at the profiler's construction `Instant`.
 ///

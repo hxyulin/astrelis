@@ -1,12 +1,10 @@
 //! Lifecycle, window, and raw-device events.
 
-use std::time::Instant;
-
 use astrelis_core::geometry::{Logical, Physical, Point, Size};
 
 use crate::{
-    DeviceId, ElementState, ImeEvent, KeyboardInput, Modifiers, PhysicalKey, PointerButton,
-    ScrollDelta, Theme, Touch, TouchPhase,
+    DeviceId, ElementState, ImeEvent, Instant, KeyboardInput, Modifiers, PhysicalKey,
+    PointerButton, ScrollDelta, Theme, Touch, TouchPhase,
 };
 
 /// Reason a new event batch began.

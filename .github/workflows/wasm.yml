@@ -1,0 +1,19 @@
+name: WASM
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Check workspace libraries
+        run: cargo check --workspace --target wasm32-unknown-unknown --lib
+      - name: Check settings WebGPU example
+        run: cargo check -p astrelis-ui-core --target wasm32-unknown-unknown --example settings_window

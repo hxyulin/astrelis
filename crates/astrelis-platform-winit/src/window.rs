@@ -99,7 +99,12 @@ impl backend::Window for WinitWindow {
                 None
             }
             WindowCommand::SetCursorIcon(value) => {
+                #[cfg(not(target_arch = "wasm32"))]
                 self.native.set_cursor(map_cursor(value));
+                #[cfg(target_arch = "wasm32")]
+                defer_window_command(self.native.clone(), move |window| {
+                    window.set_cursor(map_cursor(value));
+                });
                 None
             }
             WindowCommand::SetCursorVisible(value) => {
@@ -123,22 +128,37 @@ impl backend::Window for WinitWindow {
                 None
             }
             WindowCommand::SetImeAllowed(value) => {
+                #[cfg(not(target_arch = "wasm32"))]
                 self.native.set_ime_allowed(value);
+                #[cfg(target_arch = "wasm32")]
+                defer_window_command(self.native.clone(), move |window| {
+                    window.set_ime_allowed(value);
+                });
                 None
             }
             WindowCommand::SetImePurpose(value) => {
-                self.native.set_ime_purpose(match value {
+                let purpose = match value {
                     astrelis_platform::ImePurpose::Normal => winit::window::ImePurpose::Normal,
                     astrelis_platform::ImePurpose::Password => winit::window::ImePurpose::Password,
                     astrelis_platform::ImePurpose::Terminal => winit::window::ImePurpose::Terminal,
+                };
+                #[cfg(not(target_arch = "wasm32"))]
+                self.native.set_ime_purpose(purpose);
+                #[cfg(target_arch = "wasm32")]
+                defer_window_command(self.native.clone(), move |window| {
+                    window.set_ime_purpose(purpose);
                 });
                 None
             }
             WindowCommand::SetImeCursorArea(value) => {
-                self.native.set_ime_cursor_area(
-                    LogicalPosition::new(value.origin.x, value.origin.y),
-                    LogicalSize::new(value.size.width, value.size.height),
-                );
+                let position = LogicalPosition::new(value.origin.x, value.origin.y);
+                let size = LogicalSize::new(value.size.width, value.size.height);
+                #[cfg(not(target_arch = "wasm32"))]
+                self.native.set_ime_cursor_area(position, size);
+                #[cfg(target_arch = "wasm32")]
+                defer_window_command(self.native.clone(), move |window| {
+                    window.set_ime_cursor_area(position, size);
+                });
                 None
             }
             WindowCommand::DragWindow => {
@@ -159,6 +179,16 @@ impl backend::Window for WinitWindow {
         };
         Ok(result)
     }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn defer_window_command(
+    window: Arc<winit::window::Window>,
+    command: impl FnOnce(&winit::window::Window) + 'static,
+) {
+    wasm_bindgen_futures::spawn_local(async move {
+        command(&window);
+    });
 }
 
 pub(crate) fn attributes(value: WindowAttributes) -> winit::window::WindowAttributes {

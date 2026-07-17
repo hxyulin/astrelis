@@ -9,6 +9,8 @@ use crate::{
 
 /// Backend text clipboard operations.
 pub trait Clipboard: Debug + Send + Sync {
+    /// Returns supported synchronous text operations.
+    fn capabilities(&self) -> crate::ClipboardCapabilities;
     /// Reads text, returning `None` when the clipboard has no text representation.
     fn read_text(&self) -> Result<Option<String>, PlatformError>;
     /// Replaces the clipboard contents with text.

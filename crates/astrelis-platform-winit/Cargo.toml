@@ -8,12 +8,19 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-arboard = { workspace = true }
 astrelis-core = { workspace = true }
 astrelis-platform = { workspace = true }
 astrelis-profiling = { workspace = true }
 raw-window-handle = { workspace = true }
 winit = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+arboard = { workspace = true }
+winit = { workspace = true, features = ["x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = { workspace = true }
+web-sys = { workspace = true, features = ["HtmlCanvasElement"] }
 
 [lints]
 workspace = true
