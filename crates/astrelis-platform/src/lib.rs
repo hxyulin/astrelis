@@ -3,12 +3,14 @@
 #![warn(missing_docs)]
 
 mod application;
+mod clipboard;
 mod error;
 mod event;
 mod input;
 mod window;
 
 pub use application::*;
+pub use clipboard::*;
 pub use error::*;
 pub use event::*;
 pub use input::*;

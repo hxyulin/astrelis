@@ -1,0 +1,30 @@
+[package]
+name = "astrelis-ui-core"
+description = "Retained, headlessly testable UI core for Astrelis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-paint = { workspace = true }
+astrelis-platform = { workspace = true }
+astrelis-profiling = { workspace = true }
+astrelis-text = { workspace = true }
+bitflags = { workspace = true }
+taffy = { workspace = true }
+unicode-segmentation = { workspace = true }
+
+[dev-dependencies]
+astrelis-app = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-gpu-wgpu = { path = "../astrelis-gpu-wgpu" }
+astrelis-paint-gpu = { path = "../astrelis-paint-gpu" }
+astrelis-platform-test = { path = "../astrelis-platform-test" }
+astrelis-platform-winit = { path = "../astrelis-platform-winit" }
+pollster = { workspace = true }
+
+[lints]
+workspace = true

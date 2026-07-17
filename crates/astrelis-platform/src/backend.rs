@@ -3,9 +3,17 @@
 use std::fmt::Debug;
 
 use crate::{
-    ControlFlow, EventLoopClosed, Monitor, PlatformError, WindowAttributes, WindowCapabilities,
-    WindowId,
+    Clipboard as ClipboardHandle, ControlFlow, EventLoopClosed, Monitor, PlatformError,
+    WindowAttributes, WindowCapabilities, WindowId,
 };
+
+/// Backend text clipboard operations.
+pub trait Clipboard: Debug + Send + Sync {
+    /// Reads text, returning `None` when the clipboard has no text representation.
+    fn read_text(&self) -> Result<Option<String>, PlatformError>;
+    /// Replaces the clipboard contents with text.
+    fn write_text(&self, text: String) -> Result<(), PlatformError>;
+}
 
 /// Backend storage and operations for a native window.
 pub trait Window:
@@ -45,6 +53,8 @@ pub trait ActiveContext<T> {
     fn primary_monitor(&self) -> Option<Monitor>;
     /// Creates a proxy.
     fn event_loop_proxy(&self) -> crate::EventLoopProxy<T>;
+    /// Returns the process clipboard handle.
+    fn clipboard(&self) -> ClipboardHandle;
     /// Requests exit.
     fn exit(&mut self);
 }

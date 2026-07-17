@@ -14,7 +14,7 @@ use std::{
 };
 
 use astrelis_platform::{
-    Application, ControlFlow, DeviceEvent, DeviceId, EventLoopClosed, EventLoopProxy,
+    Application, Clipboard, ControlFlow, DeviceEvent, DeviceId, EventLoopClosed, EventLoopProxy,
     PlatformContext, PlatformError, StartCause, Window, WindowAttributes, WindowEvent, WindowId,
 };
 
@@ -470,6 +470,11 @@ impl<A: App> AppContext<'_, '_, A> {
             shared: self.state.shared.clone(),
             platform: self.platform.event_loop_proxy(),
         }
+    }
+
+    /// Returns a cloneable text clipboard handle.
+    pub fn clipboard(&self) -> Clipboard {
+        self.platform.clipboard()
     }
 
     /// Schedules a one-shot timer.

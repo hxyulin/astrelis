@@ -3,7 +3,7 @@
 use std::{fmt, sync::Arc, time::Instant};
 
 use crate::{
-    DeviceEvent, DeviceId, EventLoopClosed, Monitor, PlatformError, StartCause, Window,
+    Clipboard, DeviceEvent, DeviceId, EventLoopClosed, Monitor, PlatformError, StartCause, Window,
     WindowAttributes, WindowEvent, WindowId, backend,
 };
 
@@ -91,6 +91,11 @@ impl<'a, T> PlatformContext<'a, T> {
     /// Returns a cross-thread event proxy.
     pub fn event_loop_proxy(&self) -> EventLoopProxy<T> {
         self.inner.event_loop_proxy()
+    }
+
+    /// Returns a cloneable text clipboard handle.
+    pub fn clipboard(&self) -> Clipboard {
+        self.inner.clipboard()
     }
 
     /// Requests event-loop termination.

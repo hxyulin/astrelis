@@ -8,7 +8,7 @@ mod window;
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Weak,
+        Arc, Mutex, Weak,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -38,6 +38,7 @@ pub fn run_return<A: Application>(app: A) -> Result<A, PlatformError> {
     let mut adapter = Adapter {
         app,
         proxy,
+        clipboard: Arc::new(WinitClipboard::default()),
         windows: HashMap::new(),
         next_window_id: AtomicU64::new(1),
     };
@@ -50,6 +51,7 @@ pub fn run_return<A: Application>(app: A) -> Result<A, PlatformError> {
 struct Adapter<A: Application> {
     app: A,
     proxy: winit::event_loop::EventLoopProxy<A::UserEvent>,
+    clipboard: Arc<WinitClipboard>,
     windows: HashMap<winit::window::WindowId, (WindowId, Weak<WinitWindow>)>,
     next_window_id: AtomicU64,
 }
@@ -64,6 +66,7 @@ impl<A: Application> Adapter<A> {
         let mut context = Context {
             event_loop,
             proxy: self.proxy.clone(),
+            clipboard: self.clipboard.clone(),
             windows: &mut self.windows,
             next_window_id: &self.next_window_id,
         };
@@ -146,6 +149,7 @@ impl<A: Application> ApplicationHandler<A::UserEvent> for Adapter<A> {
 struct Context<'a, T: 'static> {
     event_loop: &'a ActiveEventLoop,
     proxy: winit::event_loop::EventLoopProxy<T>,
+    clipboard: Arc<WinitClipboard>,
     windows: &'a mut HashMap<winit::window::WindowId, (WindowId, Weak<WinitWindow>)>,
     next_window_id: &'a AtomicU64,
 }
@@ -199,8 +203,57 @@ impl<T: Send + 'static> backend::ActiveContext<T> for Context<'_, T> {
     fn event_loop_proxy(&self) -> EventLoopProxy<T> {
         EventLoopProxy::from_backend(Arc::new(WinitProxy(self.proxy.clone())))
     }
+    fn clipboard(&self) -> astrelis_platform::Clipboard {
+        astrelis_platform::Clipboard::from_backend(self.clipboard.clone())
+    }
     fn exit(&mut self) {
         self.event_loop.exit();
+    }
+}
+
+#[derive(Default)]
+struct WinitClipboard {
+    inner: Mutex<Option<arboard::Clipboard>>,
+}
+
+impl std::fmt::Debug for WinitClipboard {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WinitClipboard")
+            .finish_non_exhaustive()
+    }
+}
+
+impl WinitClipboard {
+    fn with_clipboard<T>(
+        &self,
+        operation: impl FnOnce(&mut arboard::Clipboard) -> Result<T, arboard::Error>,
+    ) -> Result<T, PlatformError> {
+        let mut clipboard = self
+            .inner
+            .lock()
+            .map_err(|_| PlatformError::new("clipboard lock was poisoned"))?;
+        if clipboard.is_none() {
+            *clipboard = Some(
+                arboard::Clipboard::new().map_err(|error| PlatformError::new(error.to_string()))?,
+            );
+        }
+        operation(clipboard.as_mut().expect("clipboard initialized"))
+            .map_err(|error| PlatformError::new(error.to_string()))
+    }
+}
+
+impl backend::Clipboard for WinitClipboard {
+    fn read_text(&self) -> Result<Option<String>, PlatformError> {
+        self.with_clipboard(|clipboard| match clipboard.get_text() {
+            Ok(text) => Ok(Some(text)),
+            Err(arboard::Error::ContentNotAvailable) => Ok(None),
+            Err(error) => Err(error),
+        })
+    }
+
+    fn write_text(&self, text: String) -> Result<(), PlatformError> {
+        self.with_clipboard(|clipboard| clipboard.set_text(text))
     }
 }
 

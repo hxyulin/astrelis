@@ -13,6 +13,7 @@ members = [
   "crates/astrelis-profiling",
   "crates/astrelis-text",
   "crates/astrelis-text-gpu",
+  "crates/astrelis-ui-core",
 ]
 
 [workspace.package]
@@ -31,6 +32,8 @@ astrelis-paint = { path = "crates/astrelis-paint", version = "0.0.0" }
 astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.0.0" }
 astrelis-text = { path = "crates/astrelis-text", version = "0.0.0" }
 astrelis-text-gpu = { path = "crates/astrelis-text-gpu", version = "0.0.0" }
+astrelis-ui-core = { path = "crates/astrelis-ui-core", version = "0.0.0" }
+arboard = { version = "3.6.1", default-features = false }
 glam = { version = "0.33", features = ["mint", "bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 lyon_tessellation = "1.0.20"
@@ -46,6 +49,8 @@ criterion = { version = "0.8", default-features = false, features = [
 ] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+taffy = "0.12.2"
+unicode-segmentation = "1.12"
 raw-window-handle = "0.6"
 winit = { version = "=0.30.13", features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
 

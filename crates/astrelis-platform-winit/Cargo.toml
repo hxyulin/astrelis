@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+arboard = { workspace = true }
 astrelis-core = { workspace = true }
 astrelis-platform = { workspace = true }
 astrelis-profiling = { workspace = true }

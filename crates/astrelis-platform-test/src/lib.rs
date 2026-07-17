@@ -16,9 +16,9 @@ use std::{
 
 use astrelis_core::geometry::{Point, Size};
 use astrelis_platform::{
-    Application, ControlFlow, DeviceEvent, DeviceId, EventLoopClosed, EventLoopProxy, Monitor,
-    PlatformContext, PlatformError, StartCause, Window, WindowAttributes, WindowCapabilities,
-    WindowCommand, WindowEvent, WindowId, WindowValue, backend,
+    Application, Clipboard, ControlFlow, DeviceEvent, DeviceId, EventLoopClosed, EventLoopProxy,
+    Monitor, PlatformContext, PlatformError, StartCause, Window, WindowAttributes,
+    WindowCapabilities, WindowCommand, WindowEvent, WindowId, WindowValue, backend,
 };
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
@@ -91,6 +91,8 @@ pub struct TestState {
     pub exit_requests: usize,
     /// Windows whose final test handle was dropped.
     pub destroyed_windows: Vec<WindowId>,
+    /// Current deterministic text clipboard contents.
+    pub clipboard_text: Option<String>,
 }
 
 struct Shared<T> {
@@ -317,6 +319,11 @@ impl<T: Send + 'static> backend::ActiveContext<T> for TestContext<T> {
             shared: self.shared.clone(),
         }))
     }
+    fn clipboard(&self) -> Clipboard {
+        Clipboard::from_backend(Arc::new(TestClipboard {
+            shared: self.shared.clone(),
+        }))
+    }
     fn exit(&mut self) {
         self.exited = true;
         self.shared
@@ -324,6 +331,39 @@ impl<T: Send + 'static> backend::ActiveContext<T> for TestContext<T> {
             .lock()
             .expect("test state poisoned")
             .exit_requests += 1;
+    }
+}
+
+struct TestClipboard<T> {
+    shared: Arc<Shared<T>>,
+}
+
+impl<T> fmt::Debug for TestClipboard<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TestClipboard")
+            .finish_non_exhaustive()
+    }
+}
+
+impl<T: Send + 'static> backend::Clipboard for TestClipboard<T> {
+    fn read_text(&self) -> Result<Option<String>, PlatformError> {
+        Ok(self
+            .shared
+            .state
+            .lock()
+            .expect("test state poisoned")
+            .clipboard_text
+            .clone())
+    }
+
+    fn write_text(&self, text: String) -> Result<(), PlatformError> {
+        self.shared
+            .state
+            .lock()
+            .expect("test state poisoned")
+            .clipboard_text = Some(text);
+        Ok(())
     }
 }
 
@@ -493,5 +533,23 @@ mod tests {
             }
         }
         runner.run(HandleApp).unwrap();
+    }
+
+    #[test]
+    fn clipboard_is_shared_and_recorded() {
+        struct ClipboardApp;
+        impl Application for ClipboardApp {
+            type UserEvent = ();
+            fn resumed(&mut self, context: &mut PlatformContext<'_, ()>) {
+                let clipboard = context.clipboard();
+                assert_eq!(clipboard.read_text().unwrap(), None);
+                clipboard.write_text("Astrelis").unwrap();
+                assert_eq!(clipboard.read_text().unwrap().as_deref(), Some("Astrelis"));
+            }
+        }
+        let mut runner = TestRunner::<()>::new();
+        runner.push(ScriptEvent::Resumed);
+        let state = runner.run(ClipboardApp).unwrap();
+        assert_eq!(state.clipboard_text.as_deref(), Some("Astrelis"));
     }
 }
