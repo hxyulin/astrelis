@@ -1,0 +1,16 @@
+[package]
+name = "astrelis-ui"
+description = "Ergonomic Layer-5 facade over the retained Astrelis UI core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-text = { workspace = true }
+astrelis-ui-core = { workspace = true }
+
+[lints]
+workspace = true

@@ -335,6 +335,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-ui"
+version = "0.0.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-text",
+ "astrelis-ui-core",
+]
+
+[[package]]
 name = "astrelis-ui-core"
 version = "0.0.0"
 dependencies = [
