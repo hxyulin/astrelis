@@ -9,8 +9,13 @@ impl<Message: 'static> Ui<Message> {
         for id in ids {
             let request = match &self.node(id)?.kind {
                 Kind::Label { text } | Kind::Button { text } => {
-                    let visual = self.node(id)?.visual;
-                    let enabled = self.node(id)?.enabled;
+                    let node = self.node(id)?;
+                    let visual = node.visual;
+                    let enabled = node.enabled;
+                    let wrap_width = node.wrap.then(|| match node.style.max_width {
+                        Length::Px(px) => px.max(0.0),
+                        _ => self.viewport.width.max(0.0),
+                    });
                     let mut request = TextLayoutRequest::new(text);
                     request.style.size = visual.font_size.unwrap_or(self.theme.type_scale.body);
                     request.style.families = self.theme.font_families.clone();
@@ -20,7 +25,12 @@ impl<Message: 'static> Ui<Message> {
                         self.theme.disabled_foreground
                     });
                     request.paragraph = ParagraphStyle {
-                        wrap: TextWrap::NoWrap,
+                        wrap: if wrap_width.is_some() {
+                            TextWrap::Wrap
+                        } else {
+                            TextWrap::NoWrap
+                        },
+                        max_width: wrap_width,
                         ..Default::default()
                     };
                     Some(request)

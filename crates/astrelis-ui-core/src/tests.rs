@@ -1105,3 +1105,38 @@ fn disabling_a_checkbox_changes_its_box_fill() {
         "a disabled checkbox must show the disabled color"
     );
 }
+
+#[test]
+fn wrapping_label_respects_max_width_and_grows_taller() {
+    let mut ui = ui();
+    let root = ui.root();
+    let text = "The quick brown fox jumps over the lazy dog repeatedly";
+
+    let single_line = ui.add_label(root, text).unwrap();
+    let wrapped = ui.add_label(root, text).unwrap();
+    ui.set_layout(
+        wrapped,
+        LayoutStyle {
+            max_width: Length::Px(120.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    ui.set_wrap(wrapped, true).unwrap();
+
+    let single = ui.layout_bounds(single_line).unwrap();
+    let multi = ui.layout_bounds(wrapped).unwrap();
+
+    assert!(
+        single.size.width > 120.5,
+        "the un-wrapped label is a single wide line"
+    );
+    assert!(
+        multi.size.width <= 120.5,
+        "a wrapping label stays within its max width"
+    );
+    assert!(
+        multi.size.height > single.size.height,
+        "wrapping breaks the text into more lines, growing the height"
+    );
+}

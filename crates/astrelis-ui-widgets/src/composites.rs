@@ -140,11 +140,19 @@ impl Tooltip {
         ui.set_visibility(overlay, Visibility::Hidden)?;
         ui.set_semantic_role(overlay, SemanticRole::Tooltip)?;
         // The overlay resolves its surface from the theme at paint time. Pad the
-        // label so the single-line text is not flush to the rounded surface, and
-        // let the surface size to that content rather than clipping at a cap.
+        // label off the rounded surface, and wrap it within a maximum width so a
+        // long tooltip becomes several lines instead of one very wide line.
         let insets = ui.theme().control_padding;
         let content = ui.add_padding(overlay, insets)?;
-        ui.add_label(content, text)?;
+        let label = ui.add_label(content, text)?;
+        ui.set_layout(
+            label,
+            LayoutStyle {
+                max_width: Length::Px(320.0),
+                ..Default::default()
+            },
+        )?;
+        ui.set_wrap(label, true)?;
         let hovered = Rc::new(Cell::new(false));
         let focused = Rc::new(Cell::new(false));
         let hover_state = hovered.clone();

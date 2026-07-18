@@ -124,6 +124,21 @@ impl<Message: 'static> Ui<Message> {
         Ok(())
     }
 
+    /// Sets whether an element's text wraps within its max width.
+    ///
+    /// When enabled, text is broken to fit the node's configured maximum width
+    /// (`LayoutStyle::max_width`), falling back to the viewport width when none
+    /// is set. Wrapping is resolved at shape time, so it tracks a fixed maximum
+    /// rather than the width a flex parent happens to hand out.
+    pub fn set_wrap<T>(&mut self, handle: ElementHandle<T>, wrap: bool) -> Result<(), UiError> {
+        let node = self.node_mut(handle.id)?;
+        if node.wrap != wrap {
+            node.wrap = wrap;
+            self.dirty |= Dirty::MEASURE | Dirty::LAYOUT | Dirty::PAINT;
+        }
+        Ok(())
+    }
+
     /// Enables or disables an element.
     pub fn set_enabled<T>(
         &mut self,
