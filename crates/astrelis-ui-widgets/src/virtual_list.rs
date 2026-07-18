@@ -142,18 +142,17 @@ impl<Message: 'static> Widget<Message> for VirtualListItem {
         theme: &Theme,
     ) -> Result<(), UiError> {
         let selected = self.selected.get() == Some(self.index);
-        painter
-            .fill_rect(
-                bounds,
-                Brush::Solid(if selected {
-                    theme.button.pressed
-                } else if self.focused || self.hovered {
-                    theme.button.hovered
-                } else {
-                    theme.field_background
-                }),
-            )
-            .map_err(|error| UiError::from_message(error.to_string()))
+        painter.fill_rect(
+            bounds,
+            Brush::Solid(if selected {
+                theme.button.pressed
+            } else if self.focused || self.hovered {
+                theme.button.hovered
+            } else {
+                theme.field_background
+            }),
+        )?;
+        Ok(())
     }
 
     fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {

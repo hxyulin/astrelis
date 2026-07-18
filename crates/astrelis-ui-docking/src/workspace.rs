@@ -216,16 +216,14 @@ impl<Message: 'static> Widget<Message> for DockWorkspaceSurface<Message> {
         theme: &Theme,
     ) -> Result<(), UiError> {
         if self.hovering {
-            painter
-                .stroke_rect(
-                    bounds,
-                    StrokeStyle {
-                        width: 3.0,
-                        ..Default::default()
-                    },
-                    Brush::Solid(theme.accent),
-                )
-                .map_err(|error| UiError::from_message(error.to_string()))?;
+            painter.stroke_rect(
+                bounds,
+                StrokeStyle {
+                    width: 3.0,
+                    ..Default::default()
+                },
+                Brush::Solid(theme.accent),
+            )?;
         }
         Ok(())
     }
@@ -428,16 +426,15 @@ impl<Message: 'static> Widget<Message> for DockGroup<Message> {
                 bounds.size.height * 0.35,
             ),
         };
-        painter
-            .stroke_rect(
-                preview,
-                StrokeStyle {
-                    width: 3.0,
-                    ..Default::default()
-                },
-                Brush::Solid(theme.accent),
-            )
-            .map_err(|error| UiError::from_message(error.to_string()))
+        painter.stroke_rect(
+            preview,
+            StrokeStyle {
+                width: 3.0,
+                ..Default::default()
+            },
+            Brush::Solid(theme.accent),
+        )?;
+        Ok(())
     }
 
     fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
@@ -644,9 +641,8 @@ impl<Message: 'static> Widget<Message> for DockTab<Message> {
             hovered: self.hovered || self.pressed.is_some(),
             pressed: self.selected || self.dragging,
         });
-        painter
-            .fill_rect(bounds, Brush::Solid(color))
-            .map_err(|error| UiError::from_message(error.to_string()))
+        painter.fill_rect(bounds, Brush::Solid(color))?;
+        Ok(())
     }
 
     fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
@@ -869,23 +865,20 @@ impl<Message: 'static> Widget<Message> for DockFloatFrame<Message> {
         bounds: LogicalRect,
         theme: &Theme,
     ) -> Result<(), UiError> {
-        painter
-            .fill_rect(bounds, Brush::Solid(theme.field_background))
-            .map_err(|error| UiError::from_message(error.to_string()))?;
-        painter
-            .stroke_rect(
-                bounds,
-                StrokeStyle {
-                    width: self.border.max(1.0),
-                    ..Default::default()
-                },
-                Brush::Solid(if self.drag.is_some() {
-                    theme.accent
-                } else {
-                    theme.button.hovered
-                }),
-            )
-            .map_err(|error| UiError::from_message(error.to_string()))
+        painter.fill_rect(bounds, Brush::Solid(theme.field_background))?;
+        painter.stroke_rect(
+            bounds,
+            StrokeStyle {
+                width: self.border.max(1.0),
+                ..Default::default()
+            },
+            Brush::Solid(if self.drag.is_some() {
+                theme.accent
+            } else {
+                theme.button.hovered
+            }),
+        )?;
+        Ok(())
     }
 
     fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {

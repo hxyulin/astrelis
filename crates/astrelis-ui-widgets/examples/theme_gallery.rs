@@ -63,11 +63,9 @@ impl Widget<Message> for Swatch {
         bounds: LogicalRect,
         theme: &Theme,
     ) -> Result<(), UiError> {
-        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(theme.radii.md))
-            .map_err(|error| UiError::from_message(error.to_string()))?;
-        painter
-            .fill_rounded_rect(rounded, Brush::Solid((self.pick)(theme)))
-            .map_err(|error| UiError::from_message(error.to_string()))
+        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(theme.radii.md))?;
+        painter.fill_rounded_rect(rounded, Brush::Solid((self.pick)(theme)))?;
+        Ok(())
     }
 }
 

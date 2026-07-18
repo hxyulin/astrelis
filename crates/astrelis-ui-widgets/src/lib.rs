@@ -140,30 +140,26 @@ impl<Message: 'static> Widget<Message> for DropZone<Message> {
         bounds: LogicalRect,
         theme: &Theme,
     ) -> Result<(), UiError> {
-        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(theme.radii.lg))
-            .map_err(|error| UiError::from_message(error.to_string()))?;
+        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(theme.radii.lg))?;
         let background = if self.hovering {
             theme.button.pressed
         } else {
             theme.field_background
         };
-        painter
-            .fill_rounded_rect(rounded, Brush::Solid(background))
-            .map_err(|error| UiError::from_message(error.to_string()))?;
-        painter
-            .stroke_rounded_rect(
-                rounded,
-                StrokeStyle {
-                    width: theme.border_width,
-                    ..Default::default()
-                },
-                Brush::Solid(if self.hovering {
-                    theme.accent
-                } else {
-                    theme.border
-                }),
-            )
-            .map_err(|error| UiError::from_message(error.to_string()))
+        painter.fill_rounded_rect(rounded, Brush::Solid(background))?;
+        painter.stroke_rounded_rect(
+            rounded,
+            StrokeStyle {
+                width: theme.border_width,
+                ..Default::default()
+            },
+            Brush::Solid(if self.hovering {
+                theme.accent
+            } else {
+                theme.border
+            }),
+        )?;
+        Ok(())
     }
 
     fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
@@ -676,16 +672,15 @@ impl<Message: 'static> Widget<Message> for Splitter<Message> {
                 visual_size,
             ),
         };
-        painter
-            .fill_rect(
-                visual_bounds,
-                Brush::Solid(if self.hovered || self.focused || self.drag.is_some() {
-                    theme.accent
-                } else {
-                    theme.button.hovered
-                }),
-            )
-            .map_err(|error| UiError::from_message(error.to_string()))
+        painter.fill_rect(
+            visual_bounds,
+            Brush::Solid(if self.hovered || self.focused || self.drag.is_some() {
+                theme.accent
+            } else {
+                theme.button.hovered
+            }),
+        )?;
+        Ok(())
     }
 
     fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {

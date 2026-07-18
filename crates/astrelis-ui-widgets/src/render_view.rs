@@ -320,8 +320,7 @@ impl<Message: 'static> Widget<Message> for RenderView<Message> {
         bounds: LogicalRect,
         theme: &Theme,
     ) -> Result<(), UiError> {
-        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(self.corner_radius))
-            .map_err(|e| UiError::from_message(e.to_string()))?;
+        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(self.corner_radius))?;
         match &self.content {
             RenderViewContent::Unavailable => {
                 painter.fill_rounded_rect(rounded, Brush::Solid(theme.surface))
@@ -361,8 +360,8 @@ impl<Message: 'static> Widget<Message> for RenderView<Message> {
                     })
                 }
             }
-        }
-        .map_err(|e| UiError::from_message(e.to_string()))
+        }?;
+        Ok(())
     }
     fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
         Some((SemanticRole::Group, self.label.clone(), None))

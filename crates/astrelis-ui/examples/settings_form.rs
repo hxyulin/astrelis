@@ -47,9 +47,8 @@ impl Widget<Message> for StatusDot {
         bounds: LogicalRect,
         _theme: &Theme,
     ) -> Result<(), UiError> {
-        painter
-            .fill_ellipse(bounds, Brush::Solid(self.color))
-            .map_err(|error| UiError::from_message(error.to_string()))
+        painter.fill_ellipse(bounds, Brush::Solid(self.color))?;
+        Ok(())
     }
 
     fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
