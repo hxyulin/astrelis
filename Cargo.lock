@@ -339,6 +339,7 @@ name = "astrelis-ui"
 version = "0.0.0"
 dependencies = [
  "astrelis-core",
+ "astrelis-paint",
  "astrelis-text",
  "astrelis-ui-core",
 ]

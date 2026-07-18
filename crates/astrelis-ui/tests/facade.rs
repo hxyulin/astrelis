@@ -78,3 +78,68 @@ fn intent_listeners_register_without_panicking() {
     // Building and registering must leave the tree renderable.
     ui.display_list().unwrap();
 }
+
+#[test]
+fn facade_builds_an_identical_tree_to_hand_written_core() {
+    // The facade is a construction-time convenience: it must emit the exact
+    // same retained tree as the fallible core calls, so the per-frame render
+    // path is untouched and adds no allocation over hand-written code.
+    fn with_facade() -> Ui {
+        let mut ui = ui();
+        let root = ui.root();
+        let column = ui
+            .padding(root, Insets::all(28.0))
+            .grow(1.0)
+            .scroll_view()
+            .grow(1.0)
+            .column()
+            .finish();
+        ui.label(column, "Title").finish();
+        let row = ui.row(column).finish();
+        ui.button(row, "One").width(px(120.0)).finish();
+        ui.button(row, "Two").width(px(120.0)).finish();
+        ui
+    }
+
+    fn with_core() -> Ui {
+        let mut ui = ui();
+        let root = ui.root();
+        let grow = LayoutStyle {
+            grow: 1.0,
+            ..Default::default()
+        };
+        let padding = ui.add_padding(root, Insets::all(28.0)).unwrap();
+        ui.set_layout(padding, grow).unwrap();
+        let scroll = ui.add_scroll_view(padding).unwrap();
+        ui.set_layout(scroll, grow).unwrap();
+        let column = ui.add_column(scroll).unwrap();
+        ui.add_label(column, "Title").unwrap();
+        let row = ui.add_row(column).unwrap();
+        let one = ui.add_button(row, "One").unwrap();
+        ui.set_layout(
+            one,
+            LayoutStyle {
+                width: Length::Px(120.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let two = ui.add_button(row, "Two").unwrap();
+        ui.set_layout(
+            two,
+            LayoutStyle {
+                width: Length::Px(120.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        ui
+    }
+
+    let facade_nodes = with_facade().inspect().unwrap().nodes;
+    let core_nodes = with_core().inspect().unwrap().nodes;
+    assert_eq!(facade_nodes.len(), core_nodes.len());
+    for (a, b) in facade_nodes.iter().zip(&core_nodes) {
+        assert_eq!(a.layout_bounds, b.layout_bounds);
+    }
+}

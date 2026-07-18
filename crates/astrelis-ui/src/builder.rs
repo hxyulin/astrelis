@@ -295,8 +295,11 @@ pub trait Build<Message: 'static> {
         step: f32,
         value: f32,
     ) -> Node<'_, Message, Slider>;
-    /// Adds an application-defined widget.
-    fn widget<T, W: Widget<Message>>(
+    /// Mounts an application-defined widget.
+    ///
+    /// Named `mount` rather than `widget` because `astrelis-ui-core`'s
+    /// inherent `Ui::widget` reader would shadow a trait method of that name.
+    fn mount<T, W: Widget<Message>>(
         &mut self,
         parent: ElementHandle<T>,
         widget: W,
@@ -401,7 +404,7 @@ impl<Message: 'static> Build<Message> for Ui<Message> {
         Node::new(self, handle)
     }
 
-    fn widget<T, W: Widget<Message>>(
+    fn mount<T, W: Widget<Message>>(
         &mut self,
         parent: ElementHandle<T>,
         widget: W,
