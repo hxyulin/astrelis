@@ -338,10 +338,20 @@ dependencies = [
 name = "astrelis-ui"
 version = "0.0.0"
 dependencies = [
+ "astrelis-app",
  "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-gpu-wgpu",
  "astrelis-paint",
+ "astrelis-paint-gpu",
+ "astrelis-platform",
+ "astrelis-platform-winit",
  "astrelis-text",
  "astrelis-ui-core",
+ "pollster",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

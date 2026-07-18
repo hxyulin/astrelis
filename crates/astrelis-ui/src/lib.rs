@@ -69,13 +69,18 @@ pub mod prelude {
     pub use crate::{Build, LayoutExt, Node, On, layout, percent, px, widget_any};
 
     pub use astrelis_ui_core::{
-        Alignment, Button, Checkbox, Column, ElementHandle, EventContext, FlexStyle, FlexWrap,
-        FocusScope, Insets, Justification, LayoutStyle, Length, Overlay, Padding, Row, ScrollView,
-        Slider, Stack, TextField, Theme, Ui, UiError, Visibility, Widget, WidgetStyle,
+        Alignment, Button, Checkbox, Column, Edges, ElementHandle, EventContext, FlexStyle,
+        FlexWrap, FocusScope, FocusScopeOptions, Insets, Justification, Label, LayoutStyle, Length,
+        MountContext, Overflow, Overlay, OverlayOptions, Padding, Positioning, Row, ScrollView,
+        SemanticRole, Slider, Stack, TextField, Theme, Ui, UiError, Visibility, Widget,
+        WidgetStyle,
     };
 
     pub use astrelis_core::{
         color::Color,
-        geometry::{LogicalRect, LogicalSize, Point},
+        geometry::{LogicalPoint, LogicalRect, LogicalSize, Point},
+        math::Affine2,
     };
+
+    pub use astrelis_platform::CursorIcon;
 }

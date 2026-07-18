@@ -14,9 +14,12 @@
 //!
 //! Callers that need the fallible API keep using `astrelis-ui-core` directly.
 
+use astrelis_core::{geometry::LogicalPoint, math::Affine2};
+use astrelis_platform::CursorIcon;
 use astrelis_ui_core::{
-    Button, Checkbox, Column, ElementHandle, FlexStyle, Insets, LayoutStyle, Length, Padding, Row,
-    ScrollView, Slider, Stack, TextField, Ui, Widget, WidgetStyle,
+    Button, Checkbox, Column, ElementHandle, FlexStyle, Insets, LayoutStyle, Length, Overflow,
+    Overlay, OverlayOptions, Padding, Row, ScrollView, Slider, Stack, TextField, Ui, Visibility,
+    Widget, WidgetStyle,
 };
 
 use crate::layout::LayoutExt;
@@ -38,6 +41,11 @@ pub struct Node<'ui, Message: 'static, T> {
     style: Option<WidgetStyle>,
     wrap: Option<bool>,
     enabled: Option<bool>,
+    overflow: Option<Overflow>,
+    z_index: Option<i32>,
+    visibility: Option<Visibility>,
+    cursor: Option<Option<CursorIcon>>,
+    transform: Option<(Affine2, LogicalPoint)>,
 }
 
 impl<'ui, Message: 'static, T> Node<'ui, Message, T> {
@@ -51,6 +59,11 @@ impl<'ui, Message: 'static, T> Node<'ui, Message, T> {
             style: None,
             wrap: None,
             enabled: None,
+            overflow: None,
+            z_index: None,
+            visibility: None,
+            cursor: None,
+            transform: None,
         }
     }
 
@@ -130,6 +143,37 @@ impl<'ui, Message: 'static, T> Node<'ui, Message, T> {
         self
     }
 
+    /// Sets whether descendants are clipped to this element's bounds.
+    pub fn overflow(mut self, overflow: Overflow) -> Self {
+        self.overflow = Some(overflow);
+        self
+    }
+
+    /// Sets the stable paint and hit-test order among siblings.
+    pub fn z_index(mut self, z_index: i32) -> Self {
+        self.z_index = Some(z_index);
+        self
+    }
+
+    /// Sets layout/paint visibility for this element and its subtree.
+    pub fn visibility(mut self, visibility: Visibility) -> Self {
+        self.visibility = Some(visibility);
+        self
+    }
+
+    /// Overrides the cursor shown while this element is hovered.
+    pub fn cursor_icon(mut self, cursor: Option<CursorIcon>) -> Self {
+        self.cursor = Some(cursor);
+        self
+    }
+
+    /// Applies a paint-only transform about a logical origin, without
+    /// disturbing layout.
+    pub fn transform(mut self, transform: Affine2, origin: LogicalPoint) -> Self {
+        self.transform = Some((transform, origin));
+        self
+    }
+
     fn map_layout(mut self, edit: impl FnOnce(LayoutStyle) -> LayoutStyle) -> Self {
         self.layout = edit(self.layout);
         self.layout_dirty = true;
@@ -162,6 +206,31 @@ impl<'ui, Message: 'static, T> Node<'ui, Message, T> {
             self.ui
                 .set_enabled(self.handle, enabled)
                 .expect("set_enabled on a live handle");
+        }
+        if let Some(overflow) = self.overflow.take() {
+            self.ui
+                .set_overflow(self.handle, overflow)
+                .expect("set_overflow on a live handle");
+        }
+        if let Some(z_index) = self.z_index.take() {
+            self.ui
+                .set_z_index(self.handle, z_index)
+                .expect("set_z_index on a live handle");
+        }
+        if let Some(visibility) = self.visibility.take() {
+            self.ui
+                .set_visibility(self.handle, visibility)
+                .expect("set_visibility on a live handle");
+        }
+        if let Some(cursor) = self.cursor.take() {
+            self.ui
+                .set_cursor_icon(self.handle, cursor)
+                .expect("set_cursor_icon on a live handle");
+        }
+        if let Some((transform, origin)) = self.transform.take() {
+            self.ui
+                .set_transform(self.handle, transform, origin)
+                .expect("set_transform on a live handle");
         }
     }
 
@@ -238,6 +307,36 @@ impl<'ui, Message: 'static, T> Node<'ui, Message, T> {
                 .expect("add_button on a live handle")
         })
     }
+
+    /// Adds a viewport-hosted overlay owned by this element and descends into
+    /// it. The overlay is logically owned by this node but painted at the
+    /// viewport root; anchor it with [`OverlayOptions`].
+    pub fn overlay(self, options: OverlayOptions) -> Node<'ui, Message, Overlay> {
+        self.descend(move |ui, owner| {
+            ui.add_overlay(owner, options)
+                .expect("add_overlay on a live handle")
+        })
+    }
+}
+
+/// Text-field-only configuration, applied eagerly since these are independent
+/// core mutations rather than part of the batched layout/style commit.
+impl<Message: 'static> Node<'_, Message, TextField> {
+    /// Sets the placeholder shown while the field is empty.
+    pub fn placeholder(self, placeholder: impl Into<String>) -> Self {
+        self.ui
+            .set_placeholder(self.handle, placeholder)
+            .expect("set_placeholder on a live handle");
+        self
+    }
+
+    /// Selects password-purpose display and IME behaviour.
+    pub fn password(self, password: bool) -> Self {
+        self.ui
+            .set_password(self.handle, password)
+            .expect("set_password on a live handle");
+        self
+    }
 }
 
 /// Infallible, chainable node creation on [`Ui`].
@@ -304,6 +403,12 @@ pub trait Build<Message: 'static> {
         parent: ElementHandle<T>,
         widget: W,
     ) -> Node<'_, Message, W>;
+    /// Adds a viewport-hosted overlay owned by `owner`.
+    fn overlay<T>(
+        &mut self,
+        owner: ElementHandle<T>,
+        options: OverlayOptions,
+    ) -> Node<'_, Message, Overlay>;
 }
 
 impl<Message: 'static> Build<Message> for Ui<Message> {
@@ -412,6 +517,17 @@ impl<Message: 'static> Build<Message> for Ui<Message> {
         let handle = self
             .add_widget(parent, widget)
             .expect("add_widget on a live handle");
+        Node::new(self, handle)
+    }
+
+    fn overlay<T>(
+        &mut self,
+        owner: ElementHandle<T>,
+        options: OverlayOptions,
+    ) -> Node<'_, Message, Overlay> {
+        let handle = self
+            .add_overlay(owner, options)
+            .expect("add_overlay on a live handle");
         Node::new(self, handle)
     }
 }

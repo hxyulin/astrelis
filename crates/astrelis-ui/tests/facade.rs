@@ -143,3 +143,116 @@ fn facade_builds_an_identical_tree_to_hand_written_core() {
         assert_eq!(a.layout_bounds, b.layout_bounds);
     }
 }
+
+#[test]
+fn builder_config_methods_match_hand_written_core() {
+    // The overflow/z-index/visibility/transform config methods must produce the
+    // same retained state as the core setters they wrap, so a facade port
+    // renders identically to the original.
+    fn with_facade() -> Ui {
+        let mut ui = ui();
+        let root = ui.root();
+        let clip = ui
+            .stack(root)
+            .width(px(400.0))
+            .height(px(200.0))
+            .overflow(Overflow::Clip)
+            .finish();
+        ui.button(clip, "A")
+            .layout(
+                layout()
+                    .width(px(120.0))
+                    .height(px(40.0))
+                    .positioning(Positioning::Absolute)
+                    .inset(Edges {
+                        left: px(10.0),
+                        top: px(10.0),
+                        ..Default::default()
+                    }),
+            )
+            .z_index(3)
+            .transform(Affine2::from_angle(-0.05), Point::new(20.0, 10.0))
+            .finish();
+        ui.button(clip, "B")
+            .layout(
+                layout()
+                    .width(px(120.0))
+                    .height(px(40.0))
+                    .positioning(Positioning::Absolute)
+                    .inset(Edges {
+                        left: px(40.0),
+                        top: px(20.0),
+                        ..Default::default()
+                    }),
+            )
+            .z_index(1)
+            .visibility(Visibility::Hidden)
+            .finish();
+        ui
+    }
+
+    fn with_core() -> Ui {
+        let mut ui = ui();
+        let root = ui.root();
+        let clip = ui.add_stack(root).unwrap();
+        ui.set_layout(
+            clip,
+            LayoutStyle {
+                width: Length::Px(400.0),
+                height: Length::Px(200.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        ui.set_overflow(clip, Overflow::Clip).unwrap();
+        let a = ui.add_button(clip, "A").unwrap();
+        ui.set_layout(
+            a,
+            LayoutStyle {
+                width: Length::Px(120.0),
+                height: Length::Px(40.0),
+                positioning: Positioning::Absolute,
+                inset: Edges {
+                    left: Length::Px(10.0),
+                    top: Length::Px(10.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        ui.set_z_index(a, 3).unwrap();
+        ui.set_transform(a, Affine2::from_angle(-0.05), Point::new(20.0, 10.0))
+            .unwrap();
+        let b = ui.add_button(clip, "B").unwrap();
+        ui.set_layout(
+            b,
+            LayoutStyle {
+                width: Length::Px(120.0),
+                height: Length::Px(40.0),
+                positioning: Positioning::Absolute,
+                inset: Edges {
+                    left: Length::Px(40.0),
+                    top: Length::Px(20.0),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        ui.set_z_index(b, 1).unwrap();
+        ui.set_visibility(b, Visibility::Hidden).unwrap();
+        ui
+    }
+
+    let facade_nodes = with_facade().inspect().unwrap().nodes;
+    let core_nodes = with_core().inspect().unwrap().nodes;
+    assert_eq!(facade_nodes.len(), core_nodes.len());
+    for (a, b) in facade_nodes.iter().zip(&core_nodes) {
+        assert_eq!(a.world_bounds, b.world_bounds);
+        assert_eq!(a.world_transform, b.world_transform);
+        assert_eq!(a.visibility, b.visibility);
+        assert_eq!(a.clip, b.clip);
+        assert_eq!(a.paint_rank, b.paint_rank);
+    }
+}

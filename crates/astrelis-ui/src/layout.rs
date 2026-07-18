@@ -68,6 +68,10 @@ pub trait LayoutExt {
     /// Switches between flow and absolute positioning.
     #[must_use]
     fn positioning(self, positioning: Positioning) -> Self;
+    /// Sets the per-edge inset used when [`positioning`](Self::positioning) is
+    /// [`Positioning::Absolute`].
+    #[must_use]
+    fn inset(self, inset: Edges<Length>) -> Self;
     /// Constrains the width-to-height ratio.
     #[must_use]
     fn aspect_ratio(self, ratio: f32) -> Self;
@@ -124,6 +128,10 @@ impl LayoutExt for LayoutStyle {
     }
     fn positioning(mut self, positioning: Positioning) -> Self {
         self.positioning = positioning;
+        self
+    }
+    fn inset(mut self, inset: Edges<Length>) -> Self {
+        self.inset = inset;
         self
     }
     fn aspect_ratio(mut self, ratio: f32) -> Self {
