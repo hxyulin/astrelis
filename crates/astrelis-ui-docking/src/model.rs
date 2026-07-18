@@ -246,6 +246,28 @@ impl PanelDescriptor {
             preferred: PreferredPlacement::Root,
         }
     }
+
+    /// Sets whether users may remove the panel, returning the descriptor so
+    /// registration reads as one chain instead of create-then-poke.
+    #[must_use]
+    pub fn closable(mut self, closable: bool) -> Self {
+        self.closable = closable;
+        self
+    }
+
+    /// Sets the minimum logical content size.
+    #[must_use]
+    pub fn minimum_size(mut self, minimum_size: LogicalSize) -> Self {
+        self.minimum_size = minimum_size;
+        self
+    }
+
+    /// Sets the deterministic placement used when opening or recovering it.
+    #[must_use]
+    pub fn preferred(mut self, preferred: PreferredPlacement) -> Self {
+        self.preferred = preferred;
+        self
+    }
 }
 
 /// Concrete destination of a panel movement.

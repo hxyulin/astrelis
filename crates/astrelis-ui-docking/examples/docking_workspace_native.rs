@@ -140,35 +140,35 @@ impl DockingExample {
             DockWorkspace::new(&mut ui, dock_host, DockStyle::default(), Message::Dock)
                 .map_err(io::Error::other)?;
 
-        let mut scene_descriptor = PanelDescriptor::new(scene_id.clone(), "Scene");
-        scene_descriptor.closable = false;
-        scene_descriptor.minimum_size = Size::new(280.0, 220.0);
+        let scene_descriptor = PanelDescriptor::new(scene_id.clone(), "Scene")
+            .closable(false)
+            .minimum_size(Size::new(280.0, 220.0));
         workspace
             .register_panel(&mut ui, scene_descriptor, scene)
             .map_err(io::Error::other)?;
 
-        let mut inspector_descriptor = PanelDescriptor::new(inspector_id.clone(), "Inspector");
-        inspector_descriptor.minimum_size = Size::new(210.0, 180.0);
-        inspector_descriptor.preferred = PreferredPlacement::Split {
-            anchor: scene_id.clone(),
-            side: DockSide::Right,
-        };
+        let inspector_descriptor = PanelDescriptor::new(inspector_id.clone(), "Inspector")
+            .minimum_size(Size::new(210.0, 180.0))
+            .preferred(PreferredPlacement::Split {
+                anchor: scene_id.clone(),
+                side: DockSide::Right,
+            });
         workspace
             .register_panel(&mut ui, inspector_descriptor, inspector)
             .map_err(io::Error::other)?;
 
-        let mut assets_descriptor = PanelDescriptor::new(assets_id.clone(), "Assets");
-        assets_descriptor.preferred = PreferredPlacement::Tab(inspector_id.clone());
+        let assets_descriptor = PanelDescriptor::new(assets_id.clone(), "Assets")
+            .preferred(PreferredPlacement::Tab(inspector_id.clone()));
         workspace
             .register_panel(&mut ui, assets_descriptor, assets)
             .map_err(io::Error::other)?;
 
-        let mut console_descriptor = PanelDescriptor::new(console_id.clone(), "Console");
-        console_descriptor.minimum_size = Size::new(260.0, 120.0);
-        console_descriptor.preferred = PreferredPlacement::Split {
-            anchor: scene_id.clone(),
-            side: DockSide::Bottom,
-        };
+        let console_descriptor = PanelDescriptor::new(console_id.clone(), "Console")
+            .minimum_size(Size::new(260.0, 120.0))
+            .preferred(PreferredPlacement::Split {
+                anchor: scene_id.clone(),
+                side: DockSide::Bottom,
+            });
         workspace
             .register_panel(&mut ui, console_descriptor, console)
             .map_err(io::Error::other)?;
