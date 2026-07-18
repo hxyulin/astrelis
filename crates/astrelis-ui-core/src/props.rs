@@ -16,7 +16,7 @@ impl<Message: 'static> Ui<Message> {
                 flex.column_gap = gap.max(0.0);
                 flex.row_gap = gap.max(0.0);
                 flex.align_items = alignment;
-                self.invalidate_layout();
+                self.invalidate_node(handle.id, Dirty::all());
                 Ok(())
             }
             _ => Err(UiError::new("element is not a row or column")),
@@ -34,7 +34,7 @@ impl<Message: 'static> Ui<Message> {
             Kind::Row { flex } | Kind::Column { flex } => *flex = style,
             _ => return Err(UiError::new("element is not a row or column")),
         }
-        self.invalidate_layout();
+        self.invalidate_node(handle.id, Dirty::all());
         Ok(())
     }
 
@@ -105,7 +105,7 @@ impl<Message: 'static> Ui<Message> {
         let node = self.node_mut(handle.id)?;
         if node.style != style {
             node.style = style;
-            self.invalidate_layout();
+            self.invalidate_node(handle.id, Dirty::all());
         }
         Ok(())
     }
@@ -119,7 +119,7 @@ impl<Message: 'static> Ui<Message> {
         let node = self.node_mut(handle.id)?;
         if node.visual != style {
             node.visual = style;
-            self.dirty |= Dirty::MEASURE | Dirty::PAINT;
+            self.invalidate_node(handle.id, Dirty::MEASURE | Dirty::PAINT);
         }
         Ok(())
     }
@@ -134,7 +134,7 @@ impl<Message: 'static> Ui<Message> {
         let node = self.node_mut(handle.id)?;
         if node.wrap != wrap {
             node.wrap = wrap;
-            self.dirty |= Dirty::MEASURE | Dirty::LAYOUT | Dirty::PAINT;
+            self.invalidate_node(handle.id, Dirty::MEASURE | Dirty::LAYOUT | Dirty::PAINT);
         }
         Ok(())
     }
@@ -287,7 +287,7 @@ impl<Message: 'static> Ui<Message> {
         };
         if *text != value {
             *text = value;
-            self.invalidate_layout();
+            self.invalidate_node(id, Dirty::all());
         }
         Ok(())
     }
@@ -307,7 +307,7 @@ impl<Message: 'static> Ui<Message> {
             field.text = text;
             field.caret.byte_index = field.text.len();
             field.anchor = field.caret;
-            self.invalidate_layout();
+            self.invalidate_node(handle.id, Dirty::all());
         }
         Ok(())
     }
@@ -333,7 +333,7 @@ impl<Message: 'static> Ui<Message> {
         };
         if field.placeholder != placeholder {
             field.placeholder = placeholder;
-            self.invalidate_layout();
+            self.invalidate_node(handle.id, Dirty::all());
         }
         Ok(())
     }
@@ -350,7 +350,7 @@ impl<Message: 'static> Ui<Message> {
         };
         if field.password != password {
             field.password = password;
-            self.invalidate_layout();
+            self.invalidate_node(handle.id, Dirty::all());
         }
         Ok(())
     }

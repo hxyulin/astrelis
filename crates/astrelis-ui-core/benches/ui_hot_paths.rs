@@ -139,11 +139,32 @@ fn bench_display_list(criterion: &mut Criterion) {
 
 /// The headline incremental case: one label changes out of `NODES`.
 ///
-/// Today `invalidate_layout` is global, so this re-shapes and repaints the
-/// entire tree. It should approach `layout/warm` once invalidation gains node
-/// granularity, and is the benchmark that would show that work paying off.
+/// `set_label_text` now enqueues only the changed node, so the measure-input
+/// sweeps (text shaping, Taffy style reconciliation) revisit one node instead
+/// of all `NODES`. The `layout` variant isolates that: it sits below
+/// `layout/resize/text_heavy` (a full reflow) by the shaping cost of the
+/// untouched labels, bounded below by `layout/resize/text_free` — the whole-tree
+/// `assign_layout` position cascade and `measure_map` are still O(nodes) and are
+/// a later step. The `display_list` variant additionally repaints the whole
+/// tree, since per-node paint invalidation is also still to come.
 fn bench_incremental(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("incremental");
+
+    // Layout-only: the measure/shaping path that node-granular dirtying speeds
+    // up, with paint excluded.
+    let (mut ui, labels) = text_heavy(NODES);
+    let root = ui.root();
+    let target = labels[NODES / 2];
+    let mut even = false;
+    group.bench_function("set_label_text/layout", |bencher| {
+        bencher.iter(|| {
+            even = !even;
+            // Alternate the value: set_static_text early-outs if it is equal.
+            let text = if even { "Item flip" } else { "Item flop" };
+            ui.set_label_text(target, text).unwrap();
+            black_box(ui.layout_bounds(root).unwrap())
+        })
+    });
 
     let (mut ui, labels) = text_heavy(NODES);
     let target = labels[NODES / 2];
@@ -151,7 +172,6 @@ fn bench_incremental(criterion: &mut Criterion) {
     group.bench_function("set_label_text/display_list", |bencher| {
         bencher.iter(|| {
             even = !even;
-            // Alternate the value: set_static_text early-outs if it is equal.
             let text = if even { "Item flip" } else { "Item flop" };
             ui.set_label_text(target, text).unwrap();
             black_box(ui.display_list().unwrap())

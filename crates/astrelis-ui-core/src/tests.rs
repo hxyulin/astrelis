@@ -1214,3 +1214,65 @@ fn retained_layout_remeasures_text_when_font_size_changes() {
         "larger text should push the label below it down, moved from {before} to {after}"
     );
 }
+
+#[test]
+fn a_single_text_change_enqueues_one_node_not_a_resweep() {
+    let mut ui: Ui = Ui::new(FontDatabase::default(), Theme::default());
+    ui.set_viewport(LogicalSize::new(640.0, 480.0), 1.0);
+    let root = ui.root();
+    let column = ui.add_column(root).unwrap();
+    let mut labels = Vec::new();
+    for index in 0..8 {
+        labels.push(ui.add_label(column, format!("Item {index}")).unwrap());
+    }
+    // Settle the tree, clearing the construction-time dirty state.
+    ui.layout_bounds(root).unwrap();
+    assert!(ui.dirty_nodes.is_empty());
+    assert!(!ui.measure_resweep);
+
+    // Changing one label enqueues exactly that node, without a resweep.
+    let target = labels[4];
+    ui.set_label_text(target, "Changed").unwrap();
+    assert!(
+        !ui.measure_resweep,
+        "a single label change must not resweep"
+    );
+    assert_eq!(
+        ui.dirty_nodes.iter().copied().collect::<Vec<_>>(),
+        vec![target.id()],
+        "only the changed node should be enqueued"
+    );
+
+    // The next layout consumes and clears the queue.
+    ui.layout_bounds(root).unwrap();
+    assert!(ui.dirty_nodes.is_empty());
+    assert!(!ui.measure_resweep);
+}
+
+#[test]
+fn coarse_changes_request_a_full_resweep() {
+    let mut ui: Ui = Ui::new(FontDatabase::default(), Theme::default());
+    ui.set_viewport(LogicalSize::new(640.0, 480.0), 1.0);
+    let root = ui.root();
+    ui.add_label(root, "Item").unwrap();
+    ui.layout_bounds(root).unwrap();
+    assert!(!ui.measure_resweep);
+
+    // A theme swap can restyle every node, so it must fall back to a resweep
+    // rather than trusting a per-node queue that never saw the change.
+    let mut theme = Theme::default();
+    theme.type_scale.body += 2.0;
+    ui.set_theme(theme);
+    assert!(ui.measure_resweep, "a theme change must resweep");
+}
+
+/// The text-shaping job is `(request) -> layout` over owned data, so it can run
+/// on a worker thread for background reshaping. This locks that boundary open;
+/// if a future change makes either type thread-bound, offloading breaks here
+/// rather than silently.
+#[test]
+fn shaping_job_types_are_send() {
+    fn assert_send<T: Send>() {}
+    assert_send::<astrelis_text::TextLayoutRequest>();
+    assert_send::<astrelis_text::TextLayout>();
+}

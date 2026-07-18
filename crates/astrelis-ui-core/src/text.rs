@@ -5,10 +5,22 @@ use super::*;
 impl<Message: 'static> Ui<Message> {
     pub(crate) fn prepare_text_layouts(&mut self) -> Result<(), UiError> {
         astrelis_profiling::profile_scope!("ui.shape");
-        for index in 0..self.slots.len() {
-            let Some(id) = self.id_at(index) else {
-                continue;
-            };
+        // Reshape only the nodes whose text or resolved style changed since the
+        // last pass; a resweep (theme/viewport, or a self-resizing custom
+        // widget) revisits everything. Snapshot the ids so the loop can take
+        // `&mut self` per node.
+        let ids: Vec<ElementId> = if self.measure_resweep {
+            (0..self.slots.len())
+                .filter_map(|index| self.id_at(index))
+                .collect()
+        } else {
+            self.dirty_nodes
+                .iter()
+                .copied()
+                .filter(|id| self.node(*id).is_ok())
+                .collect()
+        };
+        for id in ids {
             let request = match &self.node(id)?.kind {
                 Kind::Label { text } | Kind::Button { text } => {
                     let node = self.node(id)?;
@@ -268,7 +280,7 @@ impl<Message: 'static> Ui<Message> {
         match event {
             ImeEvent::Preedit(value, _) => {
                 self.text_field_mut(id)?.preedit = value.clone();
-                self.invalidate_layout();
+                self.invalidate_node(id, Dirty::all());
             }
             ImeEvent::Commit(value) => {
                 self.text_field_mut(id)?.preedit.clear();
@@ -276,7 +288,7 @@ impl<Message: 'static> Ui<Message> {
             }
             ImeEvent::Disabled => {
                 self.text_field_mut(id)?.preedit.clear();
-                self.invalidate_layout();
+                self.invalidate_node(id, Dirty::all());
             }
             ImeEvent::Enabled => {}
         }
@@ -308,7 +320,7 @@ impl<Message: 'static> Ui<Message> {
             kind: UiEventKind::TextChanged(text.clone()),
         });
         self.dispatch_routed(id, RoutedEventKind::TextChanged(text))?;
-        self.invalidate_layout();
+        self.invalidate_node(id, Dirty::all());
         Ok(())
     }
 

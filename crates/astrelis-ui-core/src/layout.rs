@@ -276,8 +276,29 @@ impl Default for LayoutStyle {
 }
 
 impl<Message: 'static> Ui<Message> {
+    /// Coarse invalidation: the next layout pass reshapes and re-reconciles
+    /// every node. Used when a change can touch many nodes at once, or a node
+    /// the caller cannot cheaply identify.
     pub(crate) fn invalidate_layout(&mut self) {
         self.dirty |= Dirty::MEASURE | Dirty::LAYOUT | Dirty::PAINT | Dirty::SEMANTICS;
+        self.measure_resweep = true;
+    }
+
+    /// Fine invalidation: only `id` changed its text or layout style, so the
+    /// measure-input sweeps revisit just this node. `dirty` carries the exact
+    /// phases the caller needs (paint and semantics stay whole-tree); the node
+    /// is enqueued only when measure or layout work is implied.
+    ///
+    /// Correctness rests on Taffy propagating a dirtied node's size change up to
+    /// its ancestors during the solve, and on any node *absent* from the queue
+    /// having neither restyled nor reshaped — so revisiting it would be a no-op.
+    /// Changes that can resize a node without naming it (custom widgets via
+    /// `request_layout`/`update`) go through `invalidate_layout` instead.
+    pub(crate) fn invalidate_node(&mut self, id: ElementId, dirty: Dirty) {
+        self.dirty |= dirty;
+        if dirty.intersects(Dirty::MEASURE | Dirty::LAYOUT) {
+            self.dirty_nodes.insert(id);
+        }
     }
 
     pub(crate) fn taffy_style(&self, id: ElementId, node: &Node) -> Style {
@@ -518,37 +539,57 @@ impl<Message: 'static> Ui<Message> {
             cache.structure_dirty = false;
             return Ok(());
         }
-        for index in 0..self.slots.len() {
-            let Some(id) = self.id_at(index) else {
-                continue;
-            };
-            let Some(&node_id) = cache.ids.get(&id) else {
-                continue;
-            };
-            let node = self.node(id)?;
-            let style = self.taffy_style(id, node);
-            let restyle = cache
+        // A node absent from `dirty_nodes` has neither restyled nor reshaped, so
+        // reconciling it would be a no-op — visit only the queued nodes. A
+        // resweep (theme/viewport, or a custom widget resizing itself) falls
+        // back to the full walk.
+        if self.measure_resweep {
+            for index in 0..self.slots.len() {
+                if let Some(id) = self.id_at(index) {
+                    self.sync_taffy_node(cache, id)?;
+                }
+            }
+        } else {
+            for id in self.dirty_nodes.iter().copied() {
+                // Despawning sets `structure_dirty`, so a queued node is live
+                // here; guard defensively regardless.
+                if self.node(id).is_ok() {
+                    self.sync_taffy_node(cache, id)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Reconciles one node's Taffy style and measured size, marking it dirty in
+    /// the retained tree only when either actually changed.
+    fn sync_taffy_node(&self, cache: &mut TaffyCache, id: ElementId) -> Result<(), UiError> {
+        let Some(&node_id) = cache.ids.get(&id) else {
+            return Ok(());
+        };
+        let node = self.node(id)?;
+        let style = self.taffy_style(id, node);
+        let restyle = cache
+            .tree
+            .style(node_id)
+            .map(|current| current != &style)
+            .unwrap_or(true);
+        if restyle {
+            cache
                 .tree
-                .style(node_id)
-                .map(|current| current != &style)
-                .unwrap_or(true);
-            if restyle {
-                cache
-                    .tree
-                    .set_style(node_id, style)
-                    .map_err(|error| UiError::new(error.to_string()))?;
-            }
-            let measured = self.measured_size(id);
-            if cache.measured.get(&id).copied() != measured {
-                cache
-                    .tree
-                    .mark_dirty(node_id)
-                    .map_err(|error| UiError::new(error.to_string()))?;
-                match measured {
-                    Some(size) => cache.measured.insert(id, size),
-                    None => cache.measured.remove(&id),
-                };
-            }
+                .set_style(node_id, style)
+                .map_err(|error| UiError::new(error.to_string()))?;
+        }
+        let measured = self.measured_size(id);
+        if cache.measured.get(&id).copied() != measured {
+            cache
+                .tree
+                .mark_dirty(node_id)
+                .map_err(|error| UiError::new(error.to_string()))?;
+            match measured {
+                Some(size) => cache.measured.insert(id, size),
+                None => cache.measured.remove(&id),
+            };
         }
         Ok(())
     }
@@ -605,6 +646,8 @@ impl<Message: 'static> Ui<Message> {
         }
         self.ensure_caret_visible()?;
         self.dirty.remove(Dirty::MEASURE | Dirty::LAYOUT);
+        self.dirty_nodes.clear();
+        self.measure_resweep = false;
         self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
         if self
             .focus

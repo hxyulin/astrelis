@@ -4,7 +4,7 @@
 
 use std::{
     any::Any,
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     marker::PhantomData,
     sync::Arc,
@@ -89,6 +89,16 @@ pub struct Ui<Message = ()> {
     pub(crate) viewport: LogicalSize,
     pub(crate) scale_factor: f32,
     pub(crate) dirty: Dirty,
+    /// Nodes whose text or layout style changed since the last layout pass, so
+    /// the measure-input sweeps (text shaping, Taffy style reconciliation) can
+    /// revisit only these instead of the whole tree. Ignored when
+    /// `measure_resweep` is set. Keyed by generational id, so a recycled slot
+    /// never inherits a stale entry.
+    pub(crate) dirty_nodes: HashSet<ElementId>,
+    /// Forces the measure-input sweeps to revisit every node. Set by changes
+    /// that can affect many nodes at once (theme, viewport) or a node the
+    /// caller cannot cheaply name (a custom widget resizing itself).
+    pub(crate) measure_resweep: bool,
     pub(crate) focus: Option<ElementId>,
     pub(crate) hover: Option<ElementId>,
     pub(crate) hover_paths: HashMap<DeviceId, Vec<ElementId>>,

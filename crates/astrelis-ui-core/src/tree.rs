@@ -233,6 +233,8 @@ impl<Message: 'static> Ui<Message> {
             viewport: Size::ZERO,
             scale_factor: 1.0,
             dirty: Dirty::all(),
+            dirty_nodes: HashSet::new(),
+            measure_resweep: true,
             focus: None,
             hover: None,
             hover_paths: HashMap::new(),
@@ -267,7 +269,8 @@ impl<Message: 'static> Ui<Message> {
         if self.viewport != viewport || self.scale_factor != scale_factor {
             self.viewport = viewport;
             self.scale_factor = scale_factor.max(f32::EPSILON);
-            self.dirty |= Dirty::MEASURE | Dirty::LAYOUT | Dirty::PAINT | Dirty::SEMANTICS;
+            // Wrap widths track the viewport, so every wrapped label may reshape.
+            self.invalidate_layout();
         }
     }
 
@@ -280,7 +283,9 @@ impl<Message: 'static> Ui<Message> {
     pub fn set_theme(&mut self, theme: Theme) {
         if self.theme != theme {
             self.theme = theme;
-            self.dirty = Dirty::all();
+            // Theme drives font sizes, colors, and spacing, so everything
+            // reshapes and re-reconciles.
+            self.invalidate_layout();
         }
     }
 
@@ -482,7 +487,10 @@ impl<Message: 'static> Ui<Message> {
             .ok_or_else(|| UiError::new("handle has the wrong widget type"))?;
         update(widget);
         widget.updated();
-        self.dirty = Dirty::all();
+        // Only this widget's node changed, and its intrinsic size may have
+        // moved, so enqueue it for the measure-input sweeps rather than forcing
+        // a whole-tree resweep.
+        self.invalidate_node(handle.id, Dirty::all());
         Ok(())
     }
 
