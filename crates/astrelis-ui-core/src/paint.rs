@@ -80,17 +80,30 @@ impl<Message: 'static> Ui<Message> {
                 .map_err(|error| UiError::new(error.to_string()))?;
         }
         match &node.kind {
+            Kind::Overlay { .. } => {
+                // Overlays are floating surfaces (tooltips, popovers, menus).
+                // Resolve the surface from the theme at paint time so it tracks
+                // set_theme; an explicit override still wins.
+                let background = node.visual.background.unwrap_or(self.theme.surface);
+                self.paint_shadow(painter, node.bounds)?;
+                painter
+                    .fill_rounded_rect(
+                        RoundedRect::new(
+                            node.bounds,
+                            CornerRadii::uniform(self.theme.radii.md.max(0.0)),
+                        )
+                        .map_err(|error| UiError::new(error.to_string()))?,
+                        Brush::Solid(background),
+                    )
+                    .map_err(|error| UiError::new(error.to_string()))?;
+            }
             Kind::Row { .. }
             | Kind::Column { .. }
             | Kind::Stack
             | Kind::FocusScope { .. }
-            | Kind::Overlay { .. }
             | Kind::Padding { .. }
                 if node.visual.background.is_some() =>
             {
-                if matches!(node.kind, Kind::Overlay { .. }) {
-                    self.paint_shadow(painter, node.bounds)?;
-                }
                 painter
                     .fill_rect(
                         node.bounds,

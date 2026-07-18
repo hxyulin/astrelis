@@ -4,7 +4,7 @@ use astrelis_platform::{ElementState, Key, NamedKey, PointerButton};
 use astrelis_ui_core::{
     Button, Checkbox, Column, ElementHandle, EventFilter, EventPhase, FocusScopeOptions,
     LayoutStyle, Length, Overlay, OverlayOptions, OverlaySide, RoutedEventKind, SemanticRole,
-    Slider, TextField, Ui, UiError, Visibility, WidgetStyle,
+    Slider, TextField, Ui, UiError, Visibility,
 };
 
 /// Click-controlled arbitrary-content viewport overlay.
@@ -22,14 +22,8 @@ impl Popover {
     ) -> Result<Self, UiError> {
         let overlay = ui.add_overlay(owner, options)?;
         ui.set_visibility(overlay, Visibility::Hidden)?;
-        let surface = ui.theme().surface;
-        ui.set_widget_style(
-            overlay,
-            WidgetStyle {
-                background: Some(surface),
-                ..Default::default()
-            },
-        )?;
+        // The overlay resolves its surface from the theme at paint time, so no
+        // background is snapshotted here.
         let open = Rc::new(Cell::new(false));
         let toggle = open.clone();
         ui.listen(
@@ -145,22 +139,12 @@ impl Tooltip {
         )?;
         ui.set_visibility(overlay, Visibility::Hidden)?;
         ui.set_semantic_role(overlay, SemanticRole::Tooltip)?;
-        ui.set_layout(
-            overlay,
-            LayoutStyle {
-                max_width: Length::Px(320.0),
-                ..Default::default()
-            },
-        )?;
-        let surface = ui.theme().surface;
-        ui.set_widget_style(
-            overlay,
-            WidgetStyle {
-                background: Some(surface),
-                ..Default::default()
-            },
-        )?;
-        ui.add_label(overlay, text)?;
+        // The overlay resolves its surface from the theme at paint time. Pad the
+        // label so the single-line text is not flush to the rounded surface, and
+        // let the surface size to that content rather than clipping at a cap.
+        let insets = ui.theme().control_padding;
+        let content = ui.add_padding(overlay, insets)?;
+        ui.add_label(content, text)?;
         let hovered = Rc::new(Cell::new(false));
         let focused = Rc::new(Cell::new(false));
         let hover_state = hovered.clone();
