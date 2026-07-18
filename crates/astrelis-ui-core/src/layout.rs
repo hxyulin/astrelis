@@ -2,6 +2,35 @@
 
 use super::*;
 
+/// Retained Taffy state carried across layout passes.
+///
+/// Rebuilding the tree every pass discarded Taffy's own per-node measure and
+/// layout cache, forcing a full flex re-solve even when a single label
+/// changed. Keeping the tree lets Taffy re-solve only the dirtied subtrees.
+///
+/// `structure_dirty` is set whenever the element topology changes (insert,
+/// remove, reparent); those passes rebuild the tree wholesale. Every other
+/// pass reconciles in place: a node's Taffy style is re-pushed only when it
+/// actually differs, and a node is marked dirty only when its measured size
+/// changed, so unchanged subtrees keep their cached layout.
+pub(crate) struct TaffyCache {
+    pub(crate) tree: TaffyTree<ElementId>,
+    pub(crate) ids: HashMap<ElementId, NodeId>,
+    pub(crate) measured: HashMap<ElementId, LogicalSize>,
+    pub(crate) structure_dirty: bool,
+}
+
+impl Default for TaffyCache {
+    fn default() -> Self {
+        Self {
+            tree: TaffyTree::new(),
+            ids: HashMap::new(),
+            measured: HashMap::new(),
+            structure_dirty: true,
+        }
+    }
+}
+
 /// Four-sided logical inset.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Insets {
@@ -448,49 +477,118 @@ impl<Message: 'static> Ui<Message> {
         Ok(taffy_id)
     }
 
+    /// The size Taffy should measure an element at: its shaped text extent, or
+    /// a custom widget's non-zero intrinsic size. Everything else is sized by
+    /// flex alone and has no measured contribution.
+    pub(crate) fn measured_size(&self, id: ElementId) -> Option<LogicalSize> {
+        let node = self.node(id).ok()?;
+        if let Some(layout) = node.text_layout.as_ref() {
+            return Some(layout.size());
+        }
+        let widget = self.custom_widgets.get(&id)?;
+        let size = widget.intrinsic_size(&self.theme);
+        (size != LogicalSize::ZERO).then_some(size)
+    }
+
+    /// Snapshots every element's measured size for the Taffy measure closure.
+    pub(crate) fn measure_map(&self) -> HashMap<ElementId, LogicalSize> {
+        self.ids()
+            .filter_map(|id| self.measured_size(id).map(|size| (id, size)))
+            .collect()
+    }
+
+    /// Reconciles the retained Taffy tree with the current element tree.
+    ///
+    /// A structural change rebuilds the tree wholesale. Otherwise each node's
+    /// style is re-pushed only when it differs from what Taffy holds, and each
+    /// node is marked dirty only when its measured size changed — so Taffy
+    /// re-solves the touched subtrees and reuses its cache for the rest.
+    pub(crate) fn sync_taffy(&self, cache: &mut TaffyCache) -> Result<(), UiError> {
+        if cache.structure_dirty || !cache.ids.contains_key(&self.root) {
+            cache.tree.clear();
+            cache.tree.disable_rounding();
+            cache.ids.clear();
+            cache.measured.clear();
+            self.build_taffy(&mut cache.tree, self.root, &mut cache.ids)?;
+            for id in self.ids() {
+                if let Some(size) = self.measured_size(id) {
+                    cache.measured.insert(id, size);
+                }
+            }
+            cache.structure_dirty = false;
+            return Ok(());
+        }
+        for index in 0..self.slots.len() {
+            let Some(id) = self.id_at(index) else {
+                continue;
+            };
+            let Some(&node_id) = cache.ids.get(&id) else {
+                continue;
+            };
+            let node = self.node(id)?;
+            let style = self.taffy_style(id, node);
+            let restyle = cache
+                .tree
+                .style(node_id)
+                .map(|current| current != &style)
+                .unwrap_or(true);
+            if restyle {
+                cache
+                    .tree
+                    .set_style(node_id, style)
+                    .map_err(|error| UiError::new(error.to_string()))?;
+            }
+            let measured = self.measured_size(id);
+            if cache.measured.get(&id).copied() != measured {
+                cache
+                    .tree
+                    .mark_dirty(node_id)
+                    .map_err(|error| UiError::new(error.to_string()))?;
+                match measured {
+                    Some(size) => cache.measured.insert(id, size),
+                    None => cache.measured.remove(&id),
+                };
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn ensure_layout(&mut self) -> Result<(), UiError> {
         if !self.dirty.intersects(Dirty::MEASURE | Dirty::LAYOUT) {
             return Ok(());
         }
         astrelis_profiling::profile_scope!("ui.layout");
         self.prepare_text_layouts()?;
-        let mut tree = TaffyTree::<ElementId>::new();
-        tree.disable_rounding();
-        let mut mapping = HashMap::new();
-        let root = self.build_taffy(&mut tree, self.root, &mut mapping)?;
-        let mut layouts = self
-            .ids()
-            .filter_map(|id| {
-                self.node(id)
-                    .ok()
-                    .and_then(|node| node.text_layout.as_ref().map(|layout| (id, layout.size())))
-            })
-            .collect::<HashMap<_, _>>();
-        for (id, widget) in &self.custom_widgets {
-            let size = widget.intrinsic_size(&self.theme);
-            if size != Size::ZERO {
-                layouts.insert(*id, size);
-            }
-        }
-        tree.compute_layout_with_measure(
-            root,
-            TaffySize {
-                width: AvailableSpace::Definite(self.viewport.width.max(0.0)),
-                height: AvailableSpace::Definite(self.viewport.height.max(0.0)),
-            },
-            |known, _available, _node, context, _style| {
-                let Some(id) = context.copied() else {
-                    return TaffySize::ZERO;
-                };
-                let measured = layouts.get(&id).copied().unwrap_or(Size::ZERO);
+        // Operate on the retained cache detached from `self` so node reads
+        // (&self) and tree writes (&mut cache) do not alias. On any early error
+        // the detached cache is dropped, leaving a fresh structure-dirty cache
+        // in place that the next pass rebuilds from scratch.
+        let mut cache = std::mem::take(&mut self.taffy_cache);
+        self.sync_taffy(&mut cache)?;
+        let root = cache.ids[&self.root];
+        let layouts = self.measure_map();
+        cache
+            .tree
+            .compute_layout_with_measure(
+                root,
                 TaffySize {
-                    width: known.width.unwrap_or(measured.width),
-                    height: known.height.unwrap_or(measured.height),
-                }
-            },
-        )
-        .map_err(|error| UiError::new(error.to_string()))?;
-        self.assign_layout(&tree, &mapping, self.root, LogicalPoint::ZERO)?;
+                    width: AvailableSpace::Definite(self.viewport.width.max(0.0)),
+                    height: AvailableSpace::Definite(self.viewport.height.max(0.0)),
+                },
+                |known, _available, _node, context, _style| {
+                    let Some(id) = context.copied() else {
+                        return TaffySize::ZERO;
+                    };
+                    let measured = layouts.get(&id).copied().unwrap_or(Size::ZERO);
+                    TaffySize {
+                        width: known.width.unwrap_or(measured.width),
+                        height: known.height.unwrap_or(measured.height),
+                    }
+                },
+            )
+            .map_err(|error| UiError::new(error.to_string()))?;
+        self.assign_layout(&cache.tree, &cache.ids, self.root, LogicalPoint::ZERO)?;
+        self.taffy_cache = cache;
         self.position_overlays()?;
         if self.focus.is_none() {
             let autofocus = self.ids().find(|id| self.node(*id).is_ok_and(|node| matches!(node.kind, Kind::FocusScope { options, .. } if options.autofocus) || matches!(node.kind, Kind::Overlay { options, .. } if options.focus.autofocus)));

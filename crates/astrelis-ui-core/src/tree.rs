@@ -225,6 +225,7 @@ impl<Message: 'static> Ui<Message> {
                 }),
             }],
             free: Vec::new(),
+            taffy_cache: TaffyCache::default(),
             root,
             theme,
             fonts,
@@ -530,6 +531,7 @@ impl<Message: 'static> Ui<Message> {
             pressed: false,
         });
         self.node_mut(parent)?.children.push(id);
+        self.taffy_cache.structure_dirty = true;
         self.invalidate_layout();
         Ok(ElementHandle {
             id,
@@ -605,6 +607,7 @@ impl<Message: 'static> Ui<Message> {
             let hovered = self.hover_paths.values().any(|path| path.contains(&id));
             self.node_mut(id)?.hovered = hovered;
         }
+        self.taffy_cache.structure_dirty = true;
         self.invalidate_layout();
         if let Some(restore) = restore_focus.filter(|id| self.node(*id).is_ok()) {
             self.set_focus(Some(restore))?;
@@ -648,6 +651,7 @@ impl<Message: 'static> Ui<Message> {
         }
         self.node_mut(handle.id)?.parent = Some(parent.id);
         self.node_mut(parent.id)?.children.push(handle.id);
+        self.taffy_cache.structure_dirty = true;
         self.invalidate_layout();
         Ok(())
     }
@@ -699,14 +703,19 @@ impl<Message: 'static> Ui<Message> {
             .children
             .first()
             .map_or(0, |child| self.node(*child).map_or(0, |node| node.z_index));
-        let uniform = node
-            .children
-            .iter()
-            .all(|child| self.node(*child).map_or(true, |node| node.z_index == reference));
+        let uniform = node.children.iter().all(|child| {
+            self.node(*child)
+                .map_or(true, |node| node.z_index == reference)
+        });
         if uniform {
             return None;
         }
-        let mut children = node.children.iter().copied().enumerate().collect::<Vec<_>>();
+        let mut children = node
+            .children
+            .iter()
+            .copied()
+            .enumerate()
+            .collect::<Vec<_>>();
         children.sort_by_key(|(index, child)| {
             (self.node(*child).map_or(0, |node| node.z_index), *index)
         });

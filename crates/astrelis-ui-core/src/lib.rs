@@ -81,6 +81,7 @@ bitflags! {
 pub struct Ui<Message = ()> {
     pub(crate) slots: Vec<Slot>,
     pub(crate) free: Vec<u32>,
+    pub(crate) taffy_cache: TaffyCache,
     pub(crate) root: ElementId,
     pub(crate) theme: Theme,
     pub(crate) fonts: FontDatabase,

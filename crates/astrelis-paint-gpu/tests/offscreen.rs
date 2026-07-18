@@ -496,11 +496,7 @@ fn merges_a_glyph_run_into_one_draw() {
         let text = text_context
             .layout(&mut fonts, request)
             .expect("text layout");
-        let glyph_count: usize = text
-            .glyph_runs()
-            .iter()
-            .map(|run| run.glyphs.len())
-            .sum();
+        let glyph_count: usize = text.glyph_runs().iter().map(|run| run.glyphs.len()).sum();
         assert!(
             glyph_count >= 30,
             "fixture should shape many glyphs, got {glyph_count}"

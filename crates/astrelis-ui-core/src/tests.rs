@@ -1140,3 +1140,77 @@ fn wrapping_label_respects_max_width_and_grows_taller() {
         "wrapping breaks the text into more lines, growing the height"
     );
 }
+
+#[test]
+fn retained_layout_reflows_siblings_when_a_style_changes() {
+    let mut ui = ui();
+    let root = ui.root();
+    let column = ui.add_column(root).unwrap();
+    let top = ui.add_column(column).unwrap();
+    ui.set_layout(
+        top,
+        LayoutStyle {
+            height: Length::Px(40.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let bottom = ui.add_column(column).unwrap();
+    ui.set_layout(
+        bottom,
+        LayoutStyle {
+            height: Length::Px(40.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let before = ui.layout_bounds(bottom).unwrap().origin.y;
+
+    // Growing the box above must reflow the sibling below through the retained
+    // Taffy tree: the style diff re-pushes only `top`, and Taffy re-solves the
+    // column. A stale cache would leave `bottom` where it was.
+    ui.set_layout(
+        top,
+        LayoutStyle {
+            height: Length::Px(100.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let after = ui.layout_bounds(bottom).unwrap().origin.y;
+
+    assert!(
+        (after - before - 60.0).abs() < 0.5,
+        "sibling should shift down by the 60px growth, moved {}",
+        after - before
+    );
+}
+
+#[test]
+fn retained_layout_remeasures_text_when_font_size_changes() {
+    let mut ui = ui();
+    let root = ui.root();
+    let column = ui.add_column(root).unwrap();
+    let first = ui.add_label(column, "First").unwrap();
+    let second = ui.add_label(column, "Second").unwrap();
+    let before = ui.layout_bounds(second).unwrap().origin.y;
+
+    // A larger font enlarges the first label's shaped height. Its Taffy style is
+    // unchanged (labels size by measure, not style), so only the measured-size
+    // diff can catch it and mark the node dirty; otherwise Taffy reuses the
+    // cached measure and the label below never moves.
+    ui.set_widget_style(
+        first,
+        WidgetStyle {
+            font_size: Some(48.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let after = ui.layout_bounds(second).unwrap().origin.y;
+
+    assert!(
+        after > before + 10.0,
+        "larger text should push the label below it down, moved from {before} to {after}"
+    );
+}
