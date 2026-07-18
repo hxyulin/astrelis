@@ -22,7 +22,10 @@ impl<Message: 'static> Ui<Message> {
                         self.cancel_drag_id(device_id)?;
                     }
                     self.capture.clear();
-                    for id in self.all_ids() {
+                    for index in 0..self.slots.len() {
+                        let Some(id) = self.id_at(index) else {
+                            continue;
+                        };
                         if let Ok(node) = self.node_mut(id) {
                             node.pressed = false;
                         }

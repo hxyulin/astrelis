@@ -593,7 +593,10 @@ impl<Message: 'static> Ui<Message> {
             self.hover_paths.remove(&device);
         }
         self.remove_subtree(handle.id);
-        for id in self.all_ids() {
+        for index in 0..self.slots.len() {
+            let Some(id) = self.id_at(index) else {
+                continue;
+            };
             let hovered = self.hover_paths.values().any(|path| path.contains(&id));
             self.node_mut(id)?.hovered = hovered;
         }
@@ -668,16 +671,22 @@ impl<Message: 'static> Ui<Message> {
             .ok_or_else(|| UiError::new("stale element handle"))
     }
 
-    pub(crate) fn all_ids(&self) -> Vec<ElementId> {
-        self.slots
-            .iter()
-            .enumerate()
-            .filter_map(|(index, slot)| {
-                slot.node.as_ref().map(|_| ElementId {
-                    index: index as u32,
-                    generation: slot.generation,
-                })
-            })
-            .collect()
+    /// Reconstructs the live identity occupying an arena slot, if any.
+    pub(crate) fn id_at(&self, index: usize) -> Option<ElementId> {
+        let slot = self.slots.get(index)?;
+        slot.node.as_ref().map(|_| ElementId {
+            index: index as u32,
+            generation: slot.generation,
+        })
+    }
+
+    /// Iterates every live element identity in arena order without allocating.
+    ///
+    /// This borrows `self` immutably for the lifetime of the iterator, so it
+    /// suits read-only sweeps. Loops that mutate a node per iteration should
+    /// instead range over `0..self.slots.len()` and resolve each index with
+    /// [`Self::id_at`], which re-borrows fresh on every step.
+    pub(crate) fn ids(&self) -> impl Iterator<Item = ElementId> + '_ {
+        (0..self.slots.len()).filter_map(|index| self.id_at(index))
     }
 }

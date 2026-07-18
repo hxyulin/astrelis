@@ -44,8 +44,7 @@ impl<Message: 'static> Ui<Message> {
             .map_err(|error| UiError::new(error.to_string()))?;
         self.paint_node(self.root, &mut painter)?;
         let mut overlays = self
-            .all_ids()
-            .into_iter()
+            .ids()
             .filter(|id| {
                 self.node(*id)
                     .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))

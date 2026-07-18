@@ -6,8 +6,7 @@ impl<Message: 'static> Ui<Message> {
     pub(crate) fn hit_test(&self, point: LogicalPoint) -> Option<ElementId> {
         astrelis_profiling::profile_scope!("ui.hit_test");
         let mut overlays = self
-            .all_ids()
-            .into_iter()
+            .ids()
             .filter(|id| {
                 self.node(*id)
                     .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
@@ -113,7 +112,10 @@ impl<Message: 'static> Ui<Message> {
             .unwrap_or_default();
         self.hover_paths.insert(device_id, new_path);
         self.hover = target;
-        for id in self.all_ids() {
+        for index in 0..self.slots.len() {
+            let Some(id) = self.id_at(index) else {
+                continue;
+            };
             let hovered = self.hover_paths.values().any(|path| path.contains(&id));
             self.node_mut(id)?.hovered = hovered;
         }
@@ -204,8 +206,7 @@ impl<Message: 'static> Ui<Message> {
             })
         });
         let focusable = self
-            .all_ids()
-            .into_iter()
+            .ids()
             .filter(|id| {
                 self.is_effectively_interactive(*id)
                     && self.is_focusable_id(*id)

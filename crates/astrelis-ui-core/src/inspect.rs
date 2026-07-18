@@ -95,8 +95,7 @@ impl<Message: 'static> Ui<Message> {
         let mut paint = Vec::new();
         self.collect_paint_order(self.root, &mut paint)?;
         let mut overlays = self
-            .all_ids()
-            .into_iter()
+            .ids()
             .filter(|id| {
                 self.node(*id)
                     .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
@@ -112,7 +111,7 @@ impl<Message: 'static> Ui<Message> {
             .map(|(rank, id)| (id, rank))
             .collect::<HashMap<_, _>>();
         let mut nodes = Vec::new();
-        for id in self.all_ids() {
+        for id in self.ids() {
             let node = self.node(id)?;
             let route = self.route_to(id)?;
             let mut world = Affine2::IDENTITY;

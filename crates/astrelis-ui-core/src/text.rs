@@ -5,8 +5,10 @@ use super::*;
 impl<Message: 'static> Ui<Message> {
     pub(crate) fn prepare_text_layouts(&mut self) -> Result<(), UiError> {
         astrelis_profiling::profile_scope!("ui.shape");
-        let ids = self.all_ids();
-        for id in ids {
+        for index in 0..self.slots.len() {
+            let Some(id) = self.id_at(index) else {
+                continue;
+            };
             let request = match &self.node(id)?.kind {
                 Kind::Label { text } | Kind::Button { text } => {
                     let node = self.node(id)?;

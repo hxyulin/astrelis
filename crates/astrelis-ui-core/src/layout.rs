@@ -459,8 +459,7 @@ impl<Message: 'static> Ui<Message> {
         let mut mapping = HashMap::new();
         let root = self.build_taffy(&mut tree, self.root, &mut mapping)?;
         let mut layouts = self
-            .all_ids()
-            .into_iter()
+            .ids()
             .filter_map(|id| {
                 self.node(id)
                     .ok()
@@ -494,15 +493,16 @@ impl<Message: 'static> Ui<Message> {
         self.assign_layout(&tree, &mapping, self.root, LogicalPoint::ZERO)?;
         self.position_overlays()?;
         if self.focus.is_none() {
-            let autofocus = self.all_ids().into_iter().find(|id| self.node(*id).is_ok_and(|node| matches!(node.kind, Kind::FocusScope { options, .. } if options.autofocus) || matches!(node.kind, Kind::Overlay { options, .. } if options.focus.autofocus)));
-            if let Some(scope) = autofocus
-                && let Some(target) = self.all_ids().into_iter().find(|id| {
+            let autofocus = self.ids().find(|id| self.node(*id).is_ok_and(|node| matches!(node.kind, Kind::FocusScope { options, .. } if options.autofocus) || matches!(node.kind, Kind::Overlay { options, .. } if options.focus.autofocus)));
+            if let Some(scope) = autofocus {
+                let target = self.ids().find(|id| {
                     self.is_descendant_of(*id, scope)
                         && self.is_effectively_interactive(*id)
                         && self.is_focusable_id(*id)
-                })
-            {
-                self.set_focus(Some(target))?;
+                });
+                if let Some(target) = target {
+                    self.set_focus(Some(target))?;
+                }
             }
         }
         self.ensure_caret_visible()?;
@@ -526,8 +526,7 @@ impl<Message: 'static> Ui<Message> {
 
     pub(crate) fn position_overlays(&mut self) -> Result<(), UiError> {
         let overlays = self
-            .all_ids()
-            .into_iter()
+            .ids()
             .filter(|id| {
                 self.node(*id)
                     .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
