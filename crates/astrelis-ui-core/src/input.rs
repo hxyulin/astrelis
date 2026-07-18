@@ -63,23 +63,15 @@ impl<Message: 'static> Ui<Message> {
             Kind::ScrollView { offset, .. } => Point::new(point.x, point.y + offset),
             _ => point,
         };
-        let mut children = node
-            .children
-            .iter()
-            .copied()
-            .enumerate()
-            .collect::<Vec<_>>();
-        children.sort_by_key(|(index, child)| {
-            (self.node(*child).map_or(0, |node| node.z_index), *index)
-        });
-        for (_, child) in children.into_iter().rev() {
+        let ordered = self.z_sorted_children(node);
+        for child in ordered.as_deref().unwrap_or(&node.children).iter().rev() {
             if self
-                .node(child)
+                .node(*child)
                 .is_ok_and(|node| matches!(node.kind, Kind::Overlay { .. }))
             {
                 continue;
             }
-            if let Some(hit) = self.hit_test_node(child, child_point, node.enabled) {
+            if let Some(hit) = self.hit_test_node(*child, child_point, node.enabled) {
                 return Some(hit);
             }
         }

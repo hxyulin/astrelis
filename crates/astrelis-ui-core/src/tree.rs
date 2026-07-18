@@ -685,6 +685,34 @@ impl<Message: 'static> Ui<Message> {
         })
     }
 
+    /// Returns a node's children in ascending z-order, breaking ties by
+    /// insertion order to match the CSS stable-paint rule.
+    ///
+    /// The overwhelmingly common case is a container whose children all share
+    /// one z-index, where the stable sort is a no-op and insertion order is
+    /// already correct. That case returns `None`, letting the caller iterate
+    /// `node.children` directly and skip both the temporary `Vec` and the
+    /// sort — paint, paint-order, and hit testing each ran that allocation and
+    /// sort at every node, the last of them on every pointer move.
+    pub(crate) fn z_sorted_children(&self, node: &Node) -> Option<Vec<ElementId>> {
+        let reference = node
+            .children
+            .first()
+            .map_or(0, |child| self.node(*child).map_or(0, |node| node.z_index));
+        let uniform = node
+            .children
+            .iter()
+            .all(|child| self.node(*child).map_or(true, |node| node.z_index == reference));
+        if uniform {
+            return None;
+        }
+        let mut children = node.children.iter().copied().enumerate().collect::<Vec<_>>();
+        children.sort_by_key(|(index, child)| {
+            (self.node(*child).map_or(0, |node| node.z_index), *index)
+        });
+        Some(children.into_iter().map(|(_, child)| child).collect())
+    }
+
     /// Iterates every live element identity in arena order without allocating.
     ///
     /// This borrows `self` immutably for the lifetime of the iterator, so it

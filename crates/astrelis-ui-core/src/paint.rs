@@ -13,20 +13,12 @@ impl<Message: 'static> Ui<Message> {
             return Ok(());
         }
         output.push(id);
-        let mut children = node
-            .children
-            .iter()
-            .copied()
-            .enumerate()
-            .collect::<Vec<_>>();
-        children.sort_by_key(|(index, child)| {
-            (self.node(*child).map_or(0, |node| node.z_index), *index)
-        });
-        for (_, child) in children {
-            if matches!(self.node(child)?.kind, Kind::Overlay { .. }) {
+        let ordered = self.z_sorted_children(node);
+        for child in ordered.as_deref().unwrap_or(&node.children) {
+            if matches!(self.node(*child)?.kind, Kind::Overlay { .. }) {
                 continue;
             }
-            self.collect_paint_order(child, output)?;
+            self.collect_paint_order(*child, output)?;
         }
         Ok(())
     }
@@ -374,20 +366,12 @@ impl<Message: 'static> Ui<Message> {
                 .transform(Affine2::from_translation(Vec2::new(0.0, -offset)))
                 .map_err(|error| UiError::new(error.to_string()))?;
         }
-        let mut children = node
-            .children
-            .iter()
-            .copied()
-            .enumerate()
-            .collect::<Vec<_>>();
-        children.sort_by_key(|(index, child)| {
-            (self.node(*child).map_or(0, |node| node.z_index), *index)
-        });
-        for (_, child) in children {
-            if matches!(self.node(child)?.kind, Kind::Overlay { .. }) {
+        let ordered = self.z_sorted_children(node);
+        for child in ordered.as_deref().unwrap_or(&node.children) {
+            if matches!(self.node(*child)?.kind, Kind::Overlay { .. }) {
                 continue;
             }
-            self.paint_node(child, painter)?;
+            self.paint_node(*child, painter)?;
         }
         if scroll_offset.is_some() {
             painter
