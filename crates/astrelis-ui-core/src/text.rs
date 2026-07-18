@@ -74,11 +74,28 @@ impl<Message: 'static> Ui<Message> {
                 _ => None,
             };
             if let Some(request) = request {
+                let node = self.node(id)?;
+                // Shaping (BiDi, itemization, fallback, kerning) is the costly
+                // half of text layout, so skip it when neither the string nor
+                // any resolved style input has changed since it last ran. The
+                // dirty flags are global, so without this every label reshapes
+                // on any mutation anywhere in the tree.
+                if node.text_layout.is_some() && node.text_request.as_ref() == Some(&request) {
+                    continue;
+                }
                 let layout = self
                     .text_context
-                    .layout(&mut self.fonts, request)
+                    .layout(&mut self.fonts, request.clone())
                     .map_err(|error| UiError::new(error.to_string()))?;
-                self.node_mut(id)?.text_layout = Some(layout);
+                let node = self.node_mut(id)?;
+                node.text_layout = Some(layout);
+                node.text_request = Some(request);
+            } else {
+                // A node that no longer shapes text (e.g. kind changed) must not
+                // keep a stale cache entry that would suppress future shaping.
+                let node = self.node_mut(id)?;
+                node.text_layout = None;
+                node.text_request = None;
             }
         }
         Ok(())

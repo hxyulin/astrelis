@@ -165,6 +165,9 @@ pub(crate) struct Node {
     pub(crate) cursor: Option<CursorIcon>,
     pub(crate) bounds: LogicalRect,
     pub(crate) text_layout: Option<TextLayout>,
+    /// The request that produced `text_layout`, retained so an unchanged node
+    /// can skip reshaping even when a global dirty pass revisits it.
+    pub(crate) text_request: Option<TextLayoutRequest>,
     pub(crate) hovered: bool,
     pub(crate) pressed: bool,
 }
@@ -216,6 +219,7 @@ impl<Message: 'static> Ui<Message> {
                     cursor: None,
                     bounds: Rect::default(),
                     text_layout: None,
+                    text_request: None,
                     hovered: false,
                     pressed: false,
                 }),
@@ -521,6 +525,7 @@ impl<Message: 'static> Ui<Message> {
             cursor: None,
             bounds: Rect::default(),
             text_layout: None,
+            text_request: None,
             hovered: false,
             pressed: false,
         });
