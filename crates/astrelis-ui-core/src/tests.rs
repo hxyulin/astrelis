@@ -997,3 +997,73 @@ fn checkbox_override_wins_over_theme() {
     });
     assert_eq!(checkbox_fill(&ui.display_list().unwrap()), override_color);
 }
+
+#[test]
+fn light_and_dark_themes_both_render() {
+    use astrelis_paint::Command;
+
+    // The first command is the viewport background fill, so its brush color is
+    // the active theme's `background` token.
+    fn background_fill(list: &DisplayList) -> Color {
+        for command in list.commands() {
+            if let Command::FillRect {
+                brush: Brush::Solid(color),
+                ..
+            } = command
+            {
+                return *color;
+            }
+        }
+        panic!("expected a viewport background fill");
+    }
+
+    let mut ui = ui();
+    let root = ui.root();
+    ui.add_button(root, "ok").unwrap();
+    ui.add_checkbox(root, true).unwrap();
+
+    ui.set_theme(Theme::dark());
+    let dark = ui.display_list().unwrap();
+    assert_eq!(background_fill(&dark), Theme::dark().background);
+
+    ui.set_theme(Theme::light());
+    let light = ui.display_list().unwrap();
+    assert_eq!(background_fill(&light), Theme::light().background);
+
+    assert_ne!(
+        Theme::light().background,
+        Theme::dark().background,
+        "the two themes must be visually distinct"
+    );
+}
+
+#[test]
+fn metric_token_drives_slider_thumb() {
+    use astrelis_paint::Command;
+
+    // The slider thumb is the only ellipse the tree paints; its width reports
+    // the resolved thumb diameter.
+    fn thumb_diameter(list: &DisplayList) -> f32 {
+        for command in list.commands() {
+            if let Command::FillEllipse { rect, .. } = command {
+                return rect.size.width;
+            }
+        }
+        panic!("expected a slider thumb ellipse");
+    }
+
+    let mut ui = ui();
+    let root = ui.root();
+    ui.add_slider(root, 0.0, 1.0, 0.1, 0.5).unwrap();
+
+    assert_eq!(
+        thumb_diameter(&ui.display_list().unwrap()),
+        Theme::default().metrics.slider_thumb
+    );
+
+    // A metric change must flow to paint rather than a hardcoded literal.
+    let mut theme = Theme::default();
+    theme.metrics.slider_thumb = 40.0;
+    ui.set_theme(theme);
+    assert_eq!(thumb_diameter(&ui.display_list().unwrap()), 40.0);
+}

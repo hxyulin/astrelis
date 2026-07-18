@@ -9,14 +9,16 @@ impl<Message: 'static> Ui<Message> {
         for id in ids {
             let request = match &self.node(id)?.kind {
                 Kind::Label { text } | Kind::Button { text } => {
+                    let visual = self.node(id)?.visual;
+                    let enabled = self.node(id)?.enabled;
                     let mut request = TextLayoutRequest::new(text);
-                    request.style.size = self.theme.font_size;
+                    request.style.size = visual.font_size.unwrap_or(self.theme.type_scale.body);
                     request.style.families = self.theme.font_families.clone();
-                    request.style.color = self
-                        .node(id)?
-                        .visual
-                        .foreground
-                        .unwrap_or(self.theme.foreground);
+                    request.style.color = visual.foreground.unwrap_or(if enabled {
+                        self.theme.foreground
+                    } else {
+                        self.theme.disabled_foreground
+                    });
                     request.paragraph = ParagraphStyle {
                         wrap: TextWrap::NoWrap,
                         ..Default::default()
@@ -39,16 +41,18 @@ impl<Message: 'static> Ui<Message> {
                     if shown.is_empty() {
                         shown = field.placeholder.clone();
                     }
+                    let visual = self.node(id)?.visual;
+                    let enabled = self.node(id)?.enabled;
                     let mut request = TextLayoutRequest::new(shown);
-                    request.style.size = self.theme.font_size;
+                    request.style.size = visual.font_size.unwrap_or(self.theme.type_scale.body);
                     request.style.families = self.theme.font_families.clone();
-                    request.style.color = self.node(id)?.visual.foreground.unwrap_or(
-                        if field.text.is_empty() && field.preedit.is_empty() {
-                            self.theme.muted_foreground
-                        } else {
-                            self.theme.foreground
-                        },
-                    );
+                    request.style.color = visual.foreground.unwrap_or(if !enabled {
+                        self.theme.disabled_foreground
+                    } else if field.text.is_empty() && field.preedit.is_empty() {
+                        self.theme.muted_foreground
+                    } else {
+                        self.theme.foreground
+                    });
                     request.paragraph = ParagraphStyle {
                         wrap: TextWrap::NoWrap,
                         ..Default::default()

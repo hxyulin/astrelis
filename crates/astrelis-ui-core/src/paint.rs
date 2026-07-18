@@ -88,6 +88,9 @@ impl<Message: 'static> Ui<Message> {
             | Kind::Padding { .. }
                 if node.visual.background.is_some() =>
             {
+                if matches!(node.kind, Kind::Overlay { .. }) {
+                    self.paint_shadow(painter, node.bounds)?;
+                }
                 painter
                     .fill_rect(
                         node.bounds,
@@ -122,7 +125,7 @@ impl<Message: 'static> Ui<Message> {
                     .background
                     .or(style.background)
                     .unwrap_or(self.theme.button.normal);
-                let radius = style.radius.unwrap_or(self.theme.corner_radius).max(0.0);
+                let radius = style.radius.unwrap_or(self.theme.radii.md).max(0.0);
                 painter
                     .fill_rounded_rect(
                         RoundedRect::new(node.bounds, CornerRadii::uniform(radius))
@@ -131,7 +134,7 @@ impl<Message: 'static> Ui<Message> {
                     )
                     .map_err(|error| UiError::new(error.to_string()))?;
                 if *checked {
-                    let inset = 6.0;
+                    let inset = self.theme.metrics.checkbox_inset;
                     painter
                         .fill_rounded_rect(
                             RoundedRect::new(
@@ -141,7 +144,7 @@ impl<Message: 'static> Ui<Message> {
                                     (node.bounds.size.width - inset * 2.0).max(0.0),
                                     (node.bounds.size.height - inset * 2.0).max(0.0),
                                 ),
-                                CornerRadii::uniform(3.0),
+                                CornerRadii::uniform(self.theme.radii.sm),
                             )
                             .map_err(|error| UiError::new(error.to_string()))?,
                             Brush::Solid(style.indicator.unwrap_or(self.theme.accent)),
@@ -158,17 +161,18 @@ impl<Message: 'static> Ui<Message> {
             } => {
                 let track_color = style.track.unwrap_or(self.theme.button.normal);
                 let thumb_color = style.thumb.unwrap_or(self.theme.accent);
-                let thumb_size = style.thumb_size.unwrap_or(16.0);
+                let thumb_size = style.thumb_size.unwrap_or(self.theme.metrics.slider_thumb);
+                let track_height = self.theme.metrics.slider_track;
                 let center_y = node.bounds.origin.y + node.bounds.size.height * 0.5;
                 let track = Rect::from_xywh(
                     node.bounds.origin.x,
-                    center_y - 2.0,
+                    center_y - track_height * 0.5,
                     node.bounds.size.width,
-                    4.0,
+                    track_height,
                 );
                 painter
                     .fill_rounded_rect(
-                        RoundedRect::new(track, CornerRadii::uniform(2.0))
+                        RoundedRect::new(track, CornerRadii::uniform(track_height * 0.5))
                             .map_err(|error| UiError::new(error.to_string()))?,
                         Brush::Solid(track_color),
                     )
@@ -204,7 +208,7 @@ impl<Message: 'static> Ui<Message> {
         }
 
         if self.focus == Some(id) && self.is_focusable_id(id) {
-            let thickness = 2.0;
+            let thickness = self.theme.metrics.focus_ring;
             let bounds = Rect::from_xywh(
                 node.bounds.origin.x,
                 node.bounds.origin.y,
@@ -352,7 +356,10 @@ impl<Message: 'static> Ui<Message> {
             {
                 let track_color = style.track.unwrap_or(self.theme.button.normal);
                 let thumb_color = style.thumb.unwrap_or(self.theme.accent);
-                let width = style.width.unwrap_or(8.0).max(1.0);
+                let width = style
+                    .width
+                    .unwrap_or(self.theme.metrics.scrollbar_width)
+                    .max(1.0);
                 let track = Rect::from_xywh(
                     node.bounds.max_x() - width,
                     node.bounds.origin.y,
@@ -368,7 +375,7 @@ impl<Message: 'static> Ui<Message> {
                     .map_err(|error| UiError::new(error.to_string()))?;
                 let thumb_height = (node.bounds.size.height * node.bounds.size.height
                     / *content_height)
-                    .max(24.0)
+                    .max(self.theme.metrics.scrollbar_min_thumb)
                     .min(node.bounds.size.height);
                 let travel = node.bounds.size.height - thumb_height;
                 let max_offset = *content_height - node.bounds.size.height;
@@ -399,13 +406,47 @@ impl<Message: 'static> Ui<Message> {
         bounds: LogicalRect,
         color: Color,
     ) -> Result<(), UiError> {
-        let rounded = RoundedRect::new(
-            bounds,
-            CornerRadii::uniform(self.theme.corner_radius.max(0.0)),
-        )
-        .map_err(|error| UiError::new(error.to_string()))?;
+        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(self.theme.radii.md.max(0.0)))
+            .map_err(|error| UiError::new(error.to_string()))?;
         painter
             .fill_rounded_rect(rounded, Brush::Solid(color))
             .map_err(|error| UiError::new(error.to_string()))
+    }
+
+    /// Approximates the theme's drop-shadow behind `bounds`.
+    ///
+    /// `astrelis-paint` has no gaussian-blur primitive, so the penumbra is a
+    /// short stack of translucent rounded rects that grow outward and fade.
+    /// The caller paints the opaque surface over the returned shadow.
+    pub(crate) fn paint_shadow(
+        &self,
+        painter: &mut Painter,
+        bounds: LogicalRect,
+    ) -> Result<(), UiError> {
+        let shadow = self.theme.shadow;
+        if shadow.color.a <= 0.0 || shadow.blur <= 0.0 {
+            return Ok(());
+        }
+        let layers = 4;
+        for i in 0..layers {
+            let step = (i + 1) as f32 / layers as f32;
+            let spread = shadow.blur * step;
+            let mut color = shadow.color;
+            color.a *= (1.0 - step) * 0.6 + 0.1;
+            let rect = Rect::from_xywh(
+                bounds.origin.x + shadow.offset.x - spread,
+                bounds.origin.y + shadow.offset.y - spread,
+                bounds.size.width + spread * 2.0,
+                bounds.size.height + spread * 2.0,
+            );
+            painter
+                .fill_rounded_rect(
+                    RoundedRect::new(rect, CornerRadii::uniform(self.theme.radii.md + spread))
+                        .map_err(|error| UiError::new(error.to_string()))?,
+                    Brush::Solid(color),
+                )
+                .map_err(|error| UiError::new(error.to_string()))?;
+        }
+        Ok(())
     }
 }

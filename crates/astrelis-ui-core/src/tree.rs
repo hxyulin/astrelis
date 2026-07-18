@@ -263,6 +263,11 @@ impl<Message: 'static> Ui<Message> {
         }
     }
 
+    /// Returns the active theme.
+    pub fn theme(&self) -> &Theme {
+        &self.theme
+    }
+
     /// Replaces the active theme.
     pub fn set_theme(&mut self, theme: Theme) {
         if self.theme != theme {

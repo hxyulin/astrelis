@@ -1,6 +1,5 @@
 use std::{cell::Cell, rc::Rc};
 
-use astrelis_core::color::Color;
 use astrelis_platform::{ElementState, Key, NamedKey, PointerButton};
 use astrelis_ui_core::{
     Button, Checkbox, Column, ElementHandle, EventFilter, EventPhase, FocusScopeOptions,
@@ -23,10 +22,11 @@ impl Popover {
     ) -> Result<Self, UiError> {
         let overlay = ui.add_overlay(owner, options)?;
         ui.set_visibility(overlay, Visibility::Hidden)?;
+        let surface = ui.theme().surface;
         ui.set_widget_style(
             overlay,
             WidgetStyle {
-                background: Some(Color::new(0.12, 0.16, 0.26, 1.0)),
+                background: Some(surface),
                 ..Default::default()
             },
         )?;
@@ -152,10 +152,11 @@ impl Tooltip {
                 ..Default::default()
             },
         )?;
+        let surface = ui.theme().surface;
         ui.set_widget_style(
             overlay,
             WidgetStyle {
-                background: Some(Color::new(0.08, 0.1, 0.16, 0.98)),
+                background: Some(surface),
                 ..Default::default()
             },
         )?;

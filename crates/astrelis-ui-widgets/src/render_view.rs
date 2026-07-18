@@ -1,9 +1,6 @@
 use std::any::Any;
 
-use astrelis_core::{
-    color::Color,
-    geometry::{LogicalPoint, LogicalRect, LogicalSize, Physical, Rect, Size},
-};
+use astrelis_core::geometry::{LogicalPoint, LogicalRect, LogicalSize, Physical, Rect, Size};
 use astrelis_paint::{
     Brush, CompositorViewId, CornerRadii, ExternalImage, ImageOptions, ImageSampling, Painter,
     RoundedRect,
@@ -321,16 +318,17 @@ impl<Message: 'static> Widget<Message> for RenderView<Message> {
         &self,
         painter: &mut Painter,
         bounds: LogicalRect,
-        _theme: &Theme,
+        theme: &Theme,
     ) -> Result<(), UiError> {
         let rounded = RoundedRect::new(bounds, CornerRadii::uniform(self.corner_radius))
             .map_err(|e| UiError::from_message(e.to_string()))?;
         match &self.content {
             RenderViewContent::Unavailable => {
-                painter.fill_rounded_rect(rounded, Brush::Solid(Color::from_rgba8(42, 46, 52, 255)))
+                painter.fill_rounded_rect(rounded, Brush::Solid(theme.surface))
             }
-            RenderViewContent::Error(_) => painter
-                .fill_rounded_rect(rounded, Brush::Solid(Color::from_rgba8(120, 24, 30, 255))),
+            RenderViewContent::Error(_) => {
+                painter.fill_rounded_rect(rounded, Brush::Solid(theme.danger))
+            }
             RenderViewContent::Ready {
                 image,
                 source_extent,

@@ -81,7 +81,7 @@ impl Widget<Message> for SettingsSection {
         bounds: astrelis_core::geometry::LogicalRect,
         theme: &Theme,
     ) -> Result<(), astrelis_ui_core::UiError> {
-        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(theme.corner_radius * 1.5))
+        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(theme.radii.lg))
             .map_err(|error| astrelis_ui_core::UiError::from_message(error.to_string()))?;
         painter
             .fill_rounded_rect(rounded, Brush::Solid(theme.field_background))
@@ -90,10 +90,10 @@ impl Widget<Message> for SettingsSection {
             .stroke_rounded_rect(
                 rounded,
                 StrokeStyle {
-                    width: 1.0,
+                    width: theme.border_width,
                     ..Default::default()
                 },
-                Brush::Solid(theme.button.hovered),
+                Brush::Solid(theme.border),
             )
             .map_err(|error| astrelis_ui_core::UiError::from_message(error.to_string()))
     }

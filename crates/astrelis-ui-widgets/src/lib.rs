@@ -140,7 +140,7 @@ impl<Message: 'static> Widget<Message> for DropZone<Message> {
         bounds: LogicalRect,
         theme: &Theme,
     ) -> Result<(), UiError> {
-        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(theme.corner_radius * 1.5))
+        let rounded = RoundedRect::new(bounds, CornerRadii::uniform(theme.radii.lg))
             .map_err(|error| UiError::from_message(error.to_string()))?;
         let background = if self.hovering {
             theme.button.pressed
@@ -154,13 +154,13 @@ impl<Message: 'static> Widget<Message> for DropZone<Message> {
             .stroke_rounded_rect(
                 rounded,
                 StrokeStyle {
-                    width: 2.0,
+                    width: theme.border_width,
                     ..Default::default()
                 },
                 Brush::Solid(if self.hovering {
                     theme.accent
                 } else {
-                    theme.button.hovered
+                    theme.border
                 }),
             )
             .map_err(|error| UiError::from_message(error.to_string()))
