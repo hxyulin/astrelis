@@ -223,7 +223,7 @@ struct FrameBuffer {
     capacity: usize,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct Scissor {
     x: u32,
     y: u32,
@@ -278,6 +278,26 @@ enum DrawKind {
     TextColor(gpu::BindGroup),
     ClipPush,
     ClipPop,
+}
+
+impl DrawKind {
+    /// Reports whether a draw of `other` can be folded into a draw of `self`
+    /// by extending its index range, given equal scissor and stencil.
+    ///
+    /// Content kinds merge when they bind the same resource (solids always do;
+    /// gradients, images, and glyph atlases must be the same bind group). Clip
+    /// stencil operations never merge: each push and pop is a distinct stencil
+    /// state change the pass loop must issue separately.
+    fn mergeable_with(&self, other: &DrawKind) -> bool {
+        match (self, other) {
+            (DrawKind::Solid, DrawKind::Solid) => true,
+            (DrawKind::Gradient(a), DrawKind::Gradient(b))
+            | (DrawKind::Image(a), DrawKind::Image(b))
+            | (DrawKind::TextMask(a), DrawKind::TextMask(b))
+            | (DrawKind::TextColor(a), DrawKind::TextColor(b)) => a.same_resource(b),
+            _ => false,
+        }
+    }
 }
 
 struct Draw {
@@ -922,7 +942,6 @@ impl Renderer {
                     state.clips.len() as u32,
                     stats,
                 );
-                stats.draws += 1;
             }
             Command::DrawExternalImage {
                 image,
@@ -957,7 +976,6 @@ impl Renderer {
                     state.clips.len() as u32,
                     stats,
                 );
-                stats.draws += 1;
             }
             Command::CompositorView { .. } => {
                 // Compositor markers are consumed by `astrelis-compositor` and
@@ -1040,7 +1058,6 @@ impl Renderer {
                         state.clips.len() as u32,
                         stats,
                     );
-                    stats.draws += 1;
                 }
             }
         }
@@ -1210,7 +1227,6 @@ impl Renderer {
                     state.clips.len() as u32,
                     stats,
                 );
-                stats.draws += u32::from(!mesh.indices.is_empty());
             }
             Brush::RadialGradient(gradient) => {
                 let bind = self.gradient_bind_radial(gradient, stats)?;
@@ -1228,7 +1244,6 @@ impl Renderer {
                     state.clips.len() as u32,
                     stats,
                 );
-                stats.draws += u32::from(!mesh.indices.is_empty());
             }
         }
         Ok(())
@@ -1760,7 +1775,6 @@ fn draw_solid(
         state.clips.len() as u32,
         stats,
     );
-    stats.draws += u32::from(!mesh.indices.is_empty());
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1805,12 +1819,28 @@ fn append(
         });
     }
     indices.extend(mesh.indices.iter().map(|index| base + index));
-    draws.push(Draw {
-        kind,
-        indices: first..indices.len() as u32,
-        scissor,
-        stencil,
-    });
+    let end = indices.len() as u32;
+    // Vertices already share one buffer and indices are appended in draw
+    // order, so a compatible neighbour is simply an index-range extension: no
+    // pipeline switch, no rebind, one draw_indexed instead of two. The glyph
+    // path leans on this hardest, collapsing a per-glyph draw into one draw per
+    // text run over the shared atlas.
+    if let Some(last) = draws.last_mut()
+        && last.indices.end == first
+        && last.scissor == scissor
+        && last.stencil == stencil
+        && last.kind.mergeable_with(&kind)
+    {
+        last.indices.end = end;
+    } else {
+        draws.push(Draw {
+            kind,
+            indices: first..end,
+            scissor,
+            stencil,
+        });
+        stats.draws += 1;
+    }
     stats.triangles += mesh.indices.len() as u32 / 3;
 }
 

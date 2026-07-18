@@ -454,3 +454,97 @@ fn renders_solid_stencil_clip_and_reuses_mesh() {
         readback.unmap();
     });
 }
+
+/// A single line of many distinct glyphs shares one atlas bind group, so the
+/// per-glyph draws must coalesce into a single index-range draw. This locks in
+/// the draw-call merge and its RenderStats reporting.
+#[test]
+fn merges_a_glyph_run_into_one_draw() {
+    let _guard = gpu_test_lock().lock().expect("GPU test lock poisoned");
+    pollster::block_on(async {
+        let instance = astrelis_gpu_wgpu::create_instance(Default::default());
+        let adapter = match instance
+            .request_adapter(RequestAdapterOptions::default())
+            .await
+        {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                eprintln!("skipping paint GPU test: {error}");
+                return;
+            }
+        };
+        let (device, queue) = adapter
+            .request_device(DeviceDescriptor::default())
+            .await
+            .expect("request device");
+        let texture = device.create_texture(TextureDescriptor {
+            label: Some("glyph merge target".into()),
+            size: Extent3d::d2(512, 32),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+        });
+        let view = texture.create_view(TextureViewDescriptor::default());
+
+        let mut fonts = FontDatabase::default();
+        let mut text_context = TextLayoutContext::new();
+        let mut request = TextLayoutRequest::new("the quick brown fox jumps over the lazy dog");
+        request.style.size = 16.0;
+        request.style.color = Color::WHITE;
+        let text = text_context
+            .layout(&mut fonts, request)
+            .expect("text layout");
+        let glyph_count: usize = text
+            .glyph_runs()
+            .iter()
+            .map(|run| run.glyphs.len())
+            .sum();
+        assert!(
+            glyph_count >= 30,
+            "fixture should shape many glyphs, got {glyph_count}"
+        );
+
+        let mut painter = Painter::new();
+        painter
+            .draw_text(&text, Point::new(1.0, 20.0), 1.0)
+            .unwrap();
+        let list = painter.finish().unwrap();
+
+        let mut renderer = Renderer::new(
+            device.clone(),
+            queue.clone(),
+            RendererOptions {
+                antialiasing: Antialiasing::None,
+                ..Default::default()
+            },
+        )
+        .expect("renderer");
+        let mut encoder = device.create_command_encoder(CommandEncoderDescriptor::default());
+        let stats = renderer
+            .render(
+                &mut encoder,
+                &list,
+                RenderTarget {
+                    view: view.clone(),
+                    format: TextureFormat::Rgba8Unorm,
+                    size: Size::new(512, 32),
+                    scale_factor: 1.0,
+                    clear_color: Color::BLACK,
+                },
+            )
+            .expect("render");
+        queue
+            .submit([encoder.finish().expect("finish encoder")])
+            .expect("submit");
+
+        // Every mask glyph in the run binds the same atlas, so the whole run
+        // collapses to one draw regardless of glyph count.
+        assert_eq!(
+            stats.draws, 1,
+            "expected {glyph_count} glyphs to merge into a single draw, got {} draws",
+            stats.draws
+        );
+    });
+}

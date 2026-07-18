@@ -106,6 +106,18 @@ shared_handle!(PipelineLayout, backend::PipelineLayout);
 shared_handle!(BindGroup, backend::BindGroup);
 shared_handle!(ComputePipeline, backend::ComputePipeline);
 
+impl BindGroup {
+    /// Reports whether two handles refer to the same underlying bind group.
+    ///
+    /// This is a pointer-identity check on the shared backend storage, not a
+    /// descriptor comparison: two bind groups built from equal descriptors are
+    /// distinct resources and compare unequal. Callers use it to coalesce
+    /// consecutive draws that reuse one bound resource.
+    pub fn same_resource(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+}
+
 impl Instance {
     /// Wraps backend instance storage.
     pub fn from_backend(inner: Arc<dyn backend::Instance>) -> Self {
