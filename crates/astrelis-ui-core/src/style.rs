@@ -285,9 +285,9 @@ impl Theme {
                 scrollbar_min_thumb: 24.0,
             },
             shadow: Shadow {
-                color: Color::new(0.0, 0.0, 0.0, 0.45),
-                offset: Vec2::new(0.0, 6.0),
-                blur: 16.0,
+                color: Color::new(0.0, 0.0, 0.0, 0.40),
+                offset: Vec2::new(0.0, 4.0),
+                blur: 13.0,
             },
             font_families: vec![FontFamily::SansSerif],
             gap: 10.0,
@@ -307,7 +307,7 @@ impl Theme {
     /// measure the same content identically.
     pub fn light() -> Self {
         Self {
-            background: Color::new(0.96, 0.97, 0.99, 1.0),
+            background: Color::new(0.90, 0.91, 0.94, 1.0),
             surface: Color::new(1.0, 1.0, 1.0, 1.0),
             foreground: Color::new(0.10, 0.12, 0.16, 1.0),
             muted_foreground: Color::new(0.40, 0.44, 0.50, 1.0),
@@ -318,17 +318,17 @@ impl Theme {
             success: Color::new(0.16, 0.58, 0.30, 1.0),
             warning: Color::new(0.78, 0.54, 0.10, 1.0),
             button: ControlColors {
-                normal: Color::new(0.90, 0.92, 0.96, 1.0),
-                hovered: Color::new(0.84, 0.87, 0.93, 1.0),
-                pressed: Color::new(0.72, 0.82, 0.96, 1.0),
-                disabled: Color::new(0.92, 0.93, 0.95, 1.0),
+                normal: Color::new(1.0, 1.0, 1.0, 1.0),
+                hovered: Color::new(0.93, 0.94, 0.97, 1.0),
+                pressed: Color::new(0.85, 0.89, 0.98, 1.0),
+                disabled: Color::new(0.94, 0.95, 0.96, 1.0),
             },
             field_background: Color::new(1.0, 1.0, 1.0, 1.0),
-            border: Color::new(0.78, 0.81, 0.86, 1.0),
+            border: Color::new(0.76, 0.79, 0.85, 1.0),
             shadow: Shadow {
-                color: Color::new(0.10, 0.12, 0.18, 0.20),
-                offset: Vec2::new(0.0, 6.0),
-                blur: 18.0,
+                color: Color::new(0.10, 0.12, 0.18, 0.18),
+                offset: Vec2::new(0.0, 4.0),
+                blur: 14.0,
             },
             ..Self::dark()
         }
