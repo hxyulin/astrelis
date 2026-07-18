@@ -1067,3 +1067,41 @@ fn metric_token_drives_slider_thumb() {
     ui.set_theme(theme);
     assert_eq!(thumb_diameter(&ui.display_list().unwrap()), 40.0);
 }
+
+#[test]
+fn disabling_a_checkbox_changes_its_box_fill() {
+    use astrelis_paint::Command;
+
+    // The checkbox box is the first filled rounded rect in the tree.
+    fn checkbox_fill(list: &DisplayList) -> Color {
+        for command in list.commands() {
+            if let Command::FillRoundedRect {
+                brush: Brush::Solid(color),
+                ..
+            } = command
+            {
+                return *color;
+            }
+        }
+        panic!("expected a filled checkbox box in the display list");
+    }
+
+    let mut ui = ui();
+    let root = ui.root();
+    let checkbox = ui.add_checkbox(root, false).unwrap();
+
+    let theme = Theme::default();
+    assert_eq!(
+        checkbox_fill(&ui.display_list().unwrap()),
+        theme.button.normal
+    );
+
+    // Disabling now resolves the box through the shared state ladder, so it
+    // paints the disabled color instead of staying at the normal one.
+    ui.set_enabled(checkbox, false).unwrap();
+    assert_eq!(
+        checkbox_fill(&ui.display_list().unwrap()),
+        theme.button.disabled,
+        "a disabled checkbox must show the disabled color"
+    );
+}

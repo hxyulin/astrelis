@@ -85,15 +85,23 @@ impl<Message: 'static> Ui<Message> {
                 // Resolve the surface from the theme at paint time so it tracks
                 // set_theme; an explicit override still wins.
                 let background = node.visual.background.unwrap_or(self.theme.surface);
+                let rounded = RoundedRect::new(
+                    node.bounds,
+                    CornerRadii::uniform(self.theme.radii.md.max(0.0)),
+                )
+                .map_err(|error| UiError::new(error.to_string()))?;
                 self.paint_shadow(painter, node.bounds)?;
                 painter
-                    .fill_rounded_rect(
-                        RoundedRect::new(
-                            node.bounds,
-                            CornerRadii::uniform(self.theme.radii.md.max(0.0)),
-                        )
-                        .map_err(|error| UiError::new(error.to_string()))?,
-                        Brush::Solid(background),
+                    .fill_rounded_rect(rounded, Brush::Solid(background))
+                    .map_err(|error| UiError::new(error.to_string()))?;
+                painter
+                    .stroke_rounded_rect(
+                        rounded,
+                        StrokeStyle {
+                            width: self.theme.border_width,
+                            ..Default::default()
+                        },
+                        Brush::Solid(self.theme.border),
                     )
                     .map_err(|error| UiError::new(error.to_string()))?;
             }
@@ -133,11 +141,18 @@ impl<Message: 'static> Ui<Message> {
                 )?;
             }
             Kind::Checkbox { checked, style } => {
+                // Only enabled/disabled applies to a checkbox box; there is no
+                // hover or press visual, so both are false in the resolve.
+                let resolved = self.theme.button.resolve(ControlState {
+                    enabled: node.enabled,
+                    hovered: false,
+                    pressed: false,
+                });
                 let background = node
                     .visual
                     .background
                     .or(style.background)
-                    .unwrap_or(self.theme.button.normal);
+                    .unwrap_or(resolved);
                 let radius = style.radius.unwrap_or(self.theme.radii.md).max(0.0);
                 painter
                     .fill_rounded_rect(
@@ -160,7 +175,11 @@ impl<Message: 'static> Ui<Message> {
                                 CornerRadii::uniform(self.theme.radii.sm),
                             )
                             .map_err(|error| UiError::new(error.to_string()))?,
-                            Brush::Solid(style.indicator.unwrap_or(self.theme.accent)),
+                            Brush::Solid(style.indicator.unwrap_or(if node.enabled {
+                                self.theme.accent
+                            } else {
+                                self.theme.disabled_foreground
+                            })),
                         )
                         .map_err(|error| UiError::new(error.to_string()))?;
                 }
@@ -172,8 +191,23 @@ impl<Message: 'static> Ui<Message> {
                 style,
                 ..
             } => {
-                let track_color = style.track.unwrap_or(self.theme.button.normal);
-                let thumb_color = style.thumb.unwrap_or(self.theme.accent);
+                let track_color = style.track.unwrap_or_else(|| {
+                    self.theme.button.resolve(ControlState {
+                        enabled: node.enabled,
+                        hovered: false,
+                        pressed: false,
+                    })
+                });
+                let thumb_color = style.thumb.unwrap_or(if node.enabled {
+                    self.theme.accent
+                } else {
+                    self.theme.disabled_foreground
+                });
+                let outline_color = if node.enabled {
+                    self.theme.foreground
+                } else {
+                    self.theme.disabled_foreground
+                };
                 let thumb_size = style.thumb_size.unwrap_or(self.theme.metrics.slider_thumb);
                 let track_height = self.theme.metrics.slider_track;
                 let center_y = node.bounds.origin.y + node.bounds.size.height * 0.5;
@@ -207,7 +241,7 @@ impl<Message: 'static> Ui<Message> {
                             width: 1.0,
                             ..Default::default()
                         },
-                        Brush::Solid(self.theme.foreground),
+                        Brush::Solid(outline_color),
                     )
                     .map_err(|error| UiError::new(error.to_string()))?;
             }
