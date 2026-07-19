@@ -110,6 +110,24 @@ fn semantic_tree_contains_roles_values_and_selection() {
 }
 
 #[test]
+fn semantic_tree_exposes_shell_metadata() {
+    let mut ui = ui();
+    let dialog = ui.add_column(ui.root()).unwrap();
+    ui.set_semantic_role(dialog, SemanticRole::Dialog).unwrap();
+    ui.set_semantic_description(dialog, Some("Resolve the conflict".into()))
+        .unwrap();
+    ui.set_semantic_invalid(dialog, true).unwrap();
+    ui.set_semantic_live(dialog, SemanticLive::Assertive)
+        .unwrap();
+    let tree = ui.semantic_tree().unwrap();
+    let node = &tree.children[0];
+    assert_eq!(node.role, SemanticRole::Dialog);
+    assert_eq!(node.description.as_deref(), Some("Resolve the conflict"));
+    assert!(node.invalid);
+    assert_eq!(node.live, SemanticLive::Assertive);
+}
+
+#[test]
 fn grapheme_deletion_does_not_split_unicode() {
     let mut ui = ui();
     let root = ui.root();

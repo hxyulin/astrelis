@@ -3,6 +3,11 @@
 use super::*;
 
 impl<Message: 'static> Ui<Message> {
+    /// Moves keyboard focus to an eligible retained element.
+    pub fn focus<T>(&mut self, handle: ElementHandle<T>) -> Result<(), UiError> {
+        self.set_focus(Some(handle.id))
+    }
+
     /// Changes the gap and cross-axis alignment of a row or column.
     pub fn set_flex<T>(
         &mut self,
@@ -58,6 +63,9 @@ impl<Message: 'static> Ui<Message> {
         self.capture.retain(|_, captured| *captured != id);
         self.listeners.remove(&id);
         self.semantic_roles.remove(&id);
+        self.semantic_descriptions.remove(&id);
+        self.semantic_invalid.remove(&id);
+        self.semantic_live.remove(&id);
         if let Some(mut widget) = self.custom_widgets.remove(&id) {
             widget.unmounted();
         }
@@ -523,6 +531,54 @@ impl<Message: 'static> Ui<Message> {
     ) -> Result<(), UiError> {
         self.node(handle.id)?;
         self.semantic_roles.insert(handle.id, role);
+        self.dirty |= Dirty::SEMANTICS;
+        Ok(())
+    }
+
+    /// Sets or clears the accessible description for one retained element.
+    pub fn set_semantic_description<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        description: Option<String>,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        if let Some(description) = description {
+            self.semantic_descriptions.insert(handle.id, description);
+        } else {
+            self.semantic_descriptions.remove(&handle.id);
+        }
+        self.dirty |= Dirty::SEMANTICS;
+        Ok(())
+    }
+
+    /// Sets whether one retained element exposes an invalid value.
+    pub fn set_semantic_invalid<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        invalid: bool,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        if invalid {
+            self.semantic_invalid.insert(handle.id);
+        } else {
+            self.semantic_invalid.remove(&handle.id);
+        }
+        self.dirty |= Dirty::SEMANTICS;
+        Ok(())
+    }
+
+    /// Sets live-region announcement behavior for one retained element.
+    pub fn set_semantic_live<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        live: SemanticLive,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        if live == SemanticLive::Off {
+            self.semantic_live.remove(&handle.id);
+        } else {
+            self.semantic_live.insert(handle.id, live);
+        }
         self.dirty |= Dirty::SEMANTICS;
         Ok(())
     }

@@ -82,6 +82,7 @@ impl backend::Window for WinitWindow {
                 self.native.set_maximized(value);
                 None
             }
+            WindowCommand::IsMaximized => Some(WindowValue::Bool(self.native.is_maximized())),
             WindowCommand::SetFullscreen(value) => {
                 self.native.set_fullscreen(
                     value.then(|| {

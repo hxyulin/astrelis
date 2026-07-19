@@ -205,6 +205,8 @@ pub enum WindowCommand {
     SetMinimized(bool),
     /// Set maximized.
     SetMaximized(bool),
+    /// Query maximized state.
+    IsMaximized,
     /// Set borderless fullscreen.
     SetFullscreen(bool),
     /// Set resizability.
@@ -326,6 +328,13 @@ impl Window {
     /// Changes maximized state.
     pub fn set_maximized(&self, value: bool) {
         let _ = self.command(WindowCommand::SetMaximized(value));
+    }
+    /// Reports whether the window is maximized.
+    pub fn is_maximized(&self) -> bool {
+        matches!(
+            self.command(WindowCommand::IsMaximized),
+            Ok(Some(WindowValue::Bool(true)))
+        )
     }
     /// Enables borderless fullscreen on the current monitor.
     pub fn set_borderless_fullscreen(&self, value: bool) {

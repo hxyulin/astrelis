@@ -464,6 +464,7 @@ impl<T: Send + 'static> backend::Window for TestWindow<T> {
             WindowCommand::OuterPosition => Some(WindowValue::PhysicalPosition(Point::new(0, 0))),
             WindowCommand::ScaleFactor => Some(WindowValue::Float(1.0)),
             WindowCommand::IsFocused => Some(WindowValue::Bool(false)),
+            WindowCommand::IsMaximized => Some(WindowValue::Bool(false)),
             WindowCommand::Theme => Some(WindowValue::Theme(None)),
             WindowCommand::CurrentMonitor => Some(WindowValue::Monitor(None)),
             WindowCommand::SetCursorGrab(_)
@@ -540,6 +541,28 @@ mod tests {
             }
         }
         runner.run(HandleApp).unwrap();
+    }
+
+    #[test]
+    fn scripted_window_reports_and_records_maximized_query() {
+        struct MaximizedApp;
+        impl Application for MaximizedApp {
+            type UserEvent = ();
+            fn resumed(&mut self, context: &mut PlatformContext<'_, ()>) {
+                let window = context.create_window(WindowAttributes::default()).unwrap();
+                assert!(!window.is_maximized());
+                context.exit();
+            }
+        }
+        let mut runner = TestRunner::new();
+        runner.push(ScriptEvent::Resumed);
+        let state = runner.run(MaximizedApp).unwrap();
+        assert!(
+            state.windows[0]
+                .1
+                .commands
+                .contains(&WindowCommand::IsMaximized)
+        );
     }
 
     #[test]

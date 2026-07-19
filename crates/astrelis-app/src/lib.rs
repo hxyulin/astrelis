@@ -413,6 +413,16 @@ pub struct AppContext<'a, 'platform, A: App> {
 }
 
 impl<A: App> AppContext<'_, '_, A> {
+    /// Returns all currently available monitors.
+    pub fn available_monitors(&self) -> Vec<astrelis_platform::Monitor> {
+        self.platform.available_monitors()
+    }
+
+    /// Returns the platform's primary monitor when known.
+    pub fn primary_monitor(&self) -> Option<astrelis_platform::Monitor> {
+        self.platform.primary_monitor()
+    }
+
     /// Creates and registers a native window.
     pub fn create_window(&mut self, attributes: WindowAttributes) -> Result<Window, PlatformError> {
         let window = self.platform.create_window(attributes)?;

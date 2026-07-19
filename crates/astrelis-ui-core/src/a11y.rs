@@ -43,6 +43,26 @@ pub enum SemanticRole {
     ListItem,
     /// Group of labeled form controls.
     Form,
+    /// Application command toolbar.
+    Toolbar,
+    /// Modal or modeless dialog surface.
+    Dialog,
+    /// Important time-sensitive message.
+    Alert,
+    /// Non-interrupting application status message.
+    Status,
+}
+
+/// How changes to a semantic node should be announced.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SemanticLive {
+    /// Do not announce changes automatically.
+    #[default]
+    Off,
+    /// Announce when convenient without interrupting current speech.
+    Polite,
+    /// Announce immediately.
+    Assertive,
 }
 
 /// Semantic operation supported by a node.
@@ -97,6 +117,12 @@ pub struct SemanticNode {
     pub label: String,
     /// Accessible value.
     pub value: Option<String>,
+    /// Additional accessible description.
+    pub description: Option<String>,
+    /// Whether the represented value is invalid.
+    pub invalid: bool,
+    /// Live-region announcement behavior.
+    pub live: SemanticLive,
     /// Whether the element accepts focus.
     pub focusable: bool,
     /// Whether the element currently has focus.
@@ -190,6 +216,9 @@ impl<Message: 'static> Ui<Message> {
             bounds: node.bounds,
             label,
             value,
+            description: self.semantic_descriptions.get(&id).cloned(),
+            invalid: self.semantic_invalid.contains(&id),
+            live: self.semantic_live.get(&id).copied().unwrap_or_default(),
             focusable: self.is_focusable_id(id),
             focused: self.focus == Some(id),
             enabled: self.is_effectively_interactive(id),
