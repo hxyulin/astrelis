@@ -4,7 +4,7 @@ use astrelis_platform::{ElementState, Key, NamedKey, PointerButton};
 use astrelis_ui_core::{
     Button, Checkbox, Column, ElementHandle, EventFilter, EventPhase, FocusScopeOptions,
     LayoutStyle, Length, Overlay, OverlayOptions, OverlaySide, RoutedEventKind, SemanticRole,
-    Slider, TextField, Ui, UiError, Visibility,
+    Slider, TextField, Ui, UiError, Visibility, WidgetStyle,
 };
 
 /// Click-controlled arbitrary-content viewport overlay.
@@ -145,6 +145,13 @@ impl Tooltip {
         let insets = ui.theme().control_padding;
         let content = ui.add_padding(overlay, insets)?;
         let label = ui.add_label(content, text)?;
+        ui.set_widget_style(
+            label,
+            WidgetStyle {
+                font_size: Some(ui.theme().type_scale.caption),
+                ..Default::default()
+            },
+        )?;
         ui.set_layout(
             label,
             LayoutStyle {
