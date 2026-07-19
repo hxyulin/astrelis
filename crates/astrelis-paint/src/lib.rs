@@ -15,7 +15,7 @@ use std::{
 use astrelis_core::{
     color::Color,
     geometry::{LogicalPoint, LogicalRect, Physical, Point, Rect, Size},
-    math::Affine2,
+    math::{Affine2, Vec2},
 };
 use astrelis_text::TextLayout;
 
@@ -520,6 +520,37 @@ fn ratio(limit: f32, sum: f32) -> f32 {
     if sum > 0.0 { limit / sum } else { 1.0 }
 }
 
+/// Drop-shadow parameters for a rounded rectangle.
+///
+/// The shadow is painted across the whole shadow area, including the pixels
+/// under the casting rectangle (CSS `box-shadow` semantics); callers paint the
+/// opaque surface on top of it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShadowStyle {
+    /// Linear-space shadow color including alpha.
+    pub color: Color,
+    /// Gaussian blur radius in logical units (`sigma = blur_radius / 2`).
+    pub blur_radius: f32,
+    /// Logical offset of the shadow from the casting rectangle.
+    pub offset: Vec2,
+    /// Outward expansion of the rectangle before blurring (may be negative).
+    pub spread: f32,
+    /// Draws the shadow inside the rectangle instead of behind it.
+    pub inset: bool,
+}
+
+impl Default for ShadowStyle {
+    fn default() -> Self {
+        Self {
+            color: Color::new(0.0, 0.0, 0.0, 0.35),
+            blur_radius: 12.0,
+            offset: Vec2::new(0.0, 4.0),
+            spread: 0.0,
+            inset: false,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct ImageData {
     id: u64,
@@ -701,6 +732,11 @@ pub enum Command {
     FillRoundedRect { rect: RoundedRect, brush: Brush },
     /// Fills an ellipse bounded by a rectangle.
     FillEllipse { rect: LogicalRect, brush: Brush },
+    /// Draws an analytic gaussian drop shadow for a rounded rectangle.
+    DrawShadow {
+        rect: RoundedRect,
+        shadow: ShadowStyle,
+    },
     /// Strokes a rectangle with a centered stroke.
     StrokeRect {
         rect: LogicalRect,
@@ -889,6 +925,7 @@ impl DisplayList {
                 Command::FillRect { .. }
                 | Command::FillRoundedRect { .. }
                 | Command::FillEllipse { .. }
+                | Command::DrawShadow { .. }
                 | Command::StrokeRect { .. }
                 | Command::StrokeRoundedRect { .. }
                 | Command::StrokeEllipse { .. }
@@ -952,6 +989,7 @@ impl DisplayList {
                 Command::FillRect { .. }
                 | Command::FillRoundedRect { .. }
                 | Command::FillEllipse { .. }
+                | Command::DrawShadow { .. }
                 | Command::StrokeRect { .. }
                 | Command::StrokeRoundedRect { .. }
                 | Command::StrokeEllipse { .. }
@@ -990,6 +1028,7 @@ impl DisplayList {
                 Command::FillRect { .. }
                 | Command::FillRoundedRect { .. }
                 | Command::FillEllipse { .. }
+                | Command::DrawShadow { .. }
                 | Command::StrokeRect { .. }
                 | Command::StrokeRoundedRect { .. }
                 | Command::StrokeEllipse { .. }
@@ -1138,6 +1177,16 @@ impl Painter {
         validate_rect(rect)?;
         validate_brush(&brush)?;
         self.commands.push(Command::FillEllipse { rect, brush });
+        Ok(())
+    }
+
+    /// Draws an analytic gaussian drop shadow for a rounded rectangle.
+    ///
+    /// The shadow covers the area under `rect` as well (CSS `box-shadow`
+    /// semantics); paint the surface on top of it.
+    pub fn draw_shadow(&mut self, rect: RoundedRect, shadow: ShadowStyle) -> Result<(), PaintError> {
+        validate_shadow(shadow)?;
+        self.commands.push(Command::DrawShadow { rect, shadow });
         Ok(())
     }
 
@@ -1437,6 +1486,22 @@ fn validate_opacity(opacity: f32) -> Result<(), PaintError> {
     }
 }
 
+fn validate_shadow(shadow: ShadowStyle) -> Result<(), PaintError> {
+    validate_color(shadow.color)?;
+    if !shadow.blur_radius.is_finite() || shadow.blur_radius < 0.0 {
+        return Err(PaintError::new(
+            "shadow blur radius must be finite and non-negative",
+        ));
+    }
+    if !shadow.offset.x.is_finite() || !shadow.offset.y.is_finite() {
+        return Err(PaintError::new("shadow offset must be finite"));
+    }
+    if !shadow.spread.is_finite() {
+        return Err(PaintError::new("shadow spread must be finite"));
+    }
+    Ok(())
+}
+
 fn validate_stroke(style: StrokeStyle) -> Result<(), PaintError> {
     if !style.width.is_finite() || style.width < 0.0 {
         return Err(PaintError::new(
@@ -1529,6 +1594,78 @@ mod tests {
                 ],
             )
             .is_err()
+        );
+    }
+
+    #[test]
+    fn validates_shadows() {
+        let rect = RoundedRect::new(Rect::from_xywh(0.0, 0.0, 20.0, 10.0), CornerRadii::uniform(3.0))
+            .unwrap();
+        let mut painter = Painter::new();
+        assert!(painter.draw_shadow(rect, ShadowStyle::default()).is_ok());
+        assert!(
+            painter
+                .draw_shadow(
+                    rect,
+                    ShadowStyle {
+                        blur_radius: -1.0,
+                        ..Default::default()
+                    },
+                )
+                .is_err()
+        );
+        assert!(
+            painter
+                .draw_shadow(
+                    rect,
+                    ShadowStyle {
+                        blur_radius: f32::NAN,
+                        ..Default::default()
+                    },
+                )
+                .is_err()
+        );
+        assert!(
+            painter
+                .draw_shadow(
+                    rect,
+                    ShadowStyle {
+                        offset: Vec2::new(f32::INFINITY, 0.0),
+                        ..Default::default()
+                    },
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn shadows_stay_in_their_own_composition_layer() {
+        let rect = RoundedRect::new(Rect::from_xywh(0.0, 0.0, 20.0, 10.0), CornerRadii::uniform(3.0))
+            .unwrap();
+        let mut painter = Painter::new();
+        painter.draw_shadow(rect, ShadowStyle::default()).unwrap();
+        painter
+            .compositor_view(
+                CompositorViewId::new(),
+                Rect::from_xywh(0.0, 0.0, 8.0, 8.0),
+                false,
+            )
+            .unwrap();
+        let list = painter.finish().unwrap();
+        let plan = list.composition_plan();
+        assert_eq!(plan.layers.len(), 2);
+        let shadow_count = |layer: &DisplayList| {
+            layer
+                .commands()
+                .iter()
+                .filter(|command| matches!(command, Command::DrawShadow { .. }))
+                .count()
+        };
+        assert_eq!(shadow_count(&plan.layers[0]), 1);
+        assert_eq!(shadow_count(&plan.layers[1]), 0);
+        assert_eq!(
+            shadow_count(&list.compositor_clear_layer(0, Color::BLACK)),
+            0
         );
     }
 

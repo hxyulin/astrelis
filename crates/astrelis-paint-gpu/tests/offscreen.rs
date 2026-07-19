@@ -11,8 +11,8 @@ use astrelis_gpu::{
     TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureViewDescriptor,
 };
 use astrelis_paint::{
-    Brush, ExternalImage, FillRule, GradientStop, ImageOptions, LinearGradient, Painter, Path,
-    RadialGradient,
+    Brush, CornerRadii, ExternalImage, FillRule, GradientStop, ImageOptions, LinearGradient,
+    Painter, Path, RadialGradient, RoundedRect, ShadowStyle,
 };
 use astrelis_paint_gpu::{Antialiasing, RenderTarget, Renderer, RendererOptions};
 use astrelis_text::{FontDatabase, TextLayoutContext, TextLayoutRequest};
@@ -542,5 +542,169 @@ fn merges_a_glyph_run_into_one_draw() {
             "expected {glyph_count} glyphs to merge into a single draw, got {} draws",
             stats.draws
         );
+    });
+}
+
+/// The analytic shadow must produce a soft gaussian penumbra that follows the
+/// configured offset, respect clips, and reuse its uniform bind group across
+/// frames.
+#[test]
+fn renders_analytic_shadow_and_reuses_cache() {
+    let _guard = gpu_test_lock().lock().expect("GPU test lock poisoned");
+    pollster::block_on(async {
+        let instance = astrelis_gpu_wgpu::create_instance(Default::default());
+        let adapter = match instance
+            .request_adapter(RequestAdapterOptions::default())
+            .await
+        {
+            Ok(adapter) => adapter,
+            Err(error) => {
+                eprintln!("skipping shadow GPU test: {error}");
+                return;
+            }
+        };
+        let (device, queue) = adapter
+            .request_device(DeviceDescriptor::default())
+            .await
+            .expect("request device");
+        let texture = device.create_texture(TextureDescriptor {
+            label: Some("shadow paint target".into()),
+            size: Extent3d::d2(64, 64),
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Rgba8Unorm,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+        });
+        let view = texture.create_view(TextureViewDescriptor::default());
+        let mut renderer = Renderer::new(
+            device.clone(),
+            queue.clone(),
+            RendererOptions {
+                antialiasing: Antialiasing::None,
+                ..Default::default()
+            },
+        )
+        .expect("renderer");
+        let render_target = || RenderTarget {
+            view: view.clone(),
+            format: TextureFormat::Rgba8Unorm,
+            size: Size::new(64, 64),
+            scale_factor: 1.0,
+            clear_color: Color::BLACK,
+        };
+        let rect = RoundedRect::new(
+            Rect::from_xywh(16.0, 16.0, 32.0, 32.0),
+            CornerRadii::uniform(6.0),
+        )
+        .expect("rounded rect");
+        let shadow = ShadowStyle {
+            color: Color::WHITE,
+            blur_radius: 8.0,
+            offset: Vec2::new(0.0, 4.0),
+            spread: 0.0,
+            inset: false,
+        };
+        let mut painter = Painter::new();
+        painter.draw_shadow(rect, shadow).expect("record shadow");
+        let list = painter.finish().expect("finish display list");
+
+        let mut encoder = device.create_command_encoder(CommandEncoderDescriptor::default());
+        let first = renderer
+            .render(&mut encoder, &list, render_target())
+            .expect("first shadow render");
+        queue
+            .submit([encoder.finish().expect("finish first encoder")])
+            .expect("submit first");
+        let mut encoder = device.create_command_encoder(CommandEncoderDescriptor::default());
+        let second = renderer
+            .render(&mut encoder, &list, render_target())
+            .expect("second shadow render");
+        assert_eq!(first.shadow_cache_misses, 1);
+        assert_eq!(second.shadow_cache_hits, 1);
+
+        let readback = device.create_buffer(BufferDescriptor {
+            label: Some("shadow readback".into()),
+            size: 256 * 64,
+            usage: BufferUsages::COPY_DST | BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        encoder
+            .copy_texture_to_buffer(
+                &TextureCopy {
+                    texture: texture.clone(),
+                    mip_level: 0,
+                    origin: Default::default(),
+                },
+                &BufferTextureCopy {
+                    buffer: readback.clone(),
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(64),
+                },
+                Extent3d::d2(64, 64),
+            )
+            .expect("copy target");
+        queue
+            .submit([encoder.finish().expect("finish second encoder")])
+            .expect("submit second");
+        let mapping = readback.map_async(MapMode::Read, 0..256 * 64);
+        device.poll(PollMode::Wait).expect("wait");
+        mapping.await.expect("map");
+        let bytes = readback.read_mapped(0..256 * 64).expect("read");
+        let luminance = |x: usize, y: usize| bytes[y * 256 + x * 4] as i32;
+        // Solid under the rect, then a monotonic gaussian falloff below the
+        // (offset) bottom edge at y = 52.
+        assert!(luminance(32, 34) > 240, "center should be near-solid");
+        assert!(luminance(32, 50) > luminance(32, 54));
+        assert!(luminance(32, 54) > luminance(32, 58));
+        assert!(luminance(32, 58) > luminance(32, 62));
+        // The +4 y offset shifts the penumbra downward: one pixel below the
+        // bottom edge is far brighter than the mirrored distance above the top.
+        assert!(luminance(32, 53) > luminance(32, 15) + 40);
+        // Far corner of the target is untouched.
+        assert_eq!(luminance(2, 2), 0);
+        readback.unmap();
+
+        // A rectangular clip must scissor the shadow like any content draw.
+        let mut painter = Painter::new();
+        painter.save();
+        painter
+            .clip_rect(Rect::from_xywh(0.0, 0.0, 32.0, 64.0))
+            .expect("clip");
+        painter.draw_shadow(rect, shadow).expect("record shadow");
+        painter.restore().expect("restore");
+        let clipped = painter.finish().expect("finish clipped list");
+        let mut encoder = device.create_command_encoder(CommandEncoderDescriptor::default());
+        renderer
+            .render(&mut encoder, &clipped, render_target())
+            .expect("clipped shadow render");
+        encoder
+            .copy_texture_to_buffer(
+                &TextureCopy {
+                    texture,
+                    mip_level: 0,
+                    origin: Default::default(),
+                },
+                &BufferTextureCopy {
+                    buffer: readback.clone(),
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(64),
+                },
+                Extent3d::d2(64, 64),
+            )
+            .expect("copy clipped target");
+        queue
+            .submit([encoder.finish().expect("finish clipped encoder")])
+            .expect("submit clipped");
+        let mapping = readback.map_async(MapMode::Read, 0..256 * 64);
+        device.poll(PollMode::Wait).expect("wait clipped");
+        mapping.await.expect("map clipped");
+        let bytes = readback.read_mapped(0..256 * 64).expect("read clipped");
+        let luminance = |x: usize, y: usize| bytes[y * 256 + x * 4] as i32;
+        assert!(luminance(20, 32) > 200, "inside the clip stays lit");
+        assert_eq!(luminance(40, 32), 0, "outside the clip stays clear");
+        readback.unmap();
     });
 }

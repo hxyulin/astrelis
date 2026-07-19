@@ -52,6 +52,8 @@ pub struct CacheLimits {
     pub gradient_bytes: usize,
     /// Maximum glyph atlas texture bytes.
     pub glyph_bytes: usize,
+    /// Maximum cached shadow uniform bytes.
+    pub shadow_bytes: usize,
 }
 
 impl Default for CacheLimits {
@@ -61,6 +63,7 @@ impl Default for CacheLimits {
             image_bytes: 128 << 20,
             gradient_bytes: 4 << 20,
             glyph_bytes: 64 << 20,
+            shadow_bytes: 1 << 20,
         }
     }
 }
@@ -114,6 +117,10 @@ pub struct RenderStats {
     pub glyph_cache_misses: u32,
     /// Newly uploaded glyph images.
     pub glyph_uploads: u32,
+    /// Reused shadow uniform resources.
+    pub shadow_cache_hits: u32,
+    /// Newly uploaded shadow uniform resources.
+    pub shadow_cache_misses: u32,
 }
 
 /// Display-list rendering failure.
@@ -197,6 +204,13 @@ struct CachedGradient {
     used: u64,
 }
 
+struct CachedShadow {
+    _uniform: gpu::Buffer,
+    bind_group: gpu::BindGroup,
+    bytes: usize,
+    used: u64,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct PipelineKey(gpu::TextureFormat, u32);
 
@@ -206,6 +220,7 @@ struct Pipelines {
     image: gpu::RenderPipeline,
     text_mask: gpu::RenderPipeline,
     text_color: gpu::RenderPipeline,
+    shadow: gpu::RenderPipeline,
     clip_push: gpu::RenderPipeline,
     clip_pop: gpu::RenderPipeline,
 }
@@ -276,6 +291,7 @@ enum DrawKind {
     Image(gpu::BindGroup),
     TextMask(gpu::BindGroup),
     TextColor(gpu::BindGroup),
+    Shadow(gpu::BindGroup),
     ClipPush,
     ClipPop,
 }
@@ -294,7 +310,8 @@ impl DrawKind {
             (DrawKind::Gradient(a), DrawKind::Gradient(b))
             | (DrawKind::Image(a), DrawKind::Image(b))
             | (DrawKind::TextMask(a), DrawKind::TextMask(b))
-            | (DrawKind::TextColor(a), DrawKind::TextColor(b)) => a.same_resource(b),
+            | (DrawKind::TextColor(a), DrawKind::TextColor(b))
+            | (DrawKind::Shadow(a), DrawKind::Shadow(b)) => a.same_resource(b),
             _ => false,
         }
     }
@@ -314,12 +331,14 @@ pub struct Renderer {
     options: RendererOptions,
     image_layout: gpu::BindGroupLayout,
     gradient_layout: gpu::BindGroupLayout,
+    shadow_layout: gpu::BindGroupLayout,
     pipelines: HashMap<PipelineKey, Pipelines>,
     attachments: Option<Attachments>,
     meshes: HashMap<MeshKey, CachedMesh>,
     images: HashMap<u64, CachedImage>,
     external_images: HashMap<u64, RegisteredExternalImage>,
     gradients: HashMap<u64, CachedGradient>,
+    shadows: HashMap<u64, CachedShadow>,
     glyphs: GlyphCache,
     vertex_buffer: Option<FrameBuffer>,
     index_buffer: Option<FrameBuffer>,
@@ -453,6 +472,18 @@ impl Renderer {
                 },
             ],
         });
+        let shadow_layout = device.create_bind_group_layout(gpu::BindGroupLayoutDescriptor {
+            label: Some("paint shadow layout".into()),
+            entries: vec![gpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: gpu::ShaderStages::FRAGMENT,
+                ty: gpu::BindingType::Buffer {
+                    ty: gpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+            }],
+        });
         let glyphs = GlyphCache::new(
             device.clone(),
             queue.clone(),
@@ -468,12 +499,14 @@ impl Renderer {
             options,
             image_layout,
             gradient_layout,
+            shadow_layout,
             pipelines: HashMap::new(),
             attachments: None,
             meshes: HashMap::new(),
             images: HashMap::new(),
             external_images: HashMap::new(),
             gradients: HashMap::new(),
+            shadows: HashMap::new(),
             glyphs,
             vertex_buffer: None,
             index_buffer: None,
@@ -719,6 +752,10 @@ impl Renderer {
                         pass.set_pipeline(&pipeline.text_color)?;
                         pass.set_bind_group(0, &bind, &[])?;
                     }
+                    DrawKind::Shadow(bind) => {
+                        pass.set_pipeline(&pipeline.shadow)?;
+                        pass.set_bind_group(0, &bind, &[])?;
+                    }
                     DrawKind::ClipPush => pass.set_pipeline(&pipeline.clip_push)?,
                     DrawKind::ClipPop => pass.set_pipeline(&pipeline.clip_pop)?,
                 }
@@ -736,6 +773,7 @@ impl Renderer {
         self.meshes.clear();
         self.images.clear();
         self.gradients.clear();
+        self.shadows.clear();
         self.glyphs.clear();
     }
 
@@ -850,6 +888,83 @@ impl Renderer {
                 draws,
                 stats,
             )?,
+            Command::DrawShadow { rect, shadow } => {
+                if state.opacity <= 0.0 || shadow.color.a <= 0.0 {
+                    return Ok(());
+                }
+                let sigma = (shadow.blur_radius * 0.5).max(1e-3);
+                // The hole an inset shadow leaves shrinks with spread; an
+                // outset shadow's silhouette grows with it.
+                let signed_spread = if shadow.inset {
+                    -shadow.spread
+                } else {
+                    shadow.spread
+                };
+                let base = rect.rect();
+                let center = [
+                    base.min_x() + base.size.width * 0.5 + shadow.offset.x,
+                    base.min_y() + base.size.height * 0.5 + shadow.offset.y,
+                ];
+                let half = [
+                    (base.size.width * 0.5 + signed_spread).max(0.0),
+                    (base.size.height * 0.5 + signed_spread).max(0.0),
+                ];
+                if !shadow.inset && (half[0] <= 0.0 || half[1] <= 0.0) {
+                    return Ok(());
+                }
+                let max_radius = half[0].min(half[1]);
+                let radii = rect.radii();
+                let adjust =
+                    |radius: f32| (radius + signed_spread).clamp(0.0, max_radius.max(0.0));
+                let uniform = [
+                    center[0],
+                    center[1],
+                    half[0],
+                    half[1],
+                    adjust(radii.top_left),
+                    adjust(radii.top_right),
+                    adjust(radii.bottom_right),
+                    adjust(radii.bottom_left),
+                    sigma,
+                    if shadow.inset { 1.0 } else { 0.0 },
+                    0.0,
+                    0.0,
+                ];
+                let bind = self.shadow_bind(uniform, stats)?;
+                // Outset shadows extend 3 sigma beyond the silhouette; inset
+                // shadows are confined to the casting rectangle.
+                let quad = if shadow.inset {
+                    base
+                } else {
+                    let pad = 3.0 * sigma;
+                    Rect::from_xywh(
+                        center[0] - half[0] - pad,
+                        center[1] - half[1] - pad,
+                        half[0] * 2.0 + pad * 2.0,
+                        half[1] * 2.0 + pad * 2.0,
+                    )
+                };
+                let alpha = (shadow.color.a * state.opacity).clamp(0.0, 1.0);
+                append(
+                    &rect_mesh(quad),
+                    dpi * state.transform,
+                    size,
+                    [
+                        shadow.color.r * alpha,
+                        shadow.color.g * alpha,
+                        shadow.color.b * alpha,
+                        alpha,
+                    ],
+                    None,
+                    vertices,
+                    indices,
+                    draws,
+                    DrawKind::Shadow(bind),
+                    state.scissor,
+                    state.clips.len() as u32,
+                    stats,
+                );
+            }
             Command::StrokeRect { rect, style, brush } => self.draw_brush(
                 shape_stroke_mesh(
                     rect_path(*rect)?,
@@ -1381,6 +1496,55 @@ impl Renderer {
         Ok(result)
     }
 
+    fn shadow_bind(
+        &mut self,
+        uniform: [f32; 12],
+        stats: &mut RenderStats,
+    ) -> Result<gpu::BindGroup, RenderError> {
+        // FNV-1a over the uniform bits: identical shadow geometry shares one
+        // bind group regardless of color, which rides in the vertex stream.
+        let mut key = 0xcbf2_9ce4_8422_2325_u64;
+        for value in uniform {
+            key ^= u64::from(value.to_bits());
+            key = key.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        if let Some(cached) = self.shadows.get_mut(&key) {
+            cached.used = self.clock;
+            stats.shadow_cache_hits += 1;
+            return Ok(cached.bind_group.clone());
+        }
+        stats.shadow_cache_misses += 1;
+        let buffer = self.device.create_buffer_init(
+            &self.queue,
+            Some("paint shadow uniform".into()),
+            bytemuck::cast_slice(&uniform),
+            gpu::BufferUsages::UNIFORM,
+        )?;
+        let bind_group = self.device.create_bind_group(gpu::BindGroupDescriptor {
+            label: Some("paint shadow bind group".into()),
+            layout: self.shadow_layout.clone(),
+            entries: vec![gpu::BindGroupEntry {
+                binding: 0,
+                resource: gpu::BindingResource::Buffer(gpu::BufferBinding {
+                    buffer: buffer.clone(),
+                    offset: 0,
+                    size: None,
+                }),
+            }],
+        })?;
+        let result = bind_group.clone();
+        self.shadows.insert(
+            key,
+            CachedShadow {
+                _uniform: buffer,
+                bind_group,
+                bytes: size_of::<[f32; 12]>(),
+                used: self.clock,
+            },
+        );
+        Ok(result)
+    }
+
     fn ensure_pipelines(
         &mut self,
         format: gpu::TextureFormat,
@@ -1414,6 +1578,12 @@ impl Renderer {
                     label: Some("paint gradient pipeline layout".into()),
                     bind_group_layouts: vec![self.gradient_layout.clone()],
                 })?;
+        let shadow_layout = self
+            .device
+            .create_pipeline_layout(gpu::PipelineLayoutDescriptor {
+                label: Some("paint shadow pipeline layout".into()),
+                bind_group_layouts: vec![self.shadow_layout.clone()],
+            })?;
         let vertex = || gpu::VertexState {
             module: shader.clone(),
             entry_point: "vs_main".into(),
@@ -1524,6 +1694,13 @@ impl Renderer {
             gpu::ColorWrites::ALL,
             content,
         )?;
+        let shadow = create(
+            "paint shadow",
+            Some(shadow_layout),
+            "fs_shadow",
+            gpu::ColorWrites::ALL,
+            content,
+        )?;
         let clip_push = create(
             "paint clip push",
             None,
@@ -1554,6 +1731,7 @@ impl Renderer {
                 image,
                 text_mask,
                 text_color,
+                shadow,
                 clip_push,
                 clip_pop,
             },
@@ -1678,6 +1856,23 @@ impl Renderer {
                 break;
             };
             self.gradients.remove(&key);
+        }
+        while self
+            .shadows
+            .values()
+            .map(|entry| entry.bytes)
+            .sum::<usize>()
+            > self.options.cache_limits.shadow_bytes
+        {
+            let Some(key) = self
+                .shadows
+                .iter()
+                .min_by_key(|(_, entry)| entry.used)
+                .map(|(key, _)| *key)
+            else {
+                break;
+            };
+            self.shadows.remove(&key);
         }
     }
 }
@@ -2251,6 +2446,63 @@ struct GradientStopData {
 @fragment fn fs_image(input: Output) -> @location(0) vec4<f32> {
     let sample = textureSample(image, image_sampler, input.uv);
     return vec4<f32>(sample.rgb * sample.a, sample.a) * input.color.a;
+}
+struct ShadowUniforms {
+    center_half: vec4<f32>,   // center.xy, half_size.zw
+    radii: vec4<f32>,         // top-left, top-right, bottom-right, bottom-left
+    params: vec4<f32>,        // sigma, inset flag, unused, unused
+};
+@group(0) @binding(0) var<uniform> shadow: ShadowUniforms;
+fn shadow_gaussian(x: f32, sigma: f32) -> f32 {
+    return 0.39894228 / sigma * exp(-(x * x) / (2.0 * sigma * sigma));
+}
+// Abramowitz-Stegun error-function approximation, evaluated for both
+// horizontal extents at once.
+fn shadow_erf(x: vec2<f32>) -> vec2<f32> {
+    let s = sign(x);
+    let a = abs(x);
+    var r = 1.0 + (0.278393 + (0.230389 + 0.078108 * a * a) * a) * a;
+    r = r * r;
+    return s - s / (r * r);
+}
+// Nearest corner radius for a point relative to the rectangle center.
+fn shadow_corner(p: vec2<f32>) -> f32 {
+    if p.x < 0.0 {
+        return select(shadow.radii.x, shadow.radii.w, p.y > 0.0);
+    }
+    return select(shadow.radii.y, shadow.radii.z, p.y > 0.0);
+}
+// Closed-form gaussian blur of one horizontal slice of the rounded rect
+// (Evan Wallace's roundedBoxShadowX).
+fn shadow_blur_x(x: f32, y: f32, sigma: f32, corner: f32, half: vec2<f32>) -> f32 {
+    let d = min(half.y - corner - abs(y), 0.0);
+    let c = half.x - corner + sqrt(max(corner * corner - d * d, 0.0));
+    let integral = shadow_erf((vec2<f32>(x, x) + vec2<f32>(c, -c)) * (0.70710678 / sigma));
+    return clamp(0.5 * (integral.x - integral.y), 0.0, 1.0);
+}
+@fragment fn fs_shadow(input: Output) -> @location(0) vec4<f32> {
+    let sigma = max(shadow.params.x, 1e-4);
+    let half = shadow.center_half.zw;
+    let p = input.local_position - shadow.center_half.xy;
+    // Analytic in x; 4-point midpoint quadrature over the gaussian in y.
+    let low = p.y - half.y;
+    let high = p.y + half.y;
+    let start = clamp(-3.0 * sigma, low, high);
+    let end = clamp(3.0 * sigma, low, high);
+    let step = (end - start) / 4.0;
+    var y = start + step * 0.5;
+    var alpha = 0.0;
+    for (var i = 0; i < 4; i += 1) {
+        let slice = p.y - y;
+        alpha += shadow_blur_x(p.x, slice, sigma, shadow_corner(vec2<f32>(p.x, slice)), half)
+            * shadow_gaussian(y, sigma) * step;
+        y += step;
+    }
+    alpha = clamp(alpha, 0.0, 1.0);
+    if shadow.params.y > 0.5 {
+        alpha = 1.0 - alpha;
+    }
+    return input.color * alpha;
 }
 @fragment fn fs_text_mask(input: Output) -> @location(0) vec4<f32> {
     let coverage = textureSample(image, image_sampler, input.uv).r;
