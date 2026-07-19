@@ -110,6 +110,11 @@ impl<Message: 'static> Ui<Message> {
         Ok(())
     }
 
+    /// Returns an element's current sizing constraints.
+    pub fn layout<T>(&self, handle: ElementHandle<T>) -> Result<LayoutStyle, UiError> {
+        Ok(self.node(handle.id)?.style)
+    }
+
     /// Applies direct foreground and background overrides to one widget.
     pub fn set_widget_style<T>(
         &mut self,
@@ -148,7 +153,9 @@ impl<Message: 'static> Ui<Message> {
         let changed = self.node(handle.id)?.enabled != enabled;
         if changed {
             self.node_mut(handle.id)?.enabled = enabled;
-            self.dirty |= Dirty::PAINT | Dirty::SEMANTICS;
+            // Enabled state participates in the cached text request's color,
+            // so text-bearing nodes must reshape as well as repaint.
+            self.invalidate_node(handle.id, Dirty::MEASURE | Dirty::PAINT | Dirty::SEMANTICS);
             if !enabled
                 && self
                     .focus

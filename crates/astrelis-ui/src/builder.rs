@@ -50,10 +50,11 @@ pub struct Node<'ui, Message: 'static, T> {
 
 impl<'ui, Message: 'static, T> Node<'ui, Message, T> {
     fn new(ui: &'ui mut Ui<Message>, handle: ElementHandle<T>) -> Self {
+        let layout = ui.layout(handle).expect("builder on a live handle");
         Self {
             ui,
             handle,
-            layout: LayoutStyle::default(),
+            layout,
             layout_dirty: false,
             flex: None,
             style: None,

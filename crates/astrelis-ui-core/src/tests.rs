@@ -1107,6 +1107,39 @@ fn disabling_a_checkbox_changes_its_box_fill() {
 }
 
 #[test]
+fn disabling_text_bearing_controls_updates_glyph_color() {
+    let mut ui = ui();
+    let root = ui.root();
+    let button = ui.add_button(root, "Disable me").unwrap();
+
+    ui.display_list().unwrap();
+    assert_eq!(
+        ui.node(button.id())
+            .unwrap()
+            .text_layout
+            .as_ref()
+            .unwrap()
+            .glyph_runs()[0]
+            .color,
+        Theme::default().foreground
+    );
+
+    ui.set_enabled(button, false).unwrap();
+    ui.display_list().unwrap();
+    assert_eq!(
+        ui.node(button.id())
+            .unwrap()
+            .text_layout
+            .as_ref()
+            .unwrap()
+            .glyph_runs()[0]
+            .color,
+        Theme::default().disabled_foreground,
+        "disabling a text-bearing control must refresh its cached text layout"
+    );
+}
+
+#[test]
 fn wrapping_label_respects_max_width_and_grows_taller() {
     let mut ui = ui();
     let root = ui.root();
@@ -1386,4 +1419,27 @@ fn async_worker_drops_superseded_reshape() {
         "only the latest string may win after superseded reshapes"
     );
     assert!(ui.node(label.id()).unwrap().pending.is_none());
+}
+
+#[test]
+fn replacing_async_worker_settles_previous_jobs() {
+    let mut ui: Ui = Ui::new(async_test_fonts(), async_test_theme());
+    ui.enable_async_shaping(async_test_fonts, || {});
+    ui.set_viewport(LogicalSize::new(640.0, 480.0), 1.0);
+    let root = ui.root();
+    let label = ui.add_label(root, "short").unwrap();
+    ui.layout_bounds(label).unwrap();
+
+    ui.set_label_text(label, "a pending replacement reshape")
+        .unwrap();
+    ui.layout_bounds(label).unwrap();
+    assert_eq!(ui.async_outstanding, 1);
+
+    ui.enable_async_shaping(async_test_fonts, || {});
+    assert_eq!(
+        ui.async_outstanding, 0,
+        "replacing a worker must not leave an unreachable outstanding count"
+    );
+    assert!(ui.node(label.id()).unwrap().pending.is_none());
+    assert!(!ui.flush_async());
 }

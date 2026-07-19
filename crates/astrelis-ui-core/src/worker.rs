@@ -184,6 +184,12 @@ impl<Message: 'static> Ui<Message> {
     {
         #[cfg(not(target_arch = "wasm32"))]
         {
+            // Results belong to the worker that produced them. Settle the old
+            // channel before replacing it so its outstanding count and node
+            // pending markers cannot become unreachable from the new worker.
+            if self.worker.is_some() {
+                self.flush_async();
+            }
             self.worker = Some(ShapeWorker::spawn(make_fonts, wake));
             self.shape_policy = ShapePolicy::Async;
         }

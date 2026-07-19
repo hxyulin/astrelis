@@ -21,6 +21,21 @@ fn builder_commits_layout_in_one_chain() {
 }
 
 #[test]
+fn at_preserves_untouched_layout_fields() {
+    let mut ui = ui();
+    let root = ui.root();
+    let box_handle = ui.column(root).width(px(200.0)).height(px(80.0)).finish();
+
+    ui.at(box_handle).width(px(120.0)).finish();
+    let bounds = ui.layout_bounds(box_handle).unwrap();
+    assert!((bounds.size.width - 120.0).abs() < 0.5);
+    assert!(
+        (bounds.size.height - 80.0).abs() < 0.5,
+        "editing width through Build::at must preserve the existing height"
+    );
+}
+
+#[test]
 fn descend_chain_nests_children_under_their_parents() {
     let mut ui = ui();
     let root = ui.root();
