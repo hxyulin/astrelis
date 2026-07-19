@@ -67,6 +67,10 @@ impl Color {
     }
 
     /// Creates a color from 8-bit RGBA components (0-255).
+    ///
+    /// Performs no sRGB decode: the bytes are treated as already-linear
+    /// values. For 8-bit sRGB values (web/design-tool colors) use
+    /// [`Color::from_srgb8`] or [`Color::from_hex`] instead.
     #[inline]
     pub fn from_rgba8(r: u8, g: u8, b: u8, a: u8) -> Self {
         Self::new(
@@ -78,6 +82,9 @@ impl Color {
     }
 
     /// Creates a color from a packed `0xRRGGBBAA` u32.
+    ///
+    /// Performs no sRGB decode; see [`Color::from_rgba8`]. For packed sRGB
+    /// values use [`Color::from_hex`].
     #[inline]
     pub fn from_u32(rgba: u32) -> Self {
         Self::from_rgba8(
@@ -86,6 +93,58 @@ impl Color {
             (rgba >> 8) as u8,
             rgba as u8,
         )
+    }
+
+    /// Creates a color from 8-bit sRGB-encoded components, decoding them to
+    /// the linear color space this type stores.
+    ///
+    /// Alpha is coverage, not a color channel, and is not gamma-encoded; it
+    /// is divided by 255 unchanged.
+    #[inline]
+    pub fn from_srgb8(r: u8, g: u8, b: u8, a: u8) -> Self {
+        Self::new(
+            srgb_to_linear(r as f32 / 255.0),
+            srgb_to_linear(g as f32 / 255.0),
+            srgb_to_linear(b as f32 / 255.0),
+            a as f32 / 255.0,
+        )
+    }
+
+    /// Creates an opaque color from a `0xRRGGBB` sRGB hex value, decoding it
+    /// to linear space.
+    ///
+    /// This is the constructor for colors authored as web/design-tool hex
+    /// values: `Color::from_hex(0x4c8dff)` renders exactly as `#4c8dff`.
+    #[inline]
+    pub fn from_hex(rgb: u32) -> Self {
+        Self::from_srgb8((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, 255)
+    }
+
+    /// Creates a color from a `0xRRGGBBAA` sRGB hex value, decoding the color
+    /// channels to linear space. Alpha is linear coverage.
+    #[inline]
+    pub fn from_hex_alpha(rgba: u32) -> Self {
+        Self::from_srgb8(
+            (rgba >> 24) as u8,
+            (rgba >> 16) as u8,
+            (rgba >> 8) as u8,
+            rgba as u8,
+        )
+    }
+
+    /// Encodes the color to 8-bit sRGB components.
+    ///
+    /// Inverse of [`Color::from_srgb8`]; channels are clamped to `[0, 1]`
+    /// before encoding.
+    #[inline]
+    pub fn to_srgb8(self) -> Rgba8 {
+        let encode = |c: f32| (linear_to_srgb(c.clamp(0.0, 1.0)) * 255.0).round() as u8;
+        Rgba8 {
+            r: encode(self.r),
+            g: encode(self.g),
+            b: encode(self.b),
+            a: (self.a.clamp(0.0, 1.0) * 255.0).round() as u8,
+        }
     }
 
     /// Packs the color into a `0xRRGGBBAA` u32.
@@ -102,6 +161,26 @@ impl Color {
     #[inline]
     pub const fn with_alpha(self, a: f32) -> Self {
         Self { a, ..self }
+    }
+}
+
+/// Decodes one sRGB-encoded channel value in `[0, 1]` to linear space.
+#[inline]
+pub fn srgb_to_linear(c: f32) -> f32 {
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Encodes one linear channel value in `[0, 1]` to sRGB space.
+#[inline]
+pub fn linear_to_srgb(c: f32) -> f32 {
+    if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
     }
 }
 
@@ -139,6 +218,38 @@ mod tests {
     fn rgba8_white() {
         let c = Color::from_rgba8(255, 255, 255, 255);
         assert_eq!(c, Color::WHITE);
+    }
+
+    #[test]
+    fn srgb_white_and_black_roundtrip() {
+        assert_eq!(Color::from_srgb8(255, 255, 255, 255), Color::WHITE);
+        assert_eq!(Color::from_srgb8(0, 0, 0, 255), Color::BLACK);
+        assert_eq!(Color::from_hex(0xffffff), Color::WHITE);
+    }
+
+    #[test]
+    fn srgb_midpoint_decodes_correctly() {
+        // sRGB #808080 (128/255 = 0.50196) decodes to ~0.2159 linear.
+        let c = Color::from_hex(0x808080);
+        assert!((c.r - 0.2159).abs() < 1e-3, "got {}", c.r);
+        assert_eq!(c.r, c.g);
+        assert_eq!(c.g, c.b);
+        assert_eq!(c.a, 1.0);
+    }
+
+    #[test]
+    fn srgb_linear_roundtrip() {
+        for i in 0..=20 {
+            let x = i as f32 / 20.0;
+            assert!((linear_to_srgb(srgb_to_linear(x)) - x).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn hex_alpha_and_to_srgb8_roundtrip() {
+        let c = Color::from_hex_alpha(0x4c8dff80);
+        let back = c.to_srgb8();
+        assert_eq!((back.r, back.g, back.b, back.a), (0x4c, 0x8d, 0xff, 0x80));
     }
 
     #[test]
