@@ -217,6 +217,14 @@ impl<Message: 'static> Ui<Message> {
                         }
                         _ => {}
                     }
+                } else if self
+                    .dispatch_routed(self.root, RoutedEventKind::Keyboard(input.clone()))?
+                {
+                    self.sync_platform_state(window)?;
+                    return Ok(UiUpdate {
+                        redraw: self.needs_redraw(),
+                        platform_state_changed,
+                    });
                 }
             }
             WindowEvent::PointerWheel {

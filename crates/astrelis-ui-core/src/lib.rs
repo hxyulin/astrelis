@@ -72,6 +72,17 @@ pub(crate) use text::{RequestId, ShapePolicy};
 pub(crate) use util::*;
 pub(crate) use worker::{ShapeWorker, WorkerJob};
 
+/// Creates a font database containing only Astrelis's bundled Noto Sans face.
+///
+/// This is intended for deterministic headless tests and structural snapshots.
+pub fn deterministic_font_database() -> FontDatabase {
+    let mut fonts = FontDatabase::empty();
+    fonts
+        .register_font(&include_bytes!("../assets/NotoSans.ttf")[..])
+        .expect("the bundled Noto Sans test font is valid");
+    fonts
+}
+
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub(crate) struct Dirty: u8 {

@@ -40,6 +40,57 @@ pub struct UiUpdate {
     pub platform_state_changed: bool,
 }
 
+/// Stable category of one retained element for developer tooling.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ElementKind {
+    /// Static text.
+    Label,
+    /// Activatable button.
+    Button,
+    /// Horizontal flex container.
+    Row,
+    /// Vertical flex container.
+    Column,
+    /// Overlaying stack container.
+    Stack,
+    /// Keyboard focus scope.
+    FocusScope,
+    /// Viewport-hosted overlay.
+    Overlay,
+    /// Padding container.
+    Padding,
+    /// Single-line text editor.
+    TextField,
+    /// Boolean checkbox.
+    Checkbox,
+    /// Numeric slider.
+    Slider,
+    /// Vertically scrolling container.
+    ScrollView,
+    /// Application-defined widget.
+    Custom,
+}
+
+impl ElementKind {
+    fn from_kind(kind: &Kind) -> Self {
+        match kind {
+            Kind::Label { .. } => Self::Label,
+            Kind::Button { .. } => Self::Button,
+            Kind::Row { .. } => Self::Row,
+            Kind::Column { .. } => Self::Column,
+            Kind::Stack => Self::Stack,
+            Kind::FocusScope { .. } => Self::FocusScope,
+            Kind::Overlay { .. } => Self::Overlay,
+            Kind::Padding { .. } => Self::Padding,
+            Kind::TextField(_) => Self::TextField,
+            Kind::Checkbox { .. } => Self::Checkbox,
+            Kind::Slider { .. } => Self::Slider,
+            Kind::ScrollView { .. } => Self::ScrollView,
+            Kind::Custom => Self::Custom,
+        }
+    }
+}
+
 /// Deterministic headless state for one retained element.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ElementInspection {
@@ -47,6 +98,16 @@ pub struct ElementInspection {
     pub id: ElementId,
     /// Logical parent.
     pub parent: Option<ElementId>,
+    /// Stable retained-element category.
+    pub kind: ElementKind,
+    /// Layout constraints declared on the element.
+    pub declared_layout: LayoutStyle,
+    /// Local enabled state before ancestor propagation.
+    pub enabled: bool,
+    /// Child overflow policy.
+    pub overflow: Overflow,
+    /// Local paint-order priority.
+    pub z_index: i32,
     /// Untransformed layout bounds.
     pub layout_bounds: LogicalRect,
     /// Axis-aligned transformed bounds.
@@ -132,6 +193,11 @@ impl<Message: 'static> Ui<Message> {
             nodes.push(ElementInspection {
                 id,
                 parent: node.parent,
+                kind: ElementKind::from_kind(&node.kind),
+                declared_layout: node.style,
+                enabled: node.enabled,
+                overflow: node.overflow,
+                z_index: node.z_index,
                 layout_bounds: node.bounds,
                 world_bounds: transformed_bounds(node.bounds, world),
                 physical_bounds: scale_rect(

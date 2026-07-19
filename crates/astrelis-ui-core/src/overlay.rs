@@ -56,6 +56,11 @@ pub struct OverlayOptions {
     pub clamp_to_viewport: bool,
     /// Top-layer ordering.
     pub z_index: i32,
+    /// Paint the conventional floating surface, border, and shadow.
+    ///
+    /// Disable this for non-interactive top-layer visuals such as selection
+    /// outlines and docking previews.
+    pub paint_surface: bool,
     /// Optional focus-scope behavior.
     pub focus: FocusScopeOptions,
 }
@@ -68,6 +73,7 @@ impl Default for OverlayOptions {
             offset: LogicalPoint::ZERO,
             clamp_to_viewport: true,
             z_index: 0,
+            paint_surface: true,
             focus: FocusScopeOptions::default(),
         }
     }

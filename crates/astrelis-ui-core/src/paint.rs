@@ -71,7 +71,7 @@ impl<Message: 'static> Ui<Message> {
                 .map_err(|error| UiError::new(error.to_string()))?;
         }
         match &node.kind {
-            Kind::Overlay { .. } => {
+            Kind::Overlay { options, .. } if options.paint_surface => {
                 // Overlays are floating surfaces (tooltips, popovers, menus).
                 // Resolve the surface from the theme at paint time so it tracks
                 // set_theme; an explicit override still wins.
@@ -96,6 +96,7 @@ impl<Message: 'static> Ui<Message> {
                     )
                     .map_err(|error| UiError::new(error.to_string()))?;
             }
+            Kind::Overlay { .. } => {}
             Kind::Row { .. }
             | Kind::Column { .. }
             | Kind::Stack
