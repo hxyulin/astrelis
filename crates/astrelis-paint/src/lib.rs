@@ -1184,7 +1184,11 @@ impl Painter {
     ///
     /// The shadow covers the area under `rect` as well (CSS `box-shadow`
     /// semantics); paint the surface on top of it.
-    pub fn draw_shadow(&mut self, rect: RoundedRect, shadow: ShadowStyle) -> Result<(), PaintError> {
+    pub fn draw_shadow(
+        &mut self,
+        rect: RoundedRect,
+        shadow: ShadowStyle,
+    ) -> Result<(), PaintError> {
         validate_shadow(shadow)?;
         self.commands.push(Command::DrawShadow { rect, shadow });
         Ok(())
@@ -1599,8 +1603,11 @@ mod tests {
 
     #[test]
     fn validates_shadows() {
-        let rect = RoundedRect::new(Rect::from_xywh(0.0, 0.0, 20.0, 10.0), CornerRadii::uniform(3.0))
-            .unwrap();
+        let rect = RoundedRect::new(
+            Rect::from_xywh(0.0, 0.0, 20.0, 10.0),
+            CornerRadii::uniform(3.0),
+        )
+        .unwrap();
         let mut painter = Painter::new();
         assert!(painter.draw_shadow(rect, ShadowStyle::default()).is_ok());
         assert!(
@@ -1640,8 +1647,11 @@ mod tests {
 
     #[test]
     fn shadows_stay_in_their_own_composition_layer() {
-        let rect = RoundedRect::new(Rect::from_xywh(0.0, 0.0, 20.0, 10.0), CornerRadii::uniform(3.0))
-            .unwrap();
+        let rect = RoundedRect::new(
+            Rect::from_xywh(0.0, 0.0, 20.0, 10.0),
+            CornerRadii::uniform(3.0),
+        )
+        .unwrap();
         let mut painter = Painter::new();
         painter.draw_shadow(rect, ShadowStyle::default()).unwrap();
         painter

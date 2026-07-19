@@ -10,10 +10,10 @@ use astrelis_core::{
     math::{Affine2, Vec2},
 };
 use astrelis_gpu as gpu;
+pub use astrelis_paint::ExternalImage;
 use astrelis_paint::{
-    Brush, Command, CornerRadii, DisplayList, ExternalImage, FillRule, Image, ImageOptions,
-    ImageSampling, LineCap, LineJoin, LinearGradient, Path, PathVerb, RadialGradient, RoundedRect,
-    StrokeStyle,
+    Brush, Command, CornerRadii, DisplayList, FillRule, Image, ImageOptions, ImageSampling,
+    LineCap, LineJoin, LinearGradient, Path, PathVerb, RadialGradient, RoundedRect, StrokeStyle,
 };
 use astrelis_text_gpu::{AtlasKind, GlyphCache, GlyphCacheOptions};
 use bytemuck::{Pod, Zeroable};
@@ -914,8 +914,7 @@ impl Renderer {
                 }
                 let max_radius = half[0].min(half[1]);
                 let radii = rect.radii();
-                let adjust =
-                    |radius: f32| (radius + signed_spread).clamp(0.0, max_radius.max(0.0));
+                let adjust = |radius: f32| (radius + signed_spread).clamp(0.0, max_radius.max(0.0));
                 let uniform = [
                     center[0],
                     center[1],

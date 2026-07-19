@@ -243,6 +243,26 @@ impl VirtualList {
         self.selected.get()
     }
 
+    /// Replaces the controlled selected index.
+    ///
+    /// Values outside the current item range clear selection. Realized rows
+    /// repaint only when the effective selection changes.
+    pub fn set_selected<Message: 'static>(
+        &self,
+        ui: &mut Ui<Message>,
+        selected: Option<usize>,
+    ) -> Result<(), UiError> {
+        let selected = selected.filter(|index| *index < self.item_count);
+        let changed = self.selected.replace(selected) != selected;
+        if changed {
+            for (index, handle) in &self.realized {
+                ui.set_semantic_selected(*handle, Some(selected == Some(*index)))?;
+                ui.update_widget(*handle, |_| {})?;
+            }
+        }
+        Ok(())
+    }
+
     /// Queues an index to be realized, revealed, and focused by the next sync.
     pub fn request_focus(&self, index: usize) {
         self.requested.set(Some(index));

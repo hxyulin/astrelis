@@ -66,6 +66,8 @@ impl<Message: 'static> Ui<Message> {
         self.semantic_descriptions.remove(&id);
         self.semantic_invalid.remove(&id);
         self.semantic_live.remove(&id);
+        self.semantic_selected.remove(&id);
+        self.semantic_expanded.remove(&id);
         if let Some(mut widget) = self.custom_widgets.remove(&id) {
             widget.unmounted();
         }
@@ -578,6 +580,38 @@ impl<Message: 'static> Ui<Message> {
             self.semantic_live.remove(&handle.id);
         } else {
             self.semantic_live.insert(handle.id, live);
+        }
+        self.dirty |= Dirty::SEMANTICS;
+        Ok(())
+    }
+
+    /// Sets or clears selection state for one semantic element.
+    pub fn set_semantic_selected<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        selected: Option<bool>,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        if let Some(selected) = selected {
+            self.semantic_selected.insert(handle.id, selected);
+        } else {
+            self.semantic_selected.remove(&handle.id);
+        }
+        self.dirty |= Dirty::SEMANTICS;
+        Ok(())
+    }
+
+    /// Sets or clears expansion state for one semantic element.
+    pub fn set_semantic_expanded<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        expanded: Option<bool>,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        if let Some(expanded) = expanded {
+            self.semantic_expanded.insert(handle.id, expanded);
+        } else {
+            self.semantic_expanded.remove(&handle.id);
         }
         self.dirty |= Dirty::SEMANTICS;
         Ok(())

@@ -41,6 +41,20 @@ pub enum SemanticRole {
     List,
     /// One selectable list entry.
     ListItem,
+    /// Hierarchical selectable item collection.
+    Tree,
+    /// One item in a hierarchical collection.
+    TreeItem,
+    /// Tabular data collection.
+    Table,
+    /// Header row in a table.
+    TableHeader,
+    /// One row in a table.
+    TableRow,
+    /// Header cell describing a table column.
+    ColumnHeader,
+    /// One data cell in a table.
+    Cell,
     /// Group of labeled form controls.
     Form,
     /// Application command toolbar.
@@ -129,6 +143,10 @@ pub struct SemanticNode {
     pub focused: bool,
     /// Whether interaction is enabled.
     pub enabled: bool,
+    /// Selection state when the role supports selection.
+    pub selected: Option<bool>,
+    /// Expansion state when the role supports expansion.
+    pub expanded: Option<bool>,
     /// Selected UTF-8 byte range for text fields.
     pub selection: Option<(usize, usize)>,
     /// Operations accepted by this semantic node.
@@ -222,6 +240,8 @@ impl<Message: 'static> Ui<Message> {
             focusable: self.is_focusable_id(id),
             focused: self.focus == Some(id),
             enabled: self.is_effectively_interactive(id),
+            selected: self.semantic_selected.get(&id).copied(),
+            expanded: self.semantic_expanded.get(&id).copied(),
             selection,
             actions,
             children: node

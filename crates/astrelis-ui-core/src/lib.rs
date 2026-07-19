@@ -133,6 +133,8 @@ pub struct Ui<Message = ()> {
     pub(crate) semantic_descriptions: HashMap<ElementId, String>,
     pub(crate) semantic_invalid: HashSet<ElementId>,
     pub(crate) semantic_live: HashMap<ElementId, SemanticLive>,
+    pub(crate) semantic_selected: HashMap<ElementId, bool>,
+    pub(crate) semantic_expanded: HashMap<ElementId, bool>,
     pub(crate) event_requests: Vec<EventRequest>,
     pub(crate) drag_sessions: HashMap<DeviceId, DragSession>,
     pub(crate) next_drag_session: u64,

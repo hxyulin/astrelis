@@ -261,6 +261,8 @@ impl<Message: 'static> Ui<Message> {
             semantic_descriptions: HashMap::new(),
             semantic_invalid: HashSet::new(),
             semantic_live: HashMap::new(),
+            semantic_selected: HashMap::new(),
+            semantic_expanded: HashMap::new(),
             event_requests: Vec::new(),
             drag_sessions: HashMap::new(),
             next_drag_session: 1,
