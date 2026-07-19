@@ -50,7 +50,9 @@ pub struct OverlayOptions {
     pub alignment: OverlayAlignment,
     /// Additional logical offset.
     pub offset: LogicalPoint,
-    /// Keep the overlay inside the viewport.
+    /// Keep the overlay inside the viewport: when the preferred side lacks
+    /// room, the overlay first flips to the opposite side of the anchor if
+    /// that side fits, and is otherwise slid along the overflowing axis.
     pub clamp_to_viewport: bool,
     /// Top-layer ordering.
     pub z_index: i32,

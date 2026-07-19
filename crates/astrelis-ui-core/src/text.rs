@@ -195,6 +195,9 @@ impl<Message: 'static> Ui<Message> {
                 });
                 let mut request = TextLayoutRequest::new(text);
                 request.style.size = visual.font_size.unwrap_or(self.theme.type_scale.body);
+                request.style.weight = visual
+                    .font_weight
+                    .unwrap_or(self.theme.type_scale.body_weight);
                 request.style.families = self.theme.font_families.clone();
                 request.style.color = visual.foreground.unwrap_or(if enabled {
                     self.theme.foreground
@@ -232,6 +235,9 @@ impl<Message: 'static> Ui<Message> {
                 let enabled = node.enabled;
                 let mut request = TextLayoutRequest::new(shown);
                 request.style.size = visual.font_size.unwrap_or(self.theme.type_scale.body);
+                request.style.weight = visual
+                    .font_weight
+                    .unwrap_or(self.theme.type_scale.body_weight);
                 request.style.families = self.theme.font_families.clone();
                 request.style.color = visual.foreground.unwrap_or(if !enabled {
                     self.theme.disabled_foreground

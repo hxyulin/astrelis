@@ -15,7 +15,9 @@ use astrelis_core::{
     geometry::{LogicalPoint, LogicalRect, LogicalSize, PhysicalRect, Point, Rect, Size},
     math::{Affine2, Vec2},
 };
-use astrelis_paint::{Brush, CornerRadii, DisplayList, Painter, RoundedRect, StrokeStyle};
+use astrelis_paint::{
+    Brush, CornerRadii, DisplayList, Painter, RoundedRect, ShadowStyle, StrokeStyle,
+};
 use astrelis_platform::{
     Clipboard, CursorIcon, DeviceId, ElementState, ImeEvent, ImePurpose, Key, KeyboardInput,
     Modifiers, NamedKey, PlatformError, PointerButton, ScrollDelta, TouchPhase, Window,

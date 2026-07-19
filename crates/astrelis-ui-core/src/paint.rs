@@ -75,7 +75,7 @@ impl<Message: 'static> Ui<Message> {
                 // Overlays are floating surfaces (tooltips, popovers, menus).
                 // Resolve the surface from the theme at paint time so it tracks
                 // set_theme; an explicit override still wins.
-                let background = node.visual.background.unwrap_or(self.theme.surface);
+                let background = node.visual.background.unwrap_or(self.theme.overlay);
                 let rounded = RoundedRect::new(
                     node.bounds,
                     CornerRadii::uniform(self.theme.radii.md.max(0.0)),
@@ -245,16 +245,31 @@ impl<Message: 'static> Ui<Message> {
             _ => {}
         }
 
-        if self.focus == Some(id) && self.is_focusable_id(id) {
+        // Only built-in controls get the generic ring: custom widgets paint
+        // their own focus treatment, and containers (scroll views) would draw
+        // a viewport-sized ring.
+        let generic_focus_ring = matches!(
+            node.kind,
+            Kind::Button { .. } | Kind::Checkbox { .. } | Kind::Slider { .. } | Kind::TextField(_)
+        );
+        if generic_focus_ring && self.focus == Some(id) && self.is_focusable_id(id) {
+            // A stroked ring around the control, matching the treatment the
+            // astreon buttons paint, instead of a bar across the top edge.
             let thickness = self.theme.metrics.focus_ring;
-            let bounds = Rect::from_xywh(
-                node.bounds.origin.x,
-                node.bounds.origin.y,
-                node.bounds.size.width,
-                thickness,
-            );
+            let ring = RoundedRect::new(
+                node.bounds,
+                CornerRadii::uniform(self.theme.radii.md.max(0.0)),
+            )
+            .map_err(|error| UiError::new(error.to_string()))?;
             painter
-                .fill_rect(bounds, Brush::Solid(self.theme.accent))
+                .stroke_rounded_rect(
+                    ring,
+                    StrokeStyle {
+                        width: thickness,
+                        ..Default::default()
+                    },
+                    Brush::Solid(self.theme.accent),
+                )
                 .map_err(|error| UiError::new(error.to_string()))?;
         }
 
@@ -440,43 +455,49 @@ impl<Message: 'static> Ui<Message> {
             .map_err(|error| UiError::new(error.to_string()))?;
         painter
             .fill_rounded_rect(rounded, Brush::Solid(color))
-            .map_err(|error| UiError::new(error.to_string()))
+            .map_err(|error| UiError::new(error.to_string()))?;
+        // Controls carry a hairline border so they keep their silhouette on
+        // same-value surfaces (white buttons on a white card in light mode).
+        if self.theme.border_width > 0.0 {
+            painter
+                .stroke_rounded_rect(
+                    rounded,
+                    StrokeStyle {
+                        width: self.theme.border_width,
+                        ..Default::default()
+                    },
+                    Brush::Solid(self.theme.border),
+                )
+                .map_err(|error| UiError::new(error.to_string()))?;
+        }
+        Ok(())
     }
 
-    /// Approximates the theme's drop-shadow behind `bounds`.
+    /// Draws the theme's drop-shadow behind `bounds`.
     ///
-    /// `astrelis-paint` has no gaussian-blur primitive, so the penumbra is a
-    /// short stack of translucent rounded rects that grow outward and fade.
-    /// The caller paints the opaque surface over the returned shadow.
+    /// Rendered as a single analytic gaussian shadow; the caller paints the
+    /// opaque surface over it.
     pub(crate) fn paint_shadow(
         &self,
         painter: &mut Painter,
         bounds: LogicalRect,
     ) -> Result<(), UiError> {
         let shadow = self.theme.shadow;
-        if shadow.color.a <= 0.0 || shadow.blur <= 0.0 {
+        if shadow.color.a <= 0.0 || (shadow.blur <= 0.0 && shadow.spread <= 0.0) {
             return Ok(());
         }
-        let layers = 4;
-        for i in 0..layers {
-            let step = (i + 1) as f32 / layers as f32;
-            let spread = shadow.blur * step;
-            let mut color = shadow.color;
-            color.a *= (1.0 - step) * 0.6 + 0.1;
-            let rect = Rect::from_xywh(
-                bounds.origin.x + shadow.offset.x - spread,
-                bounds.origin.y + shadow.offset.y - spread,
-                bounds.size.width + spread * 2.0,
-                bounds.size.height + spread * 2.0,
-            );
-            painter
-                .fill_rounded_rect(
-                    RoundedRect::new(rect, CornerRadii::uniform(self.theme.radii.md + spread))
-                        .map_err(|error| UiError::new(error.to_string()))?,
-                    Brush::Solid(color),
-                )
-                .map_err(|error| UiError::new(error.to_string()))?;
-        }
-        Ok(())
+        painter
+            .draw_shadow(
+                RoundedRect::new(bounds, CornerRadii::uniform(self.theme.radii.md.max(0.0)))
+                    .map_err(|error| UiError::new(error.to_string()))?,
+                ShadowStyle {
+                    color: shadow.color,
+                    blur_radius: shadow.blur,
+                    offset: shadow.offset,
+                    spread: shadow.spread,
+                    inset: false,
+                },
+            )
+            .map_err(|error| UiError::new(error.to_string()))
     }
 }

@@ -682,7 +682,17 @@ impl<Message: 'static> Ui<Message> {
                 Kind::Overlay { owner, options, .. } => (owner, options),
                 _ => continue,
             };
-            let anchor = self.node(owner)?.bounds;
+            let mut anchor = self.node(owner)?.bounds;
+            // Scrolling is a paint-time translation, so the owner's layout
+            // bounds are unscrolled; anchor to its on-screen position by
+            // subtracting every ancestor scroll view's offset.
+            let mut ancestor = owner;
+            while let Some(parent) = self.node(ancestor)?.parent {
+                if let Kind::ScrollView { offset, .. } = self.node(parent)?.kind {
+                    anchor.origin.y -= offset;
+                }
+                ancestor = parent;
+            }
             let bounds = self.node(id)?.bounds;
             let mut x = match options.side {
                 OverlaySide::Left => anchor.origin.x - bounds.size.width,
@@ -712,8 +722,55 @@ impl<Message: 'static> Ui<Message> {
                     OverlayAlignment::End => anchor.max_y() - bounds.size.height,
                 },
             };
-            x += options.offset.x;
-            y += options.offset.y;
+            // Prefer flipping to the opposite side of the anchor over sliding
+            // when the preferred side lacks room; the clamp below remains the
+            // backstop when neither side fits. The offset mirrors with the
+            // flip so a configured gap keeps pointing away from the anchor.
+            let mut flipped_x = false;
+            let mut flipped_y = false;
+            if options.clamp_to_viewport {
+                match options.side {
+                    OverlaySide::Below if y + bounds.size.height > self.viewport.height => {
+                        let above = anchor.origin.y - bounds.size.height;
+                        if above >= 0.0 {
+                            y = above;
+                            flipped_y = true;
+                        }
+                    }
+                    OverlaySide::Above if y < 0.0 => {
+                        let below = anchor.max_y();
+                        if below + bounds.size.height <= self.viewport.height {
+                            y = below;
+                            flipped_y = true;
+                        }
+                    }
+                    OverlaySide::Right if x + bounds.size.width > self.viewport.width => {
+                        let left = anchor.origin.x - bounds.size.width;
+                        if left >= 0.0 {
+                            x = left;
+                            flipped_x = true;
+                        }
+                    }
+                    OverlaySide::Left if x < 0.0 => {
+                        let right = anchor.max_x();
+                        if right + bounds.size.width <= self.viewport.width {
+                            x = right;
+                            flipped_x = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            x += if flipped_x {
+                -options.offset.x
+            } else {
+                options.offset.x
+            };
+            y += if flipped_y {
+                -options.offset.y
+            } else {
+                options.offset.y
+            };
             if options.clamp_to_viewport {
                 x = x.clamp(0.0, (self.viewport.width - bounds.size.width).max(0.0));
                 y = y.clamp(0.0, (self.viewport.height - bounds.size.height).max(0.0));

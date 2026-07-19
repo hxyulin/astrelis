@@ -16,6 +16,9 @@ pub struct WidgetStyle {
     /// Font-size override in logical pixels; unset resolves to
     /// `theme.type_scale.body`.
     pub font_size: Option<f32>,
+    /// Font-weight override (CSS-style, 100-900); unset resolves to
+    /// `theme.type_scale.body_weight`.
+    pub font_weight: Option<f32>,
 }
 
 /// Optional visual overrides for a checkbox.
@@ -135,7 +138,11 @@ pub struct Spacing {
     pub xl: f32,
 }
 
-/// A font-size scale in logical pixels.
+/// A font-size and font-weight scale.
+///
+/// Sizes are logical pixels; weights use the CSS convention (400 regular,
+/// 600 semibold). In a desktop tool the heading barely exceeds the body size —
+/// hierarchy comes from `heading_weight`, not from a large point jump.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TypeScale {
     /// Section-heading size.
@@ -144,6 +151,10 @@ pub struct TypeScale {
     pub body: f32,
     /// Secondary caption size.
     pub caption: f32,
+    /// Section-heading font weight.
+    pub heading_weight: f32,
+    /// Default body font weight.
+    pub body_weight: f32,
 }
 
 /// Fixed geometry for the built-in controls, in logical pixels.
@@ -168,17 +179,26 @@ pub struct ControlMetrics {
 
 /// A drop-shadow / elevation token.
 ///
-/// `astrelis-paint` has no gaussian-blur primitive, so the built-in widgets
-/// approximate this with a short stack of translucent offset rounded rects.
-/// `blur` controls how far that stack spreads outward, not a true blur radius.
+/// Rendered as a true gaussian shadow by `astrelis-paint`'s analytic
+/// rounded-rect shadow primitive ([`astrelis_paint::ShadowStyle`]); `blur` is a
+/// real blur radius.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Shadow {
     /// Shadow color, including its alpha.
     pub color: Color,
     /// Offset of the shadow from the casting rect.
     pub offset: Vec2,
-    /// Spread distance approximating a blur radius.
+    /// Gaussian blur radius in logical pixels.
     pub blur: f32,
+    /// Outward expansion of the casting rect before blurring (may be
+    /// negative to tuck the shadow under its surface).
+    pub spread: f32,
+}
+
+impl Default for Shadow {
+    fn default() -> Self {
+        Theme::dark().shadow
+    }
 }
 
 /// Typed visual tokens used by the built-in widgets.
@@ -186,8 +206,11 @@ pub struct Shadow {
 pub struct Theme {
     /// Window/background color.
     pub background: Color,
-    /// Raised-surface color for panels, cards, and popovers.
+    /// Raised-surface color for panels and cards.
     pub surface: Color,
+    /// Floating-surface color for menus, popovers, dialogs, and toasts — one
+    /// elevation step above [`Theme::surface`].
+    pub overlay: Color,
     /// Primary foreground color.
     pub foreground: Color,
     /// Muted foreground color.
@@ -198,6 +221,8 @@ pub struct Theme {
     pub selection: Color,
     /// Caret and focus-ring color.
     pub accent: Color,
+    /// Foreground for text and icons painted on accent-filled surfaces.
+    pub accent_foreground: Color,
     /// Destructive/error status color.
     pub danger: Color,
     /// Positive/confirmation status color.
@@ -237,32 +262,40 @@ impl Default for Theme {
 }
 
 impl Theme {
-    /// The default dark theme.
+    /// The default dark theme: a hue-neutral zinc ramp with a restrained blue
+    /// accent and hairline borders.
+    ///
+    /// Colors are authored as sRGB hex via [`Color::from_hex`], so the values
+    /// here are exactly what reaches the screen.
     pub fn dark() -> Self {
         Self {
-            background: Color::new(0.027, 0.030, 0.038, 1.0),
-            surface: Color::new(0.074, 0.080, 0.094, 1.0),
-            foreground: Color::new(0.94, 0.95, 0.97, 1.0),
-            muted_foreground: Color::new(0.55, 0.58, 0.65, 1.0),
-            disabled_foreground: Color::new(0.34, 0.36, 0.42, 1.0),
-            selection: Color::new(0.16, 0.40, 0.70, 0.75),
-            accent: Color::new(0.32, 0.64, 1.0, 1.0),
-            danger: Color::new(0.92, 0.34, 0.38, 1.0),
-            success: Color::new(0.32, 0.78, 0.48, 1.0),
-            warning: Color::new(0.96, 0.72, 0.28, 1.0),
+            background: Color::from_hex(0x131316),
+            surface: Color::from_hex(0x1b1b1f),
+            overlay: Color::from_hex(0x212126),
+            foreground: Color::from_hex(0xededef),
+            muted_foreground: Color::from_hex(0x9d9da6),
+            disabled_foreground: Color::from_hex(0x62626b),
+            selection: Color::from_hex(0x4c8dff).with_alpha(0.35),
+            accent: Color::from_hex(0x4c8dff),
+            accent_foreground: Color::from_hex(0xffffff),
+            danger: Color::from_hex(0xf2555a),
+            success: Color::from_hex(0x3fb950),
+            warning: Color::from_hex(0xd29922),
+            // Hover lifts a step; pressed drops below normal for an inset
+            // feel instead of an accent flash.
             button: ControlColors {
-                normal: Color::new(0.11, 0.12, 0.15, 1.0),
-                hovered: Color::new(0.16, 0.175, 0.21, 1.0),
-                pressed: Color::new(0.16, 0.36, 0.60, 1.0),
-                disabled: Color::new(0.075, 0.08, 0.095, 1.0),
+                normal: Color::from_hex(0x232328),
+                hovered: Color::from_hex(0x2b2b31),
+                pressed: Color::from_hex(0x1e1e23),
+                disabled: Color::from_hex(0x1c1c20),
             },
-            field_background: Color::new(0.050, 0.055, 0.068, 1.0),
-            border: Color::new(0.17, 0.185, 0.225, 1.0),
-            border_width: 1.5,
+            field_background: Color::from_hex(0x101013),
+            border: Color::from_hex(0x2a2a30),
+            border_width: 1.0,
             radii: Radii {
                 sm: 3.0,
-                md: 6.0,
-                lg: 9.0,
+                md: 5.0,
+                lg: 8.0,
             },
             spacing: Spacing {
                 xs: 4.0,
@@ -272,30 +305,33 @@ impl Theme {
                 xl: 24.0,
             },
             type_scale: TypeScale {
-                heading: 22.0,
-                body: 16.0,
-                caption: 13.0,
+                heading: 15.0,
+                body: 13.0,
+                caption: 11.0,
+                heading_weight: 600.0,
+                body_weight: 400.0,
             },
             metrics: ControlMetrics {
                 focus_ring: 2.0,
-                checkbox_inset: 6.0,
+                checkbox_inset: 4.0,
                 slider_track: 4.0,
-                slider_thumb: 16.0,
-                scrollbar_width: 8.0,
+                slider_thumb: 14.0,
+                scrollbar_width: 6.0,
                 scrollbar_min_thumb: 24.0,
             },
             shadow: Shadow {
-                color: Color::new(0.0, 0.0, 0.0, 0.40),
-                offset: Vec2::new(0.0, 4.0),
-                blur: 13.0,
+                color: Color::new(0.0, 0.0, 0.0, 0.45),
+                offset: Vec2::new(0.0, 6.0),
+                blur: 20.0,
+                spread: -2.0,
             },
             font_families: vec![FontFamily::SansSerif],
-            gap: 10.0,
+            gap: 8.0,
             control_padding: Insets {
-                left: 12.0,
-                top: 8.0,
-                right: 12.0,
-                bottom: 8.0,
+                left: 10.0,
+                top: 6.0,
+                right: 10.0,
+                bottom: 6.0,
             },
         }
     }
@@ -304,31 +340,35 @@ impl Theme {
     ///
     /// Only the color tokens and the shadow differ; the spacing, radius, type,
     /// and control-metric scales are identical, so the two themes lay out and
-    /// measure the same content identically.
+    /// measure the same content identically. Elevation in light mode comes
+    /// from borders and a fainter shadow rather than surface lightness.
     pub fn light() -> Self {
         Self {
-            background: Color::new(0.90, 0.91, 0.94, 1.0),
-            surface: Color::new(1.0, 1.0, 1.0, 1.0),
-            foreground: Color::new(0.10, 0.12, 0.16, 1.0),
-            muted_foreground: Color::new(0.40, 0.44, 0.50, 1.0),
-            disabled_foreground: Color::new(0.64, 0.68, 0.74, 1.0),
-            selection: Color::new(0.40, 0.62, 0.95, 0.40),
-            accent: Color::new(0.10, 0.48, 0.92, 1.0),
-            danger: Color::new(0.80, 0.20, 0.24, 1.0),
-            success: Color::new(0.16, 0.58, 0.30, 1.0),
-            warning: Color::new(0.78, 0.54, 0.10, 1.0),
+            background: Color::from_hex(0xf7f7f8),
+            surface: Color::from_hex(0xffffff),
+            overlay: Color::from_hex(0xffffff),
+            foreground: Color::from_hex(0x202024),
+            muted_foreground: Color::from_hex(0x6e6e78),
+            disabled_foreground: Color::from_hex(0xa9a9b2),
+            selection: Color::from_hex(0x2563eb).with_alpha(0.25),
+            accent: Color::from_hex(0x2563eb),
+            accent_foreground: Color::from_hex(0xffffff),
+            danger: Color::from_hex(0xd92d2d),
+            success: Color::from_hex(0x1a7f37),
+            warning: Color::from_hex(0x9a6700),
             button: ControlColors {
-                normal: Color::new(1.0, 1.0, 1.0, 1.0),
-                hovered: Color::new(0.93, 0.94, 0.97, 1.0),
-                pressed: Color::new(0.85, 0.89, 0.98, 1.0),
-                disabled: Color::new(0.94, 0.95, 0.96, 1.0),
+                normal: Color::from_hex(0xffffff),
+                hovered: Color::from_hex(0xf2f2f5),
+                pressed: Color::from_hex(0xe9e9ee),
+                disabled: Color::from_hex(0xf6f6f8),
             },
-            field_background: Color::new(1.0, 1.0, 1.0, 1.0),
-            border: Color::new(0.76, 0.79, 0.85, 1.0),
+            field_background: Color::from_hex(0xffffff),
+            border: Color::from_hex(0xe1e1e6),
             shadow: Shadow {
-                color: Color::new(0.10, 0.12, 0.18, 0.18),
+                color: Color::from_hex(0x16181d).with_alpha(0.14),
                 offset: Vec2::new(0.0, 4.0),
                 blur: 14.0,
+                spread: 0.0,
             },
             ..Self::dark()
         }

@@ -741,6 +741,111 @@ fn focus_scope_restores_focus_and_overlay_is_viewport_hosted() {
 }
 
 #[test]
+fn overlays_anchor_to_the_scrolled_position_of_their_owner() {
+    let mut ui = ui();
+    let root = ui.root();
+    let scroll = ui.add_scroll_view(root).unwrap();
+    ui.set_layout(
+        scroll,
+        LayoutStyle {
+            height: Length::Px(80.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let column = ui.add_column(scroll).unwrap();
+    let mut owner = None;
+    for index in 0..8 {
+        owner = Some(ui.add_button(column, format!("Button {index}")).unwrap());
+    }
+    let owner = owner.unwrap();
+    ui.ensure_layout().unwrap();
+    ui.set_scroll_offset(scroll, 60.0).unwrap();
+    // Opening a popup after scrolling must anchor it to where the owner is
+    // drawn (layout bounds minus the scroll offset), not its unscrolled
+    // layout position.
+    let overlay = ui.add_overlay(owner, OverlayOptions::default()).unwrap();
+    ui.add_label(overlay, "Popup").unwrap();
+    ui.ensure_layout().unwrap();
+    let owner_bottom = ui.node(owner.id()).unwrap().bounds.max_y();
+    let overlay_top = ui.node(overlay.id()).unwrap().bounds.origin.y;
+    assert!(
+        (overlay_top - (owner_bottom - 60.0)).abs() < 0.5,
+        "overlay top {overlay_top} should sit at the owner's on-screen bottom {}",
+        owner_bottom - 60.0
+    );
+}
+
+#[test]
+fn overlays_near_the_viewport_bottom_clamp_on_screen() {
+    let mut ui = ui();
+    let root = ui.root();
+    // Push the scroll view near the bottom edge of the 480px viewport.
+    let spacer = ui.add_label(root, "").unwrap();
+    ui.set_layout(
+        spacer,
+        LayoutStyle {
+            height: Length::Px(340.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let scroll = ui.add_scroll_view(root).unwrap();
+    ui.set_layout(
+        scroll,
+        LayoutStyle {
+            height: Length::Px(120.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let column = ui.add_column(scroll).unwrap();
+    let mut buttons = Vec::new();
+    for index in 0..8 {
+        buttons.push(ui.add_button(column, format!("Button {index}")).unwrap());
+    }
+    ui.ensure_layout().unwrap();
+    ui.set_scroll_offset(scroll, 40.0).unwrap();
+    // A row that is on-screen after scrolling, close enough to the bottom
+    // that a 120px popup cannot fit below it: it must flip fully above the
+    // owner instead of hanging off-screen.
+    let owner = buttons[3];
+    let overlay = ui.add_overlay(owner, OverlayOptions::default()).unwrap();
+    ui.set_layout(
+        overlay,
+        LayoutStyle {
+            width: Length::Px(160.0),
+            height: Length::Px(120.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    ui.add_label(overlay, "Popup").unwrap();
+    ui.ensure_layout().unwrap();
+    let owner_bounds = ui.node(owner.id()).unwrap().bounds;
+    let owner_screen_bottom = owner_bounds.max_y() - 40.0;
+    assert!(
+        owner_screen_bottom + 120.0 > ui.viewport.height,
+        "precondition: the popup must not fit below the owner"
+    );
+    let bounds = ui.node(overlay.id()).unwrap().bounds;
+    assert!(bounds.origin.y >= 0.0);
+    assert!(
+        bounds.max_y() <= ui.viewport.height + 0.5,
+        "overlay bottom {} must stay inside the {} viewport",
+        bounds.max_y(),
+        ui.viewport.height
+    );
+    let owner_screen_top = owner_bounds.origin.y - 40.0;
+    assert!(
+        (bounds.max_y() - owner_screen_top).abs() < 0.5,
+        "the popup should flip fully above the owner: bottom {} vs owner top {}",
+        bounds.max_y(),
+        owner_screen_top
+    );
+}
+
+#[test]
 fn overlay_children_do_not_collapse_intrinsic_button_owners() {
     let mut ui = ui();
     let root = ui.root();
@@ -1052,6 +1157,44 @@ fn light_and_dark_themes_both_render() {
         Theme::light().background,
         Theme::dark().background,
         "the two themes must be visually distinct"
+    );
+}
+
+#[test]
+fn overlay_casts_one_analytic_shadow_under_its_surface() {
+    use astrelis_paint::Command;
+
+    let mut ui = ui();
+    let root = ui.root();
+    let owner = ui.add_button(root, "owner").unwrap();
+    let overlay = ui.add_overlay(owner, OverlayOptions::default()).unwrap();
+    ui.add_label(overlay, "Overlay content").unwrap();
+    let list = ui.display_list().unwrap();
+
+    let commands = list.commands();
+    let shadows = commands
+        .iter()
+        .enumerate()
+        .filter(|(_, command)| matches!(command, Command::DrawShadow { .. }))
+        .collect::<Vec<_>>();
+    assert_eq!(shadows.len(), 1, "one overlay, one shadow");
+    let (index, Command::DrawShadow { shadow, .. }) = shadows[0] else {
+        unreachable!("filtered above");
+    };
+    assert_eq!(shadow.color, ui.theme().shadow.color);
+    assert_eq!(shadow.blur_radius, ui.theme().shadow.blur);
+    assert_eq!(shadow.spread, ui.theme().shadow.spread);
+    assert!(!shadow.inset);
+    // The shadow must be painted before (under) the overlay surface fill.
+    assert!(
+        matches!(
+            commands[index + 1],
+            Command::FillRoundedRect {
+                brush: Brush::Solid(color),
+                ..
+            } if color == ui.theme().overlay
+        ),
+        "the overlay surface fill follows its shadow immediately",
     );
 }
 
