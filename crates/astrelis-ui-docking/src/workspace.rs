@@ -1,4 +1,4 @@
-use std::{any::Any, rc::Rc};
+use std::{any::Any, cell::Cell, rc::Rc};
 
 use astrelis_core::geometry::{LogicalPoint, LogicalRect, LogicalSize, Size};
 use astrelis_paint::{Brush, Painter, StrokeStyle};
@@ -129,7 +129,7 @@ enum FloatGeometryMode {
 pub struct DockWorkspaceSurface<Message> {
     default_float: FloatingRect,
     map_action: Rc<dyn Fn(DockAction) -> Message>,
-    hovering: bool,
+    hovering: Rc<Cell<bool>>,
 }
 
 impl<Message> DockWorkspaceSurface<Message> {
@@ -137,13 +137,17 @@ impl<Message> DockWorkspaceSurface<Message> {
         Self {
             default_float,
             map_action,
-            hovering: false,
+            hovering: Rc::new(Cell::new(false)),
         }
     }
 
     /// Returns whether a panel drag is over the workspace background.
-    pub const fn is_drag_hovered(&self) -> bool {
-        self.hovering
+    pub fn is_drag_hovered(&self) -> bool {
+        self.hovering.get()
+    }
+
+    fn preview_state(&self) -> Rc<Cell<bool>> {
+        self.hovering.clone()
     }
 }
 
@@ -179,18 +183,18 @@ impl<Message: 'static> Widget<Message> for DockWorkspaceSurface<Message> {
             | RoutedEventKind::DragOver {
                 device_id, payload, ..
             } if payload.downcast_ref::<PanelId>().is_some() => {
-                self.hovering = true;
+                self.hovering.set(true);
                 context.accept_drop(*device_id, DropOperation::Move);
                 context.request_paint();
             }
             RoutedEventKind::DragLeft { .. } => {
-                self.hovering = false;
+                self.hovering.set(false);
                 context.request_paint();
             }
             RoutedEventKind::Dropped {
                 payload, position, ..
             } => {
-                self.hovering = false;
+                self.hovering.set(false);
                 if let Some(panel) = payload.downcast_ref::<PanelId>() {
                     let local = context.window_to_local(*position).unwrap_or(*position);
                     context.emit((self.map_action)(DockAction::Place {
@@ -209,13 +213,37 @@ impl<Message: 'static> Widget<Message> for DockWorkspaceSurface<Message> {
         }
     }
 
+    fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
+        Some((SemanticRole::Group, "Docking workspace".into(), None))
+    }
+}
+
+struct DockWorkspacePreview {
+    visible: Rc<Cell<bool>>,
+}
+
+impl DockWorkspacePreview {
+    fn new(visible: Rc<Cell<bool>>) -> Self {
+        Self { visible }
+    }
+}
+
+impl<Message: 'static> Widget<Message> for DockWorkspacePreview {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn paint(
         &self,
         painter: &mut Painter,
         bounds: LogicalRect,
         theme: &Theme,
     ) -> Result<(), UiError> {
-        if self.hovering {
+        if self.visible.get() {
             painter.stroke_rect(
                 bounds,
                 StrokeStyle {
@@ -226,10 +254,6 @@ impl<Message: 'static> Widget<Message> for DockWorkspaceSurface<Message> {
             )?;
         }
         Ok(())
-    }
-
-    fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
-        Some((SemanticRole::Group, "Docking workspace".into(), None))
     }
 }
 
@@ -248,7 +272,7 @@ pub struct DockGroup<Message> {
     tab_count: usize,
     floating: bool,
     map_action: Rc<dyn Fn(DockAction) -> Message>,
-    preview: Option<GroupDropZone>,
+    preview: Rc<Cell<Option<GroupDropZone>>>,
 }
 
 impl<Message> DockGroup<Message> {
@@ -263,13 +287,17 @@ impl<Message> DockGroup<Message> {
             tab_count,
             floating,
             map_action,
-            preview: None,
+            preview: Rc::new(Cell::new(None)),
         }
     }
 
     /// Returns whether this group currently displays a drop preview.
-    pub const fn has_drop_preview(&self) -> bool {
-        self.preview.is_some()
+    pub fn has_drop_preview(&self) -> bool {
+        self.preview.get().is_some()
+    }
+
+    fn preview_state(&self) -> Rc<Cell<Option<GroupDropZone>>> {
+        self.preview.clone()
     }
 
     fn zone(&self, local: LogicalPoint, size: LogicalSize) -> GroupDropZone {
@@ -355,12 +383,13 @@ impl<Message: 'static> Widget<Message> for DockGroup<Message> {
                 let local = context
                     .window_to_local(*position)
                     .unwrap_or(LogicalPoint::ZERO);
-                self.preview = Some(self.zone(local, context.bounds().size));
+                self.preview
+                    .set(Some(self.zone(local, context.bounds().size)));
                 context.accept_drop(*device_id, DropOperation::Move);
                 context.request_paint();
             }
             RoutedEventKind::DragLeft { .. } => {
-                self.preview = None;
+                self.preview.set(None);
                 context.request_paint();
             }
             RoutedEventKind::Dropped {
@@ -370,7 +399,7 @@ impl<Message: 'static> Widget<Message> for DockGroup<Message> {
                     .window_to_local(*position)
                     .unwrap_or(LogicalPoint::ZERO);
                 let zone = self.zone(local, context.bounds().size);
-                self.preview = None;
+                self.preview.set(None);
                 if let Some(panel) = payload.downcast_ref::<PanelId>()
                     && !(panel == &self.anchor && self.tab_count == 1)
                 {
@@ -385,13 +414,37 @@ impl<Message: 'static> Widget<Message> for DockGroup<Message> {
         }
     }
 
+    fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
+        Some((SemanticRole::Group, "Dock panel group".into(), None))
+    }
+}
+
+struct DockGroupPreview {
+    zone: Rc<Cell<Option<GroupDropZone>>>,
+}
+
+impl DockGroupPreview {
+    fn new(zone: Rc<Cell<Option<GroupDropZone>>>) -> Self {
+        Self { zone }
+    }
+}
+
+impl<Message: 'static> Widget<Message> for DockGroupPreview {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
     fn paint(
         &self,
         painter: &mut Painter,
         bounds: LogicalRect,
         theme: &Theme,
     ) -> Result<(), UiError> {
-        let Some(zone) = self.preview else {
+        let Some(zone) = self.zone.get() else {
             return Ok(());
         };
         let preview = match zone {
@@ -436,10 +489,6 @@ impl<Message: 'static> Widget<Message> for DockGroup<Message> {
         )?;
         Ok(())
     }
-
-    fn semantics(&self) -> Option<(SemanticRole, String, Option<String>)> {
-        Some((SemanticRole::Group, "Dock panel group".into(), None))
-    }
 }
 
 /// One accessible, draggable panel tab.
@@ -453,6 +502,7 @@ pub struct DockTab<Message> {
     pressed: Option<DeviceId>,
     dragging: bool,
     hovered: bool,
+    height: f32,
 }
 
 impl<Message> DockTab<Message> {
@@ -462,6 +512,7 @@ impl<Message> DockTab<Message> {
         selected: bool,
         index: usize,
         anchor: PanelId,
+        height: f32,
         map_action: Rc<dyn Fn(DockAction) -> Message>,
     ) -> Self {
         Self {
@@ -474,6 +525,7 @@ impl<Message> DockTab<Message> {
             pressed: None,
             dragging: false,
             hovered: false,
+            height,
         }
     }
 
@@ -510,12 +562,13 @@ impl<Message: 'static> Widget<Message> for DockTab<Message> {
     }
 
     fn container_style(&self, theme: &Theme) -> WidgetContainerStyle {
+        let vertical = ((self.height - theme.type_scale.body) * 0.5).max(0.0);
         WidgetContainerStyle {
             padding: Insets {
                 left: theme.control_padding.left,
-                top: 0.0,
+                top: vertical,
                 right: theme.control_padding.right,
-                bottom: 0.0,
+                bottom: vertical,
             },
             gap: 0.0,
         }
@@ -920,6 +973,10 @@ impl<Message: 'static> DockWorkspace<Message> {
         )?;
         ui.set_layout(root, fill_layout())?;
         ui.set_overflow(root, astrelis_ui_core::Overflow::Clip)?;
+        let preview_state = ui.widget(root)?.preview_state();
+        let preview = ui.add_widget(root, DockWorkspacePreview::new(preview_state))?;
+        ui.set_layout(preview, inset_fill_layout(0.0))?;
+        ui.set_z_index(preview, 1_000)?;
         let parking = ui.add_column(root)?;
         ui.set_visibility(parking, Visibility::Collapsed)?;
         Ok(Self {
@@ -1414,6 +1471,10 @@ impl<Message: 'static> DockWorkspace<Message> {
                 ),
             )
             .map_err(|error| DockError::new(error.to_string()))?;
+        let preview_state = ui
+            .widget(group)
+            .map_err(|error| DockError::new(error.to_string()))?
+            .preview_state();
         ui.set_layout(group, flex_content_layout())
             .map_err(|error| DockError::new(error.to_string()))?;
         let strip = ui
@@ -1465,6 +1526,7 @@ impl<Message: 'static> DockWorkspace<Message> {
                         selected,
                         index,
                         tabs.panels[0].clone(),
+                        self.style.tab_height,
                         self.map_action.clone(),
                     ),
                 )
@@ -1519,6 +1581,13 @@ impl<Message: 'static> DockWorkspace<Message> {
             ui.set_layout(registered.host, fill_layout())
                 .map_err(|error| DockError::new(error.to_string()))?;
         }
+        let preview = ui
+            .add_widget(group, DockGroupPreview::new(preview_state))
+            .map_err(|error| DockError::new(error.to_string()))?;
+        ui.set_layout(preview, inset_fill_layout(0.0))
+            .map_err(|error| DockError::new(error.to_string()))?;
+        ui.set_z_index(preview, 1_000)
+            .map_err(|error| DockError::new(error.to_string()))?;
         Ok(())
     }
 }
@@ -1756,13 +1825,26 @@ fn split_at_path_mut<'a>(
 #[cfg(test)]
 mod tests {
     use astrelis_text::FontDatabase;
-    use astrelis_ui_core::Theme;
+    use astrelis_ui_core::{SemanticNode, Theme};
 
     use super::*;
     use crate::{DockTabs, FloatingGroup};
 
     fn id(value: &str) -> PanelId {
         PanelId::new(value).unwrap()
+    }
+
+    fn semantic_node<'a>(
+        node: &'a SemanticNode,
+        role: SemanticRole,
+        label: &str,
+    ) -> Option<&'a SemanticNode> {
+        if node.role == role && node.label == label {
+            return Some(node);
+        }
+        node.children
+            .iter()
+            .find_map(|child| semantic_node(child, role, label))
     }
 
     #[test]
@@ -1791,6 +1873,13 @@ mod tests {
             .restore(&mut ui, initial.clone(), initial)
             .unwrap();
         ui.display_list().unwrap();
+        let semantics = ui.semantic_tree().unwrap();
+        let tab = semantic_node(&semantics, SemanticRole::Tab, "A").unwrap();
+        let label = semantic_node(tab, SemanticRole::Label, "A").unwrap();
+        assert_eq!(
+            label.bounds.origin.y + label.bounds.size.height * 0.5,
+            tab.bounds.origin.y + tab.bounds.size.height * 0.5,
+        );
         workspace
             .apply(
                 &mut ui,

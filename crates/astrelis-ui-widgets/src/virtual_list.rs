@@ -4,9 +4,9 @@ use astrelis_core::geometry::LogicalRect;
 use astrelis_paint::{Brush, Painter};
 use astrelis_platform::{CursorIcon, ElementState, Key, NamedKey, PointerButton};
 use astrelis_ui_core::{
-    ElementHandle, EventContext, LayoutStyle, Length, Positioning, RoutedEvent, RoutedEventKind,
-    ScrollView, SemanticAction, SemanticActionKind, SemanticRole, Stack, Theme, Ui, UiError,
-    Widget,
+    ElementHandle, EventContext, Insets, LayoutStyle, Length, Positioning, RoutedEvent,
+    RoutedEventKind, ScrollView, SemanticAction, SemanticActionKind, SemanticRole, Stack, Theme,
+    Ui, UiError, Widget, WidgetContainerStyle,
 };
 
 /// Fixed-extent virtualization policy.
@@ -81,6 +81,18 @@ impl<Message: 'static> Widget<Message> for VirtualListItem {
 
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
+    }
+
+    fn container_style(&self, theme: &Theme) -> WidgetContainerStyle {
+        WidgetContainerStyle {
+            padding: Insets {
+                left: theme.control_padding.left,
+                top: 0.0,
+                right: theme.control_padding.right,
+                bottom: 0.0,
+            },
+            gap: 0.0,
+        }
     }
 
     fn event(&mut self, context: &mut EventContext<'_, Message>, event: &RoutedEvent) {
@@ -416,6 +428,18 @@ mod tests {
     ) -> Result<(), UiError> {
         ui.add_label(item, format!("Item {index}"))?;
         Ok(())
+    }
+
+    #[test]
+    fn item_padding_does_not_reduce_the_fixed_vertical_extent() {
+        let theme = Theme::default();
+        let item = VirtualListItem::new(0, 1, Rc::new(Cell::new(None)), Rc::new(Cell::new(None)));
+        let style = <VirtualListItem as Widget<()>>::container_style(&item, &theme);
+        assert_eq!(style.padding.left, theme.control_padding.left);
+        assert_eq!(style.padding.right, theme.control_padding.right);
+        assert_eq!(style.padding.top, 0.0);
+        assert_eq!(style.padding.bottom, 0.0);
+        assert_eq!(style.gap, 0.0);
     }
 
     #[test]
