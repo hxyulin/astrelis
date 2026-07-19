@@ -278,7 +278,10 @@ impl RoutedEventKind {
                 (EventFilter::Activate, Self::Activate)
                     | (
                         EventFilter::ValueChanged,
-                        Self::CheckedChanged(_) | Self::SliderChanged(_) | Self::TextChanged(_)
+                        Self::CheckedChanged(_)
+                            | Self::SliderChanged(_)
+                            | Self::TextChanged(_)
+                            | Self::TextSubmitted(_)
                     )
                     | (EventFilter::Focus, Self::FocusChanged(_))
                     | (

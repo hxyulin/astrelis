@@ -435,6 +435,14 @@ fn routed_listeners_emit_typed_messages_and_cancel_defaults() {
 }
 
 #[test]
+fn value_changed_filter_includes_committed_text() {
+    assert!(
+        RoutedEventKind::TextSubmitted("42".into()).matches(EventFilter::ValueChanged),
+        "text submission must reach value-oriented controls"
+    );
+}
+
+#[test]
 fn slider_snaps_and_scroll_view_clamps_and_reveals_focus() {
     let mut ui = Ui::<TestMessage>::new(FontDatabase::default(), Theme::default());
     ui.set_viewport(Size::new(320.0, 200.0), 1.0);
