@@ -1276,3 +1276,114 @@ fn shaping_job_types_are_send() {
     assert_send::<astrelis_text::TextLayoutRequest>();
     assert_send::<astrelis_text::TextLayout>();
 }
+
+/// A deterministic font database for the async-worker tests. Both the main
+/// thread and the worker build one of these; because they register the same
+/// blob into an empty collection, they shape byte-identically — the invariant
+/// the sync/async parity assertions below rest on.
+fn async_test_fonts() -> FontDatabase {
+    let mut fonts = FontDatabase::empty();
+    fonts
+        .register_font(Arc::<[u8]>::from(
+            &include_bytes!("../assets/NotoSans.ttf")[..],
+        ))
+        .unwrap();
+    fonts
+}
+
+fn async_test_theme() -> Theme {
+    Theme {
+        font_families: vec![FontFamily::Named("Noto Sans".into())],
+        ..Default::default()
+    }
+}
+
+/// The core async-worker contract: a reshape of an already-shaped node is
+/// offloaded, the *previous* extent stays on screen until the result is drained
+/// (so nothing reflows mid-flight), and once drained the layout matches exactly
+/// what a synchronous shape of the same string produces.
+///
+/// The "old extent until flush" half is deterministic despite the worker
+/// running concurrently: results are only ever applied by `poll_async` /
+/// `flush_async`, and the layout pass that enqueues the reshape polls *before*
+/// it enqueues — so within that pass the node still measures with its old
+/// layout no matter how fast the worker is.
+#[test]
+fn async_worker_keeps_old_extent_then_matches_sync() {
+    let sync_bounds = {
+        let mut ui: Ui = Ui::new(async_test_fonts(), async_test_theme());
+        ui.set_viewport(LogicalSize::new(640.0, 480.0), 1.0);
+        let root = ui.root();
+        let label = ui.add_label(root, "short").unwrap();
+        ui.layout_bounds(label).unwrap();
+        ui.set_label_text(label, "a considerably longer label string")
+            .unwrap();
+        ui.layout_bounds(label).unwrap()
+    };
+
+    let mut ui: Ui = Ui::new(async_test_fonts(), async_test_theme());
+    ui.enable_async_shaping(async_test_fonts, || {});
+    ui.set_viewport(LogicalSize::new(640.0, 480.0), 1.0);
+    let root = ui.root();
+    let label = ui.add_label(root, "short").unwrap();
+    // First shape is force-synced (no previous layout to keep on screen).
+    let initial = ui.layout_bounds(label).unwrap();
+
+    // Growing the text is eligible for the worker: the old extent must stay.
+    ui.set_label_text(label, "a considerably longer label string")
+        .unwrap();
+    let before_flush = ui.layout_bounds(label).unwrap();
+    assert_eq!(
+        before_flush, initial,
+        "the previous extent must stay on screen while the worker reshapes"
+    );
+    assert!(
+        ui.node(label.id()).unwrap().pending.is_some(),
+        "a reshape must be in flight before it is drained"
+    );
+
+    assert!(ui.flush_async(), "draining the worker changed the layout");
+    let after_flush = ui.layout_bounds(label).unwrap();
+    assert_eq!(
+        after_flush, sync_bounds,
+        "the worker result must match a synchronous shape of the same string"
+    );
+    assert!(
+        ui.node(label.id()).unwrap().pending.is_none(),
+        "pending must settle once the result is applied"
+    );
+}
+
+/// When a node is edited again while a reshape is still in flight, the stale
+/// result must be dropped (matched out by `RequestId`) and only the latest
+/// string may win — regardless of the order the worker returns them.
+#[test]
+fn async_worker_drops_superseded_reshape() {
+    let mut ui: Ui = Ui::new(async_test_fonts(), async_test_theme());
+    ui.enable_async_shaping(async_test_fonts, || {});
+    ui.set_viewport(LogicalSize::new(640.0, 480.0), 1.0);
+    let root = ui.root();
+    let label = ui.add_label(root, "one").unwrap();
+    ui.layout_bounds(label).unwrap();
+
+    ui.set_label_text(label, "two").unwrap();
+    ui.layout_bounds(label).unwrap(); // enqueue reshape for "two"
+    ui.set_label_text(label, "three three three three").unwrap();
+    ui.layout_bounds(label).unwrap(); // enqueue reshape for the final string
+    ui.flush_async();
+    let async_bounds = ui.layout_bounds(label).unwrap();
+
+    let sync_bounds = {
+        let mut ui: Ui = Ui::new(async_test_fonts(), async_test_theme());
+        ui.set_viewport(LogicalSize::new(640.0, 480.0), 1.0);
+        let root = ui.root();
+        let label = ui.add_label(root, "three three three three").unwrap();
+        ui.layout_bounds(label).unwrap()
+    };
+
+    assert_eq!(
+        async_bounds, sync_bounds,
+        "only the latest string may win after superseded reshapes"
+    );
+    assert!(ui.node(label.id()).unwrap().pending.is_none());
+}

@@ -168,6 +168,10 @@ pub(crate) struct Node {
     /// The request that produced `text_layout`, retained so an unchanged node
     /// can skip reshaping even when a global dirty pass revisits it.
     pub(crate) text_request: Option<TextLayoutRequest>,
+    /// A reshape in flight for this node, if any: the request being shaped and
+    /// its id. `text_layout` keeps showing the previous result until this
+    /// resolves, so layout uses the old extent while a reshape is pending.
+    pub(crate) pending: Option<(RequestId, TextLayoutRequest)>,
     pub(crate) hovered: bool,
     pub(crate) pressed: bool,
 }
@@ -220,6 +224,7 @@ impl<Message: 'static> Ui<Message> {
                     bounds: Rect::default(),
                     text_layout: None,
                     text_request: None,
+                    pending: None,
                     hovered: false,
                     pressed: false,
                 }),
@@ -230,6 +235,10 @@ impl<Message: 'static> Ui<Message> {
             theme,
             fonts,
             text_context: TextLayoutContext::new(),
+            shape_policy: ShapePolicy::default(),
+            request_id_counter: 0,
+            worker: None,
+            async_outstanding: 0,
             viewport: Size::ZERO,
             scale_factor: 1.0,
             dirty: Dirty::all(),
@@ -535,6 +544,7 @@ impl<Message: 'static> Ui<Message> {
             bounds: Rect::default(),
             text_layout: None,
             text_request: None,
+            pending: None,
             hovered: false,
             pressed: false,
         });

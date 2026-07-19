@@ -602,6 +602,37 @@ impl App for Settings {
             .map_err(io::Error::other)?;
         self.window = Some(window.clone());
 
+        // Opt into background text reshaping. The first paint still shapes
+        // everything synchronously (nothing has a previous layout yet); later
+        // edits to already-shaped, non-focused labels — e.g. the status line —
+        // reshape on the worker while their old extent stays on screen. The
+        // worker builds its own identical font database, and its wake asks the
+        // runtime to drain the result and repaint. Native only: wasm has no
+        // worker thread yet, so it stays synchronous.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let proxy = context.proxy();
+            self.ui.enable_async_shaping(
+                || {
+                    let mut fonts = FontDatabase::empty();
+                    fonts
+                        .register_font(Arc::<[u8]>::from(NOTO_SANS))
+                        .expect("Noto Sans should register on the shaping worker");
+                    fonts
+                },
+                move || {
+                    let _ = proxy.run_on_main_thread(|app, context| {
+                        if app.ui.poll_async()
+                            && let Some(window) = &app.window
+                        {
+                            context.invalidate_window(window.id());
+                        }
+                        Ok(())
+                    });
+                },
+            );
+        }
+
         #[cfg(not(target_arch = "wasm32"))]
         {
             let gpu = pollster::block_on(initialize_gpu(self.instance.clone(), surface, window))?;

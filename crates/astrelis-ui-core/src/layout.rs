@@ -595,6 +595,10 @@ impl<Message: 'static> Ui<Message> {
     }
 
     pub(crate) fn ensure_layout(&mut self) -> Result<(), UiError> {
+        // Apply any completed background reshapes first: a landed worker result
+        // dirties its node's measure/layout, and may be the only thing dirty
+        // this pass, so this must run before the early-out below.
+        self.poll_async();
         if !self.dirty.intersects(Dirty::MEASURE | Dirty::LAYOUT) {
             return Ok(());
         }

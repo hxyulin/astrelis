@@ -51,6 +51,7 @@ mod tree;
 mod util;
 mod widget;
 mod window;
+mod worker;
 
 #[cfg(test)]
 mod tests;
@@ -65,7 +66,9 @@ pub use style::*;
 pub use tree::*;
 pub use widget::*;
 
+pub(crate) use text::{RequestId, ShapePolicy};
 pub(crate) use util::*;
+pub(crate) use worker::{ShapeWorker, WorkerJob};
 
 bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +89,18 @@ pub struct Ui<Message = ()> {
     pub(crate) theme: Theme,
     pub(crate) fonts: FontDatabase,
     pub(crate) text_context: TextLayoutContext,
+    /// How text reshaping is scheduled. `Sync` (default) shapes inline on the
+    /// layout pass; `Async` is the opt-in worker-offload path (Milestone 20).
+    pub(crate) shape_policy: ShapePolicy,
+    /// Monotonic source of `RequestId`s for reshape requests, so a completed
+    /// shape can be matched to the node's current in-flight request.
+    pub(crate) request_id_counter: u64,
+    /// The background shaping worker, present only while `Async` is enabled
+    /// (and never on wasm). `None` means every reshape runs inline.
+    pub(crate) worker: Option<ShapeWorker>,
+    /// Count of reshapes enqueued on the worker but not yet drained, so
+    /// `flush_async` knows how many results to wait for.
+    pub(crate) async_outstanding: usize,
     pub(crate) viewport: LogicalSize,
     pub(crate) scale_factor: f32,
     pub(crate) dirty: Dirty,
