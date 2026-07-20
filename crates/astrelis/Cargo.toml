@@ -1,0 +1,55 @@
+[package]
+name = "astrelis"
+description = "Modular native application, graphics, rendering, and retained UI engine for Rust"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[features]
+default = ["render-2d", "render-3d", "ui", "wgpu", "winit"]
+render-2d = ["dep:astrelis-render-2d"]
+render-3d = ["dep:astrelis-render-3d"]
+testing = ["dep:astrelis-platform-test", "dep:astrelis-ui-testing"]
+ui = [
+  "dep:astrelis-ui",
+  "dep:astrelis-ui-core",
+  "dep:astrelis-ui-docking",
+  "dep:astrelis-ui-host",
+  "dep:astrelis-ui-widgets",
+]
+wgpu = ["dep:astrelis-gpu-wgpu"]
+winit = ["dep:astrelis-platform-winit"]
+
+[dependencies]
+astrelis-app = { workspace = true }
+astrelis-compositor = { workspace = true }
+astrelis-core = { workspace = true }
+astrelis-gpu = { workspace = true }
+astrelis-gpu-wgpu = { workspace = true, optional = true }
+astrelis-paint = { workspace = true }
+astrelis-paint-gpu = { workspace = true }
+astrelis-platform = { workspace = true }
+astrelis-platform-test = { workspace = true, optional = true }
+astrelis-platform-winit = { workspace = true, optional = true }
+astrelis-profiling = { workspace = true }
+astrelis-render = { workspace = true }
+astrelis-render-2d = { workspace = true, optional = true }
+astrelis-render-3d = { workspace = true, optional = true }
+astrelis-text = { workspace = true }
+astrelis-text-gpu = { workspace = true }
+astrelis-ui = { workspace = true, optional = true }
+astrelis-ui-core = { workspace = true, optional = true }
+astrelis-ui-docking = { workspace = true, optional = true }
+astrelis-ui-host = { workspace = true, optional = true }
+astrelis-ui-testing = { workspace = true, optional = true }
+astrelis-ui-widgets = { workspace = true, optional = true }
+
+[lints]
+workspace = true

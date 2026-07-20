@@ -2,6 +2,20 @@
 
 A low-level native application and graphics runtime for Rust.
 
+> **Release candidate:** the rewritten Astrelis architecture is preparing for
+> `0.3.0-rc.1`. It is intentionally incompatible with the pre-rewrite `0.2.x`
+> crates. See [MIGRATION-0.3.md](MIGRATION-0.3.md) before upgrading.
+
+Use the complete façade:
+
+```toml
+[dependencies]
+astrelis = "=0.3.0-rc.1"
+```
+
+Applications may instead depend on individual `astrelis-*` crates to keep
+their dependency graph focused.
+
 Astrelis is being rebuilt methodically from a small foundation. The current
 workspace contains:
 
@@ -27,6 +41,7 @@ workspace contains:
   and compositor hosting with observable asynchronous browser initialization.
 - `astrelis-ui-testing`: deterministic semantic actions and normalized
   semantic, inspection, and display-list snapshots.
+- `astrelis`: umbrella façade over the complete rewritten engine.
 
 Painting, text, and the first retained UI vertical slice are available as
 separately testable layers above the shared application runtime. The Painter
@@ -40,6 +55,10 @@ cargo fmt --all --check
 cargo test --workspace --all-features
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
+
+Release preparation and the dependency-layer publication order are documented
+in [RELEASING.md](RELEASING.md). The release helper defaults to a local package
+check and never publishes unless passed `publish` explicitly.
 
 Profiling can be compiled without instrumentation:
 

@@ -8,7 +8,7 @@
 //! cargo run -p astrelis-ui --example settings_form
 //! ```
 //!
-//! Contrast the construction here with `settings_window.rs` in
+//! Contrast the construction here with `facade_settings_window.rs` in
 //! `astrelis-ui-core`, where the equivalent tree threads a `map_err` through
 //! every call and configures each node in a separate struct-literal statement.
 

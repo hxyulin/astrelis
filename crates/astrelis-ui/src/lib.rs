@@ -9,11 +9,12 @@
 //! - [`Build`] — infallible, chainable node creation that commits a node's
 //!   layout, flex, style, wrapping, and enablement in one chain
 //!   ([`Node::finish`]);
-//! - [`LayoutExt`] with [`px`]/[`percent`]/[`layout`] — fluent [`LayoutStyle`];
+//! - [`LayoutExt`] with [`px`]/[`percent`]/[`layout`] — fluent
+//!   [`LayoutStyle`](astrelis_ui_core::LayoutStyle);
 //! - [`On`] — intent-named listeners (`on_click`, `on_checked`, `on_slider`,
 //!   `on_text_changed`, `on_text_submitted`);
 //! - [`widget_any`] — stamps the `as_any`/`as_any_mut` boilerplate every
-//!   [`Widget`] must otherwise hand-write;
+//!   [`Widget`](astrelis_ui_core::Widget) must otherwise hand-write;
 //! - a [`prelude`] gathering the names a typical screen needs.
 //!
 //! ```ignore

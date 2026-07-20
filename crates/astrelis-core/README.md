@@ -20,7 +20,7 @@ Disable default features when an application installs its own tracing
 subscriber:
 
 ```toml
-astrelis-core = { version = "0.0.0", default-features = false }
+astrelis-core = { version = "0.3.0-rc.1", default-features = false }
 ```
 
 ## Example

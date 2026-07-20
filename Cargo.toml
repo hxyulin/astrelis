@@ -1,6 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
+  "crates/astrelis",
   "crates/astrelis-app",
   "crates/astrelis-core",
   "crates/astrelis-compositor",
@@ -26,31 +27,41 @@ members = [
 ]
 
 [workspace.package]
-version = "0.0.0"
+version = "0.3.0-rc.1"
 authors = ["hxyulin <hxyulin@proton.me>"]
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/hxyulin/astrelis"
+homepage = "https://github.com/hxyulin/astrelis"
+readme = "README.md"
+rust-version = "1.88"
+keywords = ["game-engine", "graphics", "gui", "wgpu"]
+categories = ["game-engines", "graphics", "gui"]
+publish = ["crates-io"]
 
 [workspace.dependencies]
-astrelis-app = { path = "crates/astrelis-app", version = "0.0.0" }
-astrelis-core = { path = "crates/astrelis-core", version = "0.0.0" }
-astrelis-compositor = { path = "crates/astrelis-compositor", version = "0.0.0" }
-astrelis-gpu = { path = "crates/astrelis-gpu", version = "0.0.0" }
-astrelis-platform = { path = "crates/astrelis-platform", version = "0.0.0" }
-astrelis-paint = { path = "crates/astrelis-paint", version = "0.0.0" }
-astrelis-profiling = { path = "crates/astrelis-profiling", version = "0.0.0" }
-astrelis-render = { path = "crates/astrelis-render", version = "0.0.0" }
-astrelis-render-2d = { path = "crates/astrelis-render-2d", version = "0.0.0" }
-astrelis-render-3d = { path = "crates/astrelis-render-3d", version = "0.0.0" }
-astrelis-text = { path = "crates/astrelis-text", version = "0.0.0" }
-astrelis-text-gpu = { path = "crates/astrelis-text-gpu", version = "0.0.0" }
-astrelis-ui = { path = "crates/astrelis-ui", version = "0.0.0" }
-astrelis-ui-core = { path = "crates/astrelis-ui-core", version = "0.0.0" }
-astrelis-ui-docking = { path = "crates/astrelis-ui-docking", version = "0.0.0" }
-astrelis-ui-host = { path = "crates/astrelis-ui-host", version = "0.0.0" }
-astrelis-ui-testing = { path = "crates/astrelis-ui-testing", version = "0.0.0" }
-astrelis-ui-widgets = { path = "crates/astrelis-ui-widgets", version = "0.0.0" }
+astrelis-app = { path = "crates/astrelis-app", version = "=0.3.0-rc.1" }
+astrelis-compositor = { path = "crates/astrelis-compositor", version = "=0.3.0-rc.1" }
+astrelis-core = { path = "crates/astrelis-core", version = "=0.3.0-rc.1" }
+astrelis-gpu = { path = "crates/astrelis-gpu", version = "=0.3.0-rc.1" }
+astrelis-gpu-wgpu = { path = "crates/astrelis-gpu-wgpu", version = "=0.3.0-rc.1" }
+astrelis-paint = { path = "crates/astrelis-paint", version = "=0.3.0-rc.1" }
+astrelis-paint-gpu = { path = "crates/astrelis-paint-gpu", version = "=0.3.0-rc.1" }
+astrelis-platform = { path = "crates/astrelis-platform", version = "=0.3.0-rc.1" }
+astrelis-platform-test = { path = "crates/astrelis-platform-test", version = "=0.3.0-rc.1" }
+astrelis-platform-winit = { path = "crates/astrelis-platform-winit", version = "=0.3.0-rc.1" }
+astrelis-profiling = { path = "crates/astrelis-profiling", version = "=0.3.0-rc.1" }
+astrelis-render = { path = "crates/astrelis-render", version = "=0.3.0-rc.1" }
+astrelis-render-2d = { path = "crates/astrelis-render-2d", version = "=0.3.0-rc.1" }
+astrelis-render-3d = { path = "crates/astrelis-render-3d", version = "=0.3.0-rc.1" }
+astrelis-text = { path = "crates/astrelis-text", version = "=0.3.0-rc.1" }
+astrelis-text-gpu = { path = "crates/astrelis-text-gpu", version = "=0.3.0-rc.1" }
+astrelis-ui = { path = "crates/astrelis-ui", version = "=0.3.0-rc.1" }
+astrelis-ui-core = { path = "crates/astrelis-ui-core", version = "=0.3.0-rc.1" }
+astrelis-ui-docking = { path = "crates/astrelis-ui-docking", version = "=0.3.0-rc.1" }
+astrelis-ui-host = { path = "crates/astrelis-ui-host", version = "=0.3.0-rc.1" }
+astrelis-ui-testing = { path = "crates/astrelis-ui-testing", version = "=0.3.0-rc.1" }
+astrelis-ui-widgets = { path = "crates/astrelis-ui-widgets", version = "=0.3.0-rc.1" }
 arboard = { version = "3.6.1", default-features = false }
 glam = { version = "0.33", features = ["mint", "bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }

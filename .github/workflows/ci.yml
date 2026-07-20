@@ -15,6 +15,25 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
 
+  release-hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Check declared MSRV
+        run: cargo check --workspace --all-features
+      - name: Check WebAssembly
+        run: cargo check --workspace --all-features --target wasm32-unknown-unknown
+      - name: Check documentation
+        run: cargo doc --workspace --all-features --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      - name: Build publishable archives
+        run: cargo package --workspace --no-verify
+
   clippy:
     runs-on: ubuntu-latest
     steps:

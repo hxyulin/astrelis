@@ -6,13 +6,18 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
 
 [dependencies]
 astrelis-core = { workspace = true }
 astrelis-gpu = { workspace = true }
 astrelis-paint = { workspace = true }
 astrelis-profiling = { workspace = true }
-astrelis-paint-gpu = { path = "../astrelis-paint-gpu" }
+astrelis-paint-gpu = { workspace = true }
 astrelis-render = { workspace = true }
 
 [dev-dependencies]
