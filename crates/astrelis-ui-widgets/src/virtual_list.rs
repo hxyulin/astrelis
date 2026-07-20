@@ -206,6 +206,7 @@ pub struct VirtualList {
     options: VirtualListOptions,
     realized: BTreeMap<usize, ElementHandle<VirtualListItem>>,
     requested: Rc<Cell<Option<usize>>>,
+    revealed: Cell<Option<usize>>,
     selected: Rc<Cell<Option<usize>>>,
     item_count: usize,
 }
@@ -240,6 +241,7 @@ impl VirtualList {
             options,
             realized: BTreeMap::new(),
             requested: Rc::new(Cell::new(None)),
+            revealed: Cell::new(None),
             selected: Rc::new(Cell::new(None)),
             item_count: 0,
         })
@@ -278,6 +280,12 @@ impl VirtualList {
     /// Queues an index to be realized, revealed, and focused by the next sync.
     pub fn request_focus(&self, index: usize) {
         self.requested.set(Some(index));
+    }
+
+    /// Queues an index to be realized and scrolled into view by the next sync
+    /// without moving keyboard focus.
+    pub fn request_reveal(&self, index: usize) {
+        self.revealed.set(Some(index));
     }
 
     /// Returns the number of retained item roots.
@@ -338,7 +346,12 @@ impl VirtualList {
             .take()
             .filter(|_| item_count > 0)
             .map(|index| index.min(item_count - 1));
-        if let Some(index) = requested {
+        let revealed = self
+            .revealed
+            .take()
+            .filter(|_| item_count > 0)
+            .map(|index| index.min(item_count - 1));
+        if let Some(index) = requested.or(revealed) {
             let top = index as f32 * self.options.item_extent;
             let bottom = top + self.options.item_extent;
             let offset = ui.scroll_offset(self.scroll)?;
@@ -503,5 +516,28 @@ mod tests {
         ui.perform_semantic_action(item.id(), SemanticAction::Activate)
             .unwrap();
         assert_eq!(list.selected(), Some(9_999));
+    }
+
+    #[test]
+    fn revealed_offscreen_index_is_realized_and_scrolled_without_focus() {
+        let mut ui: Ui = Ui::new(FontDatabase::default(), Theme::default());
+        ui.set_viewport(Size::new(400.0, 240.0), 1.0);
+        let root = ui.root();
+        let mut list = VirtualList::new(&mut ui, root, VirtualListOptions::default()).unwrap();
+        ui.set_layout(
+            list.scroll_view(),
+            LayoutStyle {
+                height: Length::Px(180.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        list.sync(&mut ui, 10_000, build_row).unwrap();
+        list.request_reveal(9_999);
+        list.sync(&mut ui, 10_000, build_row).unwrap();
+        let item = list.realized[&9_999];
+        assert!(!ui.is_focused(item).unwrap());
+        let offset = ui.scroll_offset(list.scroll_view()).unwrap();
+        assert!(offset > 350_000.0, "unexpected final offset: {offset}");
     }
 }

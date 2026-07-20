@@ -889,6 +889,26 @@ fn inspection_and_public_hit_test_are_deterministic() {
 }
 
 #[test]
+fn inspection_reports_resolved_box_model_insets() {
+    let mut ui = ui();
+    ui.set_viewport(Size::new(500.0, 200.0), 1.0);
+    let root = ui.root();
+    let padding = ui.add_padding(root, Insets::all(12.0)).unwrap();
+    ui.add_label(padding, "Padded").unwrap();
+    let button = ui.add_button(root, "Inspect").unwrap();
+    let control_padding = ui.theme().control_padding;
+    let inspection = ui.inspect().unwrap();
+    let node = |id| inspection.nodes.iter().find(|node| node.id == id).unwrap();
+    assert_eq!(node(padding.id()).resolved_padding, Insets::all(12.0));
+    assert_eq!(node(padding.id()).resolved_margin, Insets::default());
+    let button_padding = node(button.id()).resolved_padding;
+    assert_eq!(button_padding.left, control_padding.left);
+    assert_eq!(button_padding.top, control_padding.top);
+    assert_eq!(button_padding.right, control_padding.right);
+    assert_eq!(button_padding.bottom, control_padding.bottom);
+}
+
+#[test]
 fn drag_threshold_routes_drop_and_reports_outcome() {
     let mut ui = ui();
     ui.set_viewport(Size::new(500.0, 200.0), 1.0);

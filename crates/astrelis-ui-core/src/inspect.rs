@@ -110,6 +110,12 @@ pub struct ElementInspection {
     pub z_index: i32,
     /// Untransformed layout bounds.
     pub layout_bounds: LogicalRect,
+    /// Padding resolved by the layout pass, in logical pixels.
+    pub resolved_padding: Insets,
+    /// Border resolved by the layout pass, in logical pixels.
+    pub resolved_border: Insets,
+    /// Margin resolved by the layout pass, in logical pixels.
+    pub resolved_margin: Insets,
     /// Axis-aligned transformed bounds.
     pub world_bounds: LogicalRect,
     /// Axis-aligned transformed bounds in physical pixels.
@@ -199,6 +205,9 @@ impl<Message: 'static> Ui<Message> {
                 overflow: node.overflow,
                 z_index: node.z_index,
                 layout_bounds: node.bounds,
+                resolved_padding: node.resolved_padding,
+                resolved_border: node.resolved_border,
+                resolved_margin: node.resolved_margin,
                 world_bounds: transformed_bounds(node.bounds, world),
                 physical_bounds: scale_rect(
                     transformed_bounds(node.bounds, world),

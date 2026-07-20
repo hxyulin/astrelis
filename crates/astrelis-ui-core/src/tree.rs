@@ -164,6 +164,12 @@ pub(crate) struct Node {
     pub(crate) transform_origin: LogicalPoint,
     pub(crate) cursor: Option<CursorIcon>,
     pub(crate) bounds: LogicalRect,
+    /// Padding resolved by the last layout pass.
+    pub(crate) resolved_padding: Insets,
+    /// Border resolved by the last layout pass.
+    pub(crate) resolved_border: Insets,
+    /// Margin resolved by the last layout pass.
+    pub(crate) resolved_margin: Insets,
     pub(crate) text_layout: Option<TextLayout>,
     /// The request that produced `text_layout`, retained so an unchanged node
     /// can skip reshaping even when a global dirty pass revisits it.
@@ -222,6 +228,9 @@ impl<Message: 'static> Ui<Message> {
                     transform_origin: LogicalPoint::ZERO,
                     cursor: None,
                     bounds: Rect::default(),
+                    resolved_padding: Insets::default(),
+                    resolved_border: Insets::default(),
+                    resolved_margin: Insets::default(),
                     text_layout: None,
                     text_request: None,
                     pending: None,
@@ -547,6 +556,9 @@ impl<Message: 'static> Ui<Message> {
             transform_origin: LogicalPoint::ZERO,
             cursor: None,
             bounds: Rect::default(),
+            resolved_padding: Insets::default(),
+            resolved_border: Insets::default(),
+            resolved_margin: Insets::default(),
             text_layout: None,
             text_request: None,
             pending: None,

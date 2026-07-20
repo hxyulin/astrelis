@@ -837,8 +837,17 @@ impl<Message: 'static> Ui<Message> {
             parent_origin.y + layout.location.y,
         );
         let children = self.node(id)?.children.clone();
-        self.node_mut(id)?.bounds =
-            Rect::from_xywh(origin.x, origin.y, layout.size.width, layout.size.height);
+        let to_insets = |rect: taffy::Rect<f32>| Insets {
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+        };
+        let node = self.node_mut(id)?;
+        node.bounds = Rect::from_xywh(origin.x, origin.y, layout.size.width, layout.size.height);
+        node.resolved_padding = to_insets(layout.padding);
+        node.resolved_border = to_insets(layout.border);
+        node.resolved_margin = to_insets(layout.margin);
         for child in children {
             self.assign_layout(tree, mapping, child, origin)?;
         }
