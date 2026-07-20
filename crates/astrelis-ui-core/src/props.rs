@@ -63,6 +63,7 @@ impl<Message: 'static> Ui<Message> {
         self.capture.retain(|_, captured| *captured != id);
         self.listeners.remove(&id);
         self.semantic_roles.remove(&id);
+        self.semantic_labels.remove(&id);
         self.semantic_descriptions.remove(&id);
         self.semantic_invalid.remove(&id);
         self.semantic_live.remove(&id);
@@ -582,6 +583,18 @@ impl<Message: 'static> Ui<Message> {
     ) -> Result<(), UiError> {
         self.node(handle.id)?;
         self.semantic_roles.insert(handle.id, role);
+        self.dirty |= Dirty::SEMANTICS;
+        Ok(())
+    }
+
+    /// Overrides the accessible label reported for one retained element.
+    pub fn set_semantic_label<T>(
+        &mut self,
+        handle: ElementHandle<T>,
+        label: impl Into<String>,
+    ) -> Result<(), UiError> {
+        self.node(handle.id)?;
+        self.semantic_labels.insert(handle.id, label.into());
         self.dirty |= Dirty::SEMANTICS;
         Ok(())
     }

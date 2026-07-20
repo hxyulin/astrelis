@@ -144,6 +144,7 @@ pub struct Ui<Message = ()> {
     pub(crate) next_listener: u64,
     pub(crate) custom_widgets: HashMap<ElementId, Box<dyn Widget<Message>>>,
     pub(crate) semantic_roles: HashMap<ElementId, SemanticRole>,
+    pub(crate) semantic_labels: HashMap<ElementId, String>,
     pub(crate) semantic_descriptions: HashMap<ElementId, String>,
     pub(crate) semantic_invalid: HashSet<ElementId>,
     pub(crate) semantic_live: HashMap<ElementId, SemanticLive>,

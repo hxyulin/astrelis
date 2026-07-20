@@ -995,7 +995,11 @@ impl backend::Surface for WgpuSurface {
                 height: configuration.height,
                 present_mode: convert_present_mode(configuration.present_mode),
                 alpha_mode: convert_alpha_mode(configuration.alpha_mode),
-                view_formats: vec![],
+                view_formats: configuration
+                    .view_formats
+                    .into_iter()
+                    .map(convert_texture_format)
+                    .collect(),
                 desired_maximum_frame_latency: configuration.desired_maximum_frame_latency,
             },
         );

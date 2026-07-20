@@ -306,6 +306,7 @@ impl<Message: 'static> Ui<Message> {
             next_listener: 1,
             custom_widgets: HashMap::new(),
             semantic_roles: HashMap::new(),
+            semantic_labels: HashMap::new(),
             semantic_descriptions: HashMap::new(),
             semantic_invalid: HashSet::new(),
             semantic_live: HashMap::new(),

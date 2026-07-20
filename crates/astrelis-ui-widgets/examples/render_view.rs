@@ -351,6 +351,7 @@ impl App for Example {
         let configuration = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
             format,
+            view_formats: vec![],
             width: size.width.max(1),
             height: size.height.max(1),
             present_mode: PresentMode::Fifo,

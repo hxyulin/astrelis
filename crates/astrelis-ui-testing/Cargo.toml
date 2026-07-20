@@ -1,0 +1,17 @@
+[package]
+name = "astrelis-ui-testing"
+description = "Deterministic semantic, inspection, and display-list UI testing for Astrelis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-paint = { workspace = true }
+astrelis-text = { workspace = true }
+astrelis-ui-core = { workspace = true }
+
+[lints]
+workspace = true

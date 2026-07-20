@@ -1169,6 +1169,8 @@ pub struct SurfaceConfiguration {
     pub usage: TextureUsages,
     /// Frame format.
     pub format: TextureFormat,
+    /// Additional texture-view formats permitted for acquired frames.
+    pub view_formats: Vec<TextureFormat>,
     /// Width in physical pixels.
     pub width: u32,
     /// Height in physical pixels.

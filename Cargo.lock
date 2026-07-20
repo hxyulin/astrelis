@@ -400,6 +400,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-ui-host"
+version = "0.0.0"
+dependencies = [
+ "astrelis-app",
+ "astrelis-compositor",
+ "astrelis-core",
+ "astrelis-gpu",
+ "astrelis-gpu-wgpu",
+ "astrelis-paint",
+ "astrelis-paint-gpu",
+ "astrelis-platform",
+ "astrelis-ui-core",
+ "pollster",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "astrelis-ui-testing"
+version = "0.0.0"
+dependencies = [
+ "astrelis-core",
+ "astrelis-paint",
+ "astrelis-text",
+ "astrelis-ui-core",
+]
+
+[[package]]
 name = "astrelis-ui-widgets"
 version = "0.0.0"
 dependencies = [

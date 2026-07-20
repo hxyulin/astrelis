@@ -228,6 +228,7 @@ impl<Message: 'static> Ui<Message> {
             _ => (SemanticRole::Group, String::new(), None, None, vec![]),
         };
         let role = self.semantic_roles.get(&id).copied().unwrap_or(role);
+        let label = self.semantic_labels.get(&id).cloned().unwrap_or(label);
         Ok(SemanticNode {
             id,
             role,

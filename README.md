@@ -23,6 +23,10 @@ workspace contains:
   and texture-backed render-view compositions.
 - `astrelis-ui-docking`: serializable editor docking trees, retained panel
   hosts, tab/split drop policy, and in-window floating groups.
+- `astrelis-ui-host`: native/browser window, WebGPU surface, retained painter,
+  and compositor hosting with observable asynchronous browser initialization.
+- `astrelis-ui-testing`: deterministic semantic actions and normalized
+  semantic, inspection, and display-list snapshots.
 
 Painting, text, and the first retained UI vertical slice are available as
 separately testable layers above the shared application runtime. The Painter

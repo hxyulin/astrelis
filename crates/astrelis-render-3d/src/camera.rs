@@ -28,6 +28,7 @@ impl Default for Camera3D {
 
 impl Camera3D {
     /// Points the camera's negative-Z axis at a target.
+    #[allow(deprecated)]
     pub fn look_at(&mut self, target: Vec3, up: Vec3) {
         self.rotation = Quat::from_mat4(&Mat4::look_at_rh(self.position, target, up).inverse());
     }
@@ -47,6 +48,7 @@ impl Camera3D {
     }
 
     /// Returns the reverse-Z view-projection matrix.
+    #[allow(deprecated)]
     pub fn view_projection(self, aspect: f32) -> Option<Mat4> {
         if !aspect.is_finite() || aspect <= 0.0 {
             return None;
