@@ -125,6 +125,55 @@ impl<Message: 'static> Ui<Message> {
         Ok(self.node(handle.id)?.style)
     }
 
+    /// Returns an element's declared visual overrides.
+    pub fn widget_style<T>(&self, handle: ElementHandle<T>) -> Result<WidgetStyle, UiError> {
+        Ok(self.node(handle.id)?.visual)
+    }
+
+    /// Replaces a padding container's insets.
+    pub fn set_padding_insets(
+        &mut self,
+        handle: ElementHandle<Padding>,
+        insets: Insets,
+    ) -> Result<(), UiError> {
+        if !insets.left.is_finite()
+            || !insets.top.is_finite()
+            || !insets.right.is_finite()
+            || !insets.bottom.is_finite()
+        {
+            return Err(UiError::new("padding insets must be finite"));
+        }
+        let node = self.node_mut(handle.id)?;
+        match &mut node.kind {
+            Kind::Padding { insets: current } if *current != insets => *current = insets,
+            Kind::Padding { .. } => return Ok(()),
+            _ => return Err(UiError::new("element is not a padding container")),
+        }
+        self.invalidate_node(handle.id, Dirty::all());
+        Ok(())
+    }
+
+    /// Replaces an overlay's placement options.
+    pub fn set_overlay_options(
+        &mut self,
+        handle: ElementHandle<Overlay>,
+        options: OverlayOptions,
+    ) -> Result<(), UiError> {
+        let node = self.node_mut(handle.id)?;
+        let Kind::Overlay {
+            options: current, ..
+        } = &mut node.kind
+        else {
+            return Err(UiError::new("element is not an overlay"));
+        };
+        if *current != options {
+            *current = options;
+            node.z_index = options.z_index;
+            self.invalidate_layout();
+        }
+        Ok(())
+    }
+
     /// Applies direct foreground and background overrides to one widget.
     pub fn set_widget_style<T>(
         &mut self,

@@ -347,6 +347,7 @@ pub(crate) enum EventRequest {
     SetLayout(ElementId, LayoutStyle),
     SetVisibility(ElementId, Visibility),
     SetScrollOffset(ElementId, f32),
+    SetContentInset(Insets),
     BeginDrag {
         device_id: DeviceId,
         source: ElementId,
@@ -450,6 +451,13 @@ impl<Message> EventContext<'_, Message> {
     pub fn set_scroll_offset<T>(&mut self, handle: ElementHandle<T>, offset: f32) {
         self.requests
             .push(EventRequest::SetScrollOffset(handle.id, offset));
+    }
+    /// Defers a content-inset change until routed dispatch completes.
+    ///
+    /// See [`Ui::set_content_inset`]; the deferred form lets a drag handle
+    /// reflow content live from inside pointer dispatch.
+    pub fn set_content_inset(&mut self, inset: Insets) {
+        self.requests.push(EventRequest::SetContentInset(inset));
     }
     /// Arms an in-process drag which activates after its movement threshold.
     pub fn begin_drag(
@@ -677,6 +685,7 @@ impl<Message: 'static> Ui<Message> {
                 EventRequest::SetScrollOffset(id, offset) => {
                     self.set_scroll_offset_id(id, offset)?;
                 }
+                EventRequest::SetContentInset(inset) => self.set_content_inset(inset),
                 EventRequest::BeginDrag {
                     device_id,
                     source,

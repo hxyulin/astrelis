@@ -115,6 +115,9 @@ pub struct Ui<Message = ()> {
     /// `flush_async` knows how many results to wait for.
     pub(crate) async_outstanding: usize,
     pub(crate) viewport: LogicalSize,
+    /// Edges of the viewport reserved away from the root content area. Content
+    /// lays out in `viewport − content_inset`; overlays keep the full viewport.
+    pub(crate) content_inset: Insets,
     pub(crate) scale_factor: f32,
     pub(crate) dirty: Dirty,
     /// Nodes whose text or layout style changed since the last layout pass, so

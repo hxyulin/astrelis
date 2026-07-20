@@ -72,7 +72,7 @@ pub enum ElementKind {
 }
 
 impl ElementKind {
-    fn from_kind(kind: &Kind) -> Self {
+    pub(crate) fn from_kind(kind: &Kind) -> Self {
         match kind {
             Kind::Label { .. } => Self::Label,
             Kind::Button { .. } => Self::Button,
@@ -102,6 +102,8 @@ pub struct ElementInspection {
     pub kind: ElementKind,
     /// Layout constraints declared on the element.
     pub declared_layout: LayoutStyle,
+    /// Visual overrides declared on the element.
+    pub widget_style: WidgetStyle,
     /// Local enabled state before ancestor propagation.
     pub enabled: bool,
     /// Child overflow policy.
@@ -201,6 +203,7 @@ impl<Message: 'static> Ui<Message> {
                 parent: node.parent,
                 kind: ElementKind::from_kind(&node.kind),
                 declared_layout: node.style,
+                widget_style: node.visual,
                 enabled: node.enabled,
                 overflow: node.overflow,
                 z_index: node.z_index,

@@ -64,6 +64,44 @@ pub enum Stack {}
 pub enum FocusScope {}
 /// Viewport-hosted portal marker.
 pub enum Overlay {}
+/// Kind-agnostic element marker for handles recovered from an [`ElementId`].
+pub enum AnyElement {}
+
+/// Widget markers that identify one concrete retained element kind, enabling
+/// kind-checked handle recovery via [`Ui::typed_handle`].
+pub trait ElementMarker: marker_sealed::Sealed {}
+impl<T: marker_sealed::Sealed> ElementMarker for T {}
+
+mod marker_sealed {
+    use super::*;
+
+    pub trait Sealed {
+        fn matches(kind: ElementKind) -> bool;
+    }
+
+    macro_rules! impl_marker {
+        ($marker:ty, $kind:expr) => {
+            impl Sealed for $marker {
+                fn matches(kind: ElementKind) -> bool {
+                    kind == $kind
+                }
+            }
+        };
+    }
+
+    impl_marker!(Label, ElementKind::Label);
+    impl_marker!(Button, ElementKind::Button);
+    impl_marker!(Row, ElementKind::Row);
+    impl_marker!(Column, ElementKind::Column);
+    impl_marker!(Stack, ElementKind::Stack);
+    impl_marker!(FocusScope, ElementKind::FocusScope);
+    impl_marker!(Overlay, ElementKind::Overlay);
+    impl_marker!(Padding, ElementKind::Padding);
+    impl_marker!(TextField, ElementKind::TextField);
+    impl_marker!(Checkbox, ElementKind::Checkbox);
+    impl_marker!(Slider, ElementKind::Slider);
+    impl_marker!(ScrollView, ElementKind::ScrollView);
+}
 
 #[derive(Clone, Debug)]
 pub(crate) enum Kind {
@@ -249,6 +287,7 @@ impl<Message: 'static> Ui<Message> {
             worker: None,
             async_outstanding: 0,
             viewport: Size::ZERO,
+            content_inset: Insets::default(),
             scale_factor: 1.0,
             dirty: Dirty::all(),
             dirty_nodes: HashSet::new(),
@@ -287,6 +326,32 @@ impl<Message: 'static> Ui<Message> {
         }
     }
 
+    /// Recovers a kind-agnostic handle for a live element identity.
+    ///
+    /// The handle drives the kind-independent setters (layout, visibility,
+    /// enabled, widget style). Returns `None` when the identity is stale.
+    pub fn any_handle(&self, id: ElementId) -> Option<ElementHandle<AnyElement>> {
+        self.node(id).ok().map(|_| ElementHandle {
+            id,
+            marker: PhantomData,
+        })
+    }
+
+    /// Recovers a typed handle for a live element identity of a known kind.
+    ///
+    /// Returns `None` when the identity is stale or retains a different kind,
+    /// so a recovered handle never reaches a kind-specific setter it does not
+    /// satisfy.
+    pub fn typed_handle<T: ElementMarker>(&self, id: ElementId) -> Option<ElementHandle<T>> {
+        let node = self.node(id).ok()?;
+        <T as marker_sealed::Sealed>::matches(ElementKind::from_kind(&node.kind)).then_some(
+            ElementHandle {
+                id,
+                marker: PhantomData,
+            },
+        )
+    }
+
     /// Changes the logical viewport and DPI scale.
     pub fn set_viewport(&mut self, viewport: LogicalSize, scale_factor: f32) {
         if self.viewport != viewport || self.scale_factor != scale_factor {
@@ -295,6 +360,26 @@ impl<Message: 'static> Ui<Message> {
             // Wrap widths track the viewport, so every wrapped label may reshape.
             self.invalidate_layout();
         }
+    }
+
+    /// Reserves viewport edges away from the root content area.
+    ///
+    /// Content lays out inside `viewport − inset` (origin shifted by the left
+    /// and top inset) while overlays keep positioning against the full
+    /// viewport, so an overlay sized to a reserved strip docks into it without
+    /// overlapping content — the mechanism behind devtools-style docked panels.
+    pub fn set_content_inset(&mut self, inset: Insets) {
+        if self.content_inset != inset {
+            self.content_inset = inset;
+            // The root's available extent changed, so wrapped text and layout
+            // re-resolve exactly as they do for a viewport change.
+            self.invalidate_layout();
+        }
+    }
+
+    /// Returns the viewport edges reserved away from the root content area.
+    pub fn content_inset(&self) -> Insets {
+        self.content_inset
     }
 
     /// Returns the active theme.

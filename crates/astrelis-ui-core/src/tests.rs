@@ -1632,3 +1632,155 @@ fn replacing_async_worker_settles_previous_jobs() {
     assert!(ui.node(label.id()).unwrap().pending.is_none());
     assert!(!ui.flush_async());
 }
+
+#[test]
+fn content_inset_reserves_a_strip_for_a_docked_overlay() {
+    let mut ui = ui();
+    ui.set_viewport(Size::new(640.0, 480.0), 1.0);
+    let root = ui.root();
+    let content = ui.add_column(root).unwrap();
+    ui.set_layout(
+        content,
+        LayoutStyle {
+            width: Length::Percent(1.0),
+            height: Length::Percent(1.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let panel = ui
+        .add_overlay(
+            root,
+            OverlayOptions {
+                side: OverlaySide::Right,
+                alignment: OverlayAlignment::Start,
+                ..OverlayOptions::default()
+            },
+        )
+        .unwrap();
+    ui.set_layout(
+        panel,
+        LayoutStyle {
+            width: Length::Px(200.0),
+            height: Length::Percent(1.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    ui.set_content_inset(Insets {
+        right: 200.0,
+        ..Insets::default()
+    });
+    let inspection = ui.inspect().unwrap();
+    let node = |id| inspection.nodes.iter().find(|node| node.id == id).unwrap();
+    let root_bounds = node(ui.root().id()).layout_bounds;
+    assert_eq!(root_bounds, Rect::from_xywh(0.0, 0.0, 440.0, 480.0));
+    assert_eq!(
+        node(content.id()).layout_bounds,
+        Rect::from_xywh(0.0, 0.0, 440.0, 480.0)
+    );
+    let panel_bounds = node(panel.id()).layout_bounds;
+    assert_eq!(panel_bounds, Rect::from_xywh(440.0, 0.0, 200.0, 480.0));
+    assert_eq!(
+        inspection.viewport,
+        Size::new(640.0, 480.0),
+        "the reported viewport must stay the full window extent"
+    );
+    ui.set_content_inset(Insets::default());
+    let restored = ui.inspect().unwrap();
+    let restored_root = restored
+        .nodes
+        .iter()
+        .find(|node| node.id == ui.root().id())
+        .unwrap();
+    assert_eq!(
+        restored_root.layout_bounds,
+        Rect::from_xywh(0.0, 0.0, 640.0, 480.0)
+    );
+}
+
+#[test]
+fn content_inset_offsets_the_root_origin() {
+    let mut ui = ui();
+    ui.set_viewport(Size::new(640.0, 480.0), 1.0);
+    ui.set_content_inset(Insets {
+        left: 40.0,
+        top: 24.0,
+        ..Insets::default()
+    });
+    let root = ui.root();
+    let label = ui.add_label(root, "content").unwrap();
+    let bounds = ui.layout_bounds(label).unwrap();
+    assert_eq!(bounds.origin.x, 40.0);
+    assert_eq!(bounds.origin.y, 24.0);
+    assert_eq!(ui.content_inset().left, 40.0);
+}
+
+#[test]
+fn inspection_reports_widget_style_overrides() {
+    let mut ui = ui();
+    let root = ui.root();
+    let label = ui.add_label(root, "styled").unwrap();
+    let style = WidgetStyle {
+        foreground: Some(Color::from_rgba8(0xff, 0x00, 0x00, 0xff)),
+        font_size: Some(19.0),
+        ..WidgetStyle::default()
+    };
+    ui.set_widget_style(label, style).unwrap();
+    assert_eq!(ui.widget_style(label).unwrap(), style);
+    let inspection = ui.inspect_element(label).unwrap();
+    assert_eq!(inspection.widget_style, style);
+}
+
+#[test]
+fn handles_recovered_from_ids_are_kind_checked() {
+    let mut ui = ui();
+    let root = ui.root();
+    let button = ui.add_button(root, "Press").unwrap();
+    let id = button.id();
+    assert!(ui.any_handle(id).is_some());
+    assert!(ui.typed_handle::<Button>(id).is_some());
+    assert!(ui.typed_handle::<Label>(id).is_none());
+    let any = ui.any_handle(id).unwrap();
+    ui.set_visibility(any, Visibility::Hidden).unwrap();
+    assert!(!ui.inspect_element(button).unwrap().effectively_visible);
+    let typed = ui.typed_handle::<Button>(id).unwrap();
+    ui.set_button_text(typed, "Pressed").unwrap();
+    ui.remove(button).unwrap();
+    assert!(ui.any_handle(id).is_none());
+    assert!(ui.typed_handle::<Button>(id).is_none());
+}
+
+#[test]
+fn overlay_options_can_be_replaced_after_creation() {
+    let mut ui = ui();
+    let root = ui.root();
+    let anchor = ui.add_button(root, "anchor").unwrap();
+    let overlay = ui
+        .add_overlay(
+            anchor,
+            OverlayOptions {
+                side: OverlaySide::Right,
+                ..OverlayOptions::default()
+            },
+        )
+        .unwrap();
+    ui.add_label(overlay, "popup").unwrap();
+    ui.layout_bounds(overlay).unwrap();
+    ui.set_overlay_options(
+        overlay,
+        OverlayOptions {
+            side: OverlaySide::Below,
+            z_index: 7,
+            ..OverlayOptions::default()
+        },
+    )
+    .unwrap();
+    let anchor_bounds = ui.layout_bounds(anchor).unwrap();
+    let overlay_bounds = ui.layout_bounds(overlay).unwrap();
+    assert!(
+        overlay_bounds.origin.y >= anchor_bounds.max_y(),
+        "the overlay must reposition below its anchor after the side change"
+    );
+    assert_eq!(ui.inspect_element(overlay).unwrap().z_index, 7);
+}

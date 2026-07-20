@@ -301,6 +301,15 @@ impl<Message: 'static> Ui<Message> {
         }
     }
 
+    /// The extent available to root content: the viewport minus the reserved
+    /// content inset, clamped to zero.
+    pub(crate) fn content_size(&self) -> LogicalSize {
+        Size::new(
+            (self.viewport.width - self.content_inset.left - self.content_inset.right).max(0.0),
+            (self.viewport.height - self.content_inset.top - self.content_inset.bottom).max(0.0),
+        )
+    }
+
     pub(crate) fn taffy_style(&self, id: ElementId, node: &Node) -> Style {
         let dimension = |value: Length| match value {
             Length::Auto => Dimension::auto(),
@@ -358,9 +367,10 @@ impl<Message: 'static> Ui<Message> {
             ..Default::default()
         };
         if node.parent.is_none() {
+            let content = self.content_size();
             style.size = TaffySize {
-                width: Dimension::length(self.viewport.width.max(0.0)),
-                height: Dimension::length(self.viewport.height.max(0.0)),
+                width: Dimension::length(content.width),
+                height: Dimension::length(content.height),
             };
         }
         if node.style.grow > 0.0 {
@@ -612,13 +622,14 @@ impl<Message: 'static> Ui<Message> {
         self.sync_taffy(&mut cache)?;
         let root = cache.ids[&self.root];
         let layouts = self.measure_map();
+        let content = self.content_size();
         cache
             .tree
             .compute_layout_with_measure(
                 root,
                 TaffySize {
-                    width: AvailableSpace::Definite(self.viewport.width.max(0.0)),
-                    height: AvailableSpace::Definite(self.viewport.height.max(0.0)),
+                    width: AvailableSpace::Definite(content.width),
+                    height: AvailableSpace::Definite(content.height),
                 },
                 |known, _available, _node, context, _style| {
                     let Some(id) = context.copied() else {
@@ -632,7 +643,10 @@ impl<Message: 'static> Ui<Message> {
                 },
             )
             .map_err(|error| UiError::new(error.to_string()))?;
-        self.assign_layout(&cache.tree, &cache.ids, self.root, LogicalPoint::ZERO)?;
+        // Content sits at the inset origin; overlays reposition against the
+        // full viewport afterwards, so a reserved strip stays theirs to fill.
+        let content_origin = Point::new(self.content_inset.left, self.content_inset.top);
+        self.assign_layout(&cache.tree, &cache.ids, self.root, content_origin)?;
         self.taffy_cache = cache;
         self.position_overlays()?;
         if self.focus.is_none() {
