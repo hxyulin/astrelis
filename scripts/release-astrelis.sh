@@ -3,6 +3,7 @@ set -euo pipefail
 
 version="0.3.0-rc.1"
 mode="${1:-package}"
+registry_probe_dir="/tmp/astrelis-release-registry-probe"
 
 layers=(
   "astrelis-core astrelis-profiling"
@@ -15,12 +16,19 @@ layers=(
 )
 
 usage() {
-  echo "usage: $0 [package|status|publish]" >&2
+  echo "usage: $0 [package|self-test|status|publish]" >&2
   exit 2
 }
 
 visible() {
-  cargo info "$1@$version" >/dev/null 2>&1
+  # `cargo info` run inside this workspace resolves the matching local package,
+  # which is not evidence that crates.io has indexed the version. Probe from a
+  # neutral directory and force the crates.io registry instead.
+  mkdir -p "$registry_probe_dir"
+  (
+    cd "$registry_probe_dir"
+    cargo info --registry crates-io "$1@${2:-$version}" >/dev/null 2>&1
+  )
 }
 
 wait_until_visible() {
@@ -41,6 +49,14 @@ wait_until_visible() {
 case "$mode" in
   package)
     cargo package --workspace --allow-dirty --no-verify
+    ;;
+  self-test)
+    visible astrelis-core 0.2.4
+    if visible astrelis-core 0.3.0-rc.999999; then
+      echo "registry probe incorrectly accepted a nonexistent version" >&2
+      exit 1
+    fi
+    echo "registry exact-version probe passed"
     ;;
   status)
     for layer in "${layers[@]}"; do

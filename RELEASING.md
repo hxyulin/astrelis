@@ -23,13 +23,16 @@ dependency layer becomes available.
 
 ```sh
 ./scripts/release-astrelis.sh status
+./scripts/release-astrelis.sh self-test
 ./scripts/release-astrelis.sh publish
 ```
 
 The script publishes in dependency order and pauses for confirmation between
-layers. It checks the exact version before every upload, so rerunning it after
-a rate limit or interrupted registry propagation skips completed packages.
-An upload error stops immediately and is never retried automatically.
+layers. It checks the exact version from a neutral directory before every
+upload so a matching local workspace package cannot be mistaken for a
+published crate. Rerunning after a rate limit or interrupted registry
+propagation skips completed packages. An upload error stops immediately and is
+never retried automatically.
 
 After every package is visible, test a new application outside the workspace
 using only crates.io dependencies. Then tag the published commit as
