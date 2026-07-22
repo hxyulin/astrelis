@@ -2,6 +2,22 @@
 
 use super::*;
 
+fn logical_scroll_delta(
+    delta: ScrollDelta,
+    scale_factor: f32,
+) -> (LogicalPoint, ScrollGranularity) {
+    match delta {
+        ScrollDelta::Lines { x, y } => (Point::new(-x * 40.0, -y * 40.0), ScrollGranularity::Line),
+        ScrollDelta::Pixels(point) => (
+            Point::new(
+                -(point.x as f32) / scale_factor,
+                -(point.y as f32) / scale_factor,
+            ),
+            ScrollGranularity::Pixel,
+        ),
+    }
+}
+
 impl<Message: 'static> Ui<Message> {
     /// Routes one platform window event through the retained UI tree.
     pub fn handle_window_event(
@@ -228,33 +244,75 @@ impl<Message: 'static> Ui<Message> {
                 }
             }
             WindowEvent::PointerWheel {
-                device_id, delta, ..
+                device_id,
+                delta,
+                phase,
             } => {
                 self.ensure_layout()?;
                 if let Some(position) = self.pointer_positions.get(device_id).copied()
                     && let Some(target) = self.hit_test(position)
                 {
-                    let amount = match delta {
-                        ScrollDelta::Lines { y, .. } => -*y * 40.0,
-                        ScrollDelta::Pixels(point) => -(point.y as f32) / self.scale_factor,
-                    };
+                    let (delta, granularity) = logical_scroll_delta(*delta, self.scale_factor);
                     if !self.dispatch_routed(
                         target,
                         RoutedEventKind::Scroll {
                             device_id: *device_id,
-                            delta: Point::new(0.0, amount),
+                            position,
+                            delta,
+                            granularity,
+                            phase: *phase,
                         },
                     )? {
                         let mut current = Some(target);
                         while let Some(id) = current {
                             if matches!(self.node(id)?.kind, Kind::ScrollView { .. })
-                                && self.scroll_by_id(id, amount)?
+                                && self.scroll_by_id(id, delta.y)?
                             {
                                 break;
                             }
                             current = self.node(id)?.parent;
                         }
                     }
+                }
+            }
+            WindowEvent::PinchGesture {
+                device_id,
+                delta,
+                phase,
+            } => {
+                self.ensure_layout()?;
+                if let Some(position) = self.pointer_positions.get(device_id).copied()
+                    && let Some(target) = self.hit_test(position)
+                {
+                    self.dispatch_routed(
+                        target,
+                        RoutedEventKind::PinchGesture {
+                            device_id: *device_id,
+                            position,
+                            delta: *delta,
+                            phase: *phase,
+                        },
+                    )?;
+                }
+            }
+            WindowEvent::PanGesture {
+                device_id,
+                delta,
+                phase,
+            } => {
+                self.ensure_layout()?;
+                if let Some(position) = self.pointer_positions.get(device_id).copied()
+                    && let Some(target) = self.hit_test(position)
+                {
+                    self.dispatch_routed(
+                        target,
+                        RoutedEventKind::PanGesture {
+                            device_id: *device_id,
+                            position,
+                            delta: Point::new(delta.x as f32, delta.y as f32),
+                            phase: *phase,
+                        },
+                    )?;
                 }
             }
             WindowEvent::Touch(touch) => {
@@ -429,5 +487,29 @@ impl<Message: 'static> Ui<Message> {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use astrelis_core::geometry::{Physical, Point};
+
+    #[test]
+    fn line_scroll_preserves_both_axes_and_granularity() {
+        let (delta, granularity) =
+            logical_scroll_delta(ScrollDelta::Lines { x: 2.0, y: -3.0 }, 2.0);
+        assert_eq!(delta, Point::new(-80.0, 120.0));
+        assert_eq!(granularity, ScrollGranularity::Line);
+    }
+
+    #[test]
+    fn pixel_scroll_preserves_both_axes_and_converts_scale() {
+        let (delta, granularity) = logical_scroll_delta(
+            ScrollDelta::Pixels(Point::<Physical, f64>::new(16.0, -24.0)),
+            2.0,
+        );
+        assert_eq!(delta, Point::new(-8.0, 12.0));
+        assert_eq!(granularity, ScrollGranularity::Pixel);
     }
 }

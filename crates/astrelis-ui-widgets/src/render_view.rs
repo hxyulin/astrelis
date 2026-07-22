@@ -5,10 +5,12 @@ use astrelis_paint::{
     Brush, CompositorViewId, CornerRadii, ExternalImage, ImageOptions, ImageSampling, Painter,
     RoundedRect,
 };
-use astrelis_platform::{DeviceId, ElementState, ImeEvent, KeyboardInput, PointerButton};
+use astrelis_platform::{
+    DeviceId, ElementState, ImeEvent, KeyboardInput, PointerButton, TouchPhase,
+};
 use astrelis_ui_core::{
-    ElementHandle, EventContext, RoutedEvent, RoutedEventKind, SemanticRole, Theme, Ui, UiError,
-    Widget,
+    ElementHandle, EventContext, RoutedEvent, RoutedEventKind, ScrollGranularity, SemanticRole,
+    Theme, Ui, UiError, Widget,
 };
 
 /// Content currently presented by a [`RenderView`].
@@ -64,7 +66,24 @@ pub enum RenderViewEvent {
     /// Wheel or trackpad displacement.
     Scroll {
         device_id: DeviceId,
+        position: RenderViewPointerPosition,
         delta: LogicalPoint,
+        granularity: ScrollGranularity,
+        phase: TouchPhase,
+    },
+    /// Trackpad pinch magnification.
+    PinchGesture {
+        device_id: DeviceId,
+        position: RenderViewPointerPosition,
+        delta: f64,
+        phase: TouchPhase,
+    },
+    /// Trackpad pan displacement.
+    PanGesture {
+        device_id: DeviceId,
+        position: RenderViewPointerPosition,
+        delta: LogicalPoint,
+        phase: TouchPhase,
     },
     /// Keyboard input while focused.
     Keyboard(KeyboardInput),
@@ -301,10 +320,47 @@ impl<Message: 'static> Widget<Message> for RenderView<Message> {
                     device_id: *device_id,
                 })
             }
-            RoutedEventKind::Scroll { device_id, delta } => Some(RenderViewEvent::Scroll {
-                device_id: *device_id,
-                delta: *delta,
-            }),
+            RoutedEventKind::Scroll {
+                device_id,
+                position,
+                delta,
+                granularity,
+                phase,
+            } => self
+                .position(context, *position)
+                .map(|position| RenderViewEvent::Scroll {
+                    device_id: *device_id,
+                    position,
+                    delta: *delta,
+                    granularity: *granularity,
+                    phase: *phase,
+                }),
+            RoutedEventKind::PinchGesture {
+                device_id,
+                position,
+                delta,
+                phase,
+            } => self
+                .position(context, *position)
+                .map(|position| RenderViewEvent::PinchGesture {
+                    device_id: *device_id,
+                    position,
+                    delta: *delta,
+                    phase: *phase,
+                }),
+            RoutedEventKind::PanGesture {
+                device_id,
+                position,
+                delta,
+                phase,
+            } => self
+                .position(context, *position)
+                .map(|position| RenderViewEvent::PanGesture {
+                    device_id: *device_id,
+                    position,
+                    delta: *delta,
+                    phase: *phase,
+                }),
             RoutedEventKind::Keyboard(value) => Some(RenderViewEvent::Keyboard(value.clone())),
             RoutedEventKind::Ime(value) => Some(RenderViewEvent::Ime(value.clone())),
             RoutedEventKind::FocusChanged(value) => Some(RenderViewEvent::FocusChanged(*value)),

@@ -7,13 +7,13 @@ use astrelis_app::{App, AppContext, Runtime, RuntimeConfig};
 use astrelis_core::geometry::{LogicalSize, Point, Size};
 use astrelis_platform::{
     DeviceId, ElementState, Key, KeyLocation, KeyboardInput, NamedKey, PhysicalKey, PointerButton,
-    Window, WindowAttributes, WindowEvent, WindowId,
+    ScrollDelta, TouchPhase, Window, WindowAttributes, WindowEvent, WindowId,
 };
 use astrelis_platform_test::{ScriptEvent, TestRunner};
 use astrelis_text::FontDatabase;
 use astrelis_ui_core::{
-    Button, ElementHandle, EventContext, RoutedEvent, RoutedEventKind, Theme, Ui, UiEventKind,
-    Widget,
+    Button, ElementHandle, EventContext, RoutedEvent, RoutedEventKind, ScrollGranularity, Theme,
+    Ui, UiEventKind, Widget,
 };
 
 struct TestUiApp {
@@ -92,6 +92,7 @@ impl App for TestUiApp {
 struct PressTakeoverWidget {
     pressed: Option<DeviceId>,
     releases: usize,
+    navigation: Vec<RoutedEventKind>,
 }
 
 impl<Message: 'static> Widget<Message> for PressTakeoverWidget {
@@ -131,6 +132,9 @@ impl<Message: 'static> Widget<Message> for PressTakeoverWidget {
                 self.releases += 1;
                 self.pressed = None;
             }
+            RoutedEventKind::Scroll { .. }
+            | RoutedEventKind::PinchGesture { .. }
+            | RoutedEventKind::PanGesture { .. } => self.navigation.push(event.kind.clone()),
             _ => {}
         }
     }
@@ -157,6 +161,10 @@ impl TakeoverApp {
 
     fn releases(&self) -> usize {
         self.ui.widget(self.widget).unwrap().releases
+    }
+
+    fn navigation(&self) -> &[RoutedEventKind] {
+        &self.ui.widget(self.widget).unwrap().navigation
     }
 }
 
@@ -240,6 +248,78 @@ fn preventing_the_press_default_still_delivers_the_release() {
         1,
         "widget that prevented the press default never received its release"
     );
+}
+
+#[test]
+fn scroll_and_trackpad_gestures_reach_the_hovered_widget() {
+    let device_id = DeviceId(2);
+    let mut runner = TestRunner::new();
+    runner.push(ScriptEvent::Resumed);
+    runner.push(ScriptEvent::Window(
+        WindowId(1),
+        WindowEvent::PointerMoved {
+            device_id,
+            position: Point::new(20.0, 10.0),
+        },
+    ));
+    runner.push(ScriptEvent::Window(
+        WindowId(1),
+        WindowEvent::PointerWheel {
+            device_id,
+            delta: ScrollDelta::Lines { x: 2.0, y: -3.0 },
+            phase: TouchPhase::Moved,
+        },
+    ));
+    runner.push(ScriptEvent::Window(
+        WindowId(1),
+        WindowEvent::PinchGesture {
+            device_id,
+            delta: 0.25,
+            phase: TouchPhase::Moved,
+        },
+    ));
+    runner.push(ScriptEvent::Window(
+        WindowId(1),
+        WindowEvent::PanGesture {
+            device_id,
+            delta: Point::new(4.0, -6.0),
+            phase: TouchPhase::Moved,
+        },
+    ));
+    runner.push(ScriptEvent::Exit);
+
+    let (runtime, _) = runner
+        .run_return(Runtime::new(TakeoverApp::new(), RuntimeConfig::default()))
+        .unwrap();
+    let app = runtime.into_result().unwrap();
+    assert!(matches!(
+        app.navigation(),
+        [
+            RoutedEventKind::Scroll {
+                position,
+                delta,
+                granularity: ScrollGranularity::Line,
+                phase: TouchPhase::Moved,
+                ..
+            },
+            RoutedEventKind::PinchGesture {
+                position: pinch_position,
+                delta: 0.25,
+                phase: TouchPhase::Moved,
+                ..
+            },
+            RoutedEventKind::PanGesture {
+                position: pan_position,
+                delta: pan_delta,
+                phase: TouchPhase::Moved,
+                ..
+            }
+        ] if *position == Point::new(20.0, 10.0)
+            && *delta == Point::new(-80.0, 120.0)
+            && *pinch_position == *position
+            && *pan_position == *position
+            && *pan_delta == Point::new(4.0, -6.0)
+    ));
 }
 
 fn tab_event() -> WindowEvent {

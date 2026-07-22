@@ -30,8 +30,19 @@ pub enum EventFilter {
     Keyboard,
     /// Wheel or trackpad scrolling.
     Scroll,
+    /// Trackpad and touch-surface gestures.
+    Gesture,
     /// In-process drag-and-drop lifecycle events.
     Drag,
+}
+
+/// Granularity reported by a wheel or precision scrolling device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScrollGranularity {
+    /// Discrete logical line steps, normally produced by a mouse wheel.
+    Line,
+    /// Continuous logical pixel displacement, normally produced by a trackpad.
+    Pixel,
 }
 
 bitflags! {
@@ -193,8 +204,36 @@ pub enum RoutedEventKind {
     Scroll {
         /// Scrolling device.
         device_id: DeviceId,
+        /// Logical window position used to target the scroll.
+        position: LogicalPoint,
         /// Logical pixel displacement.
         delta: LogicalPoint,
+        /// Whether the platform supplied discrete lines or continuous pixels.
+        granularity: ScrollGranularity,
+        /// Scroll gesture lifecycle phase.
+        phase: TouchPhase,
+    },
+    /// Trackpad pinch magnification.
+    PinchGesture {
+        /// Gesture device.
+        device_id: DeviceId,
+        /// Logical window position used to target the gesture.
+        position: LogicalPoint,
+        /// Relative magnification delta; positive values zoom in.
+        delta: f64,
+        /// Gesture lifecycle phase.
+        phase: TouchPhase,
+    },
+    /// Trackpad pan displacement in logical coordinates.
+    PanGesture {
+        /// Gesture device.
+        device_id: DeviceId,
+        /// Logical window position used to target the gesture.
+        position: LogicalPoint,
+        /// Logical displacement reported by the platform.
+        delta: LogicalPoint,
+        /// Gesture lifecycle phase.
+        phase: TouchPhase,
     },
     /// A drag crossed its activation threshold.
     DragStarted {
@@ -295,6 +334,10 @@ impl RoutedEventKind {
                     | (EventFilter::Keyboard, Self::Keyboard(_) | Self::Ime(_))
                     | (EventFilter::Scroll, Self::Scroll { .. })
                     | (
+                        EventFilter::Gesture,
+                        Self::PinchGesture { .. } | Self::PanGesture { .. }
+                    )
+                    | (
                         EventFilter::Drag,
                         Self::DragStarted { .. }
                             | Self::DragEntered { .. }
@@ -304,6 +347,30 @@ impl RoutedEventKind {
                             | Self::DragEnded { .. }
                     )
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gesture_filter_matches_pan_and_pinch_only() {
+        let pinch = RoutedEventKind::PinchGesture {
+            device_id: DeviceId(1),
+            position: LogicalPoint::ZERO,
+            delta: 0.25,
+            phase: TouchPhase::Moved,
+        };
+        let pan = RoutedEventKind::PanGesture {
+            device_id: DeviceId(1),
+            position: LogicalPoint::ZERO,
+            delta: LogicalPoint::ZERO,
+            phase: TouchPhase::Moved,
+        };
+        assert!(pinch.matches(EventFilter::Gesture));
+        assert!(pan.matches(EventFilter::Gesture));
+        assert!(!pinch.matches(EventFilter::Scroll));
     }
 }
 

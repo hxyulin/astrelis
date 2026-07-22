@@ -2,6 +2,14 @@
 
 All notable changes to the rewritten Astrelis engine are documented here.
 
+## 0.3.0-rc.2 — Unreleased
+
+### Changed
+
+- Routed scrolling now preserves both axes, line-versus-pixel granularity,
+  gesture phase, and cursor position. Native trackpad pinch and pan gestures
+  are routed to hovered widgets and exposed by render views.
+
 ## 0.3.0-rc.1 — Unreleased
 
 This release candidate replaces the pre-rewrite `0.2.x` architecture. It is a
