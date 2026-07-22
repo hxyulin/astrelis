@@ -27,6 +27,8 @@ All notable changes to the rewritten Astrelis engine are documented here.
 - **WIP:** External drag routing APIs for carrying an in-process payload
   between independent retained UI trees hosted by different native windows.
   Native cross-window pointer/drag routing is not implemented yet.
+- Client-area desktop-position queries for translating captured pointer input
+  between native windows.
 
 ## 0.3.0-rc.1 — Unreleased
 

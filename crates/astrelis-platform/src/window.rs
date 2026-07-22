@@ -189,6 +189,8 @@ impl Default for WindowAttributes {
 pub enum WindowCommand {
     /// Query inner size.
     InnerSize,
+    /// Query the client area's desktop position.
+    InnerPosition,
     /// Query outer position.
     OuterPosition,
     /// Query scale factor.
@@ -284,6 +286,15 @@ impl Window {
         match self.command(WindowCommand::InnerSize)? {
             Some(WindowValue::PhysicalSize(v)) => Ok(v),
             _ => Err(PlatformError::new("backend returned an invalid inner size")),
+        }
+    }
+    /// Returns the client area's physical desktop position.
+    pub fn inner_position(&self) -> Result<Point<Physical, i32>, PlatformError> {
+        match self.command(WindowCommand::InnerPosition)? {
+            Some(WindowValue::PhysicalPosition(v)) => Ok(v),
+            _ => Err(PlatformError::new(
+                "backend returned an invalid inner position",
+            )),
         }
     }
     /// Returns the outer desktop position.

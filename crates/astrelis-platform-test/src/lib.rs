@@ -461,6 +461,7 @@ impl<T: Send + 'static> backend::Window for TestWindow<T> {
         window.commands.push(command.clone());
         let value = match command {
             WindowCommand::InnerSize => Some(WindowValue::PhysicalSize(Size::new(800, 600))),
+            WindowCommand::InnerPosition => Some(WindowValue::PhysicalPosition(Point::new(0, 0))),
             WindowCommand::OuterPosition => Some(WindowValue::PhysicalPosition(Point::new(0, 0))),
             WindowCommand::ScaleFactor => Some(WindowValue::Float(1.0)),
             WindowCommand::IsFocused => Some(WindowValue::Bool(false)),

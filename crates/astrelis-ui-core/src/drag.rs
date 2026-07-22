@@ -7,9 +7,9 @@ impl<Message: 'static> Ui<Message> {
     ///
     /// # Work in progress
     ///
-    /// This is destination-side plumbing only. Astrelis does not yet provide
-    /// the native drag source needed to route a captured pointer between OS
-    /// windows reliably.
+    /// This is destination-side plumbing only. Application shells must route
+    /// captured source-window coordinates to the destination tree; Astrelis
+    /// does not yet provide a platform-native drag-and-drop session.
     ///
     /// Application shells use this when a pointer crosses native windows.
     /// The payload remains application-owned and cloneable; accepted targets

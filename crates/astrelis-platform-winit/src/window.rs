@@ -54,6 +54,12 @@ impl backend::Window for WinitWindow {
                     size.height,
                 )))
             }
+            WindowCommand::InnerPosition => {
+                let position = self.native.inner_position().map_err(error)?;
+                Some(WindowValue::PhysicalPosition(Point::new(
+                    position.x, position.y,
+                )))
+            }
             WindowCommand::OuterPosition => {
                 let position = self.native.outer_position().map_err(error)?;
                 Some(WindowValue::PhysicalPosition(Point::new(
