@@ -128,6 +128,18 @@ impl PartialEq for DragPayload {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DragSessionId(pub(crate) u64);
 
+impl DragSessionId {
+    /// Creates an identity for coordinating a drag across retained UI trees.
+    pub const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    /// Returns the process-local numeric identity.
+    pub const fn raw(self) -> u64 {
+        self.0
+    }
+}
+
 /// Configuration supplied when a possible drag begins.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DragOptions {

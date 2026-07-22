@@ -236,6 +236,14 @@ pub(crate) struct DragSession {
     pub(crate) accepted: Option<(ElementId, DropOperation)>,
 }
 
+pub(crate) struct ExternalDragSession {
+    pub(crate) device_id: DeviceId,
+    pub(crate) payload: DragPayload,
+    pub(crate) allowed: DragOperations,
+    pub(crate) candidate: Option<ElementId>,
+    pub(crate) accepted: Option<(ElementId, DropOperation)>,
+}
+
 impl<Message: 'static> Ui<Message> {
     /// Creates a UI tree with a root column container.
     pub fn new(fonts: FontDatabase, theme: Theme) -> Self {
@@ -314,6 +322,7 @@ impl<Message: 'static> Ui<Message> {
             semantic_expanded: HashMap::new(),
             event_requests: Vec::new(),
             drag_sessions: HashMap::new(),
+            external_drag_sessions: HashMap::new(),
             next_drag_session: 1,
             drop_acceptance: None,
         }

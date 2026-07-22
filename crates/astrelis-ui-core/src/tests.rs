@@ -1030,6 +1030,67 @@ fn drag_threshold_routes_drop_and_reports_outcome() {
 }
 
 #[test]
+fn external_drag_routes_between_independent_ui_trees() {
+    let mut target_ui = ui();
+    target_ui.set_viewport(Size::new(300.0, 160.0), 1.0);
+    let target = target_ui
+        .add_button(target_ui.root(), "destination")
+        .unwrap();
+    target_ui
+        .set_layout(
+            target,
+            LayoutStyle {
+                width: Length::Px(240.0),
+                height: Length::Px(100.0),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let dropped = Arc::new(Mutex::new(Vec::new()));
+    let observed = dropped.clone();
+    target_ui
+        .listen(
+            target,
+            None,
+            EventFilter::Drag,
+            move |context, event| match &event.kind {
+                RoutedEventKind::DragOver {
+                    device_id, payload, ..
+                } if payload.downcast_ref::<&str>() == Some(&"panel") => {
+                    context.accept_drop(*device_id, DropOperation::Move);
+                }
+                RoutedEventKind::Dropped { payload, .. } => observed
+                    .lock()
+                    .unwrap()
+                    .push(*payload.downcast_ref::<&str>().unwrap()),
+                _ => {}
+            },
+        )
+        .unwrap();
+    target_ui.ensure_layout().unwrap();
+    let point = Point::new(20.0, 20.0);
+    let session = DragSessionId::from_raw(77);
+    let device = DeviceId(3);
+    assert_eq!(
+        target_ui
+            .update_external_drag(
+                session,
+                device,
+                point,
+                DragPayload::new("panel"),
+                DragOperations::MOVE,
+            )
+            .unwrap(),
+        Some(DropOperation::Move)
+    );
+    assert_eq!(
+        target_ui.finish_external_drag(session, point).unwrap(),
+        Some(DropOperation::Move)
+    );
+    assert_eq!(*dropped.lock().unwrap(), vec!["panel"]);
+}
+
+#[test]
 fn default_root_button_targets_window_origin() {
     let mut ui = ui();
     let button = ui.add_button(ui.root(), "Save").unwrap();

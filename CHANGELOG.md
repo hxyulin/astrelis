@@ -24,6 +24,9 @@ All notable changes to the rewritten Astrelis engine are documented here.
   dispatches platform actions through retained semantic handling.
 - `WindowHosts`, an application-owned native multi-window collection with
   shared graphics and per-window retained UI, event routing, and presentation.
+- **WIP:** External drag routing APIs for carrying an in-process payload
+  between independent retained UI trees hosted by different native windows.
+  Native cross-window pointer/drag routing is not implemented yet.
 
 ## 0.3.0-rc.1 — Unreleased
 

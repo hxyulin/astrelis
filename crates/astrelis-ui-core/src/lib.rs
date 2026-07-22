@@ -152,6 +152,7 @@ pub struct Ui<Message = ()> {
     pub(crate) semantic_expanded: HashMap<ElementId, bool>,
     pub(crate) event_requests: Vec<EventRequest>,
     pub(crate) drag_sessions: HashMap<DeviceId, DragSession>,
+    pub(crate) external_drag_sessions: HashMap<DragSessionId, ExternalDragSession>,
     pub(crate) next_drag_session: u64,
     pub(crate) drop_acceptance: Option<(DeviceId, ElementId, DropOperation)>,
 }

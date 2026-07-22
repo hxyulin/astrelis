@@ -3,6 +3,153 @@
 use super::*;
 
 impl<Message: 'static> Ui<Message> {
+    /// Routes a drag owned by another retained UI tree over this tree.
+    ///
+    /// # Work in progress
+    ///
+    /// This is destination-side plumbing only. Astrelis does not yet provide
+    /// the native drag source needed to route a captured pointer between OS
+    /// windows reliably.
+    ///
+    /// Application shells use this when a pointer crosses native windows.
+    /// The payload remains application-owned and cloneable; accepted targets
+    /// receive the same routed enter/over/drop events as an in-tree drag.
+    pub fn update_external_drag(
+        &mut self,
+        session_id: DragSessionId,
+        device_id: DeviceId,
+        position: LogicalPoint,
+        payload: DragPayload,
+        allowed: DragOperations,
+    ) -> Result<Option<DropOperation>, UiError> {
+        self.ensure_layout()?;
+        let mut session =
+            self.external_drag_sessions
+                .remove(&session_id)
+                .unwrap_or(ExternalDragSession {
+                    device_id,
+                    payload,
+                    allowed,
+                    candidate: None,
+                    accepted: None,
+                });
+        session.device_id = device_id;
+        session.allowed = allowed;
+        let candidate = self.hit_test(position);
+        if candidate != session.candidate {
+            if let Some(previous) = session.candidate.filter(|id| self.node(*id).is_ok()) {
+                self.dispatch_routed(
+                    previous,
+                    RoutedEventKind::DragLeft {
+                        session: session_id,
+                        device_id,
+                        position,
+                        payload: session.payload.clone(),
+                    },
+                )?;
+            }
+            if let Some(candidate) = candidate {
+                self.dispatch_routed(
+                    candidate,
+                    RoutedEventKind::DragEntered {
+                        session: session_id,
+                        device_id,
+                        position,
+                        payload: session.payload.clone(),
+                        allowed,
+                    },
+                )?;
+            }
+            session.candidate = candidate;
+        }
+        self.drop_acceptance = None;
+        if let Some(candidate) = candidate {
+            self.dispatch_routed(
+                candidate,
+                RoutedEventKind::DragOver {
+                    session: session_id,
+                    device_id,
+                    position,
+                    payload: session.payload.clone(),
+                    allowed,
+                },
+            )?;
+        }
+        session.accepted = self
+            .drop_acceptance
+            .take()
+            .and_then(|(device, target, operation)| {
+                (device == device_id && allowed.contains(operation.flag()))
+                    .then_some((target, operation))
+            });
+        let accepted = session.accepted.map(|(_, operation)| operation);
+        self.external_drag_sessions.insert(session_id, session);
+        self.dirty |= Dirty::PAINT;
+        Ok(accepted)
+    }
+
+    /// Removes hover state for a cross-window drag that left this UI tree.
+    pub fn leave_external_drag(
+        &mut self,
+        session_id: DragSessionId,
+        position: LogicalPoint,
+    ) -> Result<bool, UiError> {
+        let Some(session) = self.external_drag_sessions.remove(&session_id) else {
+            return Ok(false);
+        };
+        if let Some(candidate) = session.candidate.filter(|id| self.node(*id).is_ok()) {
+            self.dispatch_routed(
+                candidate,
+                RoutedEventKind::DragLeft {
+                    session: session_id,
+                    device_id: session.device_id,
+                    position,
+                    payload: session.payload,
+                },
+            )?;
+        }
+        self.dirty |= Dirty::PAINT;
+        Ok(true)
+    }
+
+    /// Drops a cross-window drag on the currently accepted target.
+    pub fn finish_external_drag(
+        &mut self,
+        session_id: DragSessionId,
+        position: LogicalPoint,
+    ) -> Result<Option<DropOperation>, UiError> {
+        let Some(session) = self.external_drag_sessions.remove(&session_id) else {
+            return Ok(None);
+        };
+        if let Some(candidate) = session.candidate.filter(|id| self.node(*id).is_ok()) {
+            self.dispatch_routed(
+                candidate,
+                RoutedEventKind::DragLeft {
+                    session: session_id,
+                    device_id: session.device_id,
+                    position,
+                    payload: session.payload.clone(),
+                },
+            )?;
+        }
+        let Some((target, operation)) = session.accepted else {
+            self.dirty |= Dirty::PAINT;
+            return Ok(None);
+        };
+        self.dispatch_routed(
+            target,
+            RoutedEventKind::Dropped {
+                session: session_id,
+                device_id: session.device_id,
+                position,
+                payload: session.payload,
+                operation,
+            },
+        )?;
+        self.dirty |= Dirty::PAINT;
+        Ok(Some(operation))
+    }
+
     pub(crate) fn update_drag(
         &mut self,
         device_id: DeviceId,
