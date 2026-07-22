@@ -3,6 +3,21 @@
 Astrelis 0.3 is a breaking rewrite. Treat it as a new engine API rather than a
 routine SemVer upgrade.
 
+## Additions during the release-candidate series
+
+- Custom `astrelis_gpu::backend::Device` implementations must implement
+  `is_lost` and latch the state once their native API reports device loss.
+- `GraphicsContext` clones share adapter/device initialization. Configure
+  required features with `GraphicsContextOptions`; use separate contexts only
+  for intentionally different devices.
+- Use the new `Window::try_*` operations when platform error details matter.
+  Existing convenience operations retain their fallback behavior.
+- Generic image presentation and viewport navigation live in
+  `astrelis-ui-widgets`; encoded raster decoding is isolated in the optional
+  `astrelis-image` crate.
+- Editor docking policy moved to `rxui-editor::docking`; the Astrelis docking
+  package remains a compatibility crate for the 0.3 release line.
+
 ## Package selection
 
 The `astrelis` package is now a thin umbrella façade. New applications should
@@ -16,8 +31,8 @@ prefer the smallest relevant packages:
   `astrelis-compositor`;
 - scene rendering: `astrelis-render`, `astrelis-render-2d`, and
   `astrelis-render-3d`;
-- retained interfaces: `astrelis-ui`, `astrelis-ui-widgets`,
-  `astrelis-ui-docking`, and `astrelis-ui-host`;
+- retained interfaces: `astrelis-ui`, `astrelis-ui-widgets`, and
+  `astrelis-ui-host`;
 - deterministic testing: `astrelis-platform-test` and `astrelis-ui-testing`.
 
 During the release-candidate series, pin every direct Astrelis dependency:

@@ -1,6 +1,6 @@
 [package]
 name = "astrelis-ui-docking"
-description = "Serializable editor docking workspaces for Astrelis"
+description = "Compatibility release of the former Astrelis editor docking workspace"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

@@ -24,6 +24,8 @@ workspace contains:
 - `astrelis-gpu`: backend-neutral GPU resources, commands, and surfaces;
 - `astrelis-gpu-wgpu`: native and browser-WebGPU implementation plus the
   native GPU profiling bridge;
+- `astrelis-image`: opt-in PNG, JPEG, and WebP decoding into immutable paint
+  images without adding codecs to the paint layer;
 - `astrelis-platform`: backend-neutral windows, lifecycle, and input;
 - `astrelis-platform-winit`: desktop and browser-canvas winit implementation;
 - `astrelis-platform-test`: deterministic display-free scripted backend;
@@ -35,10 +37,12 @@ workspace contains:
   capture/target/bubble input, semantics, controls, and display-list generation.
 - `astrelis-ui-widgets`: reusable drag/drop, split, navigation, virtualization,
   and texture-backed render-view compositions.
-- `astrelis-ui-docking`: serializable editor docking trees, retained panel
-  hosts, tab/split drop policy, and in-window floating groups.
+- `astrelis-ui-docking`: compatibility release of the former editor docking
+  policy; new development lives in `rxui-editor::docking`.
 - `astrelis-ui-host`: native/browser window, WebGPU surface, retained painter,
-  and compositor hosting with observable asynchronous browser initialization.
+  and compositor hosting with shared multi-window devices, configurable GPU
+  requirements, observable asynchronous browser initialization, and explicit
+  device-loss reporting.
 - `astrelis-ui-testing`: deterministic semantic actions and normalized
   semantic, inspection, and display-list snapshots.
 - `astrelis`: umbrella façade over the complete rewritten engine.

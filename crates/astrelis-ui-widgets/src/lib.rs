@@ -19,10 +19,14 @@ type DropMessage<Message> = dyn Fn(&DragPayload, DropOperation) -> Message;
 type RatioChangeMessage<Message> = dyn Fn(f32) -> Message;
 
 mod composites;
+mod image;
+mod navigation;
 mod render_view;
 mod virtual_list;
 
 pub use composites::{Form, List, ListItem, Menu, MenuItem, Popover, Tabs, Tooltip};
+pub use image::{ImageAlignment, ImageFit, ImageView};
+pub use navigation::{ScrollNavigation, ViewportNavigationBindings, ViewportNavigationIntent};
 pub use render_view::{
     RenderView, RenderViewContent, RenderViewEvent, RenderViewPointerPosition,
     RenderViewResizePolicy, RenderViewSnapshot, render_view_snapshot,

@@ -1,0 +1,27 @@
+[package]
+name = "astrelis-image"
+description = "Optional encoded raster image decoding for Astrelis"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish.workspace = true
+
+[features]
+default = ["png", "jpeg", "webp"]
+png = ["image/png"]
+jpeg = ["image/jpeg"]
+webp = ["image/webp"]
+
+[dependencies]
+astrelis-core = { workspace = true }
+astrelis-paint = { workspace = true }
+image = { workspace = true }
+
+[lints]
+workspace = true

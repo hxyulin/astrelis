@@ -2,6 +2,10 @@
 
 Reusable retained controls composed from the public `astrelis-ui-core` API.
 
+Generic image fitting and presentation plus wheel, trackpad, and pinch decoding
+for pan/zoom viewports live here so higher-level frameworks share the same
+engine interaction semantics.
+
 Milestone 12 adds `RenderView`, a retained texture-backed scene viewport with
 rounded clipping, typed input, scheduling snapshots, and allocation hysteresis.
 

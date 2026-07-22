@@ -51,12 +51,17 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install system libraries
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev \
@@ -67,4 +72,4 @@ jobs:
       # software adapter so the offscreen tests actually execute rather than
       # silently skipping.
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --all-features

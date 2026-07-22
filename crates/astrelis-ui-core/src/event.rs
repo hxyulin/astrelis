@@ -46,6 +46,21 @@ pub enum ScrollGranularity {
 }
 
 bitflags! {
+    /// Pending retained-tree work visible to hosts and diagnostic tools.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub struct InvalidationReasons: u8 {
+        /// Intrinsic measurements must be refreshed.
+        const MEASURE = 1 << 0;
+        /// Retained layout must be solved.
+        const LAYOUT = 1 << 1;
+        /// The display list must be regenerated.
+        const PAINT = 1 << 2;
+        /// The semantic tree must be regenerated.
+        const SEMANTICS = 1 << 3;
+    }
+}
+
+bitflags! {
     /// Operations a drag source permits a drop target to select.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub struct DragOperations: u8 {
@@ -557,6 +572,13 @@ impl<Message> EventContext<'_, Message> {
 }
 
 impl<Message: 'static> Ui<Message> {
+    /// Returns the work currently invalidated in the retained tree.
+    ///
+    /// This is an observational API: reading it does not clear any work.
+    pub fn invalidation_reasons(&self) -> InvalidationReasons {
+        InvalidationReasons::from_bits_retain(self.dirty.bits())
+    }
+
     /// Returns whether painting is currently invalidated.
     pub fn needs_redraw(&self) -> bool {
         self.dirty

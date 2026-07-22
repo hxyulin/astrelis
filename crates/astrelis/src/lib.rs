@@ -17,6 +17,9 @@ pub use astrelis_gpu as gpu;
 /// Wgpu implementation of the GPU API.
 #[cfg(feature = "wgpu")]
 pub use astrelis_gpu_wgpu as gpu_wgpu;
+/// Optional encoded raster image decoding.
+#[cfg(feature = "image")]
+pub use astrelis_image as image;
 /// Backend-independent display lists and painting.
 pub use astrelis_paint as paint;
 /// GPU display-list renderer.

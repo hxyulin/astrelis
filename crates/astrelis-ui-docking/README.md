@@ -1,5 +1,10 @@
 # astrelis-ui-docking
 
+> Compatibility crate: docking is editor policy and its maintained
+> implementation now lives in `rxui-editor::docking`. This crate remains for
+> the Astrelis 0.3 release line so existing pre-release consumers have an
+> explicit migration path.
+
 Serializable editor/workspace docking policy built above `astrelis-ui-core`
 and `astrelis-ui-widgets`.
 

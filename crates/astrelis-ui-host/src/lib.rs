@@ -2,45 +2,159 @@
 
 #![warn(missing_docs)]
 
-use std::{error::Error, fmt};
-
-#[cfg(target_arch = "wasm32")]
-use std::sync::{Arc, Mutex};
+use std::{
+    error::Error,
+    fmt,
+    sync::{Arc, Mutex},
+};
 
 use astrelis_app::{App, AppContext};
 use astrelis_compositor::{CompositionStats, Compositor, ViewOptions, ViewRenderTarget};
 use astrelis_core::{color::Color, geometry::Size};
 use astrelis_gpu::{
-    CompositeAlphaMode, DeviceDescriptor, PresentMode, RequestAdapterOptions, SurfaceConfiguration,
-    SurfaceFrameStatus, SurfaceTarget, TextureUsages, TextureViewDescriptor,
+    CompositeAlphaMode, DeviceDescriptor, PowerPreference, PresentMode, RequestAdapterOptions,
+    SurfaceConfiguration, SurfaceFrameStatus, SurfaceTarget, TextureUsages, TextureViewDescriptor,
 };
 use astrelis_paint::CompositorViewId;
 use astrelis_paint_gpu::{ExternalImage, RenderStats, RenderTarget, Renderer, RendererOptions};
 use astrelis_platform::{Window, WindowAttributes, WindowEvent, WindowId};
-use astrelis_ui_core::Ui;
+use astrelis_ui_core::{ElementId, InvalidationReasons, SemanticAction, SemanticNode, Ui};
+use futures_util::future::{BoxFuture, FutureExt, Shared};
+
+/// Adapter and logical-device preferences shared by hosted windows.
+#[derive(Clone, Debug, Default)]
+pub struct GraphicsContextOptions {
+    /// Adapter power preference.
+    pub power_preference: PowerPreference,
+    /// Require a software or fallback adapter.
+    pub force_fallback_adapter: bool,
+    /// Logical-device features and limits requested once for the context.
+    pub device: DeviceDescriptor,
+}
+
+#[derive(Clone)]
+struct SharedDevice {
+    adapter: astrelis_gpu::Adapter,
+    device: astrelis_gpu::Device,
+    queue: astrelis_gpu::Queue,
+}
+
+type DeviceFuture = Shared<BoxFuture<'static, Result<SharedDevice, HostError>>>;
+
+/// One native accessibility action waiting to be applied to the retained UI.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AccessibilityRequest {
+    /// Retained semantic element targeted by the native action.
+    pub target: ElementId,
+    /// Backend-neutral semantic action.
+    pub action: SemanticAction,
+}
+
+/// Platform accessibility bridge hosted beside one retained UI tree.
+///
+/// Platform adapters may receive requests on other threads, but they must
+/// expose them from `drain_requests` on the UI thread. The host applies those
+/// requests through the same semantic-action path used by deterministic tests.
+pub trait AccessibilityAdapter {
+    /// Observes a platform window event before retained input handling.
+    fn handle_window_event(
+        &mut self,
+        _window: &Window,
+        _event: &WindowEvent,
+    ) -> Result<(), HostError> {
+        Ok(())
+    }
+
+    /// Drains native actions that are ready for retained dispatch.
+    fn drain_requests(&mut self) -> Vec<AccessibilityRequest> {
+        Vec::new()
+    }
+
+    /// Publishes a complete, current semantic tree.
+    fn update(&mut self, window: &Window, tree: SemanticNode) -> Result<(), HostError>;
+}
 
 /// Shared graphics entry point used to open Astrelis windows.
 #[derive(Clone)]
 pub struct GraphicsContext {
     instance: astrelis_gpu::Instance,
+    options: GraphicsContextOptions,
+    device: Arc<Mutex<Option<DeviceFuture>>>,
 }
 
 impl GraphicsContext {
     /// Creates graphics using Astrelis's default wgpu instance configuration.
     pub fn new() -> Self {
+        Self::with_options(GraphicsContextOptions::default())
+    }
+
+    /// Creates graphics using Astrelis's default wgpu instance and explicit
+    /// adapter and device requirements.
+    pub fn with_options(options: GraphicsContextOptions) -> Self {
         Self {
             instance: astrelis_gpu_wgpu::create_instance(Default::default()),
+            options,
+            device: Arc::new(Mutex::new(None)),
         }
     }
 
     /// Wraps an application-configured backend-neutral instance.
-    pub const fn from_instance(instance: astrelis_gpu::Instance) -> Self {
-        Self { instance }
+    pub fn from_instance(instance: astrelis_gpu::Instance) -> Self {
+        Self::from_instance_with_options(instance, GraphicsContextOptions::default())
+    }
+
+    /// Wraps an application-configured instance and device requirements.
+    pub fn from_instance_with_options(
+        instance: astrelis_gpu::Instance,
+        options: GraphicsContextOptions,
+    ) -> Self {
+        Self {
+            instance,
+            options,
+            device: Arc::new(Mutex::new(None)),
+        }
     }
 
     /// Returns the underlying backend-neutral instance.
     pub const fn instance(&self) -> &astrelis_gpu::Instance {
         &self.instance
+    }
+
+    /// Returns the adapter and device requirements used by this context.
+    pub const fn options(&self) -> &GraphicsContextOptions {
+        &self.options
+    }
+
+    fn shared_device(&self, surface: astrelis_gpu::Surface) -> DeviceFuture {
+        let mut slot = self.device.lock().expect("graphics context state poisoned");
+        if let Some(device) = &*slot {
+            return device.clone();
+        }
+        let instance = self.instance.clone();
+        let options = self.options.clone();
+        let future = async move {
+            let adapter = instance
+                .request_adapter(RequestAdapterOptions {
+                    power_preference: options.power_preference,
+                    force_fallback_adapter: options.force_fallback_adapter,
+                    compatible_surface: Some(surface),
+                })
+                .await
+                .map_err(HostError::from_display)?;
+            let (device, queue) = adapter
+                .request_device(options.device)
+                .await
+                .map_err(HostError::from_display)?;
+            Ok(SharedDevice {
+                adapter,
+                device,
+                queue,
+            })
+        }
+        .boxed()
+        .shared();
+        *slot = Some(future.clone());
+        future
     }
 }
 
@@ -87,6 +201,8 @@ pub enum HostStatus {
     Initializing,
     /// The surface, device, queue, painter, and compositor are ready.
     Ready,
+    /// The shared logical GPU device was lost and resources must be recreated.
+    DeviceLost,
     /// Initialization failed; rendering returns the same stored error.
     Failed,
 }
@@ -111,6 +227,7 @@ pub struct WindowHost<Message = ()> {
     failed: Option<HostError>,
     ui: Ui<Message>,
     clear_color: Color,
+    accessibility: Option<Box<dyn AccessibilityAdapter>>,
 }
 
 impl<Message: 'static> WindowHost<Message> {
@@ -131,7 +248,7 @@ impl<Message: 'static> WindowHost<Message> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let result = pollster::block_on(initialize_gpu(
-                graphics.instance.clone(),
+                graphics.clone(),
                 window.clone(),
                 options.renderer,
             ));
@@ -148,6 +265,7 @@ impl<Message: 'static> WindowHost<Message> {
                 failed: None,
                 ui,
                 clear_color: options.clear_color,
+                accessibility: None,
             };
             host.sync_viewport();
             Ok(host)
@@ -157,11 +275,11 @@ impl<Message: 'static> WindowHost<Message> {
         {
             let pending = Arc::new(Mutex::new(None));
             let completion = pending.clone();
-            let instance = graphics.instance.clone();
+            let graphics = graphics.clone();
             let initialization_window = window.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let result =
-                    initialize_gpu(instance, initialization_window.clone(), options.renderer).await;
+                    initialize_gpu(graphics, initialization_window.clone(), options.renderer).await;
                 *completion
                     .lock()
                     .expect("host initialization state poisoned") = Some(result);
@@ -174,6 +292,7 @@ impl<Message: 'static> WindowHost<Message> {
                 failed: None,
                 ui,
                 clear_color: options.clear_color,
+                accessibility: None,
             };
             host.sync_viewport();
             Ok(host)
@@ -183,7 +302,9 @@ impl<Message: 'static> WindowHost<Message> {
     /// Returns the current initialization state.
     pub fn status(&mut self) -> HostStatus {
         self.sync_initialization();
-        if self.gpu.is_some() {
+        if self.gpu.as_ref().is_some_and(|gpu| gpu.device.is_lost()) {
+            HostStatus::DeviceLost
+        } else if self.gpu.is_some() {
             HostStatus::Ready
         } else if self.failed.is_some() {
             HostStatus::Failed
@@ -216,6 +337,24 @@ impl<Message: 'static> WindowHost<Message> {
     /// Returns the retained UI tree for application updates.
     pub const fn ui_mut(&mut self) -> &mut Ui<Message> {
         &mut self.ui
+    }
+
+    /// Installs or replaces the platform accessibility bridge.
+    ///
+    /// The current complete semantic tree is published before this returns.
+    pub fn set_accessibility_adapter(
+        &mut self,
+        mut adapter: impl AccessibilityAdapter + 'static,
+    ) -> Result<(), HostError> {
+        let tree = self.ui.semantic_tree().map_err(HostError::from_display)?;
+        adapter.update(&self.window, tree)?;
+        self.accessibility = Some(Box::new(adapter));
+        Ok(())
+    }
+
+    /// Removes and returns the platform accessibility bridge.
+    pub fn take_accessibility_adapter(&mut self) -> Option<Box<dyn AccessibilityAdapter>> {
+        self.accessibility.take()
     }
 
     /// Returns the GPU device, or `None` while initialization is pending or failed.
@@ -269,6 +408,9 @@ impl<Message: 'static> WindowHost<Message> {
         event: &WindowEvent,
     ) -> Result<HostUpdate, HostError> {
         self.sync_initialization();
+        if let Some(accessibility) = &mut self.accessibility {
+            accessibility.handle_window_event(&self.window, event)?;
+        }
         if matches!(event, WindowEvent::CloseRequested) {
             return Ok(HostUpdate {
                 close_requested: true,
@@ -286,10 +428,11 @@ impl<Message: 'static> WindowHost<Message> {
             .ui
             .handle_window_event(&self.window, clipboard, event)
             .map_err(HostError::from_display)?;
+        let accessibility_changed = self.sync_accessibility()?;
         Ok(HostUpdate {
             close_requested: false,
-            redraw: update.redraw || self.ui.needs_redraw(),
-            platform_state_changed: update.platform_state_changed,
+            redraw: update.redraw || accessibility_changed || self.ui.needs_redraw(),
+            platform_state_changed: update.platform_state_changed || accessibility_changed,
         })
     }
 
@@ -324,8 +467,14 @@ impl<Message: 'static> WindowHost<Message> {
         E: fmt::Display,
     {
         self.sync_initialization();
+        self.sync_accessibility()?;
         if let Some(error) = &self.failed {
             return Err(error.clone());
+        }
+        if self.gpu.as_ref().is_some_and(|gpu| gpu.device.is_lost()) {
+            return Err(HostError::new(
+                "the shared GPU device was lost; recreate the graphics context and window hosts",
+            ));
         }
         if self.gpu.is_none() {
             return Ok(None);
@@ -387,10 +536,41 @@ impl<Message: 'static> WindowHost<Message> {
         }
     }
 
+    fn sync_accessibility(&mut self) -> Result<bool, HostError> {
+        let Some(mut adapter) = self.accessibility.take() else {
+            return Ok(false);
+        };
+        let result = (|| {
+            let requests = adapter.drain_requests();
+            let changed = !requests.is_empty();
+            for request in requests {
+                self.ui
+                    .perform_semantic_action(request.target, request.action)
+                    .map_err(HostError::from_display)?;
+            }
+            if self
+                .ui
+                .invalidation_reasons()
+                .contains(InvalidationReasons::SEMANTICS)
+            {
+                let tree = self.ui.semantic_tree().map_err(HostError::from_display)?;
+                adapter.update(&self.window, tree)?;
+            }
+            Ok(changed)
+        })();
+        self.accessibility = Some(adapter);
+        result
+    }
+
     fn ready_gpu(&mut self) -> Result<&mut GpuState, HostError> {
         self.sync_initialization();
         if let Some(error) = &self.failed {
             return Err(error.clone());
+        }
+        if self.gpu.as_ref().is_some_and(|gpu| gpu.device.is_lost()) {
+            return Err(HostError::new(
+                "the shared GPU device was lost; recreate the graphics context and window hosts",
+            ));
         }
         self.gpu
             .as_mut()
@@ -433,24 +613,18 @@ impl<Message: 'static> WindowHost<Message> {
 }
 
 async fn initialize_gpu(
-    instance: astrelis_gpu::Instance,
+    graphics: GraphicsContext,
     window: Window,
     renderer_options: RendererOptions,
 ) -> Result<GpuState, HostError> {
-    let surface = instance
+    let surface = graphics
+        .instance
         .create_surface(SurfaceTarget::new(window.clone()))
         .map_err(HostError::from_display)?;
-    let adapter = instance
-        .request_adapter(RequestAdapterOptions {
-            compatible_surface: Some(surface.clone()),
-            ..Default::default()
-        })
-        .await
-        .map_err(HostError::from_display)?;
-    let (device, queue) = adapter
-        .request_device(DeviceDescriptor::default())
-        .await
-        .map_err(HostError::from_display)?;
+    let shared = graphics.shared_device(surface.clone()).await?;
+    let adapter = shared.adapter;
+    let device = shared.device;
+    let queue = shared.queue;
     let capabilities = surface
         .capabilities(&adapter)
         .map_err(HostError::from_display)?;
@@ -499,7 +673,8 @@ async fn initialize_gpu(
 pub struct HostError(String);
 
 impl HostError {
-    fn new(message: impl Into<String>) -> Self {
+    /// Creates an error from a stable diagnostic message.
+    pub fn new(message: impl Into<String>) -> Self {
         Self(message.into())
     }
 
@@ -526,9 +701,22 @@ fn srgb_view_format(format: astrelis_gpu::TextureFormat) -> astrelis_gpu::Textur
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use astrelis_gpu::TextureFormat;
 
-    use super::srgb_view_format;
+    use super::{GraphicsContext, srgb_view_format};
+
+    #[test]
+    fn cloned_graphics_contexts_share_device_initialization() {
+        let graphics = GraphicsContext::new();
+        let clone = graphics.clone();
+        assert!(Arc::ptr_eq(&graphics.device, &clone.device));
+        assert!(!Arc::ptr_eq(
+            &graphics.device,
+            &GraphicsContext::new().device
+        ));
+    }
 
     #[test]
     fn linear_surface_formats_use_srgb_frame_views() {

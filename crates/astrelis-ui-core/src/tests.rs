@@ -1,6 +1,22 @@
 //! Unit tests for the retained UI core.
 
 use super::*;
+
+#[test]
+fn invalidation_reasons_are_observable_without_being_consumed() {
+    let mut ui = Ui::<()>::new(deterministic_font_database(), Theme::default());
+    let pending = ui.invalidation_reasons();
+    assert!(pending.contains(InvalidationReasons::MEASURE));
+    assert!(pending.contains(InvalidationReasons::LAYOUT));
+    assert!(pending.contains(InvalidationReasons::PAINT));
+    assert!(pending.contains(InvalidationReasons::SEMANTICS));
+    assert_eq!(ui.invalidation_reasons(), pending);
+
+    ui.display_list().unwrap();
+    assert_eq!(ui.invalidation_reasons(), InvalidationReasons::SEMANTICS);
+    ui.semantic_tree().unwrap();
+    assert!(ui.invalidation_reasons().is_empty());
+}
 use astrelis_text::FontFamily;
 use std::sync::{Arc, Mutex};
 

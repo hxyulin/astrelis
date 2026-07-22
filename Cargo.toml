@@ -7,6 +7,7 @@ members = [
   "crates/astrelis-compositor",
   "crates/astrelis-gpu",
   "crates/astrelis-gpu-wgpu",
+  "crates/astrelis-image",
   "crates/astrelis-paint",
   "crates/astrelis-paint-gpu",
   "crates/astrelis-platform",
@@ -45,6 +46,7 @@ astrelis-compositor = { path = "crates/astrelis-compositor", version = "=0.3.0-r
 astrelis-core = { path = "crates/astrelis-core", version = "=0.3.0-rc.1" }
 astrelis-gpu = { path = "crates/astrelis-gpu", version = "=0.3.0-rc.1" }
 astrelis-gpu-wgpu = { path = "crates/astrelis-gpu-wgpu", version = "=0.3.0-rc.1" }
+astrelis-image = { path = "crates/astrelis-image", version = "=0.3.0-rc.1" }
 astrelis-paint = { path = "crates/astrelis-paint", version = "=0.3.0-rc.1" }
 astrelis-paint-gpu = { path = "crates/astrelis-paint-gpu", version = "=0.3.0-rc.1" }
 astrelis-platform = { path = "crates/astrelis-platform", version = "=0.3.0-rc.1" }
@@ -66,9 +68,11 @@ arboard = { version = "3.6.1", default-features = false }
 glam = { version = "0.33", features = ["mint", "bytemuck"] }
 bytemuck = { version = "1", features = ["derive"] }
 lyon_tessellation = "1.0.20"
+image = { version = "=0.25.10", default-features = false }
 parley = { version = "=0.11.0", features = ["complex-scripts"] }
 swash = "=0.2.9"
 etagere = "=0.3.0"
+futures-util = "0.3"
 bitflags = "2"
 pollster = "0.4"
 wgpu = { version = "=29.0.4", default-features = false, features = ["std", "wgsl"] }

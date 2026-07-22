@@ -9,6 +9,19 @@ All notable changes to the rewritten Astrelis engine are documented here.
 - Routed scrolling now preserves both axes, line-versus-pixel granularity,
   gesture phase, and cursor position. Native trackpad pinch and pan gestures
   are routed to hovered widgets and exposed by render views.
+- UI window hosts created from one graphics context share a configured GPU
+  device and explicitly report device loss.
+- Platform windows expose fallible command/query variants while preserving the
+  existing convenience fallbacks.
+- Generic image presentation and viewport navigation moved into the engine
+  widget layer; editor docking policy moved to RXUI.
+
+### Added
+
+- Optional `astrelis-image` PNG, JPEG, and WebP decoding.
+- Read-only retained UI invalidation reasons for host and devtools integration.
+- A host-level accessibility adapter seam that publishes semantic trees and
+  dispatches platform actions through retained semantic handling.
 
 ## 0.3.0-rc.1 — Unreleased
 

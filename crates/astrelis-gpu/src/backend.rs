@@ -57,6 +57,8 @@ pub trait Device: NativeHandle {
     fn id(&self) -> DeviceId;
     /// Enabled capabilities.
     fn capabilities(&self) -> DeviceCapabilities;
+    /// Reports whether the backend has declared the device lost.
+    fn is_lost(&self) -> bool;
     /// Installs an error callback.
     fn set_error_handler(&self, handler: Arc<dyn Fn(DeviceError) + Send + Sync>);
     /// Advances callbacks and mapping.

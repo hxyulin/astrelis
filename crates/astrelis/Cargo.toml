@@ -14,6 +14,7 @@ publish.workspace = true
 
 [features]
 default = ["render-2d", "render-3d", "ui", "wgpu", "winit"]
+image = ["dep:astrelis-image"]
 render-2d = ["dep:astrelis-render-2d"]
 render-3d = ["dep:astrelis-render-3d"]
 testing = ["dep:astrelis-platform-test", "dep:astrelis-ui-testing"]
@@ -33,6 +34,7 @@ astrelis-compositor = { workspace = true }
 astrelis-core = { workspace = true }
 astrelis-gpu = { workspace = true }
 astrelis-gpu-wgpu = { workspace = true, optional = true }
+astrelis-image = { workspace = true, optional = true }
 astrelis-paint = { workspace = true }
 astrelis-paint-gpu = { workspace = true }
 astrelis-platform = { workspace = true }

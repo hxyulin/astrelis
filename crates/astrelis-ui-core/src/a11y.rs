@@ -13,14 +13,24 @@ pub enum SemanticRole {
     Group,
     /// Static text.
     Label,
+    /// Non-interactive visual content with a textual alternative.
+    Image,
     /// Activatable button.
     Button,
     /// Editable single-line text field.
     TextField,
     /// Boolean checkbox.
     Checkbox,
+    /// One option in a mutually exclusive choice set.
+    RadioButton,
+    /// Collapsed or expanded value picker.
+    ComboBox,
+    /// Numeric text field with increment and decrement behavior.
+    SpinButton,
     /// Numeric slider.
     Slider,
+    /// Read-only progress indicator.
+    ProgressIndicator,
     /// Scrollable grouping container.
     ScrollView,
     /// Adjustable divider between two regions.

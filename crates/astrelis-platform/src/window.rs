@@ -297,64 +297,125 @@ impl Window {
     }
     /// Returns the DPI scale.
     pub fn scale_factor(&self) -> f64 {
-        match self.command(WindowCommand::ScaleFactor) {
-            Ok(Some(WindowValue::Float(v))) => v,
-            _ => 1.0,
+        self.try_scale_factor().unwrap_or(1.0)
+    }
+    /// Returns the DPI scale without discarding backend failures.
+    pub fn try_scale_factor(&self) -> Result<f64, PlatformError> {
+        match self.command(WindowCommand::ScaleFactor)? {
+            Some(WindowValue::Float(value)) => Ok(value),
+            _ => Err(PlatformError::new(
+                "backend returned an invalid scale factor",
+            )),
         }
     }
     /// Changes the title.
     pub fn set_title(&self, title: impl Into<String>) {
-        let _ = self.command(WindowCommand::SetTitle(title.into()));
+        let _ = self.try_set_title(title);
+    }
+    /// Changes the title without discarding backend failures.
+    pub fn try_set_title(&self, title: impl Into<String>) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetTitle(title.into()))
+            .map(|_| ())
     }
     /// Changes visibility.
     pub fn set_visible(&self, visible: bool) {
-        let _ = self.command(WindowCommand::SetVisible(visible));
+        let _ = self.try_set_visible(visible);
+    }
+    /// Changes visibility without discarding backend failures.
+    pub fn try_set_visible(&self, visible: bool) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetVisible(visible)).map(|_| ())
     }
     /// Requests keyboard focus.
     pub fn focus(&self) {
-        let _ = self.command(WindowCommand::Focus);
+        let _ = self.try_focus();
+    }
+    /// Requests keyboard focus without discarding backend failures.
+    pub fn try_focus(&self) -> Result<(), PlatformError> {
+        self.command(WindowCommand::Focus).map(|_| ())
     }
     /// Reports focus.
     pub fn is_focused(&self) -> bool {
-        matches!(
-            self.command(WindowCommand::IsFocused),
-            Ok(Some(WindowValue::Bool(true)))
-        )
+        self.try_is_focused().unwrap_or(false)
+    }
+    /// Reports focus without discarding backend failures.
+    pub fn try_is_focused(&self) -> Result<bool, PlatformError> {
+        match self.command(WindowCommand::IsFocused)? {
+            Some(WindowValue::Bool(value)) => Ok(value),
+            _ => Err(PlatformError::new("backend returned invalid focus state")),
+        }
     }
     /// Changes minimized state.
     pub fn set_minimized(&self, value: bool) {
-        let _ = self.command(WindowCommand::SetMinimized(value));
+        let _ = self.try_set_minimized(value);
+    }
+    /// Changes minimized state without discarding backend failures.
+    pub fn try_set_minimized(&self, value: bool) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetMinimized(value)).map(|_| ())
     }
     /// Changes maximized state.
     pub fn set_maximized(&self, value: bool) {
-        let _ = self.command(WindowCommand::SetMaximized(value));
+        let _ = self.try_set_maximized(value);
+    }
+    /// Changes maximized state without discarding backend failures.
+    pub fn try_set_maximized(&self, value: bool) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetMaximized(value)).map(|_| ())
     }
     /// Reports whether the window is maximized.
     pub fn is_maximized(&self) -> bool {
-        matches!(
-            self.command(WindowCommand::IsMaximized),
-            Ok(Some(WindowValue::Bool(true)))
-        )
+        self.try_is_maximized().unwrap_or(false)
+    }
+    /// Reports maximized state without discarding backend failures.
+    pub fn try_is_maximized(&self) -> Result<bool, PlatformError> {
+        match self.command(WindowCommand::IsMaximized)? {
+            Some(WindowValue::Bool(value)) => Ok(value),
+            _ => Err(PlatformError::new(
+                "backend returned invalid maximized state",
+            )),
+        }
     }
     /// Enables borderless fullscreen on the current monitor.
     pub fn set_borderless_fullscreen(&self, value: bool) {
-        let _ = self.command(WindowCommand::SetFullscreen(value));
+        let _ = self.try_set_borderless_fullscreen(value);
+    }
+    /// Changes borderless fullscreen without discarding backend failures.
+    pub fn try_set_borderless_fullscreen(&self, value: bool) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetFullscreen(value))
+            .map(|_| ())
     }
     /// Changes resizability.
     pub fn set_resizable(&self, value: bool) {
-        let _ = self.command(WindowCommand::SetResizable(value));
+        let _ = self.try_set_resizable(value);
+    }
+    /// Changes resizability without discarding backend failures.
+    pub fn try_set_resizable(&self, value: bool) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetResizable(value)).map(|_| ())
     }
     /// Changes native decorations.
     pub fn set_decorations(&self, value: bool) {
-        let _ = self.command(WindowCommand::SetDecorations(value));
+        let _ = self.try_set_decorations(value);
+    }
+    /// Changes native decorations without discarding backend failures.
+    pub fn try_set_decorations(&self, value: bool) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetDecorations(value))
+            .map(|_| ())
     }
     /// Changes the standard cursor.
     pub fn set_cursor_icon(&self, value: CursorIcon) {
-        let _ = self.command(WindowCommand::SetCursorIcon(value));
+        let _ = self.try_set_cursor_icon(value);
+    }
+    /// Changes the standard cursor without discarding backend failures.
+    pub fn try_set_cursor_icon(&self, value: CursorIcon) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetCursorIcon(value))
+            .map(|_| ())
     }
     /// Changes cursor visibility.
     pub fn set_cursor_visible(&self, value: bool) {
-        let _ = self.command(WindowCommand::SetCursorVisible(value));
+        let _ = self.try_set_cursor_visible(value);
+    }
+    /// Changes cursor visibility without discarding backend failures.
+    pub fn try_set_cursor_visible(&self, value: bool) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetCursorVisible(value))
+            .map(|_| ())
     }
     /// Changes cursor confinement.
     pub fn set_cursor_grab(&self, value: CursorGrabMode) -> Result<(), PlatformError> {
@@ -368,19 +429,38 @@ impl Window {
     }
     /// Schedules a redraw event.
     pub fn request_redraw(&self) {
-        let _ = self.command(WindowCommand::RequestRedraw);
+        let _ = self.try_request_redraw();
+    }
+    /// Schedules a redraw event without discarding backend failures.
+    pub fn try_request_redraw(&self) -> Result<(), PlatformError> {
+        self.command(WindowCommand::RequestRedraw).map(|_| ())
     }
     /// Enables or disables IME.
     pub fn set_ime_allowed(&self, value: bool) {
-        let _ = self.command(WindowCommand::SetImeAllowed(value));
+        let _ = self.try_set_ime_allowed(value);
+    }
+    /// Enables or disables IME without discarding backend failures.
+    pub fn try_set_ime_allowed(&self, value: bool) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetImeAllowed(value))
+            .map(|_| ())
     }
     /// Selects the IME purpose.
     pub fn set_ime_purpose(&self, value: ImePurpose) {
-        let _ = self.command(WindowCommand::SetImePurpose(value));
+        let _ = self.try_set_ime_purpose(value);
+    }
+    /// Selects the IME purpose without discarding backend failures.
+    pub fn try_set_ime_purpose(&self, value: ImePurpose) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetImePurpose(value))
+            .map(|_| ())
     }
     /// Sets the IME candidate-window cursor area.
     pub fn set_ime_cursor_area(&self, value: Rect<Logical, f64>) {
-        let _ = self.command(WindowCommand::SetImeCursorArea(value));
+        let _ = self.try_set_ime_cursor_area(value);
+    }
+    /// Sets the IME cursor area without discarding backend failures.
+    pub fn try_set_ime_cursor_area(&self, value: Rect<Logical, f64>) -> Result<(), PlatformError> {
+        self.command(WindowCommand::SetImeCursorArea(value))
+            .map(|_| ())
     }
     /// Starts native move dragging.
     pub fn drag_window(&self) -> Result<(), PlatformError> {
@@ -393,16 +473,24 @@ impl Window {
     }
     /// Returns the current theme.
     pub fn theme(&self) -> Option<Theme> {
-        match self.command(WindowCommand::Theme) {
-            Ok(Some(WindowValue::Theme(v))) => v,
-            _ => None,
+        self.try_theme().unwrap_or(None)
+    }
+    /// Returns the current theme without discarding backend failures.
+    pub fn try_theme(&self) -> Result<Option<Theme>, PlatformError> {
+        match self.command(WindowCommand::Theme)? {
+            Some(WindowValue::Theme(value)) => Ok(value),
+            _ => Err(PlatformError::new("backend returned invalid theme state")),
         }
     }
     /// Returns the current monitor.
     pub fn current_monitor(&self) -> Option<Monitor> {
-        match self.command(WindowCommand::CurrentMonitor) {
-            Ok(Some(WindowValue::Monitor(v))) => v,
-            _ => None,
+        self.try_current_monitor().unwrap_or(None)
+    }
+    /// Returns the current monitor without discarding backend failures.
+    pub fn try_current_monitor(&self) -> Result<Option<Monitor>, PlatformError> {
+        match self.command(WindowCommand::CurrentMonitor)? {
+            Some(WindowValue::Monitor(value)) => Ok(value),
+            _ => Err(PlatformError::new("backend returned invalid monitor state")),
         }
     }
 }
@@ -425,5 +513,60 @@ impl HasWindowHandle for Window {
 impl HasDisplayHandle for Window {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
         self.inner.display_handle()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug)]
+    struct FailingWindow;
+
+    impl HasWindowHandle for FailingWindow {
+        fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+            Err(HandleError::NotSupported)
+        }
+    }
+
+    impl HasDisplayHandle for FailingWindow {
+        fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+            Err(HandleError::NotSupported)
+        }
+    }
+
+    impl backend::Window for FailingWindow {
+        fn id(&self) -> WindowId {
+            WindowId(7)
+        }
+
+        fn capabilities(&self) -> WindowCapabilities {
+            WindowCapabilities::default()
+        }
+
+        fn command(&self, _command: WindowCommand) -> Result<Option<WindowValue>, PlatformError> {
+            Err(PlatformError::new("scripted backend failure"))
+        }
+    }
+
+    #[test]
+    fn fallible_operations_preserve_backend_errors() {
+        let window = Window::from_backend(Arc::new(FailingWindow));
+        assert_eq!(
+            window.try_set_title("title").unwrap_err().to_string(),
+            "scripted backend failure"
+        );
+        assert_eq!(
+            window.try_scale_factor().unwrap_err().to_string(),
+            "scripted backend failure"
+        );
+    }
+
+    #[test]
+    fn compatibility_queries_keep_documented_fallbacks() {
+        let window = Window::from_backend(Arc::new(FailingWindow));
+        assert_eq!(window.scale_factor(), 1.0);
+        assert!(!window.is_focused());
+        assert_eq!(window.theme(), None);
     }
 }

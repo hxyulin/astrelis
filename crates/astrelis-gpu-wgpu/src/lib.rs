@@ -5,7 +5,10 @@
 use std::{
     any::Any,
     ops::Range,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use astrelis_gpu::{
@@ -82,6 +85,7 @@ pub fn wrap_device(
         },
         raw: device,
         error_handler: Mutex::new(None),
+        lost: AtomicBool::new(false),
     });
     install_wgpu_error_handlers(&wrapped_device);
     let wrapped_queue = Arc::new(WgpuQueue { id, raw: queue });
@@ -336,6 +340,7 @@ impl backend::Adapter for WgpuAdapter {
                 raw: device,
                 capabilities,
                 error_handler: Mutex::new(None),
+                lost: AtomicBool::new(false),
             });
             install_wgpu_error_handlers(&device);
             let queue = Arc::new(WgpuQueue { id, raw: queue });
@@ -354,6 +359,7 @@ struct WgpuDevice {
     raw: wgpu::Device,
     capabilities: DeviceCapabilities,
     error_handler: Mutex<Option<ErrorHandler>>,
+    lost: AtomicBool,
 }
 
 impl std::fmt::Debug for WgpuDevice {
@@ -389,6 +395,7 @@ fn install_wgpu_error_handlers(device: &Arc<WgpuDevice>) {
         .raw
         .set_device_lost_callback(move |_reason, message| {
             if let Some(device) = weak.upgrade() {
+                device.lost.store(true, Ordering::Release);
                 device.emit_error(DeviceErrorKind::DeviceLost, message);
             }
         });
@@ -424,6 +431,10 @@ impl backend::Device for WgpuDevice {
 
     fn capabilities(&self) -> DeviceCapabilities {
         self.capabilities
+    }
+
+    fn is_lost(&self) -> bool {
+        self.lost.load(Ordering::Acquire)
     }
 
     fn set_error_handler(&self, handler: ErrorHandler) {

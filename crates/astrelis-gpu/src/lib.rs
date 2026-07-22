@@ -211,6 +211,11 @@ impl Device {
         self.inner.capabilities()
     }
 
+    /// Reports whether the backend has declared this device lost.
+    pub fn is_lost(&self) -> bool {
+        self.inner.is_lost()
+    }
+
     /// Installs a handler for asynchronous validation and device errors.
     pub fn set_error_handler(&self, handler: impl Fn(DeviceError) + Send + Sync + 'static) {
         self.inner.set_error_handler(Arc::new(handler));
