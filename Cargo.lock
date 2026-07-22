@@ -455,6 +455,8 @@ dependencies = [
  "astrelis-paint",
  "astrelis-paint-gpu",
  "astrelis-platform",
+ "astrelis-platform-winit",
+ "astrelis-text",
  "astrelis-ui-core",
  "futures-util",
  "pollster",

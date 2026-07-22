@@ -3,6 +3,7 @@
 #![warn(missing_docs)]
 
 use std::{
+    collections::BTreeMap,
     error::Error,
     fmt,
     sync::{Arc, Mutex},
@@ -228,6 +229,113 @@ pub struct WindowHost<Message = ()> {
     ui: Ui<Message>,
     clear_color: Color,
     accessibility: Option<Box<dyn AccessibilityAdapter>>,
+}
+
+/// Application-owned collection of retained native window hosts.
+///
+/// Every window shares one [`GraphicsContext`] while retaining an independent
+/// UI tree, surface, compositor, accessibility adapter, and invalidation
+/// state. Window identifiers are iterated in stable creation order because
+/// Astrelis identifiers increase monotonically within one application run.
+pub struct WindowHosts<Message = ()> {
+    graphics: GraphicsContext,
+    hosts: BTreeMap<WindowId, WindowHost<Message>>,
+}
+
+impl<Message: 'static> WindowHosts<Message> {
+    /// Creates an empty multi-window host collection.
+    pub fn new(graphics: GraphicsContext) -> Self {
+        Self {
+            graphics,
+            hosts: BTreeMap::new(),
+        }
+    }
+
+    /// Returns the graphics context shared by every hosted window.
+    pub const fn graphics(&self) -> &GraphicsContext {
+        &self.graphics
+    }
+
+    /// Opens and inserts a retained window.
+    pub fn open<A: App>(
+        &mut self,
+        context: &mut AppContext<'_, '_, A>,
+        ui: Ui<Message>,
+        options: WindowHostOptions,
+    ) -> Result<WindowId, HostError> {
+        let host = WindowHost::open(context, &self.graphics, ui, options)?;
+        let id = host.id();
+        self.hosts.insert(id, host);
+        Ok(id)
+    }
+
+    /// Closes and removes one hosted window.
+    pub fn close<A: App>(&mut self, context: &mut AppContext<'_, '_, A>, id: WindowId) -> bool {
+        let removed = self.hosts.remove(&id).is_some();
+        if removed {
+            context.unregister_window(id);
+        }
+        removed
+    }
+
+    /// Closes and removes every hosted window.
+    pub fn close_all<A: App>(&mut self, context: &mut AppContext<'_, '_, A>) {
+        let ids = self.ids().collect::<Vec<_>>();
+        for id in ids {
+            self.close(context, id);
+        }
+    }
+
+    /// Returns one hosted window.
+    pub fn get(&self, id: WindowId) -> Option<&WindowHost<Message>> {
+        self.hosts.get(&id)
+    }
+
+    /// Returns one hosted window for UI or renderer updates.
+    pub fn get_mut(&mut self, id: WindowId) -> Option<&mut WindowHost<Message>> {
+        self.hosts.get_mut(&id)
+    }
+
+    /// Returns hosted window identifiers in stable creation order.
+    pub fn ids(&self) -> impl DoubleEndedIterator<Item = WindowId> + ExactSizeIterator + '_ {
+        self.hosts.keys().copied()
+    }
+
+    /// Returns the number of open hosted windows.
+    pub fn len(&self) -> usize {
+        self.hosts.len()
+    }
+
+    /// Returns whether no hosted window remains.
+    pub fn is_empty(&self) -> bool {
+        self.hosts.is_empty()
+    }
+
+    /// Returns whether `id` belongs to this collection.
+    pub fn contains(&self, id: WindowId) -> bool {
+        self.hosts.contains_key(&id)
+    }
+
+    /// Routes a platform event to its retained window, if it is hosted.
+    pub fn handle_event(
+        &mut self,
+        id: WindowId,
+        clipboard: &astrelis_platform::Clipboard,
+        event: &WindowEvent,
+    ) -> Result<Option<HostUpdate>, HostError> {
+        self.hosts
+            .get_mut(&id)
+            .map(|host| host.handle_event(clipboard, event))
+            .transpose()
+    }
+
+    /// Presents one hosted window.
+    pub fn redraw(&mut self, id: WindowId) -> Result<Option<RenderStats>, HostError> {
+        self.hosts
+            .get_mut(&id)
+            .ok_or_else(|| HostError::new(format!("window {id:?} is not hosted")))?
+            .redraw()
+    }
 }
 
 impl<Message: 'static> WindowHost<Message> {
@@ -705,7 +813,7 @@ mod tests {
 
     use astrelis_gpu::TextureFormat;
 
-    use super::{GraphicsContext, srgb_view_format};
+    use super::{GraphicsContext, WindowHosts, srgb_view_format};
 
     #[test]
     fn cloned_graphics_contexts_share_device_initialization() {
@@ -716,6 +824,15 @@ mod tests {
             &graphics.device,
             &GraphicsContext::new().device
         ));
+    }
+
+    #[test]
+    fn multi_window_collection_starts_empty_with_shared_graphics() {
+        let graphics = GraphicsContext::new();
+        let hosts = WindowHosts::<()>::new(graphics.clone());
+        assert!(hosts.is_empty());
+        assert_eq!(hosts.len(), 0);
+        assert!(Arc::ptr_eq(&hosts.graphics().device, &graphics.device));
     }
 
     #[test]

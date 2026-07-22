@@ -22,6 +22,8 @@ All notable changes to the rewritten Astrelis engine are documented here.
 - Read-only retained UI invalidation reasons for host and devtools integration.
 - A host-level accessibility adapter seam that publishes semantic trees and
   dispatches platform actions through retained semantic handling.
+- `WindowHosts`, an application-owned native multi-window collection with
+  shared graphics and per-window retained UI, event routing, and presentation.
 
 ## 0.3.0-rc.1 — Unreleased
 
