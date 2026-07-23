@@ -5,8 +5,9 @@ use std::any::Any;
 use astrelis_core::{
     color::Color,
     geometry::{LogicalPoint, LogicalRect, LogicalSize},
+    math::{Affine2, Vec2},
 };
-use astrelis_paint::{Brush, Painter};
+use astrelis_paint::{Brush, FillRule, Painter, Path};
 use astrelis_platform::{CursorIcon, ElementState, Key, NamedKey};
 use astrelis_text::{ParagraphStyle, TextLayout, TextLayoutRequest, TextStyle, TextWrap};
 
@@ -857,6 +858,37 @@ impl Element for Label {
 }
 
 /// Minimal activatable control for action-routing tests.
+#[derive(Clone, Debug)]
+pub struct ButtonIcon {
+    /// Immutable monochrome vector path.
+    pub path: Path,
+    /// Coordinate system used by the vector path.
+    pub view_box: LogicalSize,
+    /// Requested logical square edge.
+    pub size: f32,
+    /// Path winding interpretation.
+    pub fill_rule: FillRule,
+}
+
+impl ButtonIcon {
+    /// Creates vector content for a button.
+    pub const fn new(path: Path, view_box: LogicalSize, size: f32) -> Self {
+        Self {
+            path,
+            view_box,
+            size,
+            fill_rule: FillRule::NonZero,
+        }
+    }
+
+    /// Selects path winding interpretation.
+    pub const fn with_fill_rule(mut self, fill_rule: FillRule) -> Self {
+        self.fill_rule = fill_rule;
+        self
+    }
+}
+
+/// Minimal activatable control for action-routing tests.
 pub struct Button {
     /// Accessible label.
     pub label: String,
@@ -870,6 +902,10 @@ pub struct Button {
     pub text_color: Color,
     /// Glyph size.
     pub font_size: f32,
+    /// Whether the accessible label is also painted.
+    pub show_label: bool,
+    /// Optional leading vector glyph.
+    pub icon: Option<ButtonIcon>,
     pressed: bool,
     hovered: bool,
     resolved_size: LogicalSize,
@@ -893,6 +929,8 @@ impl Button {
             pressed_color,
             text_color: Color::WHITE,
             font_size: 14.0,
+            show_label: true,
+            icon: None,
             pressed: false,
             hovered: false,
             resolved_size: LogicalSize::ZERO,
@@ -920,6 +958,8 @@ impl Button {
             pressed_color,
             text_color: Color::WHITE,
             font_size: 14.0,
+            show_label: true,
+            icon: None,
             pressed: false,
             hovered: false,
             resolved_size: LogicalSize::ZERO,
@@ -931,6 +971,28 @@ impl Button {
     /// Replaces the erased action factory without recreating the control.
     pub fn set_action_factory(&mut self, action: impl Fn() -> Box<dyn Any> + 'static) {
         self.action = Some(Box::new(action));
+    }
+
+    /// Adds or replaces leading vector content.
+    pub fn with_icon(mut self, icon: ButtonIcon) -> Self {
+        self.icon = Some(icon);
+        self
+    }
+
+    /// Replaces optional leading vector content.
+    pub fn set_icon(&mut self, icon: Option<ButtonIcon>) {
+        self.icon = icon;
+    }
+
+    /// Selects whether the accessible label is also painted.
+    pub const fn with_label_visible(mut self, visible: bool) -> Self {
+        self.show_label = visible;
+        self
+    }
+
+    /// Selects whether the accessible label is also painted.
+    pub fn set_label_visible(&mut self, visible: bool) {
+        self.show_label = visible;
     }
 }
 
@@ -948,16 +1010,44 @@ impl Element for Button {
         context: &mut LayoutContext<'_>,
         constraints: Constraints,
     ) -> Result<LogicalSize, UiError> {
-        let mut request = TextLayoutRequest::new(self.label.clone());
-        request.style = TextStyle {
-            size: self.font_size.max(1.0),
-            color: self.text_color,
-            ..TextStyle::default()
+        self.layout = if self.label.is_empty() || !self.show_label {
+            None
+        } else {
+            let mut request = TextLayoutRequest::new(self.label.clone());
+            request.style = TextStyle {
+                size: self.font_size.max(1.0),
+                color: self.text_color,
+                ..TextStyle::default()
+            };
+            request.paragraph.wrap = TextWrap::NoWrap;
+            Some(context.shape_text(request)?)
         };
-        request.paragraph.wrap = TextWrap::NoWrap;
-        let layout = context.shape_text(request)?;
-        let intrinsic = LogicalSize::new(layout.size().width + 24.0, layout.size().height + 12.0);
-        self.layout = Some(layout);
+        let icon_size = self
+            .icon
+            .as_ref()
+            .map(|icon| {
+                if icon.size.is_finite() {
+                    icon.size.max(1.0)
+                } else {
+                    16.0
+                }
+            })
+            .unwrap_or(0.0);
+        let text_size = self
+            .layout
+            .as_ref()
+            .map(TextLayout::size)
+            .unwrap_or(LogicalSize::ZERO);
+        let gap = if self.icon.is_some() && self.layout.is_some() {
+            6.0
+        } else {
+            0.0
+        };
+        let horizontal_padding = if self.layout.is_some() { 24.0 } else { 12.0 };
+        let intrinsic = LogicalSize::new(
+            icon_size + gap + text_size.width + horizontal_padding,
+            icon_size.max(text_size.height) + 12.0,
+        );
         self.resolved_size = constraints.constrain(LogicalSize::new(
             self.size.width.max(intrinsic.width),
             self.size.height.max(intrinsic.height),
@@ -980,11 +1070,50 @@ impl Element for Button {
                 self.color
             }),
         )?;
+        let icon_size = self
+            .icon
+            .as_ref()
+            .map(|icon| {
+                if icon.size.is_finite() {
+                    icon.size.max(1.0)
+                } else {
+                    16.0
+                }
+            })
+            .unwrap_or(0.0);
+        let text_width = self
+            .layout
+            .as_ref()
+            .map(|layout| layout.size().width)
+            .unwrap_or(0.0);
+        let gap = if self.icon.is_some() && self.layout.is_some() {
+            6.0
+        } else {
+            0.0
+        };
+        let content_width = icon_size + gap + text_width;
+        let content_x = (size.width - content_width).max(0.0) * 0.5;
+        if let Some(icon) = &self.icon {
+            let view_width = icon.view_box.width.max(f32::EPSILON);
+            let view_height = icon.view_box.height.max(f32::EPSILON);
+            let scale = (icon_size / view_width).min(icon_size / view_height);
+            let offset = LogicalPoint::new(
+                content_x + (icon_size - icon.view_box.width * scale) * 0.5,
+                (size.height - icon.view_box.height * scale).max(0.0) * 0.5,
+            );
+            painter.with_save(|painter| {
+                painter.transform(
+                    Affine2::from_translation(Vec2::new(offset.x, offset.y))
+                        * Affine2::from_scale(Vec2::splat(scale)),
+                )?;
+                painter.fill_path(&icon.path, icon.fill_rule, Brush::Solid(self.text_color))
+            })?;
+        }
         if let Some(layout) = &self.layout {
             painter.draw_text(
                 layout,
                 LogicalPoint::new(
-                    (size.width - layout.size().width).max(0.0) * 0.5,
+                    content_x + icon_size + gap,
                     (size.height - layout.size().height).max(0.0) * 0.5,
                 ),
                 1.0,

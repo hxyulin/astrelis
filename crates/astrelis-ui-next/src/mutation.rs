@@ -5,8 +5,8 @@ use std::{any::Any, ops::RangeInclusive};
 use astrelis_core::{color::Color, geometry::LogicalSize};
 
 use crate::{
-    Axis, BoxElement, Button, Checkbox, Element, Flex, Frame, Invalidation, Label, NodeHandle,
-    Scroll, ScrollAxis, SemanticData, Slider, Stack, TextField, UiError, UiRoot,
+    Axis, BoxElement, Button, ButtonIcon, Checkbox, Element, Flex, Frame, Invalidation, Label,
+    NodeHandle, Scroll, ScrollAxis, SemanticData, Slider, Stack, TextField, UiError, UiRoot,
 };
 
 /// Typed property-aware access to one retained element.
@@ -83,6 +83,22 @@ impl ElementMut<'_, Button> {
         self.ui
             .update(self.handle, Invalidation::empty(), |button| {
                 button.set_action_factory(action);
+            })
+    }
+
+    /// Replaces optional leading vector content.
+    pub fn set_icon(self, icon: Option<ButtonIcon>) -> Result<(), UiError> {
+        self.ui
+            .update(self.handle, Invalidation::LAYOUT_ALL, |button| {
+                button.set_icon(icon);
+            })
+    }
+
+    /// Selects whether the accessible label is also painted.
+    pub fn set_label_visible(self, visible: bool) -> Result<(), UiError> {
+        self.ui
+            .update(self.handle, Invalidation::LAYOUT_ALL, |button| {
+                button.set_label_visible(visible);
             })
     }
 }

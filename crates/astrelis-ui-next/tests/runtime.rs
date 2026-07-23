@@ -4,14 +4,15 @@ use astrelis_core::{
     color::Color,
     geometry::{LogicalPoint, LogicalSize},
 };
+use astrelis_paint::{Path, PathVerb};
 use astrelis_platform::{
     CursorIcon, DeviceId, ElementState, Key, KeyLocation, KeyboardInput, Modifiers, NamedKey,
     PhysicalKey,
 };
 use astrelis_ui_next::{
-    Align, Alignment, Axis, BoxElement, Button, Checkbox, Flex, Frame, Invalidation, KeyListener,
-    Label, Scroll, ScrollAxis, SemanticAction, SemanticData, SemanticRole, SplitPane, Stack,
-    TextField, UiInput, UiRoot,
+    Align, Alignment, Axis, BoxElement, Button, ButtonIcon, Checkbox, Flex, Frame, Invalidation,
+    KeyListener, Label, Scroll, ScrollAxis, SemanticAction, SemanticData, SemanticRole, SplitPane,
+    Stack, TextField, UiInput, UiRoot,
 };
 
 #[test]
@@ -683,4 +684,51 @@ fn tab_focus_traversal_and_keyboard_activation_follow_tree_order() {
             .map(|node| node.id),
         Some(second.id())
     );
+}
+
+#[test]
+fn icon_only_button_keeps_accessible_label_and_compact_geometry() {
+    let mut icon = Path::builder();
+    for verb in [
+        PathVerb::MoveTo(LogicalPoint::new(2.0, 2.0)),
+        PathVerb::LineTo(LogicalPoint::new(14.0, 8.0)),
+        PathVerb::LineTo(LogicalPoint::new(2.0, 14.0)),
+        PathVerb::Close,
+    ] {
+        match verb {
+            PathVerb::MoveTo(point) => icon.move_to(point),
+            PathVerb::LineTo(point) => icon.line_to(point),
+            PathVerb::Close => icon.close(),
+            _ => unreachable!(),
+        }
+        .unwrap();
+    }
+    let mut ui = UiRoot::new(Flex::default(), LogicalSize::new(100.0, 100.0));
+    let button = ui
+        .append(
+            ui.root(),
+            Button::new(
+                "Run",
+                LogicalSize::new(30.0, 30.0),
+                Color::WHITE,
+                Color::BLACK,
+                Action::Activate,
+            )
+            .with_icon(ButtonIcon::new(
+                icon.finish(),
+                LogicalSize::new(16.0, 16.0),
+                16.0,
+            ))
+            .with_label_visible(false),
+        )
+        .unwrap();
+    ui.update_passes().unwrap();
+
+    let semantics = ui
+        .semantic_snapshot()
+        .into_iter()
+        .find(|node| node.id == button.id())
+        .unwrap();
+    assert_eq!(semantics.data.label, "Run");
+    assert_eq!(semantics.bounds.size, LogicalSize::new(30.0, 30.0));
 }
