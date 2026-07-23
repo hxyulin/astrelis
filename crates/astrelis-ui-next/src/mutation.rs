@@ -6,7 +6,7 @@ use astrelis_core::{color::Color, geometry::LogicalSize};
 
 use crate::{
     Axis, BoxElement, Button, Checkbox, Element, Flex, Invalidation, Label, NodeHandle,
-    SemanticData, Slider, TextField, UiError, UiRoot,
+    SemanticData, Slider, Stack, TextField, UiError, UiRoot,
 };
 
 /// Typed property-aware access to one retained element.
@@ -133,6 +133,17 @@ impl ElementMut<'_, Flex> {
                 flex.gap = gap;
                 flex.padding = padding;
                 flex.background = background;
+            })
+    }
+}
+
+impl ElementMut<'_, Stack> {
+    /// Replaces resolved overlay padding and background properties.
+    pub fn set_stack(self, padding: f32, background: Option<Color>) -> Result<(), UiError> {
+        self.ui
+            .update(self.handle, Invalidation::LAYOUT_ALL, |stack| {
+                stack.padding = padding;
+                stack.background = background;
             })
     }
 }

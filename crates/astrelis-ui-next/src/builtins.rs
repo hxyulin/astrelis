@@ -124,6 +124,63 @@ impl Element for Flex {
     }
 }
 
+/// Overlay container which places every child at the same inset origin.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Stack {
+    /// Insets inside the container.
+    pub padding: f32,
+    /// Optional background fill.
+    pub background: Option<Color>,
+}
+
+impl Element for Stack {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn layout(
+        &mut self,
+        context: &mut LayoutContext<'_>,
+        constraints: Constraints,
+    ) -> Result<LogicalSize, UiError> {
+        let padding = self.padding.max(0.0);
+        let inner_max = LogicalSize::new(
+            (constraints.max.width - padding * 2.0).max(0.0),
+            (constraints.max.height - padding * 2.0).max(0.0),
+        );
+        let mut content = LogicalSize::ZERO;
+        for child in context.children() {
+            let size =
+                context.layout_child(child, Constraints::new(LogicalSize::ZERO, inner_max))?;
+            context.place_child(child, LogicalPoint::new(padding, padding))?;
+            content.width = content.width.max(size.width);
+            content.height = content.height.max(size.height);
+        }
+        Ok(constraints.constrain(LogicalSize::new(
+            content.width + padding * 2.0,
+            content.height + padding * 2.0,
+        )))
+    }
+
+    fn paint(
+        &self,
+        painter: &mut Painter,
+        size: LogicalSize,
+    ) -> Result<(), astrelis_paint::PaintError> {
+        if let Some(color) = self.background {
+            painter.fill_rect(
+                LogicalRect::from_xywh(0.0, 0.0, size.width, size.height),
+                Brush::Solid(color),
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// Fixed or constraint-filling visual box.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoxElement {

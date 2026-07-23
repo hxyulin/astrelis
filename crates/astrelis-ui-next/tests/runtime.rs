@@ -9,7 +9,7 @@ use astrelis_platform::{
 };
 use astrelis_ui_next::{
     Axis, BoxElement, Button, Checkbox, Flex, Invalidation, Label, SemanticAction, SemanticData,
-    SemanticRole, TextField, UiInput, UiRoot,
+    SemanticRole, Stack, TextField, UiInput, UiRoot,
 };
 
 #[test]
@@ -74,6 +74,39 @@ fn keyed_reorder_primitive_preserves_identity_and_cached_fragments() {
         stats.rebuilt_fragments, 1,
         "only the changed parent repaints"
     );
+}
+
+#[test]
+fn stack_overlays_children_and_targets_the_topmost_control() {
+    let mut ui = UiRoot::new(Stack::default(), LogicalSize::new(200.0, 100.0));
+    let first = ui
+        .append(
+            ui.root(),
+            Button::new(
+                "First",
+                LogicalSize::new(100.0, 30.0),
+                Color::WHITE,
+                Color::BLACK,
+                Action::Activate,
+            ),
+        )
+        .unwrap();
+    let second = ui
+        .append(
+            ui.root(),
+            Button::new(
+                "Second",
+                LogicalSize::new(100.0, 30.0),
+                Color::BLACK,
+                Color::WHITE,
+                Action::Activate,
+            ),
+        )
+        .unwrap();
+    ui.update_passes().unwrap();
+
+    assert_eq!(ui.hit_test(LogicalPoint::new(5.0, 5.0)), Some(second.id()));
+    assert!(ui.contains(first.id()));
 }
 
 #[derive(Clone, Debug, PartialEq)]
