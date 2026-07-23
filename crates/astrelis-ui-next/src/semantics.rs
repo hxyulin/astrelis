@@ -20,6 +20,10 @@ pub enum SemanticRole {
     Checkbox,
     /// Numeric slider.
     Slider,
+    /// Raster image.
+    Image,
+    /// Data visualization.
+    Chart,
     /// Hierarchical collection.
     Tree,
     /// Tabular collection.

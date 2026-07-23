@@ -14,8 +14,8 @@ use astrelis_text::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    Constraints, Element, EventResult, Invalidation, LayoutContext, SemanticAction,
-    SemanticActionKind, SemanticData, SemanticRole, UiError, UiInput,
+    ClipboardOperation, Constraints, Element, EventResult, Invalidation, LayoutContext,
+    SemanticAction, SemanticActionKind, SemanticData, SemanticRole, UiError, UiInput,
 };
 
 type TextActionFactory = dyn Fn(String) -> Box<dyn Any>;
@@ -159,6 +159,7 @@ impl TextField {
                 .as_ref()
                 .map(|callback| callback(self.text.clone())),
             invalidation: Invalidation::LAYOUT_ALL,
+            clipboard: None,
             handled: true,
         }
     }
@@ -313,6 +314,34 @@ impl Element for TextField {
                         ..EventResult::default()
                     };
                 }
+                if command
+                    && matches!(&input.logical_key, Key::Character(value) if value.eq_ignore_ascii_case("c"))
+                {
+                    let (start, end) = self.selection();
+                    return EventResult {
+                        clipboard: (start != end).then(|| {
+                            ClipboardOperation::WriteText(self.text[start..end].to_owned())
+                        }),
+                        handled: true,
+                        ..EventResult::default()
+                    };
+                }
+                if command
+                    && matches!(&input.logical_key, Key::Character(value) if value.eq_ignore_ascii_case("x"))
+                {
+                    let (start, end) = self.selection();
+                    if start != end {
+                        let selected = self.text[start..end].to_owned();
+                        self.replace_selection("");
+                        let mut result = self.changed_result();
+                        result.clipboard = Some(ClipboardOperation::WriteText(selected));
+                        return result;
+                    }
+                    return EventResult {
+                        handled: true,
+                        ..EventResult::default()
+                    };
+                }
                 match &input.logical_key {
                     Key::Named(NamedKey::Backspace) => {
                         let (start, end) = self.selection();
@@ -396,6 +425,10 @@ impl Element for TextField {
                     handled: true,
                     ..EventResult::default()
                 }
+            }
+            UiInput::Paste(value) => {
+                self.replace_selection(&value);
+                self.changed_result()
             }
             _ => EventResult::default(),
         }

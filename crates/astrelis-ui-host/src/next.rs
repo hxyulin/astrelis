@@ -5,23 +5,65 @@ use std::sync::{Arc, Mutex};
 use std::{any::Any, collections::HashMap};
 
 use astrelis_app::{App, AppContext};
+use astrelis_compositor::{CompositionStats, ViewOptions, ViewRenderTarget};
 use astrelis_core::{
     color::Color,
     geometry::{LogicalPoint, LogicalSize, Size},
 };
 use astrelis_gpu::{SurfaceFrameStatus, TextureViewDescriptor};
-use astrelis_paint_gpu::{RenderStats, RenderTarget};
-use astrelis_platform::{DeviceId, ElementState, Modifiers, PointerButton, Window, WindowEvent};
-use astrelis_ui_next::{UiInput, UiRoot};
+use astrelis_paint::CompositorViewId;
+use astrelis_paint_gpu::{ExternalImage, RenderStats, RenderTarget};
+use astrelis_platform::{
+    Clipboard, DeviceId, ElementState, Key, Modifiers, PointerButton, ScrollDelta, Window,
+    WindowEvent,
+};
+use astrelis_ui_next::{
+    AccessibilityUpdate, ClipboardOperation, NodeId, SemanticAction, SemanticNode, UiInput, UiRoot,
+};
 
 use super::{
     GpuState, GraphicsContext, HostError, HostStatus, HostUpdate, WindowHost, WindowHostOptions,
     initialize_gpu,
 };
 
+/// One platform accessibility request targeting the incremental retained tree.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NextAccessibilityRequest {
+    /// Stable retained semantic target.
+    pub target: NodeId,
+    /// Backend-neutral operation.
+    pub action: SemanticAction,
+}
+
+/// Platform accessibility bridge for [`NextWindowHost`].
+pub trait NextAccessibilityAdapter {
+    /// Observes a platform event before retained input routing.
+    fn handle_window_event(
+        &mut self,
+        _window: &Window,
+        _event: &WindowEvent,
+    ) -> Result<(), HostError> {
+        Ok(())
+    }
+
+    /// Drains operations requested by the platform.
+    fn drain_requests(&mut self) -> Vec<NextAccessibilityRequest> {
+        Vec::new()
+    }
+
+    /// Publishes the current semantic snapshot and its latest delta.
+    fn update(
+        &mut self,
+        window: &Window,
+        snapshot: &[SemanticNode],
+        delta: &AccessibilityUpdate,
+    ) -> Result<(), HostError>;
+}
+
 /// Incremental retained UI tree connected to a platform window and GPU surface.
 pub struct NextWindowHost {
     window: Window,
+    clipboard: Clipboard,
     gpu: Option<GpuState>,
     #[cfg(target_arch = "wasm32")]
     pending: Arc<Mutex<Option<Result<GpuState, HostError>>>>,
@@ -31,6 +73,7 @@ pub struct NextWindowHost {
     modifiers: Modifiers,
     pointer_positions: HashMap<DeviceId, LogicalPoint>,
     actions: Vec<Box<dyn Any>>,
+    accessibility: Option<Box<dyn NextAccessibilityAdapter>>,
 }
 
 impl NextWindowHost {
@@ -44,6 +87,7 @@ impl NextWindowHost {
         let window = context
             .create_window(options.window)
             .map_err(HostError::from_display)?;
+        let clipboard = context.clipboard();
 
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -61,6 +105,7 @@ impl NextWindowHost {
             };
             let mut host = Self {
                 window,
+                clipboard,
                 gpu: Some(gpu),
                 failed: None,
                 ui,
@@ -68,6 +113,7 @@ impl NextWindowHost {
                 modifiers: Modifiers::default(),
                 pointer_positions: HashMap::new(),
                 actions: Vec::new(),
+                accessibility: None,
             };
             host.sync_viewport();
             host.update_passes()?;
@@ -90,6 +136,7 @@ impl NextWindowHost {
             });
             let mut host = Self {
                 window,
+                clipboard,
                 gpu: None,
                 pending,
                 failed: None,
@@ -98,6 +145,7 @@ impl NextWindowHost {
                 modifiers: Modifiers::default(),
                 pointer_positions: HashMap::new(),
                 actions: Vec::new(),
+                accessibility: None,
             };
             host.sync_viewport();
             host.update_passes()?;
@@ -139,9 +187,31 @@ impl NextWindowHost {
         self.actions.drain(..)
     }
 
+    /// Installs a platform accessibility adapter and publishes the current tree.
+    pub fn set_accessibility_adapter(
+        &mut self,
+        mut adapter: impl NextAccessibilityAdapter + 'static,
+    ) -> Result<(), HostError> {
+        adapter.update(
+            &self.window,
+            &self.ui.semantic_snapshot(),
+            &AccessibilityUpdate::default(),
+        )?;
+        self.accessibility = Some(Box::new(adapter));
+        Ok(())
+    }
+
+    /// Removes and returns the platform accessibility adapter.
+    pub fn take_accessibility_adapter(&mut self) -> Option<Box<dyn NextAccessibilityAdapter>> {
+        self.accessibility.take()
+    }
+
     /// Routes a platform event and updates invalidated retained passes.
     pub fn handle_event(&mut self, event: &WindowEvent) -> Result<HostUpdate, HostError> {
         self.sync_initialization();
+        if let Some(accessibility) = &mut self.accessibility {
+            accessibility.handle_window_event(&self.window, event)?;
+        }
         if matches!(event, WindowEvent::CloseRequested) {
             return Ok(HostUpdate {
                 close_requested: true,
@@ -183,11 +253,41 @@ impl NextWindowHost {
                 }
                 true
             }
+            WindowEvent::PointerWheel {
+                device_id, delta, ..
+            } => {
+                if let Some(position) = self.pointer_positions.get(device_id).copied() {
+                    let scale = self.window.scale_factor().max(f64::EPSILON);
+                    let delta = match delta {
+                        ScrollDelta::Lines { x, y } => LogicalPoint::new(-x * 40.0, -y * 40.0),
+                        ScrollDelta::Pixels(point) => {
+                            LogicalPoint::new((-point.x / scale) as f32, (-point.y / scale) as f32)
+                        }
+                    };
+                    self.dispatch(UiInput::PointerWheel { position, delta })?;
+                }
+                true
+            }
             WindowEvent::KeyboardInput(input) => {
+                let paste = input.state == ElementState::Pressed
+                    && (self.modifiers.control || self.modifiers.super_key)
+                    && matches!(
+                        &input.logical_key,
+                        Key::Character(value) if value.eq_ignore_ascii_case("v")
+                    );
                 self.dispatch(UiInput::Keyboard {
                     input: input.clone(),
                     modifiers: self.modifiers,
                 })?;
+                if paste
+                    && self.clipboard.capabilities().read_text
+                    && let Some(text) = self
+                        .clipboard
+                        .read_text()
+                        .map_err(HostError::from_display)?
+                {
+                    self.dispatch(UiInput::Paste(text))?;
+                }
                 true
             }
             WindowEvent::Ime(event) => {
@@ -203,14 +303,79 @@ impl NextWindowHost {
         if redraw {
             self.update_passes()?;
         }
+        self.flush_clipboard()?;
+        let requests = self
+            .accessibility
+            .as_mut()
+            .map(|adapter| adapter.drain_requests())
+            .unwrap_or_default();
+        let accessibility_requested = !requests.is_empty();
+        for request in requests {
+            if let Some(action) = self
+                .ui
+                .perform_semantic_action(request.target, request.action)
+                .map_err(HostError::from_display)?
+            {
+                self.actions.push(action);
+            }
+        }
+        if accessibility_requested {
+            self.update_passes()?;
+        }
         Ok(HostUpdate {
-            redraw,
+            redraw: redraw || accessibility_requested,
             ..HostUpdate::default()
         })
     }
 
     /// Generates and presents one incremental UI frame.
     pub fn redraw(&mut self) -> Result<Option<RenderStats>, HostError> {
+        self.redraw_composited(
+            |_| ViewOptions::default(),
+            |id, _, _| -> Result<(), HostError> {
+                Err(HostError::new(format!(
+                    "no scene callback was supplied for compositor view {}",
+                    id.get()
+                )))
+            },
+        )
+        .map(|stats| stats.map(|stats| stats.paint))
+    }
+
+    /// Registers an application-owned texture sampled by retained paint.
+    pub fn register_external_image(
+        &mut self,
+        image: &ExternalImage,
+        view: astrelis_gpu::TextureView,
+    ) -> Result<(), HostError> {
+        self.ready_gpu()?
+            .compositor
+            .paint_mut()
+            .register_external_image(image, view)
+            .map_err(HostError::from_display)
+    }
+
+    /// Removes a previously registered retained-paint image.
+    pub fn unregister_external_image(&mut self, image: &ExternalImage) -> bool {
+        self.sync_initialization();
+        self.gpu
+            .as_mut()
+            .is_some_and(|gpu| gpu.compositor.paint_mut().unregister_external_image(image))
+    }
+
+    /// Generates and presents a frame with application-rendered compositor views.
+    pub fn redraw_composited<E>(
+        &mut self,
+        view_options: impl FnMut(CompositorViewId) -> ViewOptions,
+        render_view: impl FnMut(
+            CompositorViewId,
+            &mut astrelis_gpu::CommandEncoder,
+            ViewRenderTarget,
+        ) -> Result<(), E>,
+    ) -> Result<Option<CompositionStats>, HostError>
+    where
+        E: std::fmt::Display,
+    {
         self.sync_initialization();
         if let Some(error) = &self.failed {
             return Err(error.clone());
@@ -252,20 +417,15 @@ impl NextWindowHost {
                     scale_factor: self.window.scale_factor() as f32,
                     clear_color: self.clear_color,
                 },
-                |_| Default::default(),
-                |id, _, _| -> Result<(), HostError> {
-                    Err(HostError::new(format!(
-                        "no scene callback was supplied for compositor view {}",
-                        id.get()
-                    )))
-                },
+                view_options,
+                render_view,
             )
             .map_err(HostError::from_display)?;
         gpu.queue
             .submit([encoder.finish().map_err(HostError::from_display)?])
             .map_err(HostError::from_display)?;
         frame.present().map_err(HostError::from_display)?;
-        Ok(Some(stats.paint))
+        Ok(Some(stats))
     }
 
     fn dispatch(&mut self, input: UiInput) -> Result<(), HostError> {
@@ -275,11 +435,47 @@ impl NextWindowHost {
         Ok(())
     }
 
+    fn flush_clipboard(&mut self) -> Result<(), HostError> {
+        for operation in self.ui.drain_clipboard() {
+            match operation {
+                ClipboardOperation::WriteText(text) if self.clipboard.capabilities().write_text => {
+                    self.clipboard
+                        .write_text(text)
+                        .map_err(HostError::from_display)?;
+                }
+                ClipboardOperation::WriteText(_) => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn ready_gpu(&mut self) -> Result<&mut GpuState, HostError> {
+        self.sync_initialization();
+        if let Some(error) = &self.failed {
+            return Err(error.clone());
+        }
+        if self.gpu.as_ref().is_some_and(|gpu| gpu.device.is_lost()) {
+            return Err(HostError::new(
+                "the shared GPU device was lost; recreate the graphics context and window hosts",
+            ));
+        }
+        self.gpu
+            .as_mut()
+            .ok_or_else(|| HostError::new("GPU initialization is still pending"))
+    }
+
     fn update_passes(&mut self) -> Result<(), HostError> {
-        self.ui
+        let delta = self
+            .ui
             .update_passes()
-            .map(|_| ())
-            .map_err(HostError::from_display)
+            .map(|update| update.accessibility.clone())
+            .map_err(HostError::from_display)?;
+        if let Some(accessibility) = &mut self.accessibility
+            && (!delta.changed.is_empty() || !delta.removed.is_empty())
+        {
+            accessibility.update(&self.window, &self.ui.semantic_snapshot(), &delta)?;
+        }
+        Ok(())
     }
 
     fn logical_point(&self, x: f64, y: f64) -> LogicalPoint {

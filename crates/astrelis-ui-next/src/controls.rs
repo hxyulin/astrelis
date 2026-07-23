@@ -69,6 +69,7 @@ impl Checkbox {
         EventResult {
             action: Some((self.changed)(self.checked)),
             invalidation: Invalidation::PAINT | Invalidation::ACCESSIBILITY,
+            clipboard: None,
             handled: true,
         }
     }
@@ -272,6 +273,7 @@ impl Slider {
         EventResult {
             action: Some((self.changed)(self.value)),
             invalidation: Invalidation::PAINT | Invalidation::ACCESSIBILITY,
+            clipboard: None,
             handled: true,
         }
     }
@@ -281,6 +283,7 @@ impl Slider {
         EventResult {
             action: Some((self.changed)(self.value)),
             invalidation: Invalidation::PAINT | Invalidation::ACCESSIBILITY,
+            clipboard: None,
             handled: true,
         }
     }
@@ -390,6 +393,7 @@ impl Element for Slider {
                 EventResult {
                     action: Some((self.changed)(self.value)),
                     invalidation: Invalidation::PAINT | Invalidation::ACCESSIBILITY,
+                    clipboard: None,
                     handled: true,
                 }
             }

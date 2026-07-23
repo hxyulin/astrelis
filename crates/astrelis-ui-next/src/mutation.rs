@@ -5,8 +5,8 @@ use std::{any::Any, ops::RangeInclusive};
 use astrelis_core::{color::Color, geometry::LogicalSize};
 
 use crate::{
-    Axis, BoxElement, Button, Checkbox, Element, Flex, Invalidation, Label, NodeHandle,
-    SemanticData, Slider, Stack, TextField, UiError, UiRoot,
+    Axis, BoxElement, Button, Checkbox, Element, Flex, Frame, Invalidation, Label, NodeHandle,
+    Scroll, ScrollAxis, SemanticData, Slider, Stack, TextField, UiError, UiRoot,
 };
 
 /// Typed property-aware access to one retained element.
@@ -137,6 +137,32 @@ impl ElementMut<'_, Flex> {
     }
 }
 
+impl ElementMut<'_, Frame> {
+    /// Replaces explicit sizing and flex growth.
+    pub fn set_frame(
+        self,
+        width: Option<f32>,
+        height: Option<f32>,
+        min: LogicalSize,
+        max: Option<LogicalSize>,
+        grow: f32,
+    ) -> Result<(), UiError> {
+        self.ui
+            .update(self.handle, Invalidation::LAYOUT_ALL, |frame| {
+                frame.width = width.map(|value| value.max(0.0));
+                frame.height = height.map(|value| value.max(0.0));
+                frame.min = LogicalSize::new(min.width.max(0.0), min.height.max(0.0));
+                frame.max = max.map(|size| {
+                    LogicalSize::new(
+                        size.width.max(frame.min.width),
+                        size.height.max(frame.min.height),
+                    )
+                });
+                frame.grow = grow.max(0.0);
+            })
+    }
+}
+
 impl ElementMut<'_, Stack> {
     /// Replaces resolved overlay padding and background properties.
     pub fn set_stack(self, padding: f32, background: Option<Color>) -> Result<(), UiError> {
@@ -144,6 +170,21 @@ impl ElementMut<'_, Stack> {
             .update(self.handle, Invalidation::LAYOUT_ALL, |stack| {
                 stack.padding = padding;
                 stack.background = background;
+            })
+    }
+}
+
+impl ElementMut<'_, Scroll> {
+    /// Replaces controlled scroll axis and offset.
+    pub fn set_scroll(
+        self,
+        axis: ScrollAxis,
+        offset: astrelis_core::geometry::LogicalPoint,
+    ) -> Result<(), UiError> {
+        self.ui
+            .update(self.handle, Invalidation::LAYOUT_ALL, |scroll| {
+                scroll.axis = axis;
+                scroll.offset = offset;
             })
     }
 }

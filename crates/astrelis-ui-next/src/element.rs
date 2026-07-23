@@ -101,6 +101,13 @@ pub enum UiInput {
     PointerPressed(LogicalPoint),
     /// Primary pointer button was released.
     PointerReleased(LogicalPoint),
+    /// Pointer wheel moved at a window-coordinate position.
+    PointerWheel {
+        /// Pointer location used to choose the routed subtree.
+        position: LogicalPoint,
+        /// Logical-pixel displacement.
+        delta: LogicalPoint,
+    },
     /// Keyboard focus changed.
     FocusChanged(bool),
     /// A pressed keyboard key with the modifier state at dispatch time.
@@ -112,6 +119,15 @@ pub enum UiInput {
     },
     /// Input method composition changed.
     Ime(ImeEvent),
+    /// Plain text read from the platform clipboard.
+    Paste(String),
+}
+
+/// Platform clipboard mutation requested by a retained element.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClipboardOperation {
+    /// Replace plain-text clipboard contents.
+    WriteText(String),
 }
 
 /// Result of delivering one input event.
@@ -121,6 +137,8 @@ pub struct EventResult {
     pub action: Option<Box<dyn Any>>,
     /// Additional work requested by the element.
     pub invalidation: Invalidation,
+    /// Optional platform clipboard mutation.
+    pub clipboard: Option<ClipboardOperation>,
     /// Whether event propagation should stop.
     pub handled: bool,
 }
@@ -204,6 +222,11 @@ pub trait Element: Any {
     fn clips_children(&self) -> bool {
         false
     }
+
+    /// Relative share of remaining main-axis space requested from a flex parent.
+    fn flex_grow(&self) -> f32 {
+        0.0
+    }
 }
 
 /// Restricted access to retained children during layout.
@@ -235,6 +258,11 @@ impl LayoutContext<'_> {
     /// Returns a child's most recently computed size.
     pub fn child_size(&self, child: NodeId) -> Result<LogicalSize, UiError> {
         self.ui.child_size(self.current, child)
+    }
+
+    /// Returns a direct child's requested flex growth.
+    pub fn child_flex_grow(&self, child: NodeId) -> Result<f32, UiError> {
+        self.ui.child_flex_grow(self.current, child)
     }
 
     /// Shapes and freezes text using the root's shared font and scratch state.

@@ -8,8 +8,8 @@ use astrelis_platform::{
     DeviceId, ElementState, Key, KeyLocation, KeyboardInput, Modifiers, NamedKey, PhysicalKey,
 };
 use astrelis_ui_next::{
-    Axis, BoxElement, Button, Checkbox, Flex, Invalidation, Label, SemanticAction, SemanticData,
-    SemanticRole, Stack, TextField, UiInput, UiRoot,
+    Axis, BoxElement, Button, Checkbox, Flex, Invalidation, Label, Scroll, ScrollAxis,
+    SemanticAction, SemanticData, SemanticRole, Stack, TextField, UiInput, UiRoot,
 };
 
 #[test]
@@ -107,6 +107,53 @@ fn stack_overlays_children_and_targets_the_topmost_control() {
 
     assert_eq!(ui.hit_test(LogicalPoint::new(5.0, 5.0)), Some(second.id()));
     assert!(ui.contains(first.id()));
+}
+
+#[test]
+fn wheel_input_bubbles_to_a_clipped_scroll_ancestor() {
+    let mut ui = UiRoot::new(
+        Scroll::new(ScrollAxis::Vertical),
+        LogicalSize::new(200.0, 50.0),
+    );
+    let content = ui
+        .append(
+            ui.root(),
+            Flex {
+                axis: Axis::Vertical,
+                gap: 4.0,
+                ..Flex::default()
+            },
+        )
+        .unwrap();
+    for index in 0..8 {
+        ui.append(content.id(), Label::new(format!("Row {index}")))
+            .unwrap();
+    }
+    ui.update_passes().unwrap();
+    let before = ui
+        .semantic_snapshot()
+        .into_iter()
+        .find(|node| node.data.label == "Row 0")
+        .unwrap()
+        .bounds
+        .origin
+        .y;
+
+    ui.dispatch(UiInput::PointerWheel {
+        position: LogicalPoint::new(10.0, 10.0),
+        delta: LogicalPoint::new(0.0, 30.0),
+    })
+    .unwrap();
+    ui.update_passes().unwrap();
+    let after = ui
+        .semantic_snapshot()
+        .into_iter()
+        .find(|node| node.data.label == "Row 0")
+        .unwrap()
+        .bounds
+        .origin
+        .y;
+    assert_eq!(after, before - 30.0);
 }
 
 #[derive(Clone, Debug, PartialEq)]

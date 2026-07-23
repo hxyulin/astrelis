@@ -69,20 +69,51 @@ impl Element for Flex {
             (constraints.max.height - padding * 2.0).max(0.0),
         );
         let children = context.children();
+        let mut sizes = Vec::with_capacity(children.len());
+        let mut total_main = 0.0f32;
+        let mut total_grow = 0.0f32;
+        for child in children.iter().copied() {
+            let size =
+                context.layout_child(child, Constraints::new(LogicalSize::ZERO, inner_max))?;
+            total_main += match self.axis {
+                Axis::Horizontal => size.width,
+                Axis::Vertical => size.height,
+            };
+            total_grow += context.child_flex_grow(child)?;
+            sizes.push(size);
+        }
+        let gaps = self.gap.max(0.0) * children.len().saturating_sub(1) as f32;
+        let available_main = match self.axis {
+            Axis::Horizontal => inner_max.width,
+            Axis::Vertical => inner_max.height,
+        };
+        let remaining = (available_main - total_main - gaps).max(0.0);
+        if total_grow > 0.0 && remaining > 0.0 {
+            for (index, child) in children.iter().copied().enumerate() {
+                let grow = context.child_flex_grow(child)?;
+                if grow <= 0.0 {
+                    continue;
+                }
+                let target_main = match self.axis {
+                    Axis::Horizontal => sizes[index].width,
+                    Axis::Vertical => sizes[index].height,
+                } + remaining * grow / total_grow;
+                let child_constraints = match self.axis {
+                    Axis::Horizontal => Constraints::new(
+                        LogicalSize::new(target_main, 0.0),
+                        LogicalSize::new(target_main, inner_max.height),
+                    ),
+                    Axis::Vertical => Constraints::new(
+                        LogicalSize::new(0.0, target_main),
+                        LogicalSize::new(inner_max.width, target_main),
+                    ),
+                };
+                sizes[index] = context.layout_child(child, child_constraints)?;
+            }
+        }
         let mut cursor = padding;
         let mut cross = 0.0f32;
-        for child in children.iter().copied() {
-            let child_constraints = match self.axis {
-                Axis::Horizontal => Constraints::new(
-                    LogicalSize::ZERO,
-                    LogicalSize::new(inner_max.width, inner_max.height),
-                ),
-                Axis::Vertical => Constraints::new(
-                    LogicalSize::ZERO,
-                    LogicalSize::new(inner_max.width, inner_max.height),
-                ),
-            };
-            let size = context.layout_child(child, child_constraints)?;
+        for (child, size) in children.iter().copied().zip(sizes) {
             let origin = match self.axis {
                 Axis::Horizontal => LogicalPoint::new(cursor, padding),
                 Axis::Vertical => LogicalPoint::new(padding, cursor),
@@ -178,6 +209,82 @@ impl Element for Stack {
             )?;
         }
         Ok(())
+    }
+}
+
+/// Explicit sizing and flex-growth boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Frame {
+    /// Optional preferred width.
+    pub width: Option<f32>,
+    /// Optional preferred height.
+    pub height: Option<f32>,
+    /// Minimum accepted size.
+    pub min: LogicalSize,
+    /// Optional maximum size.
+    pub max: Option<LogicalSize>,
+    /// Relative main-axis growth in a [`Flex`] parent.
+    pub grow: f32,
+}
+
+impl Default for Frame {
+    fn default() -> Self {
+        Self {
+            width: None,
+            height: None,
+            min: LogicalSize::ZERO,
+            max: None,
+            grow: 0.0,
+        }
+    }
+}
+
+impl Element for Frame {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn layout(
+        &mut self,
+        context: &mut LayoutContext<'_>,
+        constraints: Constraints,
+    ) -> Result<LogicalSize, UiError> {
+        let configured_max = self.max.unwrap_or(constraints.max);
+        let maximum = LogicalSize::new(
+            configured_max.width.min(constraints.max.width),
+            configured_max.height.min(constraints.max.height),
+        );
+        let minimum = LogicalSize::new(
+            self.min.width.max(constraints.min.width).min(maximum.width),
+            self.min
+                .height
+                .max(constraints.min.height)
+                .min(maximum.height),
+        );
+        let children = context.children();
+        let mut content = LogicalSize::ZERO;
+        for child in children.iter().copied() {
+            let size = context.layout_child(child, Constraints::new(LogicalSize::ZERO, maximum))?;
+            content.width = content.width.max(size.width);
+            content.height = content.height.max(size.height);
+        }
+        let size = Constraints::new(minimum, maximum).constrain(LogicalSize::new(
+            self.width.unwrap_or(content.width),
+            self.height.unwrap_or(content.height),
+        ));
+        for child in children {
+            context.layout_child(child, Constraints::tight(size))?;
+            context.place_child(child, LogicalPoint::ZERO)?;
+        }
+        Ok(size)
+    }
+
+    fn flex_grow(&self) -> f32 {
+        self.grow.max(0.0)
     }
 }
 
@@ -498,6 +605,7 @@ impl Element for Button {
                 EventResult {
                     action: self.action.as_ref().map(|action| action()),
                     invalidation: Invalidation::PAINT,
+                    clipboard: None,
                     handled: true,
                 }
             }

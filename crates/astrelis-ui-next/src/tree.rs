@@ -11,8 +11,8 @@ use astrelis_platform::{ElementState, Key, NamedKey};
 use astrelis_text::{FontDatabase, TextLayout, TextLayoutContext, TextLayoutRequest};
 
 use crate::{
-    AccessibilityUpdate, Constraints, Element, Invalidation, LayoutContext, SemanticAction,
-    SemanticNode, UiError, UiInput,
+    AccessibilityUpdate, ClipboardOperation, Constraints, Element, Invalidation, LayoutContext,
+    SemanticAction, SemanticNode, UiError, UiInput,
 };
 
 /// Stable generational retained identity.
@@ -127,6 +127,7 @@ pub struct UiRoot {
     focus: Option<NodeId>,
     scene: Scene,
     accessibility: AccessibilityUpdate,
+    clipboard: Vec<ClipboardOperation>,
     stats: PassStats,
     fonts: FontDatabase,
     text_context: TextLayoutContext,
@@ -175,6 +176,7 @@ impl UiRoot {
             focus: None,
             scene: Scene::default(),
             accessibility: AccessibilityUpdate::default(),
+            clipboard: Vec::new(),
             stats: PassStats::default(),
             fonts,
             text_context: TextLayoutContext::new(),
@@ -304,8 +306,15 @@ impl UiRoot {
     /// Sets retained visibility.
     pub fn set_visible(&mut self, id: NodeId, visible: bool) -> Result<(), UiError> {
         if self.node(id)?.visible != visible {
+            if !visible
+                && self
+                    .focus
+                    .is_some_and(|focus| self.is_descendant_or_self(focus, id))
+            {
+                self.set_focus(None)?;
+            }
             self.node_mut(id)?.visible = visible;
-            self.invalidate(id, Invalidation::ALL);
+            self.invalidate_subtree(id, Invalidation::ALL);
         }
         Ok(())
     }
@@ -392,6 +401,11 @@ impl UiRoot {
             .collect()
     }
 
+    /// Drains platform clipboard mutations requested by retained elements.
+    pub fn drain_clipboard(&mut self) -> impl Iterator<Item = ClipboardOperation> + '_ {
+        self.clipboard.drain(..)
+    }
+
     /// Hit-tests a window-space point and records traversal work.
     pub fn hit_test(&mut self, point: LogicalPoint) -> Option<NodeId> {
         let mut visited = 0;
@@ -413,7 +427,11 @@ impl UiRoot {
             UiInput::PointerMoved(point)
             | UiInput::PointerPressed(point)
             | UiInput::PointerReleased(point) => *point,
-            UiInput::FocusChanged(_) | UiInput::Keyboard { .. } | UiInput::Ime(_) => {
+            UiInput::PointerWheel { position, .. } => *position,
+            UiInput::FocusChanged(_)
+            | UiInput::Keyboard { .. }
+            | UiInput::Ime(_)
+            | UiInput::Paste(_) => {
                 let Some(focus) = self.focus else {
                     return Ok(None);
                 };
@@ -435,7 +453,7 @@ impl UiRoot {
                 .then_some(target);
             self.set_focus(focus)?;
         }
-        self.dispatch_to(target, input)
+        self.dispatch_bubbling(target, input)
     }
 
     /// Moves focus to one retained target or clears it.
@@ -445,7 +463,7 @@ impl UiRoot {
         }
         if let Some(target) = target {
             let node = self.node(target)?;
-            if !node.visible
+            if !self.effective_visible(target)
                 || !self.effective_enabled(target)
                 || !node.element.as_deref().is_some_and(Element::focusable)
             {
@@ -490,7 +508,7 @@ impl UiRoot {
         target: NodeId,
         action: SemanticAction,
     ) -> Result<Option<Box<dyn Any>>, UiError> {
-        if !self.effective_enabled(target) {
+        if !self.effective_enabled(target) || !self.effective_visible(target) {
             return Ok(None);
         }
         if matches!(&action, SemanticAction::Focus) {
@@ -514,6 +532,9 @@ impl UiRoot {
         if !result.invalidation.is_empty() {
             self.invalidate(target, result.invalidation);
         }
+        if let Some(operation) = result.clipboard {
+            self.clipboard.push(operation);
+        }
         Ok(result.action)
     }
 
@@ -532,7 +553,41 @@ impl UiRoot {
         if !result.invalidation.is_empty() {
             self.invalidate(target, result.invalidation);
         }
+        if let Some(operation) = result.clipboard {
+            self.clipboard.push(operation);
+        }
         Ok(result.action)
+    }
+
+    fn dispatch_bubbling(
+        &mut self,
+        mut target: NodeId,
+        input: UiInput,
+    ) -> Result<Option<Box<dyn Any>>, UiError> {
+        loop {
+            let localized = self.localize_input(target, input.clone())?;
+            let result = {
+                let element = self
+                    .node_mut(target)?
+                    .element
+                    .as_deref_mut()
+                    .ok_or_else(|| UiError::new("element is temporarily unavailable"))?;
+                element.event(localized)
+            };
+            if !result.invalidation.is_empty() {
+                self.invalidate(target, result.invalidation);
+            }
+            if let Some(operation) = result.clipboard {
+                self.clipboard.push(operation);
+            }
+            if result.action.is_some() || result.handled {
+                return Ok(result.action);
+            }
+            let Some(parent) = self.node(target)?.parent else {
+                return Ok(None);
+            };
+            target = parent;
+        }
     }
 
     fn localize_input(&self, target: NodeId, input: UiInput) -> Result<UiInput, UiError> {
@@ -545,6 +600,10 @@ impl UiRoot {
             UiInput::PointerMoved(point) => UiInput::PointerMoved(local(point)),
             UiInput::PointerPressed(point) => UiInput::PointerPressed(local(point)),
             UiInput::PointerReleased(point) => UiInput::PointerReleased(local(point)),
+            UiInput::PointerWheel { position, delta } => UiInput::PointerWheel {
+                position: local(position),
+                delta,
+            },
             other => other,
         })
     }
@@ -597,6 +656,19 @@ impl UiRoot {
             return Err(UiError::new("child_size requires a direct child"));
         }
         Ok(self.node(child)?.size)
+    }
+
+    pub(crate) fn child_flex_grow(&self, parent: NodeId, child: NodeId) -> Result<f32, UiError> {
+        if self.node(child)?.parent != Some(parent) {
+            return Err(UiError::new("layout may only inspect direct children"));
+        }
+        Ok(self
+            .node(child)?
+            .element
+            .as_deref()
+            .map(Element::flex_grow)
+            .unwrap_or(0.0)
+            .max(0.0))
     }
 
     fn layout_node(
@@ -793,7 +865,7 @@ impl UiRoot {
                     element.focusable(),
                     self.effective_enabled(id),
                     element.semantic_actions(),
-                    node.visible,
+                    self.effective_visible(id),
                 )
             };
             let semantic = data.filter(|_| visible).map(|data| SemanticNode {
@@ -922,6 +994,21 @@ impl UiRoot {
                 return false;
             };
             if !node.enabled {
+                return false;
+            }
+            let Some(parent) = node.parent else {
+                return true;
+            };
+            id = parent;
+        }
+    }
+
+    fn effective_visible(&self, mut id: NodeId) -> bool {
+        loop {
+            let Ok(node) = self.node(id) else {
+                return false;
+            };
+            if !node.visible {
                 return false;
             }
             let Some(parent) = node.parent else {
