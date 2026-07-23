@@ -7,11 +7,12 @@ use astrelis_core::{
     geometry::{LogicalPoint, LogicalRect, LogicalSize},
 };
 use astrelis_paint::{Brush, Painter};
+use astrelis_platform::{ElementState, Key, NamedKey};
 use astrelis_text::{ParagraphStyle, TextLayout, TextLayoutRequest, TextStyle, TextWrap};
 
 use crate::{
-    Constraints, Element, EventResult, Invalidation, LayoutContext, SemanticData, SemanticRole,
-    UiError, UiInput,
+    Constraints, Element, EventResult, Invalidation, LayoutContext, SemanticAction,
+    SemanticActionKind, SemanticData, SemanticRole, UiError, UiInput,
 };
 
 /// Main-axis direction for [`Flex`].
@@ -304,7 +305,12 @@ pub struct Button {
     pub color: Color,
     /// Pressed background.
     pub pressed_color: Color,
+    /// Glyph color.
+    pub text_color: Color,
+    /// Glyph size.
+    pub font_size: f32,
     pressed: bool,
+    layout: Option<TextLayout>,
     action: Option<Box<dyn Fn() -> Box<dyn Any>>>,
 }
 
@@ -322,7 +328,10 @@ impl Button {
             size,
             color,
             pressed_color,
+            text_color: Color::WHITE,
+            font_size: 14.0,
             pressed: false,
+            layout: None,
             action: Some(Box::new(move || Box::new(action.clone()))),
         }
     }
@@ -344,7 +353,10 @@ impl Button {
             size,
             color,
             pressed_color,
+            text_color: Color::WHITE,
+            font_size: 14.0,
             pressed: false,
+            layout: None,
             action: Some(Box::new(action)),
         }
     }
@@ -366,9 +378,17 @@ impl Element for Button {
 
     fn layout(
         &mut self,
-        _context: &mut LayoutContext<'_>,
+        context: &mut LayoutContext<'_>,
         constraints: Constraints,
     ) -> Result<LogicalSize, UiError> {
+        let mut request = TextLayoutRequest::new(self.label.clone());
+        request.style = TextStyle {
+            size: self.font_size.max(1.0),
+            color: self.text_color,
+            ..TextStyle::default()
+        };
+        request.paragraph.wrap = TextWrap::NoWrap;
+        self.layout = Some(context.shape_text(request)?);
         Ok(constraints.constrain(self.size))
     }
 
@@ -385,6 +405,16 @@ impl Element for Button {
                 self.color
             }),
         )?;
+        if let Some(layout) = &self.layout {
+            painter.draw_text(
+                layout,
+                LogicalPoint::new(
+                    (size.width - layout.size().width).max(0.0) * 0.5,
+                    (size.height - layout.size().height).max(0.0) * 0.5,
+                ),
+                1.0,
+            )?;
+        }
         Ok(())
     }
 
@@ -414,6 +444,34 @@ impl Element for Button {
                     handled: true,
                 }
             }
+            UiInput::Keyboard { input, .. }
+                if input.state == ElementState::Pressed
+                    && matches!(
+                        input.logical_key,
+                        Key::Named(NamedKey::Enter | NamedKey::Space)
+                    ) =>
+            {
+                EventResult {
+                    action: self.action.as_ref().map(|action| action()),
+                    handled: true,
+                    ..EventResult::default()
+                }
+            }
+            _ => EventResult::default(),
+        }
+    }
+
+    fn semantic_actions(&self) -> Vec<SemanticActionKind> {
+        vec![SemanticActionKind::Focus, SemanticActionKind::Activate]
+    }
+
+    fn semantic_action(&mut self, action: SemanticAction) -> EventResult {
+        match action {
+            SemanticAction::Activate => EventResult {
+                action: self.action.as_ref().map(|action| action()),
+                handled: true,
+                ..EventResult::default()
+            },
             _ => EventResult::default(),
         }
     }

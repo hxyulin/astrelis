@@ -22,6 +22,7 @@ astrelis-paint = { workspace = true }
 astrelis-paint-gpu = { workspace = true }
 astrelis-platform = { workspace = true }
 astrelis-ui-core = { workspace = true }
+astrelis-ui-next = { workspace = true }
 futures-util = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

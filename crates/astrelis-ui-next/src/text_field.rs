@@ -14,8 +14,8 @@ use astrelis_text::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    Constraints, Element, EventResult, Invalidation, LayoutContext, SemanticData, SemanticRole,
-    UiError, UiInput,
+    Constraints, Element, EventResult, Invalidation, LayoutContext, SemanticAction,
+    SemanticActionKind, SemanticData, SemanticRole, UiError, UiInput,
 };
 
 type TextActionFactory = dyn Fn(String) -> Box<dyn Any>;
@@ -173,6 +173,14 @@ impl TextField {
             self.anchor = self.caret;
         }
     }
+
+    fn clamp_boundary(&self, mut index: usize) -> usize {
+        index = index.min(self.text.len());
+        while !self.text.is_char_boundary(index) {
+            index -= 1;
+        }
+        index
+    }
 }
 
 impl Element for TextField {
@@ -261,7 +269,7 @@ impl Element for TextField {
 
     fn accessibility(&self) -> Option<SemanticData> {
         Some(SemanticData {
-            role: SemanticRole::Field,
+            role: SemanticRole::TextField,
             label: self.label.clone(),
             value: Some(self.text.clone()),
             ..SemanticData::default()
@@ -385,6 +393,35 @@ impl Element for TextField {
                 self.preedit.clear();
                 EventResult {
                     invalidation: Invalidation::LAYOUT_ALL,
+                    handled: true,
+                    ..EventResult::default()
+                }
+            }
+            _ => EventResult::default(),
+        }
+    }
+
+    fn semantic_actions(&self) -> Vec<SemanticActionKind> {
+        vec![
+            SemanticActionKind::Focus,
+            SemanticActionKind::SetText,
+            SemanticActionKind::SetSelection,
+        ]
+    }
+
+    fn semantic_action(&mut self, action: SemanticAction) -> EventResult {
+        match action {
+            SemanticAction::SetText(text) => {
+                self.text = text;
+                self.caret.byte_index = self.text.len();
+                self.anchor = self.caret;
+                self.changed_result()
+            }
+            SemanticAction::SetSelection { anchor, focus } => {
+                self.anchor.byte_index = self.clamp_boundary(anchor);
+                self.caret.byte_index = self.clamp_boundary(focus);
+                EventResult {
+                    invalidation: Invalidation::PAINT | Invalidation::ACCESSIBILITY,
                     handled: true,
                     ..EventResult::default()
                 }

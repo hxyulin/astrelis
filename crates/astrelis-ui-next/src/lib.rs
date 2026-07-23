@@ -7,13 +7,17 @@
 #![warn(missing_docs)]
 
 mod builtins;
+mod controls;
 mod element;
+mod mutation;
 mod semantics;
 mod text_field;
 mod tree;
 
 pub use builtins::*;
+pub use controls::*;
 pub use element::*;
+pub use mutation::*;
 pub use semantics::*;
 pub use text_field::*;
 pub use tree::*;

@@ -11,7 +11,7 @@ use astrelis_platform::{ImeEvent, KeyboardInput, Modifiers};
 use astrelis_text::{TextLayout, TextLayoutRequest};
 use bitflags::bitflags;
 
-use crate::{NodeId, SemanticData, UiRoot};
+use crate::{NodeId, SemanticAction, SemanticActionKind, SemanticData, UiRoot};
 
 bitflags! {
     /// Retained passes invalidated by a mutation.
@@ -167,6 +167,16 @@ pub trait Element: Any {
 
     /// Handles normalized input targeted at this element.
     fn event(&mut self, _input: UiInput) -> EventResult {
+        EventResult::default()
+    }
+
+    /// Accessibility operations accepted by this element.
+    fn semantic_actions(&self) -> Vec<SemanticActionKind> {
+        Vec::new()
+    }
+
+    /// Applies an accessibility operation.
+    fn semantic_action(&mut self, _action: SemanticAction) -> EventResult {
         EventResult::default()
     }
 

@@ -5,11 +5,11 @@ use astrelis_core::{
     geometry::{LogicalPoint, LogicalSize},
 };
 use astrelis_platform::{
-    DeviceId, ElementState, Key, KeyLocation, KeyboardInput, Modifiers, PhysicalKey,
+    DeviceId, ElementState, Key, KeyLocation, KeyboardInput, Modifiers, NamedKey, PhysicalKey,
 };
 use astrelis_ui_next::{
-    Axis, BoxElement, Button, Flex, Invalidation, Label, SemanticData, SemanticRole, TextField,
-    UiInput, UiRoot,
+    Axis, BoxElement, Button, Checkbox, Flex, Invalidation, Label, SemanticAction, SemanticData,
+    SemanticRole, TextField, UiInput, UiRoot,
 };
 
 #[test]
@@ -80,6 +80,7 @@ fn keyed_reorder_primitive_preserves_identity_and_cached_fragments() {
 enum Action {
     Activate,
     Edit(String),
+    Checked(bool),
 }
 
 fn key(text: &str) -> KeyboardInput {
@@ -88,6 +89,19 @@ fn key(text: &str) -> KeyboardInput {
         physical_key: PhysicalKey::Unidentified,
         logical_key: Key::Character(text.into()),
         text: Some(text.into()),
+        location: KeyLocation::Standard,
+        state: ElementState::Pressed,
+        repeat: false,
+        synthetic: false,
+    }
+}
+
+fn named_key(key: NamedKey) -> KeyboardInput {
+    KeyboardInput {
+        device_id: DeviceId(1),
+        physical_key: PhysicalKey::Unidentified,
+        logical_key: Key::Named(key),
+        text: None,
         location: KeyLocation::Standard,
         state: ElementState::Pressed,
         repeat: false,
@@ -187,4 +201,99 @@ fn accessibility_reports_deltas_and_removals() {
     ui.remove(child.id()).unwrap();
     let removed = ui.update_passes().unwrap();
     assert!(removed.accessibility.removed.contains(&child.id()));
+}
+
+#[test]
+fn semantic_actions_focus_and_activate_control_values() {
+    let mut ui = UiRoot::new(Flex::default(), LogicalSize::new(400.0, 300.0));
+    let checkbox = ui
+        .append(
+            ui.root(),
+            Checkbox::new("Visible", false, |checked| {
+                Box::new(Action::Checked(checked))
+            }),
+        )
+        .unwrap();
+    ui.update_passes().unwrap();
+
+    ui.perform_semantic_action(checkbox.id(), SemanticAction::Focus)
+        .unwrap();
+    let action = ui
+        .perform_semantic_action(checkbox.id(), SemanticAction::Activate)
+        .unwrap()
+        .unwrap();
+    assert_eq!(*action.downcast::<Action>().unwrap(), Action::Checked(true));
+    let update = ui.update_passes().unwrap();
+    assert!(
+        update
+            .accessibility
+            .changed
+            .iter()
+            .any(|node| node.id == checkbox.id() && node.focused)
+    );
+}
+
+#[test]
+fn tab_focus_traversal_and_keyboard_activation_follow_tree_order() {
+    let mut ui = UiRoot::new(Flex::default(), LogicalSize::new(400.0, 300.0));
+    let first = ui
+        .append(
+            ui.root(),
+            Button::new(
+                "First",
+                LogicalSize::new(100.0, 30.0),
+                Color::WHITE,
+                Color::BLACK,
+                Action::Activate,
+            ),
+        )
+        .unwrap();
+    let second = ui
+        .append(
+            ui.root(),
+            Checkbox::new("Second", false, |checked| {
+                Box::new(Action::Checked(checked))
+            }),
+        )
+        .unwrap();
+    ui.update_passes().unwrap();
+
+    ui.dispatch(UiInput::Keyboard {
+        input: named_key(NamedKey::Tab),
+        modifiers: Modifiers::default(),
+    })
+    .unwrap();
+    ui.update_passes().unwrap();
+    assert_eq!(
+        ui.semantic_snapshot()
+            .into_iter()
+            .find(|node| node.focused)
+            .map(|node| node.id),
+        Some(first.id())
+    );
+    let action = ui
+        .dispatch(UiInput::Keyboard {
+            input: named_key(NamedKey::Enter),
+            modifiers: Modifiers::default(),
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(*action.downcast::<Action>().unwrap(), Action::Activate);
+
+    ui.dispatch(UiInput::Keyboard {
+        input: named_key(NamedKey::Tab),
+        modifiers: Modifiers {
+            shift: true,
+            ..Modifiers::default()
+        },
+    })
+    .unwrap();
+    ui.update_passes().unwrap();
+    assert_eq!(
+        ui.semantic_snapshot()
+            .into_iter()
+            .find(|node| node.focused)
+            .map(|node| node.id),
+        Some(second.id())
+    );
 }

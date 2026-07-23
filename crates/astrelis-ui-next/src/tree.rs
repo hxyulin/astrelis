@@ -7,11 +7,12 @@ use astrelis_core::{
     math::{Affine2, Vec2},
 };
 use astrelis_paint::{DisplayList, DisplayListInstance, Painter};
+use astrelis_platform::{ElementState, Key, NamedKey};
 use astrelis_text::{FontDatabase, TextLayout, TextLayoutContext, TextLayoutRequest};
 
 use crate::{
-    AccessibilityUpdate, Constraints, Element, Invalidation, LayoutContext, SemanticNode, UiError,
-    UiInput,
+    AccessibilityUpdate, Constraints, Element, Invalidation, LayoutContext, SemanticAction,
+    SemanticNode, UiError, UiInput,
 };
 
 /// Stable generational retained identity.
@@ -312,13 +313,33 @@ impl UiRoot {
     /// Sets effective interaction enablement.
     pub fn set_enabled(&mut self, id: NodeId, enabled: bool) -> Result<(), UiError> {
         if self.node(id)?.enabled != enabled {
+            if !enabled
+                && self
+                    .focus
+                    .is_some_and(|focus| self.is_descendant_or_self(focus, id))
+            {
+                self.set_focus(None)?;
+            }
             self.node_mut(id)?.enabled = enabled;
-            self.invalidate(
-                id,
-                Invalidation::PAINT | Invalidation::ACCESSIBILITY | Invalidation::HIT_TEST,
-            );
+            self.invalidate(id, Invalidation::PAINT | Invalidation::HIT_TEST);
+            self.invalidate_subtree(id, Invalidation::ACCESSIBILITY);
         }
         Ok(())
+    }
+
+    fn is_descendant_or_self(&self, mut node: NodeId, ancestor: NodeId) -> bool {
+        loop {
+            if node == ancestor {
+                return true;
+            }
+            let Ok(current) = self.node(node) else {
+                return false;
+            };
+            let Some(parent) = current.parent else {
+                return false;
+            };
+            node = parent;
+        }
     }
 
     /// Runs invalidated passes and returns cached output.
@@ -381,6 +402,13 @@ impl UiRoot {
 
     /// Delivers pointer input and returns a typed erased payload.
     pub fn dispatch(&mut self, input: UiInput) -> Result<Option<Box<dyn Any>>, UiError> {
+        if let UiInput::Keyboard { input, modifiers } = &input
+            && input.state == ElementState::Pressed
+            && matches!(input.logical_key, Key::Named(NamedKey::Tab))
+        {
+            self.focus_next(modifiers.shift)?;
+            return Ok(None);
+        }
         let point = match &input {
             UiInput::PointerMoved(point)
             | UiInput::PointerPressed(point)
@@ -393,24 +421,100 @@ impl UiRoot {
             }
         };
         let Some(target) = self.hit_test(point) else {
+            if matches!(input, UiInput::PointerPressed(_)) {
+                self.set_focus(None)?;
+            }
             return Ok(None);
         };
-        if matches!(input, UiInput::PointerPressed(_))
-            && self
+        if matches!(input, UiInput::PointerPressed(_)) {
+            let focus = self
                 .node(target)?
                 .element
                 .as_deref()
                 .is_some_and(Element::focusable)
-            && self.focus != Some(target)
-        {
-            if let Some(old) = self.focus {
-                let _ = self.dispatch_to(old, UiInput::FocusChanged(false))?;
+                .then_some(target);
+            self.set_focus(focus)?;
+        }
+        self.dispatch_to(target, input)
+    }
+
+    /// Moves focus to one retained target or clears it.
+    pub fn set_focus(&mut self, target: Option<NodeId>) -> Result<(), UiError> {
+        if target == self.focus {
+            return Ok(());
+        }
+        if let Some(target) = target {
+            let node = self.node(target)?;
+            if !node.visible
+                || !self.effective_enabled(target)
+                || !node.element.as_deref().is_some_and(Element::focusable)
+            {
+                return Err(UiError::new("focus target is not focusable"));
             }
-            self.focus = Some(target);
+        }
+        if let Some(old) = self.focus {
+            let _ = self.dispatch_to(old, UiInput::FocusChanged(false))?;
+            self.invalidate(old, Invalidation::ACCESSIBILITY);
+        }
+        self.focus = target;
+        if let Some(target) = target {
             let _ = self.dispatch_to(target, UiInput::FocusChanged(true))?;
             self.invalidate(target, Invalidation::ACCESSIBILITY);
         }
-        self.dispatch_to(target, input)
+        Ok(())
+    }
+
+    /// Advances focus in retained tree order, optionally in reverse.
+    pub fn focus_next(&mut self, reverse: bool) -> Result<(), UiError> {
+        let mut order = Vec::new();
+        self.collect_focus_order(self.root, true, &mut order);
+        if order.is_empty() {
+            return self.set_focus(None);
+        }
+        let current = self
+            .focus
+            .and_then(|focus| order.iter().position(|id| *id == focus));
+        let next = if reverse {
+            current
+                .map(|index| (index + order.len() - 1) % order.len())
+                .unwrap_or(order.len() - 1)
+        } else {
+            current.map(|index| (index + 1) % order.len()).unwrap_or(0)
+        };
+        self.set_focus(Some(order[next]))
+    }
+
+    /// Applies a platform accessibility operation to one retained element.
+    pub fn perform_semantic_action(
+        &mut self,
+        target: NodeId,
+        action: SemanticAction,
+    ) -> Result<Option<Box<dyn Any>>, UiError> {
+        if !self.effective_enabled(target) {
+            return Ok(None);
+        }
+        if matches!(&action, SemanticAction::Focus) {
+            if !self
+                .node(target)?
+                .element
+                .as_deref()
+                .is_some_and(Element::focusable)
+            {
+                return Ok(None);
+            }
+            self.set_focus(Some(target))?;
+            return Ok(None);
+        }
+        let element = self
+            .node_mut(target)?
+            .element
+            .as_deref_mut()
+            .ok_or_else(|| UiError::new("element is temporarily unavailable"))?;
+        let result = element.semantic_action(action);
+        if !result.invalidation.is_empty() {
+            self.invalidate(target, result.invalidation);
+        }
+        Ok(result.action)
     }
 
     fn dispatch_to(
@@ -676,7 +780,7 @@ impl UiRoot {
             if !dirty {
                 continue;
             }
-            let (parent, bounds, data, focusable, visible) = {
+            let (parent, bounds, data, focusable, enabled, actions, visible) = {
                 let node = self.node(id)?;
                 let element = node
                     .element
@@ -687,6 +791,8 @@ impl UiRoot {
                     node.world_bounds,
                     element.accessibility(),
                     element.focusable(),
+                    self.effective_enabled(id),
+                    element.semantic_actions(),
                     node.visible,
                 )
             };
@@ -697,6 +803,8 @@ impl UiRoot {
                 data,
                 focusable,
                 focused: self.focus == Some(id),
+                enabled,
+                actions,
             });
             let old = self.node(id)?.semantic.clone();
             if old != semantic {
@@ -747,6 +855,22 @@ impl UiRoot {
         (node.enabled && element.hit_testable() && element.hit_test(point, node.size)).then_some(id)
     }
 
+    fn collect_focus_order(&self, id: NodeId, ancestors_enabled: bool, output: &mut Vec<NodeId>) {
+        let Ok(node) = self.node(id) else {
+            return;
+        };
+        let enabled = ancestors_enabled && node.enabled;
+        if !node.visible || !enabled {
+            return;
+        }
+        if node.element.as_deref().is_some_and(Element::focusable) {
+            output.push(id);
+        }
+        for child in &node.children {
+            self.collect_focus_order(*child, enabled, output);
+        }
+    }
+
     fn invalidate(&mut self, id: NodeId, invalidation: Invalidation) {
         if self.node(id).is_err() || invalidation.is_empty() {
             return;
@@ -779,6 +903,32 @@ impl UiRoot {
             }
         }
         self.dirty.insert(expanded);
+    }
+
+    fn invalidate_subtree(&mut self, id: NodeId, invalidation: Invalidation) {
+        let children = self
+            .node(id)
+            .map(|node| node.children.clone())
+            .unwrap_or_default();
+        self.invalidate(id, invalidation);
+        for child in children {
+            self.invalidate_subtree(child, invalidation);
+        }
+    }
+
+    fn effective_enabled(&self, mut id: NodeId) -> bool {
+        loop {
+            let Ok(node) = self.node(id) else {
+                return false;
+            };
+            if !node.enabled {
+                return false;
+            }
+            let Some(parent) = node.parent else {
+                return true;
+            };
+            id = parent;
+        }
     }
 
     fn allocate(&mut self, node: Node) -> NodeId {
