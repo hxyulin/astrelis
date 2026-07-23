@@ -21,6 +21,7 @@ members = [
   "crates/astrelis-text-gpu",
   "crates/astrelis-ui",
   "crates/astrelis-ui-core",
+  "crates/astrelis-ui-next",
   "crates/astrelis-ui-docking",
   "crates/astrelis-ui-host",
   "crates/astrelis-ui-testing",
@@ -60,6 +61,7 @@ astrelis-text = { path = "crates/astrelis-text", version = "=0.3.0-rc.1" }
 astrelis-text-gpu = { path = "crates/astrelis-text-gpu", version = "=0.3.0-rc.1" }
 astrelis-ui = { path = "crates/astrelis-ui", version = "=0.3.0-rc.1" }
 astrelis-ui-core = { path = "crates/astrelis-ui-core", version = "=0.3.0-rc.1" }
+astrelis-ui-next = { path = "crates/astrelis-ui-next", version = "=0.3.0-rc.1" }
 astrelis-ui-docking = { path = "crates/astrelis-ui-docking", version = "=0.3.0-rc.1" }
 astrelis-ui-host = { path = "crates/astrelis-ui-host", version = "=0.3.0-rc.1" }
 astrelis-ui-testing = { path = "crates/astrelis-ui-testing", version = "=0.3.0-rc.1" }

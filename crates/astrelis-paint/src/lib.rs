@@ -803,6 +803,36 @@ pub struct DisplayList {
     texts: Arc<[TextLayout]>,
 }
 
+/// One cached display-list fragment placed into a composed scene.
+///
+/// Fragments keep their immutable resource identities. UI systems can cache
+/// them independently and rebuild only the fragments whose paint inputs
+/// changed. [`DisplayList::compose`] is the compatibility path for renderers
+/// which still consume one flat display list.
+#[derive(Clone, Debug)]
+pub struct DisplayListInstance {
+    /// Cached fragment content in local coordinates.
+    pub list: DisplayList,
+    /// Local-to-window transform applied to the fragment.
+    pub transform: Affine2,
+    /// Optional window-local rectangular clip.
+    pub clip: Option<LogicalRect>,
+    /// Multiplicative fragment opacity.
+    pub opacity: f32,
+}
+
+impl DisplayListInstance {
+    /// Places a fragment with an affine transform.
+    pub fn new(list: DisplayList, transform: Affine2) -> Self {
+        Self {
+            list,
+            transform,
+            clip: None,
+            opacity: 1.0,
+        }
+    }
+}
+
 /// One scene insertion discovered while splitting a display list into UI layers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompositorMarker {
@@ -830,6 +860,81 @@ pub struct CompositionPlan {
 }
 
 impl DisplayList {
+    /// Flattens cached display-list fragments into one validated display list.
+    ///
+    /// This preserves fragment-local resource references while applying each
+    /// instance's transform, clip, and opacity. It is intended as an adapter:
+    /// renderers with native fragment support can consume the instances
+    /// directly and avoid rebuilding this flat command stream.
+    pub fn compose(
+        instances: impl IntoIterator<Item = DisplayListInstance>,
+    ) -> Result<Self, PaintError> {
+        let mut commands = Vec::new();
+        let mut paths = Vec::new();
+        let mut images = Vec::new();
+        let mut external_images = Vec::new();
+        let mut texts = Vec::new();
+        for instance in instances {
+            if !instance.opacity.is_finite() || !(0.0..=1.0).contains(&instance.opacity) {
+                return Err(PaintError::new(
+                    "display-list instance opacity must be within 0..=1",
+                ));
+            }
+            if !instance
+                .transform
+                .to_cols_array()
+                .iter()
+                .all(|value| value.is_finite())
+            {
+                return Err(PaintError::new(
+                    "display-list instance transform must be finite",
+                ));
+            }
+            if let Some(clip) = instance.clip {
+                validate_rect(clip)?;
+            }
+
+            let path_offset = paths.len() as u32;
+            let image_offset = images.len() as u32;
+            let external_offset = external_images.len() as u32;
+            let text_offset = texts.len() as u32;
+            paths.extend(instance.list.paths.iter().cloned());
+            images.extend(instance.list.images.iter().cloned());
+            external_images.extend(instance.list.external_images.iter().cloned());
+            texts.extend(instance.list.texts.iter().cloned());
+
+            commands.push(Command::Save);
+            // `clip` is expressed in window coordinates, so install it before
+            // the fragment-local transform.
+            if let Some(clip) = instance.clip {
+                commands.push(Command::ClipRect(clip));
+            }
+            if instance.transform != Affine2::IDENTITY {
+                commands.push(Command::Transform(instance.transform));
+            }
+            if instance.opacity != 1.0 {
+                commands.push(Command::MultiplyOpacity(instance.opacity));
+            }
+            commands.extend(instance.list.commands.iter().map(|command| {
+                remap_command(
+                    command,
+                    path_offset,
+                    image_offset,
+                    external_offset,
+                    text_offset,
+                )
+            }));
+            commands.push(Command::Restore);
+        }
+        Ok(Self {
+            commands: commands.into(),
+            paths: paths.into(),
+            images: images.into(),
+            external_images: external_images.into(),
+            texts: texts.into(),
+        })
+    }
+
     /// Commands in painter order.
     pub fn commands(&self) -> &[Command] {
         &self.commands
@@ -1047,6 +1152,59 @@ impl DisplayList {
             external_images: self.external_images.clone(),
             texts: self.texts.clone(),
         }
+    }
+}
+
+fn remap_command(
+    command: &Command,
+    path_offset: u32,
+    image_offset: u32,
+    external_offset: u32,
+    text_offset: u32,
+) -> Command {
+    match command {
+        Command::ClipPath { path, rule } => Command::ClipPath {
+            path: PathRef(path.0 + path_offset),
+            rule: *rule,
+        },
+        Command::FillPath { path, rule, brush } => Command::FillPath {
+            path: PathRef(path.0 + path_offset),
+            rule: *rule,
+            brush: brush.clone(),
+        },
+        Command::StrokePath { path, style, brush } => Command::StrokePath {
+            path: PathRef(path.0 + path_offset),
+            style: *style,
+            brush: brush.clone(),
+        },
+        Command::DrawImage {
+            image,
+            destination,
+            options,
+        } => Command::DrawImage {
+            image: ImageRef(image.0 + image_offset),
+            destination: *destination,
+            options: *options,
+        },
+        Command::DrawExternalImage {
+            image,
+            destination,
+            options,
+        } => Command::DrawExternalImage {
+            image: ExternalImageRef(image.0 + external_offset),
+            destination: *destination,
+            options: *options,
+        },
+        Command::DrawText {
+            text,
+            origin,
+            opacity,
+        } => Command::DrawText {
+            text: TextRef(text.0 + text_offset),
+            origin: *origin,
+            opacity: *opacity,
+        },
+        other => other.clone(),
     }
 }
 
@@ -1798,5 +1956,51 @@ mod tests {
         let list = painter.finish().unwrap();
         assert_eq!(list.external_images(), &[image]);
         assert_eq!(list.images().len(), 0);
+    }
+
+    #[test]
+    fn composes_fragments_with_remapped_resources_and_window_clip() {
+        let image =
+            Image::from_rgba8(Size::new(1, 1), vec![255_u8, 255_u8, 255_u8, 255_u8]).unwrap();
+        let mut first = Painter::new();
+        first
+            .draw_image(
+                &image,
+                Rect::from_xywh(0.0, 0.0, 10.0, 10.0),
+                ImageOptions::default(),
+            )
+            .unwrap();
+        let first = first.finish().unwrap();
+        let mut second = Painter::new();
+        second
+            .draw_image(
+                &image,
+                Rect::from_xywh(2.0, 2.0, 4.0, 4.0),
+                ImageOptions::default(),
+            )
+            .unwrap();
+        let second = second.finish().unwrap();
+        let composed = DisplayList::compose([
+            DisplayListInstance::new(first, Affine2::IDENTITY),
+            DisplayListInstance {
+                list: second,
+                transform: Affine2::from_translation(Vec2::new(20.0, 0.0)),
+                clip: Some(Rect::from_xywh(20.0, 0.0, 10.0, 10.0)),
+                opacity: 0.5,
+            },
+        ])
+        .unwrap();
+        assert_eq!(composed.images().len(), 2);
+        assert!(matches!(composed.commands()[4], Command::ClipRect(_)));
+        assert!(matches!(composed.commands()[5], Command::Transform(_)));
+        let references = composed
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                Command::DrawImage { image, .. } => Some(image.0),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(references, vec![0, 1]);
     }
 }

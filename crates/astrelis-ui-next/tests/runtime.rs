@@ -1,0 +1,190 @@
+//! Incremental retained runtime behavior.
+
+use astrelis_core::{
+    color::Color,
+    geometry::{LogicalPoint, LogicalSize},
+};
+use astrelis_platform::{
+    DeviceId, ElementState, Key, KeyLocation, KeyboardInput, Modifiers, PhysicalKey,
+};
+use astrelis_ui_next::{
+    Axis, BoxElement, Button, Flex, Invalidation, Label, SemanticData, SemanticRole, TextField,
+    UiInput, UiRoot,
+};
+
+#[test]
+fn paint_only_update_rebuilds_one_fragment_and_skips_layout() {
+    let mut ui = UiRoot::new(Flex::default(), LogicalSize::new(400.0, 300.0));
+    let child = ui
+        .append(
+            ui.root(),
+            BoxElement::new(LogicalSize::new(40.0, 20.0), Color::WHITE),
+        )
+        .unwrap();
+    ui.update_passes().unwrap();
+
+    ui.update(child, Invalidation::PAINT, |child| {
+        child.color = Color::BLACK
+    })
+    .unwrap();
+    let update = ui.update_passes().unwrap();
+    assert_eq!(update.stats.layout_elements, 0);
+    assert_eq!(update.stats.rebuilt_fragments, 1);
+    assert!(update.scene.rebuilt(child.id()));
+}
+
+#[test]
+fn unchanged_update_does_no_retained_work() {
+    let mut ui = UiRoot::new(Flex::default(), LogicalSize::new(400.0, 300.0));
+    ui.append(ui.root(), Label::new("unchanged")).unwrap();
+    ui.update_passes().unwrap();
+    let update = ui.update_passes().unwrap();
+    assert_eq!(update.stats.layout_elements, 0);
+    assert_eq!(update.stats.rebuilt_fragments, 0);
+    assert_eq!(update.accessibility.changed.len(), 0);
+}
+
+#[test]
+fn keyed_reorder_primitive_preserves_identity_and_cached_fragments() {
+    let mut ui = UiRoot::new(
+        Flex {
+            axis: Axis::Horizontal,
+            ..Flex::default()
+        },
+        LogicalSize::new(400.0, 300.0),
+    );
+    let root = ui.root();
+    let a = ui
+        .append(
+            root,
+            BoxElement::new(LogicalSize::new(20.0, 20.0), Color::WHITE),
+        )
+        .unwrap();
+    let b = ui
+        .append(
+            root,
+            BoxElement::new(LogicalSize::new(20.0, 20.0), Color::BLACK),
+        )
+        .unwrap();
+    ui.update_passes().unwrap();
+    ui.set_children(root, &[b.id(), a.id()]).unwrap();
+    let stats = ui.update_passes().unwrap().stats;
+    assert!(ui.contains(a.id()) && ui.contains(b.id()));
+    assert_eq!(
+        stats.rebuilt_fragments, 1,
+        "only the changed parent repaints"
+    );
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum Action {
+    Activate,
+    Edit(String),
+}
+
+fn key(text: &str) -> KeyboardInput {
+    KeyboardInput {
+        device_id: DeviceId(1),
+        physical_key: PhysicalKey::Unidentified,
+        logical_key: Key::Character(text.into()),
+        text: Some(text.into()),
+        location: KeyLocation::Standard,
+        state: ElementState::Pressed,
+        repeat: false,
+        synthetic: false,
+    }
+}
+
+#[test]
+fn hit_testing_prunes_subtrees_and_dispatches_typed_actions() {
+    let mut ui = UiRoot::new(Flex::default(), LogicalSize::new(400.0, 300.0));
+    let button = ui
+        .append(
+            ui.root(),
+            Button::new(
+                "Run",
+                LogicalSize::new(100.0, 30.0),
+                Color::WHITE,
+                Color::BLACK,
+                Action::Activate,
+            ),
+        )
+        .unwrap();
+    ui.update_passes().unwrap();
+    let point = LogicalPoint::new(10.0, 10.0);
+    assert_eq!(ui.hit_test(point), Some(button.id()));
+    ui.dispatch(UiInput::PointerPressed(point)).unwrap();
+    let action = ui
+        .dispatch(UiInput::PointerReleased(point))
+        .unwrap()
+        .unwrap();
+    assert_eq!(*action.downcast::<Action>().unwrap(), Action::Activate);
+}
+
+#[test]
+fn shaped_text_field_routes_focus_editing_and_incremental_repaint() {
+    let mut ui = UiRoot::new(Flex::default(), LogicalSize::new(400.0, 300.0));
+    let field = ui
+        .append(
+            ui.root(),
+            TextField::new("Name", "Astrelis").on_changed(Action::Edit),
+        )
+        .unwrap();
+    ui.update_passes().unwrap();
+
+    ui.dispatch(UiInput::PointerPressed(LogicalPoint::new(20.0, 10.0)))
+        .unwrap();
+    let action = ui
+        .dispatch(UiInput::Keyboard {
+            input: key("!"),
+            modifiers: Modifiers::default(),
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        *action.downcast::<Action>().unwrap(),
+        Action::Edit("A!strelis".into())
+    );
+
+    let update = ui.update_passes().unwrap();
+    assert!(update.scene.rebuilt(field.id()));
+    assert_eq!(ui.element(field).unwrap().selection(), (2, 2));
+}
+
+#[test]
+fn accessibility_reports_deltas_and_removals() {
+    let mut ui = UiRoot::new(Flex::default(), LogicalSize::new(400.0, 300.0));
+    let child = ui
+        .append(
+            ui.root(),
+            BoxElement {
+                size: LogicalSize::new(40.0, 20.0),
+                color: Color::WHITE,
+                semantics: Some(SemanticData {
+                    role: SemanticRole::Field,
+                    label: "Width".into(),
+                    value: Some("40".into()),
+                    ..SemanticData::default()
+                }),
+                interactive: true,
+            },
+        )
+        .unwrap();
+    let first = ui.update_passes().unwrap();
+    assert!(
+        first
+            .accessibility
+            .changed
+            .iter()
+            .any(|node| node.id == child.id())
+    );
+    ui.update(child, Invalidation::ACCESSIBILITY, |child| {
+        child.semantics.as_mut().unwrap().value = Some("41".into());
+    })
+    .unwrap();
+    let changed = ui.update_passes().unwrap();
+    assert_eq!(changed.accessibility.changed.len(), 1);
+    ui.remove(child.id()).unwrap();
+    let removed = ui.update_passes().unwrap();
+    assert!(removed.accessibility.removed.contains(&child.id()));
+}

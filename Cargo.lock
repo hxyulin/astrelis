@@ -464,6 +464,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-ui-next"
+version = "0.3.0-rc.1"
+dependencies = [
+ "astrelis-core",
+ "astrelis-paint",
+ "astrelis-platform",
+ "astrelis-text",
+ "bitflags 2.13.1",
+ "criterion",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "astrelis-ui-testing"
 version = "0.3.0-rc.1"
 dependencies = [
