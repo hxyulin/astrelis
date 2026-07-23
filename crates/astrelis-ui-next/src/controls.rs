@@ -7,7 +7,7 @@ use astrelis_core::{
     geometry::{LogicalPoint, LogicalRect, LogicalSize},
 };
 use astrelis_paint::{Brush, Painter};
-use astrelis_platform::{ElementState, Key, NamedKey};
+use astrelis_platform::{CursorIcon, ElementState, Key, NamedKey};
 use astrelis_text::{TextLayout, TextLayoutRequest, TextStyle, TextWrap};
 
 use crate::{
@@ -17,6 +17,15 @@ use crate::{
 
 type BoolAction = dyn Fn(bool) -> Box<dyn Any>;
 type ValueAction = dyn Fn(f32) -> Box<dyn Any>;
+
+fn hover_color(color: Color) -> Color {
+    Color::new(
+        color.r + (1.0 - color.r) * 0.14,
+        color.g + (1.0 - color.g) * 0.14,
+        color.b + (1.0 - color.b) * 0.14,
+        color.a,
+    )
+}
 
 /// Controlled boolean checkbox with a shaped label.
 pub struct Checkbox {
@@ -33,6 +42,7 @@ pub struct Checkbox {
     /// Checked fill color.
     pub accent_color: Color,
     pressed: bool,
+    hovered: bool,
     focused: bool,
     layout: Option<TextLayout>,
     changed: Box<BoolAction>,
@@ -53,6 +63,7 @@ impl Checkbox {
             outline_color: Color::new(0.55, 0.58, 0.64, 1.0),
             accent_color: Color::BLUE,
             pressed: false,
+            hovered: false,
             focused: false,
             layout: None,
             changed: Box::new(changed),
@@ -109,7 +120,13 @@ impl Element for Checkbox {
         let indicator = LogicalRect::from_xywh(2.0, (size.height - side) * 0.5, side, side);
         painter.fill_rect(
             indicator,
-            Brush::Solid(if self.checked {
+            Brush::Solid(if self.hovered {
+                hover_color(if self.checked {
+                    self.accent_color
+                } else {
+                    self.outline_color
+                })
+            } else if self.checked {
                 self.accent_color
             } else {
                 self.outline_color
@@ -153,6 +170,14 @@ impl Element for Checkbox {
 
     fn event(&mut self, input: UiInput) -> EventResult {
         match input {
+            UiInput::HoverChanged(hovered) => {
+                self.hovered = hovered;
+                EventResult {
+                    invalidation: Invalidation::PAINT,
+                    handled: true,
+                    ..EventResult::default()
+                }
+            }
             UiInput::FocusChanged(focused) => {
                 self.focused = focused;
                 EventResult {
@@ -204,6 +229,10 @@ impl Element for Checkbox {
     fn focusable(&self) -> bool {
         true
     }
+
+    fn cursor_icon(&self) -> CursorIcon {
+        CursorIcon::Pointer
+    }
 }
 
 /// Controlled horizontal numeric slider.
@@ -223,6 +252,7 @@ pub struct Slider {
     /// Filled track and thumb color.
     pub accent_color: Color,
     dragging: bool,
+    hovered: bool,
     focused: bool,
     changed: Box<ValueAction>,
 }
@@ -248,6 +278,7 @@ impl Slider {
             track_color: Color::new(0.28, 0.3, 0.34, 1.0),
             accent_color: Color::BLUE,
             dragging: false,
+            hovered: false,
             focused: false,
             changed: Box::new(changed),
         }
@@ -321,15 +352,22 @@ impl Element for Slider {
             LogicalRect::from_xywh(0.0, center - 2.0, thumb_x, 4.0),
             Brush::Solid(self.accent_color),
         )?;
+        let thumb_height = if self.hovered || self.dragging {
+            20.0
+        } else {
+            16.0
+        };
         painter.fill_rect(
             LogicalRect::from_xywh(
                 (thumb_x - 6.0).clamp(0.0, (size.width - 12.0).max(0.0)),
-                center - 8.0,
+                center - thumb_height * 0.5,
                 12.0,
-                16.0,
+                thumb_height,
             ),
             Brush::Solid(if self.focused {
                 Color::WHITE
+            } else if self.hovered || self.dragging {
+                hover_color(self.accent_color)
             } else {
                 self.accent_color
             }),
@@ -348,6 +386,14 @@ impl Element for Slider {
 
     fn event(&mut self, input: UiInput) -> EventResult {
         match input {
+            UiInput::HoverChanged(hovered) => {
+                self.hovered = hovered;
+                EventResult {
+                    invalidation: Invalidation::PAINT,
+                    handled: true,
+                    ..EventResult::default()
+                }
+            }
             UiInput::FocusChanged(focused) => {
                 self.focused = focused;
                 EventResult {
@@ -407,5 +453,9 @@ impl Element for Slider {
 
     fn focusable(&self) -> bool {
         true
+    }
+
+    fn cursor_icon(&self) -> CursorIcon {
+        CursorIcon::Pointer
     }
 }

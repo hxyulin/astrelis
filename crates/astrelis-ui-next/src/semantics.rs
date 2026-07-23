@@ -24,6 +24,8 @@ pub enum SemanticRole {
     Image,
     /// Data visualization.
     Chart,
+    /// Node-and-edge graph editor.
+    Graph,
     /// Hierarchical collection.
     Tree,
     /// Tabular collection.

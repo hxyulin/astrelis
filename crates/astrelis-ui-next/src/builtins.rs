@@ -7,13 +7,22 @@ use astrelis_core::{
     geometry::{LogicalPoint, LogicalRect, LogicalSize},
 };
 use astrelis_paint::{Brush, Painter};
-use astrelis_platform::{ElementState, Key, NamedKey};
+use astrelis_platform::{CursorIcon, ElementState, Key, NamedKey};
 use astrelis_text::{ParagraphStyle, TextLayout, TextLayoutRequest, TextStyle, TextWrap};
 
 use crate::{
     Constraints, Element, EventResult, Invalidation, LayoutContext, SemanticAction,
     SemanticActionKind, SemanticData, SemanticRole, UiError, UiInput,
 };
+
+fn hover_color(color: Color) -> Color {
+    Color::new(
+        color.r + (1.0 - color.r) * 0.12,
+        color.g + (1.0 - color.g) * 0.12,
+        color.b + (1.0 - color.b) * 0.12,
+        color.a,
+    )
+}
 
 /// Main-axis direction for [`Flex`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -23,6 +32,30 @@ pub enum Axis {
     /// Children advance from top to bottom.
     #[default]
     Vertical,
+}
+
+/// Placement of intrinsic content within all available space.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Alignment {
+    /// Leading edge on both axes.
+    TopLeading,
+    /// Centered horizontally at the leading vertical edge.
+    Top,
+    /// Trailing horizontally at the leading vertical edge.
+    TopTrailing,
+    /// Leading horizontally and centered vertically.
+    Leading,
+    /// Centered on both axes.
+    #[default]
+    Center,
+    /// Trailing horizontally and centered vertically.
+    Trailing,
+    /// Leading horizontally at the trailing vertical edge.
+    BottomLeading,
+    /// Centered horizontally at the trailing vertical edge.
+    Bottom,
+    /// Trailing edge on both axes.
+    BottomTrailing,
 }
 
 /// Simple flex container with deterministic retained child layout.
@@ -70,16 +103,34 @@ impl Element for Flex {
         );
         let children = context.children();
         let mut sizes = Vec::with_capacity(children.len());
-        let mut total_main = 0.0f32;
+        let mut total_fixed_main = 0.0f32;
         let mut total_grow = 0.0f32;
         for child in children.iter().copied() {
-            let size =
-                context.layout_child(child, Constraints::new(LogicalSize::ZERO, inner_max))?;
-            total_main += match self.axis {
-                Axis::Horizontal => size.width,
-                Axis::Vertical => size.height,
-            };
-            total_grow += context.child_flex_grow(child)?;
+            let grow = context.child_flex_grow(child)?;
+            let size = context.layout_child(
+                child,
+                if grow > 0.0 {
+                    match self.axis {
+                        Axis::Horizontal => Constraints::new(
+                            LogicalSize::ZERO,
+                            LogicalSize::new(0.0, inner_max.height),
+                        ),
+                        Axis::Vertical => Constraints::new(
+                            LogicalSize::ZERO,
+                            LogicalSize::new(inner_max.width, 0.0),
+                        ),
+                    }
+                } else {
+                    Constraints::new(LogicalSize::ZERO, inner_max)
+                },
+            )?;
+            if grow <= 0.0 {
+                total_fixed_main += match self.axis {
+                    Axis::Horizontal => size.width,
+                    Axis::Vertical => size.height,
+                };
+            }
+            total_grow += grow;
             sizes.push(size);
         }
         let gaps = self.gap.max(0.0) * children.len().saturating_sub(1) as f32;
@@ -87,24 +138,21 @@ impl Element for Flex {
             Axis::Horizontal => inner_max.width,
             Axis::Vertical => inner_max.height,
         };
-        let remaining = (available_main - total_main - gaps).max(0.0);
-        if total_grow > 0.0 && remaining > 0.0 {
+        let remaining = (available_main - total_fixed_main - gaps).max(0.0);
+        if total_grow > 0.0 {
             for (index, child) in children.iter().copied().enumerate() {
                 let grow = context.child_flex_grow(child)?;
                 if grow <= 0.0 {
                     continue;
                 }
-                let target_main = match self.axis {
-                    Axis::Horizontal => sizes[index].width,
-                    Axis::Vertical => sizes[index].height,
-                } + remaining * grow / total_grow;
+                let target_main = remaining * grow / total_grow;
                 let child_constraints = match self.axis {
                     Axis::Horizontal => Constraints::new(
-                        LogicalSize::new(target_main, 0.0),
+                        LogicalSize::new(target_main, inner_max.height),
                         LogicalSize::new(target_main, inner_max.height),
                     ),
                     Axis::Vertical => Constraints::new(
-                        LogicalSize::new(0.0, target_main),
+                        LogicalSize::new(inner_max.width, target_main),
                         LogicalSize::new(inner_max.width, target_main),
                     ),
                 };
@@ -153,6 +201,10 @@ impl Element for Flex {
         }
         Ok(())
     }
+
+    fn clips_children(&self) -> bool {
+        true
+    }
 }
 
 /// Overlay container which places every child at the same inset origin.
@@ -185,8 +237,14 @@ impl Element for Stack {
         );
         let mut content = LogicalSize::ZERO;
         for child in context.children() {
-            let size =
-                context.layout_child(child, Constraints::new(LogicalSize::ZERO, inner_max))?;
+            let size = context.layout_child(
+                child,
+                if context.child_flex_grow(child)? > 0.0 {
+                    Constraints::tight(inner_max)
+                } else {
+                    Constraints::new(LogicalSize::ZERO, inner_max)
+                },
+            )?;
             context.place_child(child, LogicalPoint::new(padding, padding))?;
             content.width = content.width.max(size.width);
             content.height = content.height.max(size.height);
@@ -209,6 +267,305 @@ impl Element for Stack {
             )?;
         }
         Ok(())
+    }
+}
+
+/// Expands to the available size and positions one intrinsic child within it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Align {
+    /// Child placement.
+    pub alignment: Alignment,
+    /// Minimum distance from each boundary.
+    pub padding: f32,
+}
+
+impl Element for Align {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn layout(
+        &mut self,
+        context: &mut LayoutContext<'_>,
+        constraints: Constraints,
+    ) -> Result<LogicalSize, UiError> {
+        let padding = self.padding.max(0.0);
+        let size = constraints.max;
+        let available = LogicalSize::new(
+            (size.width - padding * 2.0).max(0.0),
+            (size.height - padding * 2.0).max(0.0),
+        );
+        if let Some(child) = context.children().into_iter().next() {
+            let child_size =
+                context.layout_child(child, Constraints::new(LogicalSize::ZERO, available))?;
+            let remaining_x = (available.width - child_size.width).max(0.0);
+            let remaining_y = (available.height - child_size.height).max(0.0);
+            let x = match self.alignment {
+                Alignment::TopLeading | Alignment::Leading | Alignment::BottomLeading => 0.0,
+                Alignment::Top | Alignment::Center | Alignment::Bottom => remaining_x * 0.5,
+                Alignment::TopTrailing | Alignment::Trailing | Alignment::BottomTrailing => {
+                    remaining_x
+                }
+            };
+            let y = match self.alignment {
+                Alignment::TopLeading | Alignment::Top | Alignment::TopTrailing => 0.0,
+                Alignment::Leading | Alignment::Center | Alignment::Trailing => remaining_y * 0.5,
+                Alignment::BottomLeading | Alignment::Bottom | Alignment::BottomTrailing => {
+                    remaining_y
+                }
+            };
+            context.place_child(child, LogicalPoint::new(padding + x, padding + y))?;
+        }
+        Ok(constraints.constrain(size))
+    }
+
+    fn clips_children(&self) -> bool {
+        true
+    }
+}
+
+type KeyAction = dyn Fn() -> Box<dyn Any>;
+
+/// Transparent keyboard-bubbling boundary for overlay and command handling.
+pub struct KeyListener {
+    escape: Option<Box<KeyAction>>,
+}
+
+impl KeyListener {
+    /// Creates a keyboard boundary with an Escape action.
+    pub fn on_escape(action: impl Fn() -> Box<dyn Any> + 'static) -> Self {
+        Self {
+            escape: Some(Box::new(action)),
+        }
+    }
+
+    /// Replaces the Escape action.
+    pub fn set_escape(&mut self, action: impl Fn() -> Box<dyn Any> + 'static) {
+        self.escape = Some(Box::new(action));
+    }
+}
+
+impl Element for KeyListener {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn layout(
+        &mut self,
+        context: &mut LayoutContext<'_>,
+        constraints: Constraints,
+    ) -> Result<LogicalSize, UiError> {
+        let Some(child) = context.children().into_iter().next() else {
+            return Ok(constraints.constrain(LogicalSize::ZERO));
+        };
+        let size = context.layout_child(child, constraints)?;
+        context.place_child(child, LogicalPoint::ZERO)?;
+        Ok(constraints.constrain(size))
+    }
+
+    fn event(&mut self, input: UiInput) -> EventResult {
+        if let UiInput::Keyboard { input, .. } = input
+            && input.state == ElementState::Pressed
+            && matches!(input.logical_key, Key::Named(NamedKey::Escape))
+        {
+            return EventResult {
+                action: self.escape.as_ref().map(|action| action()),
+                handled: true,
+                ..EventResult::default()
+            };
+        }
+        EventResult::default()
+    }
+}
+
+type SplitAction = dyn Fn(f32) -> Box<dyn Any>;
+
+/// Two-child resizing container with a dedicated draggable divider.
+pub struct SplitPane {
+    /// Split direction.
+    pub axis: Axis,
+    /// Fraction of content space assigned to the first child.
+    pub ratio: f32,
+    /// Visible and interactive divider thickness.
+    pub divider_extent: f32,
+    /// Divider color.
+    pub divider_color: Color,
+    size: LogicalSize,
+    dragging: bool,
+    hovered: bool,
+    drag_offset: f32,
+    changed: Box<SplitAction>,
+}
+
+impl SplitPane {
+    /// Creates a controlled split pane.
+    pub fn new(axis: Axis, ratio: f32, changed: impl Fn(f32) -> Box<dyn Any> + 'static) -> Self {
+        Self {
+            axis,
+            ratio: ratio.clamp(0.05, 0.95),
+            divider_extent: 6.0,
+            divider_color: Color::new(0.18, 0.2, 0.24, 1.0),
+            size: LogicalSize::ZERO,
+            dragging: false,
+            hovered: false,
+            drag_offset: 0.0,
+            changed: Box::new(changed),
+        }
+    }
+
+    /// Replaces the controlled resize action.
+    pub fn set_changed(&mut self, changed: impl Fn(f32) -> Box<dyn Any> + 'static) {
+        self.changed = Box::new(changed);
+    }
+
+    fn main_extent(&self) -> f32 {
+        match self.axis {
+            Axis::Horizontal => self.size.width,
+            Axis::Vertical => self.size.height,
+        }
+    }
+
+    fn divider_rect(&self) -> LogicalRect {
+        let divider = self.divider_extent.max(1.0).min(self.main_extent());
+        let content = (self.main_extent() - divider).max(0.0);
+        let first = content * self.ratio.clamp(0.05, 0.95);
+        match self.axis {
+            Axis::Horizontal => LogicalRect::from_xywh(first, 0.0, divider, self.size.height),
+            Axis::Vertical => LogicalRect::from_xywh(0.0, first, self.size.width, divider),
+        }
+    }
+
+    fn set_from_point(&mut self, point: LogicalPoint) -> EventResult {
+        let divider = self.divider_extent.max(1.0).min(self.main_extent());
+        let content = (self.main_extent() - divider).max(1.0);
+        let coordinate = match self.axis {
+            Axis::Horizontal => point.x - divider * 0.5 - self.drag_offset,
+            Axis::Vertical => point.y - divider * 0.5 - self.drag_offset,
+        };
+        self.ratio = (coordinate / content).clamp(0.05, 0.95);
+        EventResult {
+            action: Some((self.changed)(self.ratio)),
+            invalidation: Invalidation::LAYOUT_ALL,
+            handled: true,
+            ..EventResult::default()
+        }
+    }
+}
+
+impl Element for SplitPane {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn layout(
+        &mut self,
+        context: &mut LayoutContext<'_>,
+        constraints: Constraints,
+    ) -> Result<LogicalSize, UiError> {
+        self.size = constraints.max;
+        let divider = self.divider_extent.max(1.0).min(self.main_extent());
+        let content = (self.main_extent() - divider).max(0.0);
+        let first_main = content * self.ratio.clamp(0.05, 0.95);
+        let second_main = content - first_main;
+        let children = context.children();
+        if let Some(first) = children.first().copied() {
+            let size = match self.axis {
+                Axis::Horizontal => LogicalSize::new(first_main, self.size.height),
+                Axis::Vertical => LogicalSize::new(self.size.width, first_main),
+            };
+            context.layout_child(first, Constraints::tight(size))?;
+            context.place_child(first, LogicalPoint::ZERO)?;
+        }
+        if let Some(second) = children.get(1).copied() {
+            let size = match self.axis {
+                Axis::Horizontal => LogicalSize::new(second_main, self.size.height),
+                Axis::Vertical => LogicalSize::new(self.size.width, second_main),
+            };
+            let origin = match self.axis {
+                Axis::Horizontal => LogicalPoint::new(first_main + divider, 0.0),
+                Axis::Vertical => LogicalPoint::new(0.0, first_main + divider),
+            };
+            context.layout_child(second, Constraints::tight(size))?;
+            context.place_child(second, origin)?;
+        }
+        Ok(constraints.constrain(self.size))
+    }
+
+    fn paint(
+        &self,
+        painter: &mut Painter,
+        _size: LogicalSize,
+    ) -> Result<(), astrelis_paint::PaintError> {
+        painter.fill_rect(
+            self.divider_rect(),
+            Brush::Solid(if self.dragging || self.hovered {
+                hover_color(self.divider_color)
+            } else {
+                self.divider_color
+            }),
+        )
+    }
+
+    fn event(&mut self, input: UiInput) -> EventResult {
+        match input {
+            UiInput::HoverChanged(hovered) => {
+                self.hovered = hovered;
+                EventResult {
+                    invalidation: Invalidation::PAINT,
+                    handled: true,
+                    ..EventResult::default()
+                }
+            }
+            UiInput::PointerPressed(point) => {
+                self.dragging = true;
+                let divider = self.divider_rect();
+                self.drag_offset = match self.axis {
+                    Axis::Horizontal => point.x - (divider.origin.x + divider.size.width * 0.5),
+                    Axis::Vertical => point.y - (divider.origin.y + divider.size.height * 0.5),
+                };
+                EventResult {
+                    handled: true,
+                    ..EventResult::default()
+                }
+            }
+            UiInput::PointerMoved(point) if self.dragging => self.set_from_point(point),
+            UiInput::PointerReleased(point) if self.dragging => {
+                self.dragging = false;
+                self.set_from_point(point)
+            }
+            _ => EventResult::default(),
+        }
+    }
+
+    fn hit_test(&self, point: LogicalPoint, _size: LogicalSize) -> bool {
+        self.divider_rect().contains(point)
+    }
+
+    fn hit_testable(&self) -> bool {
+        true
+    }
+
+    fn cursor_icon(&self) -> CursorIcon {
+        match self.axis {
+            Axis::Horizontal => CursorIcon::EwResize,
+            Axis::Vertical => CursorIcon::NsResize,
+        }
+    }
+
+    fn clips_children(&self) -> bool {
+        true
     }
 }
 
@@ -474,6 +831,8 @@ pub struct Button {
     /// Glyph size.
     pub font_size: f32,
     pressed: bool,
+    hovered: bool,
+    resolved_size: LogicalSize,
     layout: Option<TextLayout>,
     action: Option<Box<dyn Fn() -> Box<dyn Any>>>,
 }
@@ -495,6 +854,8 @@ impl Button {
             text_color: Color::WHITE,
             font_size: 14.0,
             pressed: false,
+            hovered: false,
+            resolved_size: LogicalSize::ZERO,
             layout: None,
             action: Some(Box::new(move || Box::new(action.clone()))),
         }
@@ -520,6 +881,8 @@ impl Button {
             text_color: Color::WHITE,
             font_size: 14.0,
             pressed: false,
+            hovered: false,
+            resolved_size: LogicalSize::ZERO,
             layout: None,
             action: Some(Box::new(action)),
         }
@@ -552,8 +915,14 @@ impl Element for Button {
             ..TextStyle::default()
         };
         request.paragraph.wrap = TextWrap::NoWrap;
-        self.layout = Some(context.shape_text(request)?);
-        Ok(constraints.constrain(self.size))
+        let layout = context.shape_text(request)?;
+        let intrinsic = LogicalSize::new(layout.size().width + 24.0, layout.size().height + 12.0);
+        self.layout = Some(layout);
+        self.resolved_size = constraints.constrain(LogicalSize::new(
+            self.size.width.max(intrinsic.width),
+            self.size.height.max(intrinsic.height),
+        ));
+        Ok(self.resolved_size)
     }
 
     fn paint(
@@ -565,6 +934,8 @@ impl Element for Button {
             LogicalRect::from_xywh(0.0, 0.0, size.width, size.height),
             Brush::Solid(if self.pressed {
                 self.pressed_color
+            } else if self.hovered {
+                hover_color(self.color)
             } else {
                 self.color
             }),
@@ -592,6 +963,14 @@ impl Element for Button {
 
     fn event(&mut self, input: UiInput) -> EventResult {
         match input {
+            UiInput::HoverChanged(hovered) => {
+                self.hovered = hovered;
+                EventResult {
+                    invalidation: Invalidation::PAINT,
+                    handled: true,
+                    ..EventResult::default()
+                }
+            }
             UiInput::PointerPressed(_) => {
                 self.pressed = true;
                 EventResult {
@@ -600,10 +979,18 @@ impl Element for Button {
                     ..EventResult::default()
                 }
             }
-            UiInput::PointerReleased(_) if self.pressed => {
+            UiInput::PointerReleased(point) if self.pressed => {
                 self.pressed = false;
                 EventResult {
-                    action: self.action.as_ref().map(|action| action()),
+                    action: LogicalRect::from_xywh(
+                        0.0,
+                        0.0,
+                        self.resolved_size.width,
+                        self.resolved_size.height,
+                    )
+                    .contains(point)
+                    .then(|| self.action.as_ref().map(|action| action()))
+                    .flatten(),
                     invalidation: Invalidation::PAINT,
                     clipboard: None,
                     handled: true,
@@ -647,5 +1034,9 @@ impl Element for Button {
 
     fn focusable(&self) -> bool {
         true
+    }
+
+    fn cursor_icon(&self) -> CursorIcon {
+        CursorIcon::Pointer
     }
 }

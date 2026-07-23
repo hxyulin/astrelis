@@ -7,7 +7,7 @@ use astrelis_core::{
     math::Affine2,
 };
 use astrelis_paint::Painter;
-use astrelis_platform::{ImeEvent, KeyboardInput, Modifiers};
+use astrelis_platform::{CursorIcon, ImeEvent, KeyboardInput, Modifiers};
 use astrelis_text::{TextLayout, TextLayoutRequest};
 use bitflags::bitflags;
 
@@ -101,6 +101,10 @@ pub enum UiInput {
     PointerPressed(LogicalPoint),
     /// Primary pointer button was released.
     PointerReleased(LogicalPoint),
+    /// Pointer entered or left this element's active hit region.
+    HoverChanged(bool),
+    /// Pointer left the native window.
+    PointerLeft,
     /// Pointer wheel moved at a window-coordinate position.
     PointerWheel {
         /// Pointer location used to choose the routed subtree.
@@ -221,6 +225,11 @@ pub trait Element: Any {
     /// Whether descendants are clipped to the local layout rectangle.
     fn clips_children(&self) -> bool {
         false
+    }
+
+    /// Preferred native cursor while this element is hovered or dragging.
+    fn cursor_icon(&self) -> CursorIcon {
+        CursorIcon::Default
     }
 
     /// Relative share of remaining main-axis space requested from a flex parent.

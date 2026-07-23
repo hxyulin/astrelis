@@ -7,7 +7,7 @@ use astrelis_core::{
     geometry::{LogicalPoint, LogicalRect, LogicalSize},
 };
 use astrelis_paint::{Brush, Painter};
-use astrelis_platform::{ElementState, ImeEvent, Key, NamedKey};
+use astrelis_platform::{CursorIcon, ElementState, ImeEvent, Key, NamedKey};
 use astrelis_text::{
     CaretMovement, ParagraphStyle, TextLayout, TextLayoutRequest, TextPosition, TextStyle, TextWrap,
 };
@@ -19,6 +19,15 @@ use crate::{
 };
 
 type TextActionFactory = dyn Fn(String) -> Box<dyn Any>;
+
+fn hover_color(color: Color) -> Color {
+    Color::new(
+        color.r + (1.0 - color.r) * 0.08,
+        color.g + (1.0 - color.g) * 0.08,
+        color.b + (1.0 - color.b) * 0.08,
+        color.a,
+    )
+}
 
 /// Single-line retained text editor with shaped selection and caret geometry.
 pub struct TextField {
@@ -42,7 +51,9 @@ pub struct TextField {
     anchor: TextPosition,
     preedit: String,
     focused: bool,
+    hovered: bool,
     layout: Option<TextLayout>,
+    placeholder_layout: Option<TextLayout>,
     changed: Option<Box<TextActionFactory>>,
     submitted: Option<Box<TextActionFactory>>,
 }
@@ -71,7 +82,9 @@ impl TextField {
             anchor: caret,
             preedit: String::new(),
             focused: false,
+            hovered: false,
             layout: None,
+            placeholder_layout: None,
             changed: None,
             submitted: None,
         }
@@ -211,8 +224,24 @@ impl Element for TextField {
             ..ParagraphStyle::default()
         };
         let layout = context.shape_text(request)?;
-        let desired = LogicalSize::new(self.width, layout.size().height + Self::PADDING_Y * 2.0);
+        let mut placeholder = TextLayoutRequest::new(self.label.clone());
+        placeholder.style = TextStyle {
+            size: self.font_size.max(1.0),
+            color: Color::new(0.58, 0.61, 0.68, 1.0),
+            ..TextStyle::default()
+        };
+        placeholder.paragraph = ParagraphStyle {
+            max_width: Some(available),
+            wrap: TextWrap::NoWrap,
+            ..ParagraphStyle::default()
+        };
+        let placeholder_layout = context.shape_text(placeholder)?;
+        let desired = LogicalSize::new(
+            self.width,
+            layout.size().height.max(placeholder_layout.size().height) + Self::PADDING_Y * 2.0,
+        );
         self.layout = Some(layout);
+        self.placeholder_layout = Some(placeholder_layout);
         Ok(constraints.constrain(desired))
     }
 
@@ -223,7 +252,11 @@ impl Element for TextField {
     ) -> Result<(), astrelis_paint::PaintError> {
         painter.fill_rect(
             LogicalRect::from_xywh(0.0, 0.0, size.width, size.height),
-            Brush::Solid(self.background),
+            Brush::Solid(if self.hovered && !self.focused {
+                hover_color(self.background)
+            } else {
+                self.background
+            }),
         )?;
         let Some(layout) = &self.layout else {
             return Ok(());
@@ -253,6 +286,12 @@ impl Element for TextField {
             }
         }
         painter.draw_text(layout, origin, 1.0)?;
+        if self.text.is_empty()
+            && self.preedit.is_empty()
+            && let Some(placeholder) = &self.placeholder_layout
+        {
+            painter.draw_text(placeholder, origin, 1.0)?;
+        }
         if self.focused {
             let caret = layout.caret_rect(self.caret, 1.0);
             painter.fill_rect(
@@ -279,6 +318,14 @@ impl Element for TextField {
 
     fn event(&mut self, input: UiInput) -> EventResult {
         match input {
+            UiInput::HoverChanged(hovered) => {
+                self.hovered = hovered;
+                EventResult {
+                    invalidation: Invalidation::PAINT,
+                    handled: true,
+                    ..EventResult::default()
+                }
+            }
             UiInput::FocusChanged(focused) => {
                 self.focused = focused;
                 EventResult {
@@ -469,5 +516,9 @@ impl Element for TextField {
 
     fn focusable(&self) -> bool {
         true
+    }
+
+    fn cursor_icon(&self) -> CursorIcon {
+        CursorIcon::Text
     }
 }

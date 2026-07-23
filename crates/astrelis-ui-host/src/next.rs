@@ -14,8 +14,8 @@ use astrelis_gpu::{SurfaceFrameStatus, TextureViewDescriptor};
 use astrelis_paint::CompositorViewId;
 use astrelis_paint_gpu::{ExternalImage, RenderStats, RenderTarget};
 use astrelis_platform::{
-    Clipboard, DeviceId, ElementState, Key, Modifiers, PointerButton, ScrollDelta, Window,
-    WindowEvent,
+    Clipboard, CursorIcon, DeviceId, ElementState, Key, Modifiers, PointerButton, ScrollDelta,
+    Window, WindowEvent,
 };
 use astrelis_ui_next::{
     AccessibilityUpdate, ClipboardOperation, NodeId, SemanticAction, SemanticNode, UiInput, UiRoot,
@@ -72,6 +72,7 @@ pub struct NextWindowHost {
     clear_color: Color,
     modifiers: Modifiers,
     pointer_positions: HashMap<DeviceId, LogicalPoint>,
+    cursor_icon: CursorIcon,
     actions: Vec<Box<dyn Any>>,
     accessibility: Option<Box<dyn NextAccessibilityAdapter>>,
 }
@@ -112,6 +113,7 @@ impl NextWindowHost {
                 clear_color: options.clear_color,
                 modifiers: Modifiers::default(),
                 pointer_positions: HashMap::new(),
+                cursor_icon: CursorIcon::Default,
                 actions: Vec::new(),
                 accessibility: None,
             };
@@ -144,6 +146,7 @@ impl NextWindowHost {
                 clear_color: options.clear_color,
                 modifiers: Modifiers::default(),
                 pointer_positions: HashMap::new(),
+                cursor_icon: CursorIcon::Default,
                 actions: Vec::new(),
                 accessibility: None,
             };
@@ -238,6 +241,11 @@ impl NextWindowHost {
                 let point = self.logical_point(position.x, position.y);
                 self.pointer_positions.insert(*device_id, point);
                 self.dispatch(UiInput::PointerMoved(point))?;
+                true
+            }
+            WindowEvent::PointerLeft { device_id } => {
+                self.pointer_positions.remove(device_id);
+                self.dispatch(UiInput::PointerLeft)?;
                 true
             }
             WindowEvent::PointerButton {
@@ -431,6 +439,11 @@ impl NextWindowHost {
     fn dispatch(&mut self, input: UiInput) -> Result<(), HostError> {
         if let Some(action) = self.ui.dispatch(input).map_err(HostError::from_display)? {
             self.actions.push(action);
+        }
+        let cursor = self.ui.cursor_icon();
+        if cursor != self.cursor_icon {
+            self.window.set_cursor_icon(cursor);
+            self.cursor_icon = cursor;
         }
         Ok(())
     }

@@ -7,7 +7,7 @@ use astrelis_core::{
     math::{Affine2, Vec2},
 };
 use astrelis_paint::{DisplayList, DisplayListInstance, Painter};
-use astrelis_platform::{ElementState, Key, NamedKey};
+use astrelis_platform::{CursorIcon, ElementState, Key, NamedKey};
 use astrelis_text::{FontDatabase, TextLayout, TextLayoutContext, TextLayoutRequest};
 
 use crate::{
@@ -125,6 +125,9 @@ pub struct UiRoot {
     dirty: Invalidation,
     removed_semantics: Vec<NodeId>,
     focus: Option<NodeId>,
+    last_focus: Option<NodeId>,
+    hover: Option<NodeId>,
+    pointer_capture: Option<NodeId>,
     scene: Scene,
     accessibility: AccessibilityUpdate,
     clipboard: Vec<ClipboardOperation>,
@@ -174,6 +177,9 @@ impl UiRoot {
             dirty: Invalidation::ALL,
             removed_semantics: Vec::new(),
             focus: None,
+            last_focus: None,
+            hover: None,
+            pointer_capture: None,
             scene: Scene::default(),
             accessibility: AccessibilityUpdate::default(),
             clipboard: Vec::new(),
@@ -313,6 +319,20 @@ impl UiRoot {
             {
                 self.set_focus(None)?;
             }
+            if !visible
+                && self
+                    .pointer_capture
+                    .is_some_and(|capture| self.is_descendant_or_self(capture, id))
+            {
+                self.pointer_capture = None;
+            }
+            if !visible
+                && self
+                    .hover
+                    .is_some_and(|hover| self.is_descendant_or_self(hover, id))
+            {
+                self.set_hover(None)?;
+            }
             self.node_mut(id)?.visible = visible;
             self.invalidate_subtree(id, Invalidation::ALL);
         }
@@ -328,6 +348,20 @@ impl UiRoot {
                     .is_some_and(|focus| self.is_descendant_or_self(focus, id))
             {
                 self.set_focus(None)?;
+            }
+            if !enabled
+                && self
+                    .pointer_capture
+                    .is_some_and(|capture| self.is_descendant_or_self(capture, id))
+            {
+                self.pointer_capture = None;
+            }
+            if !enabled
+                && self
+                    .hover
+                    .is_some_and(|hover| self.is_descendant_or_self(hover, id))
+            {
+                self.set_hover(None)?;
             }
             self.node_mut(id)?.enabled = enabled;
             self.invalidate(id, Invalidation::PAINT | Invalidation::HIT_TEST);
@@ -394,6 +428,11 @@ impl UiRoot {
         &self.scene
     }
 
+    /// Returns counters from the most recently completed retained update.
+    pub const fn stats(&self) -> PassStats {
+        self.stats
+    }
+
     /// Returns a full deterministic semantic snapshot.
     pub fn semantic_snapshot(&self) -> Vec<SemanticNode> {
         self.live_ids()
@@ -414,8 +453,25 @@ impl UiRoot {
         hit
     }
 
+    /// Returns the cursor requested by the captured or hovered element.
+    pub fn cursor_icon(&self) -> CursorIcon {
+        self.pointer_capture
+            .filter(|id| self.contains(*id))
+            .or_else(|| self.hover.filter(|id| self.contains(*id)))
+            .and_then(|id| self.node(id).ok()?.element.as_deref())
+            .map(Element::cursor_icon)
+            .unwrap_or_default()
+    }
+
     /// Delivers pointer input and returns a typed erased payload.
     pub fn dispatch(&mut self, input: UiInput) -> Result<Option<Box<dyn Any>>, UiError> {
+        if matches!(input, UiInput::PointerLeft) {
+            self.set_hover(None)?;
+            return Ok(None);
+        }
+        if matches!(input, UiInput::HoverChanged(_)) {
+            return Ok(None);
+        }
         if let UiInput::Keyboard { input, modifiers } = &input
             && input.state == ElementState::Pressed
             && matches!(input.logical_key, Key::Named(NamedKey::Tab))
@@ -423,13 +479,39 @@ impl UiRoot {
             self.focus_next(modifiers.shift)?;
             return Ok(None);
         }
+        if let UiInput::PointerMoved(point)
+        | UiInput::PointerPressed(point)
+        | UiInput::PointerReleased(point) = &input
+        {
+            let target = self.hit_test(*point);
+            self.set_hover(target)?;
+        }
+        let release = matches!(input, UiInput::PointerReleased(_));
+        if matches!(
+            input,
+            UiInput::PointerMoved(_) | UiInput::PointerReleased(_)
+        ) && let Some(capture) = self.pointer_capture.filter(|id| self.contains(*id))
+        {
+            let action = self.dispatch_bubbling(capture, input)?;
+            if release {
+                self.pointer_capture = None;
+            }
+            return Ok(action);
+        }
         let point = match &input {
             UiInput::PointerMoved(point)
             | UiInput::PointerPressed(point)
             | UiInput::PointerReleased(point) => *point,
             UiInput::PointerWheel { position, .. } => *position,
+            UiInput::Keyboard { .. } => {
+                let Some(focus) = self.focus else {
+                    return Ok(None);
+                };
+                return self.dispatch_bubbling(focus, input);
+            }
             UiInput::FocusChanged(_)
-            | UiInput::Keyboard { .. }
+            | UiInput::HoverChanged(_)
+            | UiInput::PointerLeft
             | UiInput::Ime(_)
             | UiInput::Paste(_) => {
                 let Some(focus) = self.focus else {
@@ -441,6 +523,9 @@ impl UiRoot {
         let Some(target) = self.hit_test(point) else {
             if matches!(input, UiInput::PointerPressed(_)) {
                 self.set_focus(None)?;
+            }
+            if release {
+                self.pointer_capture = None;
             }
             return Ok(None);
         };
@@ -454,6 +539,22 @@ impl UiRoot {
             self.set_focus(focus)?;
         }
         self.dispatch_bubbling(target, input)
+    }
+
+    fn set_hover(&mut self, target: Option<NodeId>) -> Result<(), UiError> {
+        if target == self.hover {
+            return Ok(());
+        }
+        if let Some(old) = self.hover.filter(|id| self.contains(*id)) {
+            let _ = self.dispatch_to(old, UiInput::HoverChanged(false))?;
+        }
+        self.hover = target.filter(|id| {
+            self.contains(*id) && self.effective_visible(*id) && self.effective_enabled(*id)
+        });
+        if let Some(target) = self.hover {
+            let _ = self.dispatch_to(target, UiInput::HoverChanged(true))?;
+        }
+        Ok(())
     }
 
     /// Moves focus to one retained target or clears it.
@@ -471,6 +572,7 @@ impl UiRoot {
             }
         }
         if let Some(old) = self.focus {
+            self.last_focus = Some(old);
             let _ = self.dispatch_to(old, UiInput::FocusChanged(false))?;
             self.invalidate(old, Invalidation::ACCESSIBILITY);
         }
@@ -480,6 +582,29 @@ impl UiRoot {
             self.invalidate(target, Invalidation::ACCESSIBILITY);
         }
         Ok(())
+    }
+
+    /// Returns the currently focused retained identity.
+    pub const fn focused(&self) -> Option<NodeId> {
+        self.focus
+    }
+
+    /// Returns the most recently blurred retained identity.
+    pub const fn last_focused(&self) -> Option<NodeId> {
+        self.last_focus
+    }
+
+    /// Focuses the first enabled, visible focus target in one subtree.
+    pub fn focus_first_in_subtree(&mut self, root: NodeId) -> Result<Option<NodeId>, UiError> {
+        self.node(root)?;
+        if !self.effective_visible(root) || !self.effective_enabled(root) {
+            return Ok(None);
+        }
+        let mut order = Vec::new();
+        self.collect_focus_order(root, true, &mut order);
+        let target = order.first().copied();
+        self.set_focus(target)?;
+        Ok(target)
     }
 
     /// Advances focus in retained tree order, optionally in reverse.
@@ -581,6 +706,9 @@ impl UiRoot {
                 self.clipboard.push(operation);
             }
             if result.action.is_some() || result.handled {
+                if matches!(input, UiInput::PointerPressed(_)) {
+                    self.pointer_capture = Some(target);
+                }
                 return Ok(result.action);
             }
             let Some(parent) = self.node(target)?.parent else {
@@ -1041,6 +1169,18 @@ impl UiRoot {
     }
 
     fn remove_subtree(&mut self, id: NodeId) {
+        if self
+            .pointer_capture
+            .is_some_and(|capture| self.is_descendant_or_self(capture, id))
+        {
+            self.pointer_capture = None;
+        }
+        if self
+            .hover
+            .is_some_and(|hover| self.is_descendant_or_self(hover, id))
+        {
+            self.hover = None;
+        }
         let children = self
             .node(id)
             .map(|node| node.children.clone())
