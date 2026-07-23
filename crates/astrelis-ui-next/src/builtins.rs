@@ -333,6 +333,9 @@ type KeyAction = dyn Fn() -> Box<dyn Any>;
 /// Transparent keyboard-bubbling boundary for overlay and command handling.
 pub struct KeyListener {
     escape: Option<Box<KeyAction>>,
+    previous: Option<Box<KeyAction>>,
+    next: Option<Box<KeyAction>>,
+    submit: Option<Box<KeyAction>>,
 }
 
 impl KeyListener {
@@ -340,12 +343,41 @@ impl KeyListener {
     pub fn on_escape(action: impl Fn() -> Box<dyn Any> + 'static) -> Self {
         Self {
             escape: Some(Box::new(action)),
+            previous: None,
+            next: None,
+            submit: None,
         }
     }
 
     /// Replaces the Escape action.
     pub fn set_escape(&mut self, action: impl Fn() -> Box<dyn Any> + 'static) {
         self.escape = Some(Box::new(action));
+    }
+
+    /// Creates a keyboard boundary for list navigation and submission.
+    pub fn command_navigation(
+        previous: impl Fn() -> Box<dyn Any> + 'static,
+        next: impl Fn() -> Box<dyn Any> + 'static,
+        submit: impl Fn() -> Box<dyn Any> + 'static,
+    ) -> Self {
+        Self {
+            escape: None,
+            previous: Some(Box::new(previous)),
+            next: Some(Box::new(next)),
+            submit: Some(Box::new(submit)),
+        }
+    }
+
+    /// Replaces list-navigation and submission actions.
+    pub fn set_command_navigation(
+        &mut self,
+        previous: impl Fn() -> Box<dyn Any> + 'static,
+        next: impl Fn() -> Box<dyn Any> + 'static,
+        submit: impl Fn() -> Box<dyn Any> + 'static,
+    ) {
+        self.previous = Some(Box::new(previous));
+        self.next = Some(Box::new(next));
+        self.submit = Some(Box::new(submit));
     }
 }
 
@@ -374,13 +406,21 @@ impl Element for KeyListener {
     fn event(&mut self, input: UiInput) -> EventResult {
         if let UiInput::Keyboard { input, .. } = input
             && input.state == ElementState::Pressed
-            && matches!(input.logical_key, Key::Named(NamedKey::Escape))
         {
-            return EventResult {
-                action: self.escape.as_ref().map(|action| action()),
-                handled: true,
-                ..EventResult::default()
+            let action = match &input.logical_key {
+                Key::Named(NamedKey::Escape) => self.escape.as_ref(),
+                Key::Named(NamedKey::Enter) => self.submit.as_ref(),
+                Key::Named(NamedKey::Other(name)) if name == "ArrowUp" => self.previous.as_ref(),
+                Key::Named(NamedKey::Other(name)) if name == "ArrowDown" => self.next.as_ref(),
+                _ => None,
             };
+            if let Some(action) = action {
+                return EventResult {
+                    action: Some(action()),
+                    handled: true,
+                    ..EventResult::default()
+                };
+            }
         }
         EventResult::default()
     }

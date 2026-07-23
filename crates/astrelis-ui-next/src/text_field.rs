@@ -389,8 +389,10 @@ impl Element for TextField {
                         ..EventResult::default()
                     };
                 }
+                let mut handled = false;
                 match &input.logical_key {
                     Key::Named(NamedKey::Backspace) => {
+                        handled = true;
                         let (start, end) = self.selection();
                         if start != end {
                             self.replace_selection("");
@@ -404,6 +406,7 @@ impl Element for TextField {
                         }
                     }
                     Key::Named(NamedKey::Other(name)) if name == "Delete" => {
+                        handled = true;
                         let (start, end) = self.selection();
                         if start != end {
                             self.replace_selection("");
@@ -416,22 +419,26 @@ impl Element for TextField {
                     }
                     Key::Named(NamedKey::Other(name)) if name == "ArrowLeft" => {
                         self.move_caret(CaretMovement::VisualLeft, modifiers.shift);
+                        handled = true;
                     }
                     Key::Named(NamedKey::Other(name)) if name == "ArrowRight" => {
                         self.move_caret(CaretMovement::VisualRight, modifiers.shift);
+                        handled = true;
                     }
                     Key::Named(NamedKey::Other(name)) if name == "Home" => {
                         self.move_caret(CaretMovement::LineStart, modifiers.shift);
+                        handled = true;
                     }
                     Key::Named(NamedKey::Other(name)) if name == "End" => {
                         self.move_caret(CaretMovement::LineEnd, modifiers.shift);
+                        handled = true;
                     }
                     Key::Named(NamedKey::Enter) => {
+                        let Some(callback) = &self.submitted else {
+                            return EventResult::default();
+                        };
                         return EventResult {
-                            action: self
-                                .submitted
-                                .as_ref()
-                                .map(|callback| callback(self.text.clone())),
+                            action: Some(callback(self.text.clone())),
                             handled: true,
                             ..EventResult::default()
                         };
@@ -446,10 +453,14 @@ impl Element for TextField {
                     }
                     _ => {}
                 }
-                EventResult {
-                    invalidation: Invalidation::PAINT | Invalidation::ACCESSIBILITY,
-                    handled: true,
-                    ..EventResult::default()
+                if handled {
+                    EventResult {
+                        invalidation: Invalidation::PAINT | Invalidation::ACCESSIBILITY,
+                        handled: true,
+                        ..EventResult::default()
+                    }
+                } else {
+                    EventResult::default()
                 }
             }
             UiInput::Ime(ImeEvent::Preedit(value, _)) => {

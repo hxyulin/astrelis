@@ -431,6 +431,39 @@ fn keyboard_events_bubble_to_overlay_boundaries() {
 }
 
 #[test]
+fn text_fields_release_command_navigation_keys_to_their_owner() {
+    let mut ui = UiRoot::new(
+        KeyListener::command_navigation(
+            || Box::new("previous"),
+            || Box::new("next"),
+            || Box::new("submit"),
+        ),
+        LogicalSize::new(240.0, 80.0),
+    );
+    ui.append(ui.root(), TextField::new("Search", "")).unwrap();
+    ui.update_passes().unwrap();
+    ui.focus_first_in_subtree(ui.root()).unwrap();
+
+    let next = ui
+        .dispatch(UiInput::Keyboard {
+            input: named_key(NamedKey::Other("ArrowDown".into())),
+            modifiers: Modifiers::default(),
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(*next.downcast::<&str>().unwrap(), "next");
+
+    let submit = ui
+        .dispatch(UiInput::Keyboard {
+            input: named_key(NamedKey::Enter),
+            modifiers: Modifiers::default(),
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(*submit.downcast::<&str>().unwrap(), "submit");
+}
+
+#[test]
 fn split_pane_routes_drag_outside_the_divider_and_reflows_children() {
     let mut ui = UiRoot::new(
         SplitPane::new(Axis::Horizontal, 0.25, |ratio| Box::new(ratio)),
