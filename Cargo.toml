@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = ["crates/astrelis"]
+
+[workspace.package]
+version = "0.4.0-dev.0"
+edition = "2024"
+rust-version = "1.88"
+license = "MIT"
+authors = ["hxyulin <hxyulin@proton.me>"]
+repository = "https://github.com/hxyulin/astrelis"
+
+[workspace.dependencies]
+bytemuck = { version = "1", features = ["derive"] }
+wgpu = { version = "=30.0.1", default-features = false, features = [
+    "std", "parking_lot", "wgsl", "metal", "vulkan", "dx12", "webgpu",
+] }
+pollster = "0.4"
+winit = "=0.30.13"
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = "warn"

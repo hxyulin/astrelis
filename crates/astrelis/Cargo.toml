@@ -1,0 +1,21 @@
+[package]
+name = "astrelis"
+description = "A small mesh rendering API built directly on wgpu"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+bytemuck.workspace = true
+wgpu.workspace = true
+
+[dev-dependencies]
+pollster.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true
