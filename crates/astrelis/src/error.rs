@@ -3,6 +3,14 @@ use std::{error, fmt};
 /// An initialization, mesh validation, target, or rendering failure.
 #[derive(Debug)]
 pub enum Error {
+    /// Attachments are absent or have inconsistent dimensions, samples, or formats.
+    InvalidAttachments,
+    /// A built-in color renderer requires exactly one color output at slot zero.
+    ExpectedSingleColor,
+    /// wgpu rejected a prepared shader or pipeline.
+    Validation(wgpu::Error),
+    /// Geometry layout, buffer sizes, or draw ranges are invalid.
+    InvalidGeometry,
     /// Texture dimensions must be nonzero and fit the device's 2D limit.
     InvalidTextureSize {
         /// Requested width.
@@ -161,6 +169,10 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidAttachments => f.write_str("pass attachments must have compatible formats, dimensions, and samples"),
+            Self::ExpectedSingleColor => f.write_str("this renderer requires a single color output at slot zero"),
+            Self::Validation(error) => write!(f, "GPU validation failed: {error}"),
+            Self::InvalidGeometry => f.write_str("invalid geometry layout, buffer size, or draw range"),
             Self::InvalidTextureSize { width, height, max } => write!(f, "texture size {width}x{height} must be nonzero and fit {max}"),
             Self::UnsupportedTextureFormat { format } => write!(f, "{format:?} is not a supported uncompressed color texture format"),
             Self::InvalidTextureUsage { format, usage } => write!(f, "invalid texture usage {usage:?} for {format:?}"),

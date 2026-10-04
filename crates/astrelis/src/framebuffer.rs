@@ -1,6 +1,6 @@
 use std::sync::{Arc, atomic::AtomicBool};
 
-use crate::{Error, Frame, FrameError, GraphicsContext, pass::ColorAttachment, target};
+use crate::{Error, Frame, FrameError, GraphicsContext, pass::ManagedColorAttachment, target};
 
 /// Initial configuration of a persistent offscreen color framebuffer.
 ///
@@ -107,6 +107,8 @@ pub struct Framebuffer {
     attachments: Option<Attachments>,
     supported_sample_counts: Vec<u32>,
     pub(crate) initialized: Arc<AtomicBool>,
+    pub(crate) samples_initialized: Arc<AtomicBool>,
+    sampled: crate::SampledColor,
     pub(crate) depth_stencil: Option<crate::depth_stencil::DepthStencilAttachment>,
 }
 
@@ -151,12 +153,17 @@ impl Framebuffer {
             options.depth_stencil_usage,
         )?;
         target::validate_sample_count(format, options.sample_count, &supported_sample_counts)?;
+        let attachments = allocate(graphics, options);
+        let sampled =
+            crate::SampledColor::new(graphics, attachments.as_ref().map(|a| a.view.clone()));
         Ok(Self {
             graphics: graphics.clone(),
-            attachments: allocate(graphics, options),
+            attachments,
+            sampled,
             options,
             supported_sample_counts,
             initialized: Arc::new(AtomicBool::new(false)),
+            samples_initialized: Arc::new(AtomicBool::new(false)),
             depth_stencil: crate::depth_stencil::allocate(
                 graphics,
                 options.size,
@@ -224,6 +231,15 @@ impl Framebuffer {
     /// Returns the fixed color format.
     pub fn format(&self) -> wgpu::TextureFormat {
         self.options.format
+    }
+
+    /// Returns the complete attachment format for pipeline preparation.
+    pub fn render_format(&self) -> crate::RenderFormat {
+        crate::RenderFormat {
+            colors: vec![Some(self.format())],
+            depth_stencil: self.depth_stencil_format(),
+            sample_count: self.sample_count(),
+        }
     }
 
     /// Returns the current color attachment sample count.
@@ -311,9 +327,46 @@ impl Framebuffer {
             .view)
     }
 
-    pub(crate) fn attachment(&self) -> Result<ColorAttachment<'_>, Error> {
+    /// Returns a live sampled-color handle that follows resize and MSAA changes.
+    /// Its default alpha interpretation is premultiplied, as produced by built-in renderers.
+    /// Custom shaders must declare a different interpretation when appropriate.
+    pub fn sampled_color(&self) -> crate::SampledColor {
+        self.sampled.clone()
+    }
+
+    /// Snapshots the current managed color attachment for a custom pass.
+    /// Recorded descriptors retain this storage generation after a resize.
+    pub fn color_attachment(&self) -> Result<crate::RenderColorAttachment, Error> {
+        let a = self.attachment()?;
+        let mut color = crate::RenderColorAttachment::new(a.view, a.format, a.size);
+        color.resolve_target = a.resolve_target.cloned();
+        color.state = Some(if self.sample_count() > 1 {
+            self.samples_initialized.clone()
+        } else {
+            self.initialized.clone()
+        });
+        color.resolved_state = a.resolved_state.cloned();
+        color.owner = Some(self.graphics.clone());
+        Ok(color)
+    }
+
+    /// Snapshots managed depth/stencil storage for a custom pass, if enabled.
+    pub fn depth_stencil_attachment(
+        &self,
+    ) -> Result<Option<crate::RenderDepthStencilAttachment>, Error> {
+        if self.options.depth_stencil_format.is_none() {
+            return Ok(None);
+        }
+        let a = self.depth_stencil.as_ref().ok_or(Error::TargetSuspended)?;
+        Ok(Some(crate::RenderDepthStencilAttachment::managed(
+            a,
+            &self.graphics,
+        )))
+    }
+
+    pub(crate) fn attachment(&self) -> Result<ManagedColorAttachment<'_>, Error> {
         let attachments = self.attachments.as_ref().ok_or(Error::TargetSuspended)?;
-        Ok(ColorAttachment {
+        Ok(ManagedColorAttachment {
             view: attachments
                 .multisample_view
                 .as_ref()
@@ -325,6 +378,7 @@ impl Framebuffer {
             format: self.options.format,
             size: self.options.size,
             sample_count: self.options.sample_count,
+            resolved_state: (self.options.sample_count > 1).then_some(&self.initialized),
         })
     }
 
@@ -340,6 +394,9 @@ impl Framebuffer {
         self.options = options;
         // Pending recordings retain the old generation's marker, never this one.
         self.initialized = Arc::new(AtomicBool::new(false));
+        self.samples_initialized = Arc::new(AtomicBool::new(false));
+        self.sampled
+            .replace(self.attachments.as_ref().map(|a| a.view.clone()));
     }
 }
 

@@ -1,6 +1,6 @@
 use std::collections::{HashMap, hash_map::Entry};
 
-use crate::{Error, GraphicsContext, Material, MaterialOptions, Mesh, RenderPass, Vertex};
+use crate::{Error, GraphicsContext, Material, MaterialOptions, Mesh, RenderPass};
 
 type Pipelines =
     HashMap<(u64, wgpu::TextureFormat, u32, Option<wgpu::TextureFormat>), wgpu::RenderPipeline>;
@@ -185,27 +185,39 @@ impl MeshRenderer {
     /// device, or [`Error::UnsupportedMeshFormat`] for integer or nonblendable
     /// attachments. Rejected operations record no draw.
     pub fn draw(&mut self, pass: &mut RenderPass<'_>, mesh: &Mesh) -> Result<(), Error> {
+        self.draw_range(pass, mesh, &mesh.full_draw())
+    }
+
+    /// Records a selected geometry range and instance range using default shading.
+    pub fn draw_range(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        mesh: &Mesh,
+        draw: &crate::MeshDraw,
+    ) -> Result<(), Error> {
         self.validate_devices(pass, mesh)?;
+        mesh.validate_draw(&self.material, draw)?;
         let pipeline = pipeline(
             &self.graphics,
             &mut self.pipelines,
             &self.material,
-            pass.format(),
+            pass.single_color_format()?,
             pass.sample_count(),
             pass.depth_stencil_format(),
             true,
         )?;
-        draw(pass, mesh, pipeline);
+        pass.apply_raster_state();
+        pass.set_pipeline(pipeline);
+        mesh.record(pass, draw);
         Ok(())
     }
 
     /// Records one mesh draw using an application-created material.
     ///
-    /// Bind this material's resource groups through [`RenderPass::as_wgpu`]
+    /// Bind this material's resource groups through [`RenderPass::set_bind_group`]
     /// before drawing. Bindings can vary between draws, including dynamic uniform
     /// offsets. The material supplies the pipeline; geometry and pass raster
-    /// settings are restored just as in [`Self::draw`]. Mesh vertices remain the
-    /// fixed [`Vertex`] layout; a custom vertex shader can transform positions.
+    /// settings are restored just as in [`Self::draw`]. Mesh layouts and topology must match the material; shaders may transform positions.
     /// Integer fragment outputs are supported with a matching format and no blend.
     /// Depth/stencil tests follow the material. Dynamic stencil reference follows
     /// the pass's wrapped setter; raw reference changes are restored on each draw.
@@ -226,12 +238,25 @@ impl MeshRenderer {
         mesh: &Mesh,
         material: &Material,
     ) -> Result<(), Error> {
+        self.draw_range_with_material(pass, mesh, material, &mesh.full_draw())
+    }
+
+    /// Records custom-layout geometry with explicit material, index/vertex range,
+    /// and instances. Geometry layouts/topology must match material settings.
+    pub fn draw_range_with_material(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        mesh: &Mesh,
+        material: &Material,
+        draw: &crate::MeshDraw,
+    ) -> Result<(), Error> {
         self.validate_devices(pass, mesh)?;
         if &material.device != self.graphics.device()
             || &material.instance != self.graphics.instance()
         {
             return Err(Error::DeviceMismatch);
         }
+        mesh.validate_draw(material, draw)?;
         if let Some(state) = &material.depth_stencil {
             if pass.depth_read_only() && !state.is_depth_read_only() {
                 return Err(Error::ReadOnlyDepth);
@@ -244,12 +269,84 @@ impl MeshRenderer {
             &self.graphics,
             &mut self.pipelines,
             material,
-            pass.format(),
+            pass.single_color_format()?,
             pass.sample_count(),
             pass.depth_stencil_format(),
             false,
         )?;
-        draw(pass, mesh, pipeline);
+        pass.apply_raster_state();
+        pass.set_pipeline(pipeline);
+        mesh.record(pass, draw);
+        Ok(())
+    }
+
+    /// Prepares a material for a complete format value without acquiring a target.
+    pub fn prepare_for_format(
+        &mut self,
+        material: &Material,
+        format: &crate::RenderFormat,
+    ) -> Result<(), Error> {
+        if &material.device != self.graphics.device()
+            || &material.instance != self.graphics.instance()
+        {
+            return Err(Error::DeviceMismatch);
+        }
+        let color = if format.colors.len() == 1 {
+            format.colors[0]
+        } else {
+            None
+        }
+        .ok_or(Error::ExpectedSingleColor)?;
+        pipeline(
+            &self.graphics,
+            &mut self.pipelines,
+            material,
+            color,
+            format.sample_count,
+            format.depth_stencil,
+            false,
+        )?;
+        Ok(())
+    }
+
+    /// Captures wgpu validation diagnostics and caches only a successfully prepared pipeline.
+    /// Shader modules and layouts can be checked separately with wgpu error scopes.
+    pub async fn try_prepare_material(
+        &mut self,
+        material: &Material,
+        format: &crate::RenderFormat,
+    ) -> Result<(), Error> {
+        if &material.device != self.graphics.device()
+            || &material.instance != self.graphics.instance()
+        {
+            return Err(Error::DeviceMismatch);
+        }
+        let color = if format.colors.len() == 1 {
+            format.colors[0]
+        } else {
+            None
+        }
+        .ok_or(Error::ExpectedSingleColor)?;
+        let scope = self
+            .graphics
+            .device()
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut prepared = HashMap::new();
+        let result = pipeline(
+            &self.graphics,
+            &mut prepared,
+            material,
+            color,
+            format.sample_count,
+            format.depth_stencil,
+            false,
+        )
+        .map(|_| ());
+        if let Some(error) = scope.pop().await {
+            return Err(Error::Validation(error));
+        }
+        result?;
+        self.pipelines.extend(prepared);
         Ok(())
     }
 
@@ -337,6 +434,11 @@ fn pipeline<'cache>(
             bias: Default::default(),
         })
     });
+    let vertex_layouts: Vec<_> = material
+        .vertex_layouts
+        .iter()
+        .map(|l| Some(l.as_wgpu()))
+        .collect();
     Ok(entry.insert(
         graphics
             .device()
@@ -347,7 +449,7 @@ fn pipeline<'cache>(
                     module: &material.shader,
                     entry_point: Some(&material.vertex_entry),
                     compilation_options: Default::default(),
-                    buffers: &[Some(Vertex::layout())],
+                    buffers: &vertex_layouts,
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &material.shader,
@@ -361,6 +463,8 @@ fn pipeline<'cache>(
                 }),
                 primitive: wgpu::PrimitiveState {
                     front_face: material.front_face,
+                    topology: material.topology,
+                    strip_index_format: material.strip_index_format,
                     cull_mode: material.cull_mode,
                     ..Default::default()
                 },
@@ -373,16 +477,6 @@ fn pipeline<'cache>(
                 cache: None,
             }),
     ))
-}
-
-fn draw(pass: &mut RenderPass<'_>, mesh: &Mesh, pipeline: &wgpu::RenderPipeline) {
-    pass.apply_raster_state();
-    pass.inner.set_pipeline(pipeline);
-    pass.inner
-        .set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
-    pass.inner
-        .set_index_buffer(mesh.index_buffer().slice(..), wgpu::IndexFormat::Uint32);
-    pass.inner.draw_indexed(0..mesh.index_count(), 0, 0..1);
 }
 
 #[cfg(test)]

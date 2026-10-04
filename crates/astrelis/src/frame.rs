@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use crate::{
-    Error, Framebuffer, GraphicsContext, RenderPassBuilder, pass::ColorAttachment,
+    Error, Framebuffer, GraphicsContext, RenderPassBuilder, pass::ManagedColorAttachment,
     target::SurfaceTarget,
 };
 
@@ -39,11 +39,21 @@ impl std::fmt::Display for FrameError {
 impl std::error::Error for FrameError {}
 
 #[derive(Debug, Default)]
-pub(crate) struct AttachmentWrites(Vec<(Arc<AtomicBool>, bool)>);
+pub(crate) struct AttachmentWrites {
+    pending: Vec<(Arc<AtomicBool>, bool)>,
+    required: Vec<(Arc<AtomicBool>, AttachmentAspect)>,
+}
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum AttachmentAspect {
+    Color,
+    Depth,
+    Stencil,
+    Surface,
+}
 
 impl AttachmentWrites {
     pub(crate) fn is_initialized(&self, state: &Arc<AtomicBool>) -> bool {
-        self.0
+        self.pending
             .iter()
             .find(|(pending, _)| Arc::ptr_eq(pending, state))
             .map_or_else(
@@ -54,18 +64,39 @@ impl AttachmentWrites {
 
     pub(crate) fn record(&mut self, state: &Arc<AtomicBool>, initialized: bool) {
         if let Some((_, pending)) = self
-            .0
+            .pending
             .iter_mut()
             .find(|(pending, _)| Arc::ptr_eq(pending, state))
         {
             *pending = initialized;
-        } else if state.load(Ordering::Acquire) != initialized {
-            self.0.push((Arc::clone(state), initialized));
+        } else {
+            self.pending.push((Arc::clone(state), initialized));
         }
     }
 
+    pub(crate) fn require(&mut self, state: &Arc<AtomicBool>, aspect: AttachmentAspect) {
+        if !self.pending.iter().any(|(s, _)| Arc::ptr_eq(s, state))
+            && !self.required.iter().any(|(s, _)| Arc::ptr_eq(s, state))
+        {
+            self.required.push((state.clone(), aspect));
+        }
+    }
+    fn validate_submission(&self) -> Result<(), Error> {
+        for (state, aspect) in &self.required {
+            if !state.load(Ordering::Acquire) {
+                return Err(match aspect {
+                    AttachmentAspect::Color => Error::UninitializedFramebuffer,
+                    AttachmentAspect::Depth => Error::UninitializedDepth,
+                    AttachmentAspect::Stencil => Error::UninitializedStencil,
+                    AttachmentAspect::Surface => Error::UninitializedFrame,
+                });
+            }
+        }
+        Ok(())
+    }
+
     fn commit(self) {
-        for (state, initialized) in self.0 {
+        for (state, initialized) in self.pending {
             state.store(initialized, Ordering::Release);
         }
     }
@@ -132,7 +163,9 @@ pub struct Frame<'target, 'window> {
     // Recording is released before an acquired image when abandoned.
     encoder: wgpu::CommandEncoder,
     target: FrameTarget<'target, 'window>,
-    initialized: bool,
+    initialized: Arc<AtomicBool>,
+    samples_initialized: Arc<AtomicBool>,
+    uploads: crate::uploads::DrawUploads,
     writes: AttachmentWrites,
 }
 
@@ -152,7 +185,9 @@ impl<'target, 'window> Frame<'target, 'window> {
                 target,
                 suboptimal,
             },
-            initialized: false,
+            initialized: Arc::new(AtomicBool::new(false)),
+            samples_initialized: Arc::new(AtomicBool::new(false)),
+            uploads: crate::uploads::DrawUploads::default(),
             writes: AttachmentWrites::default(),
         }
     }
@@ -162,7 +197,9 @@ impl<'target, 'window> Frame<'target, 'window> {
         Self {
             encoder,
             target: FrameTarget::Framebuffer(target),
-            initialized: false,
+            initialized: Arc::new(AtomicBool::new(false)),
+            samples_initialized: Arc::new(AtomicBool::new(false)),
+            uploads: crate::uploads::DrawUploads::default(),
             writes: AttachmentWrites::default(),
         }
     }
@@ -170,7 +207,7 @@ impl<'target, 'window> Frame<'target, 'window> {
     /// Configures a color pass writing to this frame's default destination.
     ///
     /// Defaults clear transparent black, store results, and use the full viewport
-    /// and scissor. Later `load()` passes preserve individual MSAA samples.
+    /// and scissor. Later `load_color()` passes preserve individual MSAA samples.
     /// A surface frame's first pass must clear; a framebuffer may load contents
     /// from earlier submitted recordings. Dropping a builder records nothing.
     pub fn render_pass(&mut self) -> RenderPassBuilder<'_> {
@@ -178,22 +215,29 @@ impl<'target, 'window> Frame<'target, 'window> {
             FrameTarget::Surface { view, target, .. } => RenderPassBuilder::new(
                 &mut self.encoder,
                 &target.graphics,
-                ColorAttachment {
+                ManagedColorAttachment {
                     view: target.multisample_view.as_ref().unwrap_or(view),
                     resolve_target: target.multisample_view.as_ref().map(|_| view),
                     format: target.configuration.format,
                     size: target.size,
                     sample_count: target.sample_count,
+                    resolved_state: target.multisample_view.as_ref().map(|_| &self.initialized),
                 },
-                &mut self.initialized,
+                if target.sample_count > 1 {
+                    &self.samples_initialized
+                } else {
+                    &self.initialized
+                },
             )
-            .with_depth_stencil(target.depth_stencil.as_ref(), &mut self.writes),
+            .with_depth_stencil(target.depth_stencil.as_ref(), &mut self.writes)
+            .with_uploads(&mut self.uploads),
             FrameTarget::Framebuffer(target) => RenderPassBuilder::for_framebuffer(
                 &mut self.encoder,
                 &target.graphics,
                 target,
                 &mut self.writes,
-            ),
+            )
+            .with_uploads(&mut self.uploads),
         }
     }
 
@@ -227,6 +271,83 @@ impl<'target, 'window> Frame<'target, 'window> {
             target,
             &mut self.writes,
         )
+        .with_uploads(&mut self.uploads)
+    }
+
+    /// Snapshots this frame's default color attachment, including its MSAA resolve.
+    /// Use it in [`Self::begin_render_pass`] to customize a surface pass or add color outputs.
+    pub fn color_attachment(&self) -> Result<crate::RenderColorAttachment, Error> {
+        match &self.target {
+            FrameTarget::Framebuffer(target) => target.color_attachment(),
+            FrameTarget::Surface { view, target, .. } => {
+                let mut a = crate::RenderColorAttachment::new(
+                    target.multisample_view.as_ref().unwrap_or(view),
+                    target.configuration.format,
+                    target.size,
+                );
+                a.resolve_target = target.multisample_view.as_ref().map(|_| view.clone());
+                a.state = Some(if target.sample_count > 1 {
+                    self.samples_initialized.clone()
+                } else {
+                    self.initialized.clone()
+                });
+                a.resolved_state = target
+                    .multisample_view
+                    .as_ref()
+                    .map(|_| self.initialized.clone());
+                a.owner = Some(target.graphics.clone());
+                Ok(a)
+            }
+        }
+    }
+
+    /// Snapshots the default target's optional depth/stencil attachment.
+    pub fn depth_stencil_attachment(
+        &self,
+    ) -> Result<Option<crate::RenderDepthStencilAttachment>, Error> {
+        match &self.target {
+            FrameTarget::Framebuffer(target) => target.depth_stencil_attachment(),
+            FrameTarget::Surface { target, .. } => Ok(target
+                .depth_stencil
+                .as_ref()
+                .map(|a| crate::RenderDepthStencilAttachment::managed(a, &target.graphics))),
+        }
+    }
+
+    /// Begins a custom pass with zero or multiple color outputs and imported or
+    /// managed attachments. Managed operations participate in initialization tracking.
+    /// Imported view formats and selected mip/layer sizes must be declared accurately;
+    /// wgpu validates raw view compatibility. Submission still belongs to this frame.
+    pub fn begin_render_pass<'pass>(
+        &'pass mut self,
+        descriptor: &crate::RenderPassDescriptor<'_>,
+    ) -> Result<crate::RenderPass<'pass>, Error> {
+        crate::RenderPass::from_descriptor(
+            &mut self.encoder,
+            self.target.graphics(),
+            &mut self.writes,
+            &mut self.uploads,
+            descriptor,
+        )
+    }
+
+    /// Records a custom full-color write to a single-sampled managed framebuffer.
+    /// The callback receives its current output view and this recording's encoder.
+    /// It must initialize every texel (for example with a copy or compute dispatch).
+    /// Partial writes require already initialized contents. Prefer custom render passes
+    /// when load/store operations describe the write. Panicking or dropping the frame
+    /// does not commit initialization. MSAA sample storage is unaffected.
+    pub fn write_framebuffer_color(
+        &mut self,
+        target: &mut Framebuffer,
+        record: impl FnOnce(&mut wgpu::CommandEncoder, &wgpu::TextureView),
+    ) -> Result<(), Error> {
+        if !self.target.graphics().same_device(&target.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        record(&mut self.encoder, target.color_view()?);
+        self.writes.record(&target.initialized, true);
+        Ok(())
     }
 
     /// Borrows the command encoder for copies, compute, and custom GPU recording.
@@ -293,13 +414,25 @@ impl<'target, 'window> Frame<'target, 'window> {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UninitializedFrame`] and discards all recorded work if a
-    /// surface frame has no clear pass for its default destination. Clearing an
-    /// additional framebuffer does not satisfy this requirement.
+    /// Returns [`Error::UninitializedFrame`] without submitting when a surface output
+    /// is uninitialized (including a missing MSAA resolve). Loads depending on earlier
+    /// submissions can return color/depth/stencil initialization errors if an intervening
+    /// recording discarded that storage. Clearing an additional framebuffer does not
+    /// initialize the surface output.
     pub fn finish(self) -> Result<wgpu::SubmissionIndex, Error> {
-        if matches!(self.target, FrameTarget::Surface { .. }) && !self.initialized {
+        if matches!(self.target, FrameTarget::Surface { .. })
+            && !self.writes.is_initialized(&self.initialized)
+        {
             return Err(Error::UninitializedFrame);
         }
+        let graphics = self.target.graphics().clone();
+        // Keep tracked commits in the same order as managed queue submissions.
+        let _submission_guard = graphics
+            .submission_lock
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        self.writes.validate_submission()?;
+        self.uploads.upload(self.target.graphics().queue());
         let submission = self
             .target
             .graphics()

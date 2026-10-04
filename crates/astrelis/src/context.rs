@@ -25,6 +25,8 @@ pub struct GraphicsContext {
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
+    pub(crate) submission_lock: std::sync::Arc<std::sync::Mutex<()>>,
+    pub(crate) upload_pool: crate::uploads::UploadPool,
 }
 
 impl GraphicsContext {
@@ -123,6 +125,23 @@ impl GraphicsContext {
         Mesh::upload(self, vertices, indices)
     }
 
+    /// Uploads geometry with explicit layouts, index width, topology, and update usages.
+    pub fn create_mesh_with_options(&self, options: crate::MeshOptions<'_>) -> Result<Mesh, Error> {
+        Mesh::upload_options(self, options)
+    }
+
+    /// Imports application-owned buffer ranges. Raw handle device identity uses wgpu
+    /// validation; imported index values remain caller-controlled. Layout, range,
+    /// and usage metadata are checked here.
+    pub fn create_mesh_from_buffers(
+        &self,
+        streams: &[crate::MeshVertexBuffer<'_>],
+        indices: Option<crate::MeshIndexBuffer<'_>>,
+        topology: wgpu::PrimitiveTopology,
+    ) -> Result<Mesh, Error> {
+        Mesh::from_buffers(self, streams, indices, topology)
+    }
+
     /// Creates a reusable offscreen framebuffer with optional MSAA and depth/stencil.
     ///
     /// Validates dimensions, enabled format features, output usages, and sample
@@ -139,7 +158,7 @@ impl GraphicsContext {
     /// The shader and binding layouts must belong to this device. The material
     /// retains their GPU handles and owns its entry-point names and render state.
     /// Uniform buffers, textures, bind groups, and their updates remain owned by
-    /// the application. Shaders use the fixed [`Vertex`] attribute layout.
+    /// the application. Shader inputs follow the declared vertex layouts, defaulting to [`Vertex`].
     ///
     /// As with raw wgpu resource creation, invalid layouts use wgpu's error
     /// reporting. Shader interfaces are validated when a renderer first creates
@@ -147,6 +166,14 @@ impl GraphicsContext {
     /// rendering. This factory does not record, submit, or wait for GPU work.
     pub fn create_material(&self, options: MaterialOptions<'_>) -> Material {
         Material::create(self, options)
+    }
+
+    /// Creates reusable textured-rectangle shader, blending, and depth/stencil settings.
+    pub fn create_texture_material(
+        &self,
+        options: crate::TextureMaterialOptions<'_>,
+    ) -> crate::TextureMaterial {
+        crate::TextureMaterial::create(self, options)
     }
 
     /// Requests a device from an application-created wgpu instance.
@@ -196,6 +223,8 @@ impl GraphicsContext {
             adapter,
             device,
             queue,
+            upload_pool: Default::default(),
+            submission_lock: Default::default(),
         }
     }
 

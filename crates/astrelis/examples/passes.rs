@@ -1,4 +1,4 @@
-//! Upload an sRGB checker image, then crop, filter, and alpha-composite prepared rectangles.
+//! A custom surface pass followed by a final MSAA resolve that discards sample storage.
 //! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
 
 use std::{
@@ -8,9 +8,8 @@ use std::{
 };
 
 use astrelis::{
-    Error, FrameError, GraphicsContext, Rect, RenderTarget, SurfaceOptions, Texture,
-    TextureBinding, TextureBindingOptions, TextureDraw, TextureFilter, TextureOptions,
-    TextureRenderer, UvRect, wgpu,
+    Error, FrameError, GraphicsContext, Mesh, MeshRenderer, RenderPassDescriptor, RenderTarget,
+    SurfaceOptions, Vertex, wgpu,
 };
 use winit::{
     application::ApplicationHandler,
@@ -24,11 +23,8 @@ struct State {
     window: Arc<Window>,
     graphics: GraphicsContext,
     target: RenderTarget<'static>,
-    renderer: TextureRenderer,
-    _texture: Texture,
-    nearest: TextureBinding,
-    linear: TextureBinding,
-    crop: TextureBinding,
+    renderer: MeshRenderer,
+    mesh: Mesh,
 }
 
 impl State {
@@ -36,53 +32,33 @@ impl State {
         let window = Arc::new(
             event_loop.create_window(
                 Window::default_attributes()
-                    .with_title("Astrelis — textures: nearest, linear, cropped overlay")
+                    .with_title("Astrelis — custom passes and final MSAA resolve")
                     .with_inner_size(PhysicalSize::new(800, 600)),
             )?,
         );
         let size = window.inner_size();
         let (graphics, target) = pollster::block_on(GraphicsContext::with_surface(
             window.clone(),
-            SurfaceOptions::new(size.width, size.height),
+            SurfaceOptions::new(size.width, size.height)
+                .sample_count(4)
+                .depth_stencil(wgpu::TextureFormat::Depth24PlusStencil8),
         ))?;
-        let texture = graphics.create_texture(TextureOptions::new(16, 16))?;
-        let mut bytes = Vec::with_capacity(16 * 16 * 4);
-        for y in 0..16 {
-            for x in 0..16 {
-                let rgb = if (x / 2 + y / 2) % 2 == 0 {
-                    [240, 105, 55]
-                } else {
-                    [45, 155, 240]
-                };
-                let alpha = if (5..11).contains(&x) && (5..11).contains(&y) {
-                    100
-                } else {
-                    255
-                };
-                bytes.extend_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
-            }
-        }
-        texture.write(&bytes)?;
-        let mut renderer = TextureRenderer::new(&graphics);
-        let nearest = renderer.create_binding(
-            texture.view(),
-            TextureBindingOptions::new().filter(TextureFilter::Nearest),
+        let renderer = MeshRenderer::new(&graphics);
+        let mesh = graphics.create_mesh(
+            &[
+                Vertex::new([0.0, 0.75, 0.0], [1.0, 0.15, 0.15, 1.0]),
+                Vertex::new([-0.75, -0.65, 0.0], [0.15, 1.0, 0.15, 1.0]),
+                Vertex::new([0.75, -0.65, 0.0], [0.15, 0.35, 1.0, 1.0]),
+            ],
+            &[0, 1, 2],
         )?;
-        let linear = renderer.create_binding(texture.view(), TextureBindingOptions::new())?;
-        let crop = linear.clone(); // Reuse image/sampler resources for another placement.
-        for binding in [&nearest, &linear, &crop] {
-            renderer.prepare_for_target(binding, &target)?;
-        }
         window.request_redraw();
         Ok(Self {
             window,
             graphics,
             target,
             renderer,
-            _texture: texture,
-            nearest,
-            linear,
-            crop,
+            mesh,
         })
     }
 }
@@ -117,32 +93,29 @@ impl App {
             Err(error) => return Err(error.into()),
         };
         {
-            let mut pass = frame
+            // Managed snapshots expose the acquired surface and its MSAA storage.
+            let color = frame.color_attachment()?.resolve(false);
+            let colors = [Some(color)];
+            let depth = frame.depth_stencil_attachment()?;
+            let mut pass = frame.begin_render_pass(&RenderPassDescriptor {
+                label: Some("custom scene pass"),
+                colors: &colors,
+                depth_stencil: depth.as_ref(),
+                ..Default::default()
+            })?;
+            state.renderer.draw(&mut pass, &state.mesh)?;
+        }
+        {
+            // Resolve once after all scene passes. Samples are unnecessary afterward.
+            let _pass = frame
                 .render_pass()
-                .clear_color(wgpu::Color {
-                    r: 0.025,
-                    g: 0.035,
-                    b: 0.06,
-                    a: 1.0,
+                .load_all()
+                .without_depth_stencil()
+                .color_ops(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Discard,
                 })
                 .begin()?;
-            state.renderer.draw(
-                &mut pass,
-                &state.nearest,
-                TextureDraw::normalized(Rect::new(0.06, 0.12, 0.40, 0.76)),
-            )?;
-            state.renderer.draw(
-                &mut pass,
-                &state.linear,
-                TextureDraw::normalized(Rect::new(0.54, 0.12, 0.40, 0.76)),
-            )?;
-            state.renderer.draw(
-                &mut pass,
-                &state.crop,
-                TextureDraw::normalized(Rect::new(0.32, 0.34, 0.36, 0.32))
-                    .uv(UvRect::new(0., 0., 0.5, 0.5))
-                    .tint([0.65, 1., 0.8, 0.65]),
-            )?;
         }
         frame.finish()?;
         self.retry_at = None;
@@ -157,11 +130,10 @@ impl App {
         let count = state.target.sample_count();
         state.target = state.graphics.create_surface(
             state.window.clone(),
-            SurfaceOptions::new(size.width, size.height).sample_count(count),
+            SurfaceOptions::new(size.width, size.height)
+                .sample_count(count)
+                .depth_stencil(wgpu::TextureFormat::Depth24PlusStencil8),
         )?;
-        for binding in [&state.nearest, &state.linear, &state.crop] {
-            state.renderer.prepare_for_target(binding, &state.target)?;
-        }
         state.window.request_redraw();
         Ok(())
     }

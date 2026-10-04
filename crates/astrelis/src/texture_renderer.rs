@@ -1,374 +1,761 @@
-use std::collections::{HashMap, hash_map::Entry};
-
-use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt;
-
 use crate::{Error, GraphicsContext, RenderPass, RenderTarget};
+use bytemuck::{Pod, Zeroable};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, hash_map::Entry},
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
-/// How the source texture stores alpha, independently of destination blending.
+/// Alpha encoding of sampled RGB, independent of destination blending.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TextureAlpha {
-    /// Source RGB is independent of alpha, as in most uploaded image files.
+    /// RGB is independent of alpha, as in most uploaded images.
     #[default]
     Straight,
-    /// Source RGB already contains alpha, as in the built-in mesh framebuffer output.
+    /// RGB already contains alpha, as in built-in framebuffer rendering.
     Premultiplied,
 }
-
-/// Sampling filter for a single-mip color texture. Addressing clamps to its edges.
+/// Convenience sampling filter. Custom samplers can be supplied separately.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TextureFilter {
-    /// Chooses the nearest texel, including on unfilterable float formats.
+    /// Nearest texel; supports unfilterable float formats.
     Nearest,
-    /// Interpolates neighboring texels. Requires a filterable source format.
+    /// Linear interpolation; requires filterable storage.
     #[default]
     Linear,
 }
-
-/// How a texture draw combines its premultiplied output with existing color.
+/// Destination blending for built-in texture shading.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TextureBlend {
-    /// Premultiplied source-over alpha blending.
+    /// Premultiplied source-over blending.
     #[default]
     Alpha,
-    /// Replaces the destination with premultiplied output, including its alpha.
+    /// Replace destination color with premultiplied output.
     Replace,
 }
-
-/// Immutable settings uploaded when preparing a [`TextureBinding`].
-///
-/// Rectangles are `[x, y, width, height]`, with nonnegative extents. Destination
-/// coordinates are relative to the active pass viewport: `(0, 0)` is top-left and
-/// `(1, 1)` bottom-right. Values outside that range are clipped by the pass.
-/// Source coordinates are normalized texture UVs, also top-left based; coordinates
-/// outside the texture clamp to its edges. Zero destination extents produce no
-/// visible area; a zero source extent samples a point or line.
-/// Rectangles and tint must be finite. Tint uses linear RGB and straight alpha;
-/// alpha must be in `0..=1`. The default draws the full image over the full viewport.
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[must_use = "pass these options to TextureRenderer::create_binding"]
-pub struct TextureDrawOptions {
-    /// Destination rectangle in viewport-relative coordinates.
-    pub destination: [f32; 4],
-    /// Source rectangle in normalized UV coordinates.
-    pub source: [f32; 4],
-    /// Linear RGB tint and opacity, applied to premultiplied output.
-    pub tint: [f32; 4],
-    /// Source alpha interpretation.
-    pub alpha: TextureAlpha,
-    /// Sampling filter.
-    pub filter: TextureFilter,
-    /// Destination blending.
-    pub blend: TextureBlend,
-}
-
-impl Default for TextureDrawOptions {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TextureDrawOptions {
-    /// Selects a full-image draw with straight source alpha, linear filtering, and alpha blending.
-    pub const fn new() -> Self {
-        Self {
-            destination: [0.0, 0.0, 1.0, 1.0],
-            source: [0.0, 0.0, 1.0, 1.0],
-            tint: [1.0; 4],
-            alpha: TextureAlpha::Straight,
-            filter: TextureFilter::Linear,
-            blend: TextureBlend::Alpha,
+impl From<TextureBlend> for Option<wgpu::BlendState> {
+    fn from(blend: TextureBlend) -> Self {
+        match blend {
+            TextureBlend::Alpha => Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            TextureBlend::Replace => None,
         }
     }
-    /// Selects the viewport-relative destination rectangle.
-    pub const fn destination(mut self, rectangle: [f32; 4]) -> Self {
-        self.destination = rectangle;
+}
+
+/// A top-left rectangle in explicitly selected destination units.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Rect {
+    /// Left coordinate.
+    pub x: f32,
+    /// Top coordinate.
+    pub y: f32,
+    /// Nonnegative width.
+    pub width: f32,
+    /// Nonnegative height.
+    pub height: f32,
+}
+impl Rect {
+    /// Creates a rectangle; drawing validates finite coordinates and nonnegative extents.
+    pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+    fn array(self) -> [f32; 4] {
+        [self.x, self.y, self.width, self.height]
+    }
+}
+/// A normalized source rectangle in texture UV coordinates, top-left based.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct UvRect {
+    /// Left UV coordinate.
+    pub u: f32,
+    /// Top UV coordinate.
+    pub v: f32,
+    /// Nonnegative UV width.
+    pub width: f32,
+    /// Nonnegative UV height.
+    pub height: f32,
+}
+impl UvRect {
+    /// Creates a UV rectangle. Coordinates outside the texture follow sampler addressing.
+    pub const fn new(u: f32, v: f32, width: f32, height: f32) -> Self {
+        Self {
+            u,
+            v,
+            width,
+            height,
+        }
+    }
+    fn array(self) -> [f32; 4] {
+        [self.u, self.v, self.width, self.height]
+    }
+}
+/// Per-draw CPU data. Changing these values allocates no binding, sampler, or uniform buffer.
+/// Parameters are copied into recording-owned instance storage and uploaded at finish.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextureDraw {
+    destination: Rect,
+    normalized: bool,
+    /// Source UV rectangle.
+    pub uv: UvRect,
+    /// Linear RGB tint and straight opacity, with opacity in `0..=1`.
+    pub tint: [f32; 4],
+    /// Affine transform `[xx, yx, xy, yy, tx, ty]` in destination units.
+    /// Applied before conversion from pixels or normalized viewport coordinates.
+    pub transform: [f32; 6],
+}
+impl Default for TextureDraw {
+    fn default() -> Self {
+        Self::normalized(Rect::new(0., 0., 1., 1.))
+    }
+}
+impl TextureDraw {
+    /// Selects a rectangle in physical pixels relative to the viewport's top-left.
+    pub const fn new(destination: Rect) -> Self {
+        Self {
+            destination,
+            normalized: false,
+            uv: UvRect::new(0., 0., 1., 1.),
+            tint: [1.; 4],
+            transform: [1., 0., 0., 1., 0., 0.],
+        }
+    }
+    /// Selects a viewport-relative rectangle, where `(1,1)` is its bottom-right.
+    pub const fn normalized(destination: Rect) -> Self {
+        Self {
+            normalized: true,
+            ..Self::new(destination)
+        }
+    }
+    /// Selects normalized source UVs.
+    pub const fn uv(mut self, uv: UvRect) -> Self {
+        self.uv = uv;
         self
     }
-    /// Selects the normalized source crop.
-    pub const fn source(mut self, rectangle: [f32; 4]) -> Self {
-        self.source = rectangle;
-        self
-    }
-    /// Selects a linear RGB tint and straight opacity.
+    /// Selects tint and opacity.
     pub const fn tint(mut self, tint: [f32; 4]) -> Self {
         self.tint = tint;
         self
     }
-    /// Selects straight or premultiplied source pixels.
+    /// Selects an affine destination transform.
+    pub const fn transform(mut self, transform: [f32; 6]) -> Self {
+        self.transform = transform;
+        self
+    }
+    fn parameters(self, viewport: [f32; 2]) -> Result<Parameters, Error> {
+        let valid = |r: [f32; 4]| r.iter().all(|v| v.is_finite()) && r[2] >= 0. && r[3] >= 0.;
+        if !valid(self.destination.array())
+            || !valid(self.uv.array())
+            || !self
+                .tint
+                .iter()
+                .chain(&self.transform)
+                .all(|v| v.is_finite())
+            || !(0.0..=1.0).contains(&self.tint[3])
+        {
+            return Err(Error::InvalidTextureDraw);
+        }
+        let [xx, yx, xy, yy, tx, ty] = self.transform;
+        let scale = if self.normalized {
+            [1., 1.]
+        } else {
+            viewport.map(|v| if v > 0. { 1. / v } else { 0. })
+        };
+        let r = self.destination;
+        let p = Parameters {
+            origin_axis_x: [
+                (xx * r.x + xy * r.y + tx) * scale[0],
+                (yx * r.x + yy * r.y + ty) * scale[1],
+                xx * r.width * scale[0],
+                yx * r.width * scale[1],
+            ],
+            axis_y: [xy * r.height * scale[0], yy * r.height * scale[1], 0., 0.],
+            source: self.uv.array(),
+            tint: self.tint,
+        };
+        if !bytemuck::cast_slice::<Parameters, f32>(&[p])
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err(Error::InvalidTextureDraw);
+        }
+        Ok(p)
+    }
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct Parameters {
+    origin_axis_x: [f32; 4],
+    axis_y: [f32; 4],
+    source: [f32; 4],
+    tint: [f32; 4],
+}
+fn parameter_layout() -> wgpu::VertexBufferLayout<'static> {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
+        wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4];
+    wgpu::VertexBufferLayout {
+        array_stride: 64,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &ATTRIBUTES,
+    }
+}
+/// Reusable sampling settings, independent of rectangle placement and material state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TextureBindingOptions {
+    /// Source RGB alpha encoding.
+    pub alpha: TextureAlpha,
+    /// Filtering requirement; must match a supplied custom sampler.
+    pub filter: TextureFilter,
+}
+impl TextureBindingOptions {
+    /// Straight alpha and linear sampling.
+    pub const fn new() -> Self {
+        Self {
+            alpha: TextureAlpha::Straight,
+            filter: TextureFilter::Linear,
+        }
+    }
+    /// Selects source alpha interpretation.
     pub const fn alpha(mut self, alpha: TextureAlpha) -> Self {
         self.alpha = alpha;
         self
     }
-    /// Selects nearest or linear sampling.
+    /// Selects sampling filtering requirements.
     pub const fn filter(mut self, filter: TextureFilter) -> Self {
         self.filter = filter;
         self
     }
-    /// Selects alpha compositing or replacement.
-    pub const fn blend(mut self, blend: TextureBlend) -> Self {
-        self.blend = blend;
-        self
+}
+/// Live framebuffer output reference. Clones follow replacement of its storage.
+/// Snapshot texture bindings remain available for explicit generation ownership.
+#[derive(Clone, Debug)]
+pub struct SampledColor {
+    view: Arc<RwLock<Option<wgpu::TextureView>>>,
+    graphics: GraphicsContext,
+}
+impl SampledColor {
+    pub(crate) fn new(graphics: &GraphicsContext, view: Option<wgpu::TextureView>) -> Self {
+        Self {
+            view: Arc::new(RwLock::new(view)),
+            graphics: graphics.clone(),
+        }
+    }
+    pub(crate) fn replace(&self, view: Option<wgpu::TextureView>) {
+        *self.view.write().unwrap_or_else(|e| e.into_inner()) = view;
+    }
+    /// Snapshots the current view; suspended output has no storage.
+    pub fn view(&self) -> Result<wgpu::TextureView, Error> {
+        self.view
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .ok_or(Error::TargetSuspended)
     }
 }
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct Parameters {
-    destination: [f32; 4],
-    source: [f32; 4],
-    tint: [f32; 4],
+/// Immutable texture instance data uploaded once, independently of image bindings.
+/// Use for static content; changing draws use [`TextureDraw`] and recording-owned uploads.
+/// Pixel-coordinate data is prepared against a viewport size and rejects a different
+/// viewport size at draw time. Normalized data adapts to any viewport without reupload.
+#[derive(Clone, Debug)]
+pub struct PreparedTextureDraw {
+    graphics: GraphicsContext,
+    buffer: wgpu::Buffer,
+    count: u32,
+    viewport: Option<[f32; 2]>,
 }
 
-/// A reusable texture source and prepared rectangle, tint, sampler, and bind group.
-///
-/// Create with [`TextureRenderer::create_binding`]. Preparation uploads immutable
-/// draw parameters once; repeated draws create no GPU resources or uploads. Create another
-/// binding to change settings. Bindings can be shared by texture renderers on the
-/// same device and cloned without copying resources.
-///
-/// The binding retains the source view. When a framebuffer replaces its storage
-/// after resize or MSAA changes, call [`TextureRenderer::rebind`] explicitly.
-/// Pixel uploads to existing storage need no rebind. Raw view dimensions, devices,
-/// and view-format compatibility use wgpu validation at binding creation.
+type LiveBinding = (
+    SampledColor,
+    Arc<Mutex<(wgpu::TextureView, wgpu::BindGroup)>>,
+);
+
+/// A reusable image/sampler binding. Draw placement, UVs, tint, and transforms
+/// are supplied separately. Clones share handles; recorded draws retain their groups.
 #[derive(Clone, Debug)]
 pub struct TextureBinding {
-    device: wgpu::Device,
-    instance: wgpu::Instance,
+    graphics: GraphicsContext,
     view: wgpu::TextureView,
     sampler: wgpu::Sampler,
-    parameters: wgpu::Buffer,
     group: wgpu::BindGroup,
-    options: TextureDrawOptions,
+    options: TextureBindingOptions,
+    managed: Option<LiveBinding>,
 }
-
 impl TextureBinding {
-    /// Returns the immutable settings used by this binding.
-    pub fn options(&self) -> TextureDrawOptions {
+    /// Returns source alpha and filtering settings.
+    pub fn options(&self) -> TextureBindingOptions {
         self.options
     }
-    /// Returns the retained source view, including after its originating target resizes.
+    /// Returns the snapshot used at creation or explicit rebind.
+    /// For live framebuffer sources use [`SampledColor::view`] to inspect current storage.
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
 }
-
+/// Immutable shader and pipeline settings for textured rectangles.
+#[derive(Clone, Debug)]
+pub struct TextureMaterialOptions<'a> {
+    /// Blend operation for built-in premultiplied output.
+    pub blend: Option<wgpu::BlendState>,
+    /// Color channels written by the material.
+    pub write_mask: wgpu::ColorWrites,
+    /// Winding used for culling and front/back stencil operations.
+    pub front_face: wgpu::FrontFace,
+    /// Faces to discard; defaults to no culling.
+    pub cull_mode: Option<wgpu::Face>,
+    /// Optional explicit depth/stencil tests and writes.
+    pub depth_stencil: Option<wgpu::DepthStencilState>,
+    /// Optional custom shader. Uses the four vec4 instance attributes documented
+    /// by [`TextureDraw`], and image/sampler at group zero bindings zero/one.
+    pub shader: Option<&'a wgpu::ShaderModule>,
+    /// Vertex entry point for a custom shader.
+    pub vertex_entry: &'a str,
+    /// Custom fragment entry point. Built-in shading selects source alpha automatically.
+    pub fragment_entry: &'a str,
+    /// Additional layouts at groups one and above, bound through [`RenderPass::set_bind_group`].
+    pub bind_group_layouts: &'a [Option<&'a wgpu::BindGroupLayout>],
+}
+impl Default for TextureMaterialOptions<'_> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl<'a> TextureMaterialOptions<'a> {
+    /// Built-in shading with alpha blending and no depth/stencil tests or writes.
+    pub const fn new() -> Self {
+        Self {
+            blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            write_mask: wgpu::ColorWrites::ALL,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            depth_stencil: None,
+            shader: None,
+            vertex_entry: "vertex_main",
+            fragment_entry: "fragment_main",
+            bind_group_layouts: &[],
+        }
+    }
+    /// Selects blending.
+    pub fn blend(mut self, blend: impl Into<Option<wgpu::BlendState>>) -> Self {
+        self.blend = blend.into();
+        self
+    }
+    /// Selects depth/stencil state. Dynamic stencil reference belongs to the pass.
+    pub fn depth_stencil(mut self, state: Option<wgpu::DepthStencilState>) -> Self {
+        self.depth_stencil = state;
+        self
+    }
+}
+/// Reusable texture shading settings, independent of targets and image bindings.
+#[derive(Clone, Debug)]
+pub struct TextureMaterial {
+    id: u64,
+    graphics: GraphicsContext,
+    blend: Option<wgpu::BlendState>,
+    write_mask: wgpu::ColorWrites,
+    front_face: wgpu::FrontFace,
+    cull_mode: Option<wgpu::Face>,
+    depth_stencil: Option<wgpu::DepthStencilState>,
+    shader: Option<wgpu::ShaderModule>,
+    vertex_entry: String,
+    fragment_entry: String,
+    layouts: Vec<Option<wgpu::BindGroupLayout>>,
+}
+impl TextureMaterial {
+    pub(crate) fn create(g: &GraphicsContext, o: TextureMaterialOptions<'_>) -> Self {
+        static ID: AtomicU64 = AtomicU64::new(0);
+        Self {
+            id: ID.fetch_add(1, Ordering::Relaxed),
+            graphics: g.clone(),
+            blend: o.blend,
+            write_mask: o.write_mask,
+            front_face: o.front_face,
+            cull_mode: o.cull_mode,
+            depth_stencil: o.depth_stencil,
+            shader: o.shader.cloned(),
+            vertex_entry: o.vertex_entry.into(),
+            fragment_entry: o.fragment_entry.into(),
+            layouts: o.bind_group_layouts.iter().map(|v| v.cloned()).collect(),
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct PipelineKey {
+    material: u64,
     format: wgpu::TextureFormat,
     count: u32,
     depth_stencil: Option<wgpu::TextureFormat>,
     filter: TextureFilter,
     alpha: TextureAlpha,
-    blend: TextureBlend,
 }
-
-/// Draws prepared texture rectangles into application-controlled render passes.
-///
-/// Construct independently with [`Self::new`]. This renderer owns no target or
-/// window and does not clear, submit, or present. Pipeline keys include target
-/// formats, MSAA count, filtering, source alpha, and blending. Prepare with
-/// [`Self::prepare_for_target`] to avoid pipeline creation on first draw.
-/// Depth/stencil tests and writes are disabled, allowing overlays in 3D passes.
-/// Drawing restores wrapped viewport/scissor/reference state and its own bindings,
-/// so mesh, texture, and application renderers can be interleaved in one pass.
+/// Independent textured-rectangle renderer. Records explicit draw order into
+/// application-owned passes. Instance pages are leased per recording and uploaded
+/// once per page at finish; image bindings are reusable across changing draws.
 #[derive(Debug)]
 pub struct TextureRenderer {
     graphics: GraphicsContext,
     shader: wgpu::ShaderModule,
     nearest: wgpu::BindGroupLayout,
     linear: wgpu::BindGroupLayout,
+    nearest_sampler: wgpu::Sampler,
+    linear_sampler: wgpu::Sampler,
+    material: Arc<TextureMaterial>,
     pipelines: HashMap<PipelineKey, wgpu::RenderPipeline>,
+    parameters: Vec<Parameters>,
 }
-
 impl TextureRenderer {
-    /// Creates the shader and binding layouts, with an empty pipeline cache.
-    pub fn new(graphics: &GraphicsContext) -> Self {
-        let device = graphics.device();
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Astrelis texture shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("texture.wgsl").into()),
-        });
+    /// Creates built-in shader, layouts, reusable samplers, and an empty pipeline cache.
+    pub fn new(g: &GraphicsContext) -> Self {
+        let device = g.device();
+        let sampler = |filter| {
+            device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: filter,
+                min_filter: filter,
+                ..Default::default()
+            })
+        };
         Self {
-            graphics: graphics.clone(),
-            shader,
+            graphics: g.clone(),
+            shader: device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Astrelis textures"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("texture.wgsl").into()),
+            }),
             nearest: binding_layout(device, false),
             linear: binding_layout(device, true),
+            nearest_sampler: sampler(wgpu::FilterMode::Nearest),
+            linear_sampler: sampler(wgpu::FilterMode::Linear),
+            material: Arc::new(g.create_texture_material(TextureMaterialOptions::new())),
             pipelines: HashMap::new(),
+            parameters: Vec::new(),
         }
     }
-
-    /// Prepares a sampled 2D view with immutable draw settings.
-    ///
-    /// Accepts [`crate::Texture::view`], [`crate::Framebuffer::color_view`], and
-    /// application-created views. Source storage must be single-sampled, have
-    /// `TEXTURE_BINDING`, and supply float color texels. Linear filtering additionally
-    /// needs a filterable format. Nearest filtering accepts unfilterable float formats.
-    /// Settings and observable source properties are validated before allocation.
-    /// Raw view device/dimension/format mismatches use wgpu error reporting.
-    pub fn create_binding(
-        &self,
-        view: &wgpu::TextureView,
-        options: TextureDrawOptions,
-    ) -> Result<TextureBinding, Error> {
-        validate_options(options)?;
-        self.validate_source(view, options.filter)?;
-        let device = self.graphics.device();
-        let filter = match options.filter {
-            TextureFilter::Nearest => wgpu::FilterMode::Nearest,
-            TextureFilter::Linear => wgpu::FilterMode::Linear,
-        };
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("Astrelis texture sampler"),
-            mag_filter: filter,
-            min_filter: filter,
-            ..Default::default()
-        });
-        let parameters = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Astrelis texture rectangle"),
-            contents: bytemuck::bytes_of(&Parameters {
-                destination: options.destination,
-                source: options.source,
-                tint: options.tint,
-            }),
-            usage: wgpu::BufferUsages::UNIFORM,
-        });
-        let group = bind(
-            device,
-            self.layout(options.filter),
-            view,
-            &sampler,
-            &parameters,
-        );
-        Ok(TextureBinding {
-            device: device.clone(),
-            instance: self.graphics.instance().clone(),
-            view: view.clone(),
-            sampler,
-            parameters,
-            group,
-            options,
-        })
-    }
-
-    /// Refreshes a binding's source view while retaining its settings, sampler, and parameters.
-    ///
-    /// Repeating with the same view does no GPU work. Returned errors preserve the
-    /// previous binding. A new view creates one bind group, without pixel uploads.
-    /// Previously recorded draws retain the old bind group; recording is a snapshot
-    /// of bindings, unlike queue uploads into the same underlying texture storage.
-    pub fn rebind(
-        &self,
-        binding: &mut TextureBinding,
-        view: &wgpu::TextureView,
-    ) -> Result<(), Error> {
-        if &binding.device != self.graphics.device()
-            || &binding.instance != self.graphics.instance()
-        {
-            return Err(Error::DeviceMismatch);
-        }
-        self.validate_source(view, binding.options.filter)?;
-        if &binding.view == view {
-            return Ok(());
-        }
-        let group = bind(
-            self.graphics.device(),
-            self.layout(binding.options.filter),
-            view,
-            &binding.sampler,
-            &binding.parameters,
-        );
-        binding.group = group;
-        binding.view = view.clone();
-        Ok(())
-    }
-
-    /// Warms a binding's pipeline for a complete target configuration.
-    ///
-    /// Repeated preparation reuses the cache without capability queries or resource
-    /// creation. Source rectangles and tint do not create pipeline variants.
-    /// Returns `DeviceMismatch` for foreign bindings/targets, or format/sample
-    /// errors for unsupported destinations. Raw shader validation follows wgpu.
-    pub fn prepare_for_target(
-        &mut self,
-        binding: &TextureBinding,
-        target: &RenderTarget<'_>,
-    ) -> Result<(), Error> {
-        if !target.graphics().same_device(&self.graphics)
-            || (&binding.device != self.graphics.device()
-                || &binding.instance != self.graphics.instance())
-        {
-            return Err(Error::DeviceMismatch);
-        }
-        self.pipeline(key(
-            binding,
-            target.format(),
-            target.sample_count(),
-            target.depth_stencil_format(),
-        ))?;
-        Ok(())
-    }
-
-    /// Warms a binding's pipeline for explicit attachment formats and sample count.
-    ///
-    /// Useful for framebuffers before acquiring a recording, or before changing MSAA.
-    /// Validation and caching follow [`Self::prepare_for_target`].
-    pub fn prepare(
-        &mut self,
-        binding: &TextureBinding,
-        format: wgpu::TextureFormat,
-        count: u32,
-        depth_stencil: Option<wgpu::TextureFormat>,
-    ) -> Result<(), Error> {
-        if &binding.device != self.graphics.device()
-            || &binding.instance != self.graphics.instance()
-        {
-            return Err(Error::DeviceMismatch);
-        }
-        self.pipeline(key(binding, format, count, depth_stencil))?;
-        Ok(())
-    }
-
-    /// Draws one prepared rectangle, without parameter uploads or submission.
-    ///
-    /// A missing pipeline is created lazily. Prepare first to avoid GPU resource creation.
-    /// Rectangles follow the current viewport; clipping follows the current scissor.
-    /// Source storage must not alias an active color/resolve attachment. Rejected
-    /// device, feedback, or destination format/sample checks record no draw.
-    /// Other custom-view validation follows wgpu's error reporting.
-    pub fn draw(
-        &mut self,
-        pass: &mut RenderPass<'_>,
-        binding: &TextureBinding,
-    ) -> Result<(), Error> {
-        if !pass.same_device(&self.graphics)
-            || (&binding.device != self.graphics.device()
-                || &binding.instance != self.graphics.instance())
-        {
-            return Err(Error::DeviceMismatch);
-        }
-        if pass.uses_color_texture(binding.view.texture()) {
-            return Err(Error::TextureFeedback);
-        }
-        let key = key(
-            binding,
-            pass.format(),
-            pass.sample_count(),
-            pass.depth_stencil_format(),
-        );
-        let pipeline = self.pipeline(key)?;
-        pass.apply_raster_state();
-        pass.inner.set_pipeline(pipeline);
-        pass.inner.set_bind_group(0, &binding.group, &[]);
-        pass.inner.draw(0..6, 0..1);
-        Ok(())
-    }
-
     fn layout(&self, filter: TextureFilter) -> &wgpu::BindGroupLayout {
         match filter {
             TextureFilter::Nearest => &self.nearest,
             TextureFilter::Linear => &self.linear,
         }
+    }
+    /// Creates a snapshot image binding using a reusable nearest or linear sampler.
+    pub fn create_binding(
+        &self,
+        view: &wgpu::TextureView,
+        options: TextureBindingOptions,
+    ) -> Result<TextureBinding, Error> {
+        self.create_binding_with_sampler(
+            view,
+            match options.filter {
+                TextureFilter::Nearest => &self.nearest_sampler,
+                TextureFilter::Linear => &self.linear_sampler,
+            },
+            options,
+        )
+    }
+    /// Uses an application sampler for addressing, filtering, and mip selection.
+    /// Its filtering behavior must match `options.filter`; wgpu validates the raw sampler.
+    pub fn create_binding_with_sampler(
+        &self,
+        view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+        options: TextureBindingOptions,
+    ) -> Result<TextureBinding, Error> {
+        self.validate_source(view, options.filter)?;
+        let group = bind(
+            self.graphics.device(),
+            self.layout(options.filter),
+            view,
+            sampler,
+        );
+        Ok(TextureBinding {
+            graphics: self.graphics.clone(),
+            view: view.clone(),
+            sampler: sampler.clone(),
+            group,
+            options,
+            managed: None,
+        })
+    }
+    /// Binds a live framebuffer source with premultiplied alpha by default.
+    /// The source refreshes only when storage changes; a suspended source rejects drawing.
+    pub fn create_sampled_binding(&self, source: &SampledColor) -> Result<TextureBinding, Error> {
+        self.create_sampled_binding_with_options(
+            source,
+            TextureBindingOptions::new().alpha(TextureAlpha::Premultiplied),
+        )
+    }
+    /// Selects explicit alpha/filtering for a live source, including custom shader output.
+    pub fn create_sampled_binding_with_options(
+        &self,
+        source: &SampledColor,
+        options: TextureBindingOptions,
+    ) -> Result<TextureBinding, Error> {
+        if !self.graphics.same_device(&source.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        let mut b = self.create_binding(&source.view()?, options)?;
+        b.managed = Some((
+            source.clone(),
+            Arc::new(Mutex::new((b.view.clone(), b.group.clone()))),
+        ));
+        Ok(b)
+    }
+    /// Replaces a snapshot source, retaining its sampler. Live tracking becomes a snapshot.
+    /// Existing recorded draws retain their original source binding.
+    pub fn rebind(&self, b: &mut TextureBinding, view: &wgpu::TextureView) -> Result<(), Error> {
+        if !self.graphics.same_device(&b.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        self.validate_source(view, b.options.filter)?;
+        if b.view != *view {
+            b.group = bind(
+                self.graphics.device(),
+                self.layout(b.options.filter),
+                view,
+                &b.sampler,
+            );
+            b.view = view.clone();
+        }
+        b.managed = None;
+        Ok(())
+    }
+    /// Prepares default shading for a target before rendering.
+    pub fn prepare_for_target(
+        &mut self,
+        b: &TextureBinding,
+        target: &RenderTarget<'_>,
+    ) -> Result<(), Error> {
+        if !target.graphics().same_device(&self.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        self.prepare(b, &target.render_format())
+    }
+    /// Prepares default shading from a format value, including framebuffer formats.
+    pub fn prepare(
+        &mut self,
+        b: &TextureBinding,
+        format: &crate::RenderFormat,
+    ) -> Result<(), Error> {
+        let material = self.material.clone();
+        self.prepare_material(b, &material, format)
+    }
+    /// Prepares a material; raw shader diagnostics follow wgpu error reporting.
+    pub fn prepare_material(
+        &mut self,
+        b: &TextureBinding,
+        m: &TextureMaterial,
+        format: &crate::RenderFormat,
+    ) -> Result<(), Error> {
+        let color = if format.colors.len() == 1 {
+            format.colors[0]
+        } else {
+            None
+        }
+        .ok_or(Error::ExpectedSingleColor)?;
+        self.pipeline(b, m, color, format.sample_count, format.depth_stencil)?;
+        Ok(())
+    }
+    /// Captures pipeline validation errors before caching a custom material.
+    pub async fn try_prepare_material(
+        &mut self,
+        b: &TextureBinding,
+        m: &TextureMaterial,
+        format: &crate::RenderFormat,
+    ) -> Result<(), Error> {
+        let scope = self
+            .graphics
+            .device()
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let original = std::mem::take(&mut self.pipelines);
+        let result = self.prepare_material(b, m, format);
+        let prepared = std::mem::replace(&mut self.pipelines, original);
+        if let Some(e) = scope.pop().await {
+            return Err(Error::Validation(e));
+        }
+        result?;
+        self.pipelines.extend(prepared);
+        Ok(())
+    }
+    /// Uploads immutable draw parameters once. Normalized rectangles can use any
+    /// viewport size; pixel rectangles retain the supplied viewport size.
+    /// Rejects empty data, invalid parameters, or data beyond device buffer limits.
+    pub fn prepare_draws(
+        &self,
+        draws: &[TextureDraw],
+        viewport: [f32; 2],
+    ) -> Result<PreparedTextureDraw, Error> {
+        use wgpu::util::DeviceExt;
+        if draws.is_empty()
+            || draws.len() > u32::MAX as usize
+            || draws.len() as u64 > self.graphics.device().limits().max_buffer_size / 64
+            || !viewport.iter().all(|v| v.is_finite() && *v > 0.)
+        {
+            return Err(Error::InvalidTextureDraw);
+        }
+        let parameters: Result<Vec<_>, _> = draws.iter().map(|d| d.parameters(viewport)).collect();
+        let buffer = self
+            .graphics
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Astrelis static texture draws"),
+                contents: bytemuck::cast_slice(&parameters?),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        Ok(PreparedTextureDraw {
+            graphics: self.graphics.clone(),
+            buffer,
+            count: draws.len() as u32,
+            viewport: draws.iter().any(|d| !d.normalized).then_some(viewport),
+        })
+    }
+
+    /// Draws static prepared parameters with no recurring parameter uploads.
+    pub fn draw_prepared(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        binding: &TextureBinding,
+        draws: &PreparedTextureDraw,
+    ) -> Result<(), Error> {
+        let material = self.material.clone();
+        self.draw_prepared_with_material(pass, binding, &material, draws)
+    }
+
+    /// Draws static prepared parameters with an explicit reusable material.
+    pub fn draw_prepared_with_material(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        binding: &TextureBinding,
+        material: &TextureMaterial,
+        draws: &PreparedTextureDraw,
+    ) -> Result<(), Error> {
+        if !draws.graphics.same_device(&self.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        if draws.viewport.is_some_and(|v| v != pass.viewport_size()) {
+            return Err(Error::InvalidTextureDraw);
+        }
+        self.setup_draw(pass, binding, material)?;
+        pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
+        pass.inner.draw(0..6, 0..draws.count);
+        Ok(())
+    }
+
+    /// Draws one rectangle using default premultiplied shading.
+    pub fn draw(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        b: &TextureBinding,
+        draw: TextureDraw,
+    ) -> Result<(), Error> {
+        let material = self.material.clone();
+        self.draw_with_material(pass, b, &material, draw)
+    }
+    /// Draws using explicit reusable material state, including stencil clipping.
+    pub fn draw_with_material(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        b: &TextureBinding,
+        m: &TextureMaterial,
+        draw: TextureDraw,
+    ) -> Result<(), Error> {
+        self.draw_many_with_material(pass, b, m, std::slice::from_ref(&draw))
+    }
+    /// Instances consecutive rectangles using one image and default material.
+    /// Order follows the input slice. No automatic sorting is performed.
+    pub fn draw_many(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        b: &TextureBinding,
+        draws: &[TextureDraw],
+    ) -> Result<(), Error> {
+        let material = self.material.clone();
+        self.draw_many_with_material(pass, b, &material, draws)
+    }
+    /// Instances consecutive draws with explicit material state. Large slices split
+    /// at upload-page boundaries while preserving order. Rejects invalid parameters
+    /// before recording any draw.
+    pub fn draw_many_with_material(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        b: &TextureBinding,
+        m: &TextureMaterial,
+        draws: &[TextureDraw],
+    ) -> Result<(), Error> {
+        let viewport = pass.viewport_size();
+        self.parameters.clear();
+        for draw in draws {
+            self.parameters.push(draw.parameters(viewport)?);
+        }
+        if self.parameters.is_empty() {
+            return Ok(());
+        }
+        self.setup_draw(pass, b, m)?;
+        for chunk in self.parameters.chunks(1024) {
+            let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk));
+            // Instance ranges select a page region without rebinding the buffer per draw.
+            pass.set_vertex_buffer(0, &buffer, 0..buffer.size());
+            let first = (range.start / 64) as u32;
+            pass.inner.draw(0..6, first..first + chunk.len() as u32);
+        }
+        Ok(())
+    }
+    fn setup_draw(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        b: &TextureBinding,
+        m: &TextureMaterial,
+    ) -> Result<(), Error> {
+        if !pass.same_device(&self.graphics)
+            || !b.graphics.same_device(&self.graphics)
+            || !m.graphics.same_device(&self.graphics)
+        {
+            return Err(Error::DeviceMismatch);
+        }
+        let (view, group) = if let Some((source, cache)) = &b.managed {
+            let view = source.view()?;
+            let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+            if cache.0 != view {
+                self.validate_source(&view, b.options.filter)?;
+                *cache = (
+                    view.clone(),
+                    bind(
+                        self.graphics.device(),
+                        self.layout(b.options.filter),
+                        &view,
+                        &b.sampler,
+                    ),
+                );
+            }
+            (Cow::Owned(view), Cow::Owned(cache.1.clone()))
+        } else {
+            (Cow::Borrowed(&b.view), Cow::Borrowed(&b.group))
+        };
+        if pass.uses_color_texture(view.texture()) {
+            return Err(Error::TextureFeedback);
+        }
+        if let Some(state) = &m.depth_stencil {
+            if pass.depth_read_only() && !state.is_depth_read_only() {
+                return Err(Error::ReadOnlyDepth);
+            }
+            if pass.stencil_read_only() && !state.is_stencil_read_only(m.cull_mode) {
+                return Err(Error::ReadOnlyStencil);
+            }
+        }
+        let pipeline = self.pipeline(
+            b,
+            m,
+            pass.single_color_format()?,
+            pass.sample_count(),
+            pass.depth_stencil_format(),
+        )?;
+        pass.apply_raster_state();
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        Ok(())
     }
 
     fn validate_source(
@@ -378,160 +765,167 @@ impl TextureRenderer {
     ) -> Result<(), Error> {
         let texture = view.texture();
         let format = texture.format();
-        let float = format.sample_type(None, Some(self.graphics.device().features()));
-        if texture.dimension() != wgpu::TextureDimension::D2
-            || texture.sample_count() != 1
+        let features = crate::target::format_features(&self.graphics, format);
+        if texture.sample_count() != 1
             || !texture
                 .usage()
                 .contains(wgpu::TextureUsages::TEXTURE_BINDING)
-            || !matches!(float, Some(wgpu::TextureSampleType::Float { .. }))
-            || (filter == TextureFilter::Linear
-                && !matches!(
-                    float,
-                    Some(wgpu::TextureSampleType::Float { filterable: true })
-                ))
+            || !matches!(
+                format.sample_type(None, Some(self.graphics.device().features())),
+                Some(wgpu::TextureSampleType::Float { .. })
+            )
+            || filter == TextureFilter::Linear
+                && !features
+                    .flags
+                    .contains(wgpu::TextureFormatFeatureFlags::FILTERABLE)
         {
             return Err(Error::InvalidTextureSource { format });
         }
         Ok(())
     }
-
-    fn pipeline(&mut self, key: PipelineKey) -> Result<&wgpu::RenderPipeline, Error> {
-        let layout = match key.filter {
-            TextureFilter::Nearest => &self.nearest,
-            TextureFilter::Linear => &self.linear,
+    fn pipeline(
+        &mut self,
+        b: &TextureBinding,
+        m: &TextureMaterial,
+        format: wgpu::TextureFormat,
+        count: u32,
+        depth_stencil: Option<wgpu::TextureFormat>,
+    ) -> Result<&wgpu::RenderPipeline, Error> {
+        if !b.graphics.same_device(&self.graphics) || !m.graphics.same_device(&self.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        if let Some(state) = &m.depth_stencil
+            && Some(state.format) != depth_stencil
+        {
+            return Err(Error::DepthStencilMismatch {
+                material: state.format,
+                pass: depth_stencil,
+            });
+        }
+        let key = PipelineKey {
+            material: m.id,
+            format,
+            count,
+            depth_stencil,
+            filter: b.options.filter,
+            alpha: b.options.alpha,
         };
         let entry = match self.pipelines.entry(key) {
             Entry::Occupied(entry) => return Ok(entry.into_mut()),
             Entry::Vacant(entry) => entry,
         };
-        let features = crate::target::format_features(&self.graphics, key.format);
-        if !self
-            .graphics
-            .device()
-            .features()
-            .contains(key.format.required_features())
-            || !features
-                .allowed_usages
-                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
-            || !matches!(
-                key.format
-                    .sample_type(None, Some(self.graphics.device().features())),
-                Some(wgpu::TextureSampleType::Float { .. })
-            )
         {
-            return Err(Error::UnsupportedColorFormat { format: key.format });
-        }
-        if key.blend == TextureBlend::Alpha
-            && !features
-                .flags
-                .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
-        {
-            return Err(Error::UnsupportedMaterialFormat { format: key.format });
-        }
-        crate::target::validate_sample_count(
-            key.format,
-            key.count,
-            &crate::target::sample_counts(features),
-        )?;
-        if let Some(format) = key.depth_stencil {
-            let counts = crate::depth_stencil::supported_counts(
-                &self.graphics,
+            let features = crate::target::format_features(&self.graphics, format);
+            if !self
+                .graphics
+                .device()
+                .features()
+                .contains(format.required_features())
+                || !features
+                    .allowed_usages
+                    .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+                || !matches!(
+                    format.sample_type(None, Some(self.graphics.device().features())),
+                    Some(wgpu::TextureSampleType::Float { .. })
+                )
+            {
+                return Err(Error::UnsupportedColorFormat { format });
+            }
+            if m.blend.is_some()
+                && !features
+                    .flags
+                    .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
+            {
+                return Err(Error::UnsupportedMaterialFormat { format });
+            }
+            crate::target::validate_sample_count(
                 format,
-                wgpu::TextureUsages::RENDER_ATTACHMENT,
+                count,
+                &crate::target::sample_counts(features),
             )?;
-            crate::target::validate_sample_count(format, key.count, &counts)?;
+            if let Some(depth_format) = depth_stencil {
+                let counts = crate::depth_stencil::supported_counts(
+                    &self.graphics,
+                    depth_format,
+                    wgpu::TextureUsages::RENDER_ATTACHMENT,
+                )?;
+                crate::target::validate_sample_count(depth_format, count, &counts)?;
+            }
+            let mut layouts = vec![Some(match b.options.filter {
+                TextureFilter::Nearest => &self.nearest,
+                TextureFilter::Linear => &self.linear,
+            })];
+            layouts.extend(m.layouts.iter().map(|v| v.as_ref()));
+            let layout =
+                self.graphics
+                    .device()
+                    .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                        label: Some("Astrelis texture material"),
+                        bind_group_layouts: &layouts,
+                        immediate_size: 0,
+                    });
+            let shader = m.shader.as_ref().unwrap_or(&self.shader);
+            let pipeline =
+                self.graphics
+                    .device()
+                    .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        label: Some("Astrelis texture pipeline"),
+                        layout: Some(&layout),
+                        vertex: wgpu::VertexState {
+                            module: shader,
+                            entry_point: Some(&m.vertex_entry),
+                            compilation_options: Default::default(),
+                            buffers: &[Some(parameter_layout())],
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: shader,
+                            entry_point: Some(if m.shader.is_some() {
+                                &m.fragment_entry
+                            } else {
+                                match b.options.alpha {
+                                    TextureAlpha::Straight => "fragment_straight",
+                                    TextureAlpha::Premultiplied => "fragment_premultiplied",
+                                }
+                            }),
+                            compilation_options: Default::default(),
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format,
+                                blend: m.blend,
+                                write_mask: m.write_mask,
+                            })],
+                        }),
+                        primitive: wgpu::PrimitiveState {
+                            front_face: m.front_face,
+                            cull_mode: m.cull_mode,
+                            ..Default::default()
+                        },
+                        depth_stencil: m.depth_stencil.clone().or_else(|| {
+                            depth_stencil.map(|format| wgpu::DepthStencilState {
+                                format,
+                                depth_write_enabled: format.has_depth_aspect().then_some(false),
+                                depth_compare: None,
+                                stencil: Default::default(),
+                                bias: Default::default(),
+                            })
+                        }),
+                        multisample: wgpu::MultisampleState {
+                            count,
+                            ..Default::default()
+                        },
+                        multiview_mask: None,
+                        cache: None,
+                    });
+            Ok(entry.insert(pipeline))
         }
-        let device = self.graphics.device();
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Astrelis texture pipeline layout"),
-            bind_group_layouts: &[Some(layout)],
-            immediate_size: 0,
-        });
-        Ok(entry.insert(
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("Astrelis texture pipeline"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &self.shader,
-                    entry_point: Some("vertex_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &self.shader,
-                    entry_point: Some(match key.alpha {
-                        TextureAlpha::Straight => "fragment_straight",
-                        TextureAlpha::Premultiplied => "fragment_premultiplied",
-                    }),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: key.format,
-                        blend: (key.blend == TextureBlend::Alpha)
-                            .then_some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                primitive: Default::default(),
-                depth_stencil: key.depth_stencil.map(|format| wgpu::DepthStencilState {
-                    format,
-                    depth_write_enabled: format.has_depth_aspect().then_some(false),
-                    depth_compare: None,
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: key.count,
-                    ..Default::default()
-                },
-                multiview_mask: None,
-                cache: None,
-            }),
-        ))
     }
 }
-
-fn key(
-    binding: &TextureBinding,
-    format: wgpu::TextureFormat,
-    count: u32,
-    depth_stencil: Option<wgpu::TextureFormat>,
-) -> PipelineKey {
-    PipelineKey {
-        format,
-        count,
-        depth_stencil,
-        filter: binding.options.filter,
-        alpha: binding.options.alpha,
-        blend: binding.options.blend,
-    }
-}
-
-fn validate_options(options: TextureDrawOptions) -> Result<(), Error> {
-    let valid_rect = |r: [f32; 4]| {
-        r.iter().all(|v| v.is_finite())
-            && r[2] >= 0.0
-            && r[3] >= 0.0
-            && (r[0] + r[2]).is_finite()
-            && (r[1] + r[3]).is_finite()
-    };
-    if !valid_rect(options.destination)
-        || !valid_rect(options.source)
-        || !options.tint.iter().all(|v| v.is_finite())
-        || !(0.0..=1.0).contains(&options.tint[3])
-    {
-        return Err(Error::InvalidTextureDraw);
-    }
-    Ok(())
-}
-
 fn binding_layout(device: &wgpu::Device, filtering: bool) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("Astrelis texture binding layout"),
+        label: Some("Astrelis image source"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float {
                         filterable: filtering,
@@ -543,7 +937,7 @@ fn binding_layout(device: &wgpu::Device, filtering: bool) -> wgpu::BindGroupLayo
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Sampler(if filtering {
                     wgpu::SamplerBindingType::Filtering
                 } else {
@@ -551,31 +945,17 @@ fn binding_layout(device: &wgpu::Device, filtering: bool) -> wgpu::BindGroupLayo
                 }),
                 count: None,
             },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(
-                        std::mem::size_of::<Parameters>() as u64
-                    ),
-                },
-                count: None,
-            },
         ],
     })
 }
-
 fn bind(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     view: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
-    parameters: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Astrelis texture draw binding"),
+        label: Some("Astrelis image binding"),
         layout,
         entries: &[
             wgpu::BindGroupEntry {
@@ -586,14 +966,9 @@ fn bind(
                 binding: 1,
                 resource: wgpu::BindingResource::Sampler(sampler),
             },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: parameters.as_entire_binding(),
-            },
         ],
     })
 }
-
 #[cfg(test)]
 #[path = "texture_tests.rs"]
 mod tests;

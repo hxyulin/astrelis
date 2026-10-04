@@ -116,14 +116,24 @@ fn depth_tests_occlude_independent_of_order_and_persist_across_passes() {
                             .draw_with_material(&mut pass, &near, &material)
                             .unwrap();
                     }
-                    let mut pass = frame.render_pass().load().load_depth().begin().unwrap();
+                    let mut pass = frame
+                        .render_pass()
+                        .load_color()
+                        .load_depth()
+                        .begin()
+                        .unwrap();
                     renderer
                         .draw_with_material(&mut pass, &far, &material)
                         .unwrap();
                 });
                 assert_eq!(image, sequential);
                 let persisted = pixels(&graphics, &mut target, |frame| {
-                    let mut pass = frame.render_pass().load().load_depth().begin().unwrap();
+                    let mut pass = frame
+                        .render_pass()
+                        .load_color()
+                        .load_depth()
+                        .begin()
+                        .unwrap();
                     renderer
                         .draw_with_material(&mut pass, &far, &material)
                         .unwrap();
@@ -132,7 +142,12 @@ fn depth_tests_occlude_independent_of_order_and_persist_across_passes() {
                 assert_eq!(renderer.pipelines, cached, "prepared depth pipeline reused");
                 // Default shading can overlay a depth-enabled scene without testing or writing depth.
                 let overlay = pixels(&graphics, &mut target, |frame| {
-                    let mut pass = frame.render_pass().load().load_depth().begin().unwrap();
+                    let mut pass = frame
+                        .render_pass()
+                        .load_color()
+                        .load_depth()
+                        .begin()
+                        .unwrap();
                     renderer.draw(&mut pass, &far).unwrap();
                 });
                 assert_eq!(at(&overlay, 32), [0, 0, 255, 255]);
@@ -235,7 +250,7 @@ fn stencil_masks_dynamic_references_and_read_only_passes_clip_meshes() {
                     }
                     let mut builder = frame
                         .render_pass()
-                        .load()
+                        .load_color()
                         .stencil_ops(None)
                         .stencil_reference(7);
                     if format.has_depth_aspect() {
@@ -265,7 +280,7 @@ fn stencil_masks_dynamic_references_and_read_only_passes_clip_meshes() {
                 let persisted = pixels(&graphics, &mut target, |frame| {
                     let mut pass = frame
                         .render_pass()
-                        .load()
+                        .load_color()
                         .load_stencil()
                         .stencil_reference(7)
                         .begin()

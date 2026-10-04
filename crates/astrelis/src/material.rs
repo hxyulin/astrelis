@@ -14,13 +14,13 @@ use crate::GraphicsContext;
 /// Defaults use `vertex_main` / `fragment_main`, premultiplied alpha blending,
 /// all color channels, counterclockwise front faces, and no face culling.
 /// Premultiplied blending requires the shader to output premultiplied colors.
-/// Depth/stencil settings are optional; alternative vertex layouts remain outside this mesh API.
+/// Depth/stencil settings are optional. Declare matching custom vertex layouts and topology when using custom geometry.
 #[derive(Clone, Debug)]
 #[must_use = "pass these options to GraphicsContext::create_material"]
 pub struct MaterialOptions<'a> {
     /// Application-created shader module, on the context's device.
     pub shader: &'a wgpu::ShaderModule,
-    /// Vertex entry point, consuming the fixed mesh vertex layout.
+    /// Vertex entry point, consuming the declared stream layouts.
     pub vertex_entry: &'a str,
     /// Fragment entry point, writing color at location 0.
     pub fragment_entry: &'a str,
@@ -37,6 +37,12 @@ pub struct MaterialOptions<'a> {
     /// Optional explicit depth/stencil tests, writes, masks, operations, and bias.
     /// The format must match the pass attachment. `None` disables all tests/writes.
     pub depth_stencil: Option<wgpu::DepthStencilState>,
+    /// Custom stream layouts; empty selects the standard position/color layout.
+    pub vertex_layouts: &'a [crate::VertexLayout],
+    /// Primitive topology.
+    pub topology: wgpu::PrimitiveTopology,
+    /// Index width for strip restart; required for indexed strip topologies.
+    pub strip_index_format: Option<wgpu::IndexFormat>,
 }
 
 impl<'a> MaterialOptions<'a> {
@@ -52,9 +58,27 @@ impl<'a> MaterialOptions<'a> {
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: None,
             depth_stencil: None,
+            vertex_layouts: &[],
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
         }
     }
 
+    /// Selects layouts matching the mesh's vertex and instance streams.
+    pub const fn vertex_layouts(mut self, layouts: &'a [crate::VertexLayout]) -> Self {
+        self.vertex_layouts = layouts;
+        self
+    }
+    /// Selects primitive topology; indexed strips also need a strip index format.
+    pub const fn topology(mut self, topology: wgpu::PrimitiveTopology) -> Self {
+        self.topology = topology;
+        self
+    }
+    /// Selects strip index width and primitive restart interpretation.
+    pub const fn strip_index_format(mut self, format: wgpu::IndexFormat) -> Self {
+        self.strip_index_format = Some(format);
+        self
+    }
     /// Selects explicit depth/stencil state, or `None` to disable tests and writes.
     ///
     /// Attachment allocation belongs to target creation. This only configures the
@@ -117,7 +141,7 @@ impl<'a> MaterialOptions<'a> {
 ///
 /// Buffers, textures, bind groups, and their updates remain application-owned.
 /// Bind the groups required by this material with
-/// [`wgpu::RenderPass::set_bind_group`] through [`crate::RenderPass::as_wgpu`]
+/// [`crate::RenderPass::set_bind_group`]
 /// before each draw that changes bindings. Dynamic offsets work the same as wgpu.
 /// The renderer establishes the material's pipeline and mesh geometry, without
 /// replacing application resource bindings or pass clipping settings.
@@ -135,6 +159,9 @@ pub struct Material {
     pub(crate) front_face: wgpu::FrontFace,
     pub(crate) cull_mode: Option<wgpu::Face>,
     pub(crate) depth_stencil: Option<wgpu::DepthStencilState>,
+    pub(crate) vertex_layouts: Vec<crate::VertexLayout>,
+    pub(crate) topology: wgpu::PrimitiveTopology,
+    pub(crate) strip_index_format: Option<wgpu::IndexFormat>,
 }
 
 impl Material {
@@ -163,6 +190,13 @@ impl Material {
             front_face: options.front_face,
             cull_mode: options.cull_mode,
             depth_stencil: options.depth_stencil,
+            vertex_layouts: if options.vertex_layouts.is_empty() {
+                vec![crate::VertexLayout::new(&crate::Vertex::layout())]
+            } else {
+                options.vertex_layouts.to_vec()
+            },
+            topology: options.topology,
+            strip_index_format: options.strip_index_format,
         }
     }
 

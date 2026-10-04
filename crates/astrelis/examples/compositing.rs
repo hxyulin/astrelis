@@ -1,5 +1,5 @@
 //! Composite a cropped 4x MSAA framebuffer into a clipped window region in one submission.
-//! Space switches the offscreen target between 1x and 4x MSAA and refreshes the source binding.
+//! Space switches the offscreen target between 1x and 4x MSAA without manually rebuilding source bindings.
 //! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
 
 use std::{
@@ -9,9 +9,9 @@ use std::{
 };
 
 use astrelis::{
-    Error, FrameError, Framebuffer, FramebufferOptions, GraphicsContext, Mesh, MeshRenderer,
-    RenderTarget, SurfaceOptions, TextureAlpha, TextureBinding, TextureDrawOptions,
-    TextureRenderer, Vertex, wgpu,
+    Error, FrameError, Framebuffer, FramebufferOptions, GraphicsContext, Mesh, MeshRenderer, Rect,
+    RenderTarget, SurfaceOptions, TextureBinding, TextureDraw, TextureRenderer, UvRect, Vertex,
+    wgpu,
 };
 use winit::{
     application::ApplicationHandler,
@@ -61,13 +61,7 @@ impl State {
         let framebuffer = graphics
             .create_framebuffer(FramebufferOptions::new(size.width, size.height).sample_count(4))?;
         let mut compositor = TextureRenderer::new(&graphics);
-        let binding = compositor.create_binding(
-            framebuffer.color_view()?,
-            TextureDrawOptions::new()
-                .alpha(TextureAlpha::Premultiplied)
-                .source([0.1, 0.1, 0.8, 0.8])
-                .destination([0.125, 0.125, 0.75, 0.75]),
-        )?;
+        let binding = compositor.create_sampled_binding(&framebuffer.sampled_color())?;
         renderer.prepare(framebuffer.format(), framebuffer.sample_count())?;
         compositor.prepare_for_target(&binding, &target)?;
         window.request_redraw();
@@ -134,7 +128,12 @@ impl App {
                 })
                 .scissor_rect(width / 5, height / 5, width * 3 / 5, height * 3 / 5)
                 .begin()?;
-            state.compositor.draw(&mut pass, &state.binding)?;
+            state.compositor.draw(
+                &mut pass,
+                &state.binding,
+                TextureDraw::normalized(Rect::new(0.125, 0.125, 0.75, 0.75))
+                    .uv(UvRect::new(0.1, 0.1, 0.8, 0.8)),
+            )?;
         }
         frame.finish()?;
         self.retry_at = None;
@@ -202,16 +201,9 @@ impl ApplicationHandler for App {
                     self.fail(event_loop, error);
                     return;
                 }
-                if let Ok(view) = state.framebuffer.color_view()
-                    && let Err(error) = state.compositor.rebind(&mut state.binding, view)
-                {
-                    self.fail(event_loop, error);
-                    return;
-                }
                 state.window.request_redraw();
             }
             WindowEvent::Resized(size) => {
-                let changed = state.framebuffer.size() != [size.width, size.height];
                 if let Err(error) = state
                     .target
                     .resize(size.width, size.height)
@@ -220,21 +212,7 @@ impl ApplicationHandler for App {
                     self.fail(event_loop, error);
                     return;
                 }
-                // The output view changes on resize, so update the cached bind group.
-                if changed && size.width != 0 && size.height != 0 {
-                    match state.framebuffer.color_view() {
-                        Ok(view) => {
-                            if let Err(error) = state.compositor.rebind(&mut state.binding, view) {
-                                self.fail(event_loop, error);
-                                return;
-                            }
-                        }
-                        Err(error) => {
-                            self.fail(event_loop, error);
-                            return;
-                        }
-                    }
-                }
+                // The live sampled binding follows the framebuffer's new storage.
                 state.window.request_redraw();
             }
             WindowEvent::Occluded(false) => state.window.request_redraw(),

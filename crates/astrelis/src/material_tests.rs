@@ -156,12 +156,13 @@ fn materials_bind_dynamic_uniforms_and_reuse_prepared_pipelines() {
             let mut pass = RenderPass::new(
                 encoder,
                 &graphics,
-                crate::pass::ColorAttachment {
+                crate::pass::ManagedColorAttachment {
                     view: &msaa_view,
                     resolve_target: Some(view),
                     format,
                     size: [64, 64],
                     sample_count: 4,
+                    resolved_state: None,
                 },
                 crate::pass::PassOptions::default(),
             )

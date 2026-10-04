@@ -1,6 +1,7 @@
 use std::{sync::mpsc, time::Duration};
 
 use super::*;
+use crate::Vertex;
 
 pub(super) fn quad(graphics: &GraphicsContext, color: [f32; 4]) -> Mesh {
     graphics
@@ -93,32 +94,51 @@ pub(super) fn pass<'encoder>(
     RenderPass::new(
         encoder,
         graphics,
-        crate::pass::ColorAttachment {
+        crate::pass::ManagedColorAttachment {
             view,
             resolve_target: None,
             format: wgpu::TextureFormat::Rgba8Unorm,
             size: [64, 64],
             sample_count: 1,
+            resolved_state: None,
         },
         options,
     )
+}
+
+#[derive(Default)]
+struct TestRecording {
+    initialized: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    writes: crate::frame::AttachmentWrites,
+    uploads: crate::uploads::DrawUploads,
+}
+fn managed_builder<'a>(
+    e: &'a mut wgpu::CommandEncoder,
+    g: &'a GraphicsContext,
+    a: crate::pass::ManagedColorAttachment<'a>,
+    r: &'a mut TestRecording,
+) -> crate::RenderPassBuilder<'a> {
+    crate::RenderPassBuilder::new(e, g, a, &r.initialized)
+        .with_depth_stencil(None, &mut r.writes)
+        .with_uploads(&mut r.uploads)
 }
 
 fn builder<'frame>(
     graphics: &'frame GraphicsContext,
     encoder: &'frame mut wgpu::CommandEncoder,
     view: &'frame wgpu::TextureView,
-    initialized: &'frame mut bool,
+    initialized: &'frame mut TestRecording,
 ) -> crate::RenderPassBuilder<'frame> {
-    crate::RenderPassBuilder::new(
+    managed_builder(
         encoder,
         graphics,
-        crate::pass::ColorAttachment {
+        crate::pass::ManagedColorAttachment {
             view,
             resolve_target: None,
             format: wgpu::TextureFormat::Rgba8Unorm,
             size: [64, 64],
             sample_count: 1,
+            resolved_state: None,
         },
         initialized,
     )
@@ -234,7 +254,7 @@ fn renderers_share_passes_preserve_order_and_validate_devices() {
         );
         // Invalid or abandoned builders must not initialize the frame or poison recording.
         let defaults = pixels(&graphics, |encoder, view| {
-            let mut initialized = false;
+            let mut initialized = TestRecording::default();
             drop(builder(&graphics, encoder, view, &mut initialized).clear_color(wgpu::Color::RED));
             let invalid_clear = wgpu::Color {
                 r: f64::NAN,
@@ -260,7 +280,7 @@ fn renderers_share_passes_preserve_order_and_validate_devices() {
             ));
             assert!(matches!(
                 builder(&graphics, encoder, view, &mut initialized)
-                    .load()
+                    .load_color()
                     .begin(),
                 Err(Error::UninitializedFrame)
             ));
@@ -276,10 +296,10 @@ fn renderers_share_passes_preserve_order_and_validate_devices() {
         );
 
         let selected = pixels(&graphics, |encoder, view| {
-            let mut initialized = false;
+            let mut initialized = TestRecording::default();
             drop(
                 builder(&graphics, encoder, view, &mut initialized)
-                    .load()
+                    .load_color()
                     .clear_color(wgpu::Color::GREEN)
                     .begin()
                     .unwrap(),
@@ -287,7 +307,7 @@ fn renderers_share_passes_preserve_order_and_validate_devices() {
             drop(
                 builder(&graphics, encoder, view, &mut initialized)
                     .clear_color(wgpu::Color::RED)
-                    .load()
+                    .load_color()
                     .begin()
                     .unwrap(),
             );
@@ -303,7 +323,7 @@ fn renderers_share_passes_preserve_order_and_validate_devices() {
 
         let pixel_at = |x: usize, y: usize| y * 256 + x * 4;
         let clipped = pixels(&graphics, |encoder, view| {
-            let mut initialized = false;
+            let mut initialized = TestRecording::default();
             let mut pass = builder(&graphics, encoder, view, &mut initialized)
                 .label("viewport and scissor")
                 .clear_color(wgpu::Color::BLACK)
@@ -328,7 +348,7 @@ fn renderers_share_passes_preserve_order_and_validate_devices() {
         }
         let opaque_blue = quad(&graphics, [0.0, 0.0, 1.0, 1.0]);
         let dynamic = pixels(&graphics, |encoder, view| {
-            let mut initialized = false;
+            let mut initialized = TestRecording::default();
             let mut pass = builder(&graphics, encoder, view, &mut initialized)
                 .clear_color(wgpu::Color::BLACK)
                 .begin()
@@ -356,7 +376,7 @@ fn renderers_share_passes_preserve_order_and_validate_devices() {
             &[0, 0, 255, 255]
         );
         let empty_clip = pixels(&graphics, |encoder, view| {
-            let mut initialized = false;
+            let mut initialized = TestRecording::default();
             let mut pass = builder(&graphics, encoder, view, &mut initialized)
                 .clear_color(wgpu::Color::BLACK)
                 .scissor_rect(0, 0, 0, 64)
@@ -514,18 +534,19 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
                     view: &'view wgpu::TextureView,
                     multisample_view: Option<&'view wgpu::TextureView>,
                     count: u32,
-                ) -> crate::pass::ColorAttachment<'view> {
-                    crate::pass::ColorAttachment {
+                ) -> crate::pass::ManagedColorAttachment<'view> {
+                    crate::pass::ManagedColorAttachment {
                         view: multisample_view.unwrap_or(view),
                         resolve_target: multisample_view.map(|_| view),
                         format: wgpu::TextureFormat::Rgba8Unorm,
                         size: [64, 64],
                         sample_count: count,
+                        resolved_state: None,
                     }
                 }
                 let edges = pixels(&graphics, |encoder, view| {
-                    let mut initialized = false;
-                    let mut pass = crate::RenderPassBuilder::new(
+                    let mut initialized = TestRecording::default();
+                    let mut pass = managed_builder(
                         encoder,
                         &graphics,
                         attachment(view, multisample_view.as_ref(), count),
@@ -554,8 +575,8 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
 
                 let mut draw_layers = |split: bool| {
                     pixels(&graphics, |encoder, view| {
-                        let mut initialized = false;
-                        let mut pass = crate::RenderPassBuilder::new(
+                        let mut initialized = TestRecording::default();
+                        let mut pass = managed_builder(
                             encoder,
                             &graphics,
                             attachment(view, multisample_view.as_ref(), count),
@@ -567,13 +588,13 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
                         first.draw(&mut pass, &red).unwrap();
                         if split {
                             drop(pass);
-                            pass = crate::RenderPassBuilder::new(
+                            pass = managed_builder(
                                 encoder,
                                 &graphics,
                                 attachment(view, multisample_view.as_ref(), count),
                                 &mut initialized,
                             )
-                            .load()
+                            .load_color()
                             .begin()
                             .unwrap();
                         }
@@ -594,10 +615,10 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
                     assert!(actual.abs_diff(expected) <= 1);
                 }
                 let cleared = pixels(&graphics, |encoder, view| {
-                    let mut initialized = false;
+                    let mut initialized = TestRecording::default();
                     // Clearing the reused attachment starts a fresh frame.
                     drop(
-                        crate::RenderPassBuilder::new(
+                        managed_builder(
                             encoder,
                             &graphics,
                             attachment(view, multisample_view.as_ref(), count),

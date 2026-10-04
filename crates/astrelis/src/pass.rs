@@ -4,23 +4,26 @@ use crate::{Error, Framebuffer, depth_stencil::DepthStencilAttachment, frame::At
 
 #[derive(Debug)]
 enum Initialization<'frame> {
-    Surface(&'frame mut bool),
+    Surface(&'frame Arc<AtomicBool>),
     Framebuffer(&'frame Arc<AtomicBool>),
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ColorAttachment<'view> {
+pub(crate) struct ManagedColorAttachment<'view> {
     pub(crate) view: &'view wgpu::TextureView,
     pub(crate) resolve_target: Option<&'view wgpu::TextureView>,
     pub(crate) format: wgpu::TextureFormat,
     pub(crate) size: [u32; 2],
     pub(crate) sample_count: u32,
+    pub(crate) resolved_state: Option<&'view Arc<AtomicBool>>,
 }
 
 #[derive(Debug)]
 pub(crate) struct PassOptions<'label> {
     pub(crate) label: Option<&'label str>,
     pub(crate) load: wgpu::LoadOp<wgpu::Color>,
+    store: wgpu::StoreOp,
+    resolve: bool,
     viewport: Option<[f32; 6]>,
     scissor: Option<[u32; 4]>,
     depth_stencil: Option<&'label DepthStencilAttachment>,
@@ -36,6 +39,8 @@ impl Default for PassOptions<'_> {
         Self {
             label: None,
             load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+            store: wgpu::StoreOp::Store,
+            resolve: true,
             viewport: None,
             scissor: None,
             depth_stencil: None,
@@ -58,28 +63,29 @@ impl Default for PassOptions<'_> {
 ///
 /// Created by [`crate::Frame::render_pass`] or [`crate::Frame::render_to`]. Defaults clear to transparent black,
 /// store the results, and use the full attachment for viewport and scissor. These
-/// defaults are the same for every pass; use [`Self::load`] to preserve earlier work.
+/// defaults are the same for every pass; use [`Self::load_color`] to preserve earlier work.
 /// Attached depth defaults to clear 1.0 and stencil to clear 0, both stored.
 /// Their load/store operations are independent of color and each other.
 /// No GPU commands are recorded until [`Self::begin`]. Dropping the builder leaves
-/// the frame unchanged. Configuration borrows the frame and requires no heap allocation.
+/// the frame unchanged. Configuration borrows the frame; beginning a pass records attachment metadata.
 #[derive(Debug)]
 #[must_use = "call begin to record a pass; dropping this builder does nothing"]
 pub struct RenderPassBuilder<'frame> {
     encoder: &'frame mut wgpu::CommandEncoder,
-    attachment: Result<ColorAttachment<'frame>, Error>,
+    attachment: Result<ManagedColorAttachment<'frame>, Error>,
     graphics: &'frame crate::GraphicsContext,
     initialization: Initialization<'frame>,
     options: PassOptions<'frame>,
     writes: Option<&'frame mut AttachmentWrites>,
+    uploads: Option<&'frame mut crate::uploads::DrawUploads>,
 }
 
 impl<'frame> RenderPassBuilder<'frame> {
     pub(crate) fn new(
         encoder: &'frame mut wgpu::CommandEncoder,
         graphics: &'frame crate::GraphicsContext,
-        attachment: ColorAttachment<'frame>,
-        initialized: &'frame mut bool,
+        attachment: ManagedColorAttachment<'frame>,
+        initialized: &'frame Arc<AtomicBool>,
     ) -> Self {
         Self {
             encoder,
@@ -88,6 +94,7 @@ impl<'frame> RenderPassBuilder<'frame> {
             initialization: Initialization::Surface(initialized),
             options: PassOptions::default(),
             writes: None,
+            uploads: None,
         }
     }
 
@@ -106,13 +113,23 @@ impl<'frame> RenderPassBuilder<'frame> {
             encoder,
             attachment,
             graphics,
-            initialization: Initialization::Framebuffer(&framebuffer.initialized),
+            initialization: Initialization::Framebuffer(if framebuffer.sample_count() > 1 {
+                &framebuffer.samples_initialized
+            } else {
+                &framebuffer.initialized
+            }),
             options: PassOptions {
                 depth_stencil: framebuffer.depth_stencil.as_ref(),
                 ..Default::default()
             },
             writes: Some(writes),
+            uploads: None,
         }
+    }
+
+    pub(crate) fn with_uploads(mut self, uploads: &'frame mut crate::uploads::DrawUploads) -> Self {
+        self.uploads = Some(uploads);
+        self
     }
 
     pub(crate) fn with_depth_stencil(
@@ -214,8 +231,47 @@ impl<'frame> RenderPassBuilder<'frame> {
     ///
     /// A surface needs an earlier clear in this frame. A framebuffer may also
     /// load contents initialized in a previously submitted recording.
-    pub fn load(mut self) -> Self {
+    pub fn load_color(mut self) -> Self {
         self.options.load = wgpu::LoadOp::Load;
+        self
+    }
+
+    /// Loads color, depth, and stencil aspects that are present, preserving their contents.
+    pub fn load_all(mut self) -> Self {
+        self.options.load = wgpu::LoadOp::Load;
+        if let Some(attachment) = self.options.depth_stencil {
+            let format = attachment.texture.format();
+            if format.has_depth_aspect() {
+                self = self.load_depth();
+            }
+            if format.has_stencil_aspect() {
+                self = self.load_stencil();
+            }
+        }
+        self
+    }
+
+    /// Sets independent color load and store operations.
+    /// With MSAA, these operations refer to multisampled storage, not the resolve output.
+    pub fn color_ops(mut self, ops: wgpu::Operations<wgpu::Color>) -> Self {
+        self.options.load = ops.load;
+        self.options.store = ops.store;
+        self
+    }
+
+    /// Enables or skips this pass's automatic MSAA resolve. Defaults to enabled.
+    /// Retain samples with `Store` when a later pass loads them; resolve the last
+    /// pass before sampling or presenting the output.
+    pub fn resolve(mut self, enabled: bool) -> Self {
+        self.options.resolve = enabled;
+        self
+    }
+
+    /// Omits the target's depth/stencil attachment from this pass.
+    pub fn without_depth_stencil(mut self) -> Self {
+        self.options.depth_stencil = None;
+        self.options.depth_requested = false;
+        self.options.stencil_requested = false;
         self
     }
 
@@ -247,8 +303,7 @@ impl<'frame> RenderPassBuilder<'frame> {
 
     /// Validates configuration and starts a scoped color pass.
     ///
-    /// Every pass stores its results. With MSAA enabled, this preserves individual
-    /// samples and resolves to the single-sampled output. A clear-only pass is valid.
+    /// Store/resolve choices determine retained samples and output. A clear-only pass is valid.
     /// Dropping the returned pass ends recording; the frame still owns submission.
     ///
     /// # Errors
@@ -265,11 +320,16 @@ impl<'frame> RenderPassBuilder<'frame> {
     /// [`Error::UninitializedDepth`], or [`Error::UninitializedStencil`].
     /// Rejected configuration records no commands and leaves the frame unchanged.
     pub fn begin(mut self) -> Result<RenderPass<'frame>, Error> {
-        let attachment = self.attachment?;
+        let mut attachment = self.attachment?;
+        if !self.options.resolve {
+            attachment.resolve_target = None;
+        }
         validate_depth_stencil_options(&self.options)?;
         if matches!(self.options.load, wgpu::LoadOp::Load) {
             match &self.initialization {
-                Initialization::Surface(initialized) if !**initialized => {
+                Initialization::Surface(initialized)
+                    if !self.writes.as_ref().unwrap().is_initialized(initialized) =>
+                {
                     return Err(Error::UninitializedFrame);
                 }
                 Initialization::Framebuffer(state)
@@ -296,17 +356,54 @@ impl<'frame> RenderPassBuilder<'frame> {
                 return Err(Error::UninitializedStencil);
             }
         }
+        let loading = matches!(self.options.load, wgpu::LoadOp::Load);
+        let stored = self.options.store == wgpu::StoreOp::Store;
         let depth_stencil = self.options.depth_stencil;
         let depth_ops = self.options.depth_ops;
         let stencil_ops = self.options.stencil_ops;
-        let pass = RenderPass::new(self.encoder, self.graphics, attachment, self.options)?;
+        let pass = RenderPass::new_with_uploads(
+            self.encoder,
+            self.graphics,
+            attachment,
+            self.options,
+            self.uploads,
+        )?;
         match self.initialization {
-            Initialization::Surface(initialized) => *initialized = true,
-            Initialization::Framebuffer(state) => self.writes.as_mut().unwrap().record(state, true),
+            Initialization::Surface(initialized) => {
+                let writes = self.writes.as_mut().unwrap();
+                if loading {
+                    writes.require(initialized, crate::frame::AttachmentAspect::Surface);
+                }
+                writes.record(initialized, stored)
+            }
+            Initialization::Framebuffer(state) => {
+                let writes = self.writes.as_mut().unwrap();
+                if loading {
+                    writes.require(state, crate::frame::AttachmentAspect::Color);
+                }
+                writes.record(state, stored)
+            }
+        }
+        if attachment.resolve_target.is_some()
+            && let Some(state) = attachment.resolved_state
+        {
+            self.writes.as_mut().unwrap().record(state, true);
         }
         if let Some(attachment) = depth_stencil {
             let writes = self.writes.as_mut().unwrap();
             let format = attachment.texture.format();
+            if format.has_depth_aspect() && needs_initialized(depth_ops) {
+                writes.require(
+                    &attachment.depth_initialized,
+                    crate::frame::AttachmentAspect::Depth,
+                );
+            }
+            if format.has_stencil_aspect() && needs_initialized(stencil_ops) {
+                writes.require(
+                    &attachment.stencil_initialized,
+                    crate::frame::AttachmentAspect::Stencil,
+                );
+            }
             if format.has_depth_aspect()
                 && let Some(ops) = depth_ops
             {
@@ -340,7 +437,7 @@ impl<'frame> RenderPassBuilder<'frame> {
 pub struct RenderPass<'frame> {
     pub(crate) inner: wgpu::RenderPass<'frame>,
     graphics: &'frame crate::GraphicsContext,
-    format: wgpu::TextureFormat,
+    format: Option<wgpu::TextureFormat>,
     size: [u32; 2],
     sample_count: u32,
     viewport: [f32; 6],
@@ -349,25 +446,46 @@ pub struct RenderPass<'frame> {
     depth_read_only: bool,
     stencil_read_only: bool,
     stencil_reference: u32,
-    color_texture: wgpu::Texture,
+    color_texture: Option<wgpu::Texture>,
     resolve_texture: Option<wgpu::Texture>,
+    raster_dirty: bool,
+    bound_pipeline: Option<wgpu::RenderPipeline>,
+    vertex_zero: Option<(wgpu::Buffer, std::ops::Range<u64>)>,
+    vertex_other: Vec<Option<(wgpu::Buffer, std::ops::Range<u64>)>>,
+    bound_index: Option<(wgpu::Buffer, std::ops::Range<u64>, wgpu::IndexFormat)>,
+    group_zero: Option<wgpu::BindGroup>,
+    uploads: Option<&'frame mut crate::uploads::DrawUploads>,
+    color_formats: Vec<Option<wgpu::TextureFormat>>,
+    additional_colors: Vec<wgpu::Texture>,
 }
 
 impl<'frame> RenderPass<'frame> {
+    #[cfg(test)]
     pub(crate) fn new(
         encoder: &'frame mut wgpu::CommandEncoder,
         graphics: &'frame crate::GraphicsContext,
-        attachment: ColorAttachment<'_>,
+        attachment: ManagedColorAttachment<'_>,
         options: PassOptions<'_>,
+    ) -> Result<Self, Error> {
+        Self::new_with_uploads(encoder, graphics, attachment, options, None)
+    }
+
+    pub(crate) fn new_with_uploads(
+        encoder: &'frame mut wgpu::CommandEncoder,
+        graphics: &'frame crate::GraphicsContext,
+        attachment: ManagedColorAttachment<'_>,
+        options: PassOptions<'_>,
+        uploads: Option<&'frame mut crate::uploads::DrawUploads>,
     ) -> Result<Self, Error> {
         let device = graphics.device();
         validate_depth_stencil_options(&options)?;
-        let ColorAttachment {
+        let ManagedColorAttachment {
             view,
             resolve_target,
             format,
             size,
             sample_count,
+            ..
         } = attachment;
         if let wgpu::LoadOp::Clear(color) = options.load
             && ![color.r, color.g, color.b, color.a]
@@ -389,7 +507,7 @@ impl<'frame> RenderPass<'frame> {
             resolve_target,
             ops: wgpu::Operations {
                 load: options.load,
-                store: wgpu::StoreOp::Store,
+                store: options.store,
             },
         })];
         let depth_stencil_format = options
@@ -416,7 +534,7 @@ impl<'frame> RenderPass<'frame> {
         let mut pass = Self {
             inner,
             graphics,
-            format,
+            format: Some(format),
             size,
             sample_count,
             viewport,
@@ -425,11 +543,274 @@ impl<'frame> RenderPass<'frame> {
             depth_read_only: options.depth_ops.is_none(),
             stencil_read_only: options.stencil_ops.is_none(),
             stencil_reference: options.stencil_reference,
-            color_texture: view.texture().clone(),
+            color_texture: Some(view.texture().clone()),
             resolve_texture: resolve_target.map(|view| view.texture().clone()),
+            raster_dirty: true,
+            bound_pipeline: None,
+            vertex_zero: None,
+            vertex_other: Vec::new(),
+            bound_index: None,
+            group_zero: None,
+            uploads,
+            color_formats: vec![Some(format)],
+            additional_colors: Vec::new(),
         };
         pass.apply_raster_state();
         Ok(pass)
+    }
+
+    pub(crate) fn from_descriptor(
+        encoder: &'frame mut wgpu::CommandEncoder,
+        graphics: &'frame crate::GraphicsContext,
+        writes: &mut AttachmentWrites,
+        uploads: &'frame mut crate::uploads::DrawUploads,
+        descriptor: &crate::RenderPassDescriptor<'_>,
+    ) -> Result<Self, Error> {
+        let first = descriptor.colors.iter().flatten().next();
+        let size = first
+            .map(|a| a.size)
+            .or_else(|| descriptor.depth_stencil.map(|a| a.size))
+            .ok_or(Error::InvalidAttachments)?;
+        let sample_count = first
+            .map(|a| a.view.texture().sample_count())
+            .or_else(|| {
+                descriptor
+                    .depth_stencil
+                    .map(|a| a.view.texture().sample_count())
+            })
+            .unwrap();
+        if size.contains(&0)
+            || descriptor.colors.len() > graphics.device().limits().max_color_attachments as usize
+        {
+            return Err(Error::InvalidAttachments);
+        }
+        for a in descriptor.colors.iter().flatten() {
+            if a.owner.as_ref().is_some_and(|g| !graphics.same_device(g)) {
+                return Err(Error::DeviceMismatch);
+            }
+            if a.size != size
+                || a.view.texture().sample_count() != sample_count
+                || a.format.is_depth_stencil_format()
+            {
+                return Err(Error::InvalidAttachments);
+            }
+            if let wgpu::LoadOp::Clear(c) = a.ops.load
+                && ![c.r, c.g, c.b, c.a].iter().all(|v| v.is_finite())
+            {
+                return Err(Error::InvalidClearColor);
+            }
+            if matches!(a.ops.load, wgpu::LoadOp::Load)
+                && a.state.as_ref().is_some_and(|s| !writes.is_initialized(s))
+            {
+                return Err(Error::UninitializedFramebuffer);
+            }
+        }
+        if let Some(a) = descriptor.depth_stencil {
+            if a.owner.as_ref().is_some_and(|g| !graphics.same_device(g)) {
+                return Err(Error::DeviceMismatch);
+            }
+            if a.size != size
+                || a.view.texture().sample_count() != sample_count
+                || !a.format.is_depth_stencil_format()
+            {
+                return Err(Error::InvalidAttachments);
+            }
+            if !a.format.has_depth_aspect() && a.depth_ops.is_some() {
+                return Err(Error::MissingDepthAttachment);
+            }
+            if !a.format.has_stencil_aspect() && a.stencil_ops.is_some() {
+                return Err(Error::MissingStencilAttachment);
+            }
+            if let Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(depth),
+                ..
+            }) = a.depth_ops
+                && (!depth.is_finite() || !(0.0..=1.0).contains(&depth))
+            {
+                return Err(Error::InvalidClearDepth);
+            }
+            if a.format.has_depth_aspect()
+                && needs_initialized(a.depth_ops)
+                && a.depth_state
+                    .as_ref()
+                    .is_some_and(|s| !writes.is_initialized(s))
+            {
+                return Err(Error::UninitializedDepth);
+            }
+            if a.format.has_stencil_aspect()
+                && needs_initialized(a.stencil_ops)
+                && a.stencil_state
+                    .as_ref()
+                    .is_some_and(|s| !writes.is_initialized(s))
+            {
+                return Err(Error::UninitializedStencil);
+            }
+        }
+        let viewport =
+            descriptor
+                .viewport
+                .unwrap_or([0., 0., size[0] as f32, size[1] as f32, 0., 1.]);
+        let scissor = descriptor.scissor.unwrap_or([0, 0, size[0], size[1]]);
+        validate_viewport(graphics.device(), viewport)?;
+        validate_scissor(size, scissor)?;
+        let colors: Vec<_> = descriptor
+            .colors
+            .iter()
+            .map(|a| {
+                a.as_ref().map(|a| wgpu::RenderPassColorAttachment {
+                    view: &a.view,
+                    resolve_target: a.resolve_target(),
+                    depth_slice: a.depth_slice,
+                    ops: a.ops,
+                })
+            })
+            .collect();
+        let depth = descriptor
+            .depth_stencil
+            .map(|a| wgpu::RenderPassDepthStencilAttachment {
+                view: &a.view,
+                depth_ops: a.depth_ops,
+                stencil_ops: a.stencil_ops,
+            });
+        let inner = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: descriptor.label,
+            color_attachments: &colors,
+            depth_stencil_attachment: depth,
+            timestamp_writes: descriptor.timestamp_writes.clone(),
+            occlusion_query_set: descriptor.occlusion_query_set,
+            ..Default::default()
+        });
+        for a in descriptor.colors.iter().flatten() {
+            if let Some(state) = &a.state {
+                if matches!(a.ops.load, wgpu::LoadOp::Load) {
+                    writes.require(state, crate::frame::AttachmentAspect::Color);
+                }
+                writes.record(state, a.ops.store == wgpu::StoreOp::Store);
+            }
+            if a.resolve_target().is_some()
+                && let Some(state) = &a.resolved_state
+            {
+                writes.record(state, true);
+            }
+        }
+        if let Some(a) = descriptor.depth_stencil {
+            if a.format.has_depth_aspect()
+                && needs_initialized(a.depth_ops)
+                && let Some(s) = &a.depth_state
+            {
+                writes.require(s, crate::frame::AttachmentAspect::Depth);
+            }
+            if a.format.has_stencil_aspect()
+                && needs_initialized(a.stencil_ops)
+                && let Some(s) = &a.stencil_state
+            {
+                writes.require(s, crate::frame::AttachmentAspect::Stencil);
+            }
+            if let (Some(state), Some(ops)) = (&a.depth_state, a.depth_ops) {
+                writes.record(state, ops.store == wgpu::StoreOp::Store);
+            }
+            if let (Some(state), Some(ops)) = (&a.stencil_state, a.stencil_ops) {
+                writes.record(state, ops.store == wgpu::StoreOp::Store);
+            }
+        }
+        let mut pass = Self {
+            inner,
+            graphics,
+            format: descriptor
+                .colors
+                .first()
+                .and_then(|a| a.as_ref())
+                .map(|a| a.format),
+            size,
+            sample_count,
+            viewport,
+            scissor,
+            depth_stencil_format: descriptor.depth_stencil.map(|a| a.format),
+            depth_read_only: descriptor
+                .depth_stencil
+                .is_some_and(|a| a.depth_ops.is_none()),
+            stencil_read_only: descriptor
+                .depth_stencil
+                .is_some_and(|a| a.stencil_ops.is_none()),
+            stencil_reference: descriptor.stencil_reference,
+            color_texture: first.map(|a| a.view.texture().clone()),
+            resolve_texture: first
+                .and_then(|a| a.resolve_target())
+                .map(|v| v.texture().clone()),
+            raster_dirty: true,
+            bound_pipeline: None,
+            vertex_zero: None,
+            vertex_other: Vec::new(),
+            bound_index: None,
+            group_zero: None,
+            uploads: Some(uploads),
+            color_formats: descriptor
+                .colors
+                .iter()
+                .map(|a| a.as_ref().map(|a| a.format))
+                .collect(),
+            additional_colors: descriptor
+                .colors
+                .iter()
+                .flatten()
+                .flat_map(|a| {
+                    std::iter::once(a.view.texture().clone())
+                        .chain(a.resolve_target().map(|v| v.texture().clone()))
+                })
+                .chain(descriptor.depth_stencil.map(|a| a.view.texture().clone()))
+                .collect(),
+        };
+        pass.apply_raster_state();
+        Ok(pass)
+    }
+
+    /// Returns all attachment formats and the sample count for pipeline preparation.
+    pub fn render_format(&self) -> crate::RenderFormat {
+        crate::RenderFormat {
+            colors: self.color_formats.clone(),
+            depth_stencil: self.depth_stencil_format,
+            sample_count: self.sample_count,
+        }
+    }
+
+    pub(crate) fn single_color_format(&self) -> Result<wgpu::TextureFormat, Error> {
+        if self.color_formats.len() != 1 {
+            return Err(Error::ExpectedSingleColor);
+        }
+        self.format.ok_or(Error::ExpectedSingleColor)
+    }
+
+    pub(crate) fn upload_instances(
+        &mut self,
+        bytes: &[u8],
+    ) -> (wgpu::Buffer, std::ops::Range<u64>) {
+        self.uploads
+            .as_mut()
+            .expect("instance uploads require a frame-owned pass")
+            .append(self.graphics, bytes)
+    }
+
+    pub(crate) fn viewport_size(&self) -> [f32; 2] {
+        [self.viewport[2], self.viewport[3]]
+    }
+
+    /// Binds application resources without invalidating tracked raster state.
+    /// Dynamic offsets follow wgpu alignment and layout validation.
+    pub fn set_bind_group(
+        &mut self,
+        index: u32,
+        group: &wgpu::BindGroup,
+        offsets: &[wgpu::DynamicOffset],
+    ) {
+        if index == 0 && offsets.is_empty() {
+            if self.group_zero.as_ref() == Some(group) {
+                return;
+            }
+            self.group_zero = Some(group.clone());
+        } else if index == 0 {
+            self.group_zero = None;
+        }
+        self.inner.set_bind_group(index, group, offsets);
     }
 
     pub(crate) fn same_device(&self, graphics: &crate::GraphicsContext) -> bool {
@@ -437,7 +818,9 @@ impl<'frame> RenderPass<'frame> {
     }
 
     pub(crate) fn uses_color_texture(&self, texture: &wgpu::Texture) -> bool {
-        &self.color_texture == texture || self.resolve_texture.as_ref() == Some(texture)
+        self.color_texture.as_ref() == Some(texture)
+            || self.resolve_texture.as_ref() == Some(texture)
+            || self.additional_colors.contains(texture)
     }
 
     /// Sets the viewport for subsequent draws, in physical pixels.
@@ -461,6 +844,7 @@ impl<'frame> RenderPass<'frame> {
     ) -> Result<(), Error> {
         let viewport = [x, y, width, height, min_depth, max_depth];
         validate_viewport(self.graphics.device(), viewport)?;
+        self.raster_dirty |= self.viewport != viewport;
         self.viewport = viewport;
         self.apply_raster_state();
         Ok(())
@@ -482,6 +866,7 @@ impl<'frame> RenderPass<'frame> {
     ) -> Result<(), Error> {
         let scissor = [x, y, width, height];
         validate_scissor(self.size, scissor)?;
+        self.raster_dirty |= self.scissor != scissor;
         self.scissor = scissor;
         self.apply_raster_state();
         Ok(())
@@ -489,16 +874,12 @@ impl<'frame> RenderPass<'frame> {
 
     /// Changes stencil comparisons and replacement values for subsequent draws.
     ///
-    /// Mesh renderers restore this wrapped state on every draw, along with viewport
+    /// Built-in renderers restore this wrapped state after raw access, along with viewport
     /// and scissor. Changing the reference creates no pipeline or GPU resource.
     pub fn set_stencil_reference(&mut self, reference: u32) {
+        self.raster_dirty |= self.stencil_reference != reference;
         self.stencil_reference = reference;
-        if self
-            .depth_stencil_format
-            .is_some_and(|format| format.has_stencil_aspect())
-        {
-            self.inner.set_stencil_reference(reference);
-        }
+        self.apply_raster_state();
     }
 
     /// Returns the optional depth/stencil format required by compatible pipelines.
@@ -521,7 +902,7 @@ impl<'frame> RenderPass<'frame> {
     }
 
     /// Returns the color attachment format used to select compatible pipelines.
-    pub fn format(&self) -> wgpu::TextureFormat {
+    pub fn format(&self) -> Option<wgpu::TextureFormat> {
         self.format
     }
 
@@ -551,14 +932,74 @@ impl<'frame> RenderPass<'frame> {
     /// persist in wgpu's state but do not update this wrapper's viewport, scissor,
     /// or stencil reference.
     /// [`crate::MeshRenderer`] reapplies the wrapper's chosen viewport and scissor
-    /// and stencil reference before each draw. Use the wrapped setters to control
+    /// and stencil reference when raw access invalidates tracked state. Use wrapped setters to control
     /// mesh rasterization and stencil comparisons.
     /// Custom renderers are responsible for the GPU state their draws need.
     pub fn as_wgpu(&mut self) -> &mut wgpu::RenderPass<'frame> {
+        self.raster_dirty = true;
+        self.bound_pipeline = None;
+        self.vertex_zero = None;
+        self.vertex_other.clear();
+        self.bound_index = None;
+        self.group_zero = None;
         &mut self.inner
     }
 
+    pub(crate) fn set_vertex_buffer(
+        &mut self,
+        slot: u32,
+        buffer: &wgpu::Buffer,
+        range: std::ops::Range<u64>,
+    ) {
+        let current = if slot == 0 {
+            &mut self.vertex_zero
+        } else {
+            let slot = slot as usize - 1;
+            if self.vertex_other.len() <= slot {
+                self.vertex_other.resize_with(slot + 1, || None);
+            }
+            &mut self.vertex_other[slot]
+        };
+        if current
+            .as_ref()
+            .is_some_and(|(b, r)| b == buffer && *r == range)
+        {
+            return;
+        }
+        self.inner
+            .set_vertex_buffer(slot, buffer.slice(range.clone()));
+        *current = Some((buffer.clone(), range));
+    }
+    pub(crate) fn set_index_buffer(
+        &mut self,
+        buffer: &wgpu::Buffer,
+        range: std::ops::Range<u64>,
+        format: wgpu::IndexFormat,
+    ) {
+        if self
+            .bound_index
+            .as_ref()
+            .is_some_and(|(b, r, f)| b == buffer && *r == range && *f == format)
+        {
+            return;
+        }
+        self.inner
+            .set_index_buffer(buffer.slice(range.clone()), format);
+        self.bound_index = Some((buffer.clone(), range, format));
+    }
+
+    pub(crate) fn set_pipeline(&mut self, pipeline: &wgpu::RenderPipeline) {
+        if self.bound_pipeline.as_ref() != Some(pipeline) {
+            self.inner.set_pipeline(pipeline);
+            self.bound_pipeline = Some(pipeline.clone());
+        }
+    }
+
     pub(crate) fn apply_raster_state(&mut self) {
+        if !self.raster_dirty {
+            return;
+        }
+        self.raster_dirty = false;
         let [x, y, width, height, min_depth, max_depth] = self.viewport;
         self.inner
             .set_viewport(x, y, width, height, min_depth, max_depth);

@@ -1,4 +1,4 @@
-//! Upload an sRGB checker image, then crop, filter, and alpha-composite prepared rectangles.
+//! Two instanced quads with custom vertex streams, Uint16 indices, and a checked shader.
 //! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
 
 use std::{
@@ -8,9 +8,8 @@ use std::{
 };
 
 use astrelis::{
-    Error, FrameError, GraphicsContext, Rect, RenderTarget, SurfaceOptions, Texture,
-    TextureBinding, TextureBindingOptions, TextureDraw, TextureFilter, TextureOptions,
-    TextureRenderer, UvRect, wgpu,
+    Error, FrameError, GraphicsContext, Material, MaterialOptions, Mesh, MeshIndices, MeshOptions,
+    MeshRenderer, RenderTarget, SurfaceOptions, VertexLayout, VertexStream, wgpu,
 };
 use winit::{
     application::ApplicationHandler,
@@ -24,11 +23,9 @@ struct State {
     window: Arc<Window>,
     graphics: GraphicsContext,
     target: RenderTarget<'static>,
-    renderer: TextureRenderer,
-    _texture: Texture,
-    nearest: TextureBinding,
-    linear: TextureBinding,
-    crop: TextureBinding,
+    renderer: MeshRenderer,
+    mesh: Mesh,
+    material: Material,
 }
 
 impl State {
@@ -36,7 +33,7 @@ impl State {
         let window = Arc::new(
             event_loop.create_window(
                 Window::default_attributes()
-                    .with_title("Astrelis — textures: nearest, linear, cropped overlay")
+                    .with_title("Astrelis — custom instanced geometry")
                     .with_inner_size(PhysicalSize::new(800, 600)),
             )?,
         );
@@ -45,44 +42,74 @@ impl State {
             window.clone(),
             SurfaceOptions::new(size.width, size.height),
         ))?;
-        let texture = graphics.create_texture(TextureOptions::new(16, 16))?;
-        let mut bytes = Vec::with_capacity(16 * 16 * 4);
-        for y in 0..16 {
-            for x in 0..16 {
-                let rgb = if (x / 2 + y / 2) % 2 == 0 {
-                    [240, 105, 55]
-                } else {
-                    [45, 155, 240]
-                };
-                let alpha = if (5..11).contains(&x) && (5..11).contains(&y) {
-                    100
-                } else {
-                    255
-                };
-                bytes.extend_from_slice(&[rgb[0], rgb[1], rgb[2], alpha]);
-            }
-        }
-        texture.write(&bytes)?;
-        let mut renderer = TextureRenderer::new(&graphics);
-        let nearest = renderer.create_binding(
-            texture.view(),
-            TextureBindingOptions::new().filter(TextureFilter::Nearest),
+        let mut renderer = MeshRenderer::new(&graphics);
+        let layouts = [
+            VertexLayout {
+                stride: 8,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: wgpu::vertex_attr_array![0 => Float32x2].to_vec(),
+            },
+            VertexLayout {
+                stride: 24,
+                step_mode: wgpu::VertexStepMode::Instance,
+                attributes: wgpu::vertex_attr_array![1 => Float32x2, 2 => Float32x4].to_vec(),
+            },
+        ];
+        let positions = [
+            [-0.35f32, 0.55],
+            [-0.35, -0.55],
+            [0.35, 0.55],
+            [0.35, -0.55],
+        ];
+        let instances = [
+            [-0.5f32, 0., 1., 0.25, 0.15, 1.],
+            [0.5, 0., 0.15, 0.65, 1., 1.],
+        ];
+        let streams = [
+            VertexStream::new(&positions, layouts[0].clone()),
+            VertexStream::new(&instances, layouts[1].clone()),
+        ];
+        let mesh = graphics.create_mesh_with_options(
+            MeshOptions::new(&streams).indices(MeshIndices::U16(&[0, 1, 2, 2, 1, 3])),
         )?;
-        let linear = renderer.create_binding(texture.view(), TextureBindingOptions::new())?;
-        let crop = linear.clone(); // Reuse image/sampler resources for another placement.
-        for binding in [&nearest, &linear, &crop] {
-            renderer.prepare_for_target(binding, &target)?;
-        }
+        let shader = graphics
+            .device()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("instanced custom geometry"),
+                source: wgpu::ShaderSource::Wgsl(
+                    r#"
+                struct Output {
+                    @builtin(position) position: vec4<f32>,
+                    @location(0) color: vec4<f32>,
+                };
+                @vertex fn vertex_main(@location(0) position: vec2<f32>,
+                    @location(1) offset: vec2<f32>, @location(2) color: vec4<f32>) -> Output {
+                    var output: Output;
+                    output.position = vec4(position + offset, 0.0, 1.0);
+                    output.color = color;
+                    return output;
+                }
+                @fragment fn fragment_main(input: Output) -> @location(0) vec4<f32> {
+                    return input.color;
+                }
+            "#
+                    .into(),
+                ),
+            });
+        let material = graphics.create_material(
+            MaterialOptions::new(&shader)
+                .blend(None)
+                .vertex_layouts(&layouts),
+        );
+        pollster::block_on(renderer.try_prepare_material(&material, &target.render_format()))?;
         window.request_redraw();
         Ok(Self {
             window,
             graphics,
             target,
             renderer,
-            _texture: texture,
-            nearest,
-            linear,
-            crop,
+            mesh,
+            material,
         })
     }
 }
@@ -117,31 +144,12 @@ impl App {
             Err(error) => return Err(error.into()),
         };
         {
-            let mut pass = frame
-                .render_pass()
-                .clear_color(wgpu::Color {
-                    r: 0.025,
-                    g: 0.035,
-                    b: 0.06,
-                    a: 1.0,
-                })
-                .begin()?;
-            state.renderer.draw(
+            let mut pass = frame.render_pass().begin()?;
+            state.renderer.draw_range_with_material(
                 &mut pass,
-                &state.nearest,
-                TextureDraw::normalized(Rect::new(0.06, 0.12, 0.40, 0.76)),
-            )?;
-            state.renderer.draw(
-                &mut pass,
-                &state.linear,
-                TextureDraw::normalized(Rect::new(0.54, 0.12, 0.40, 0.76)),
-            )?;
-            state.renderer.draw(
-                &mut pass,
-                &state.crop,
-                TextureDraw::normalized(Rect::new(0.32, 0.34, 0.36, 0.32))
-                    .uv(UvRect::new(0., 0., 0.5, 0.5))
-                    .tint([0.65, 1., 0.8, 0.65]),
+                &state.mesh,
+                &state.material,
+                &state.mesh.full_draw().instances(0..2),
             )?;
         }
         frame.finish()?;
@@ -159,9 +167,6 @@ impl App {
             state.window.clone(),
             SurfaceOptions::new(size.width, size.height).sample_count(count),
         )?;
-        for binding in [&state.nearest, &state.linear, &state.crop] {
-            state.renderer.prepare_for_target(binding, &state.target)?;
-        }
         state.window.request_redraw();
         Ok(())
     }

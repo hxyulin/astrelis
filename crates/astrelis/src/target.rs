@@ -285,6 +285,15 @@ impl<'window> RenderTarget<'window> {
         }
     }
 
+    /// Returns the complete attachment format for pipeline preparation.
+    pub fn render_format(&self) -> crate::RenderFormat {
+        crate::RenderFormat {
+            colors: vec![Some(self.format())],
+            depth_stencil: self.depth_stencil_format(),
+            sample_count: self.sample_count(),
+        }
+    }
+
     /// Returns the current color sample count, initially selected by [`SurfaceOptions`].
     pub fn sample_count(&self) -> u32 {
         match self {

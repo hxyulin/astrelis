@@ -71,7 +71,7 @@ fn framebuffer_contents_persist_only_after_submission() {
         let mut framebuffer = graphics.create_framebuffer(options(4)).unwrap();
         let mut frame = framebuffer.begin_frame().unwrap();
         assert!(matches!(
-            frame.render_pass().load().begin(),
+            frame.render_pass().load_color().begin(),
             Err(Error::UninitializedFramebuffer)
         ));
         drop(
@@ -84,7 +84,7 @@ fn framebuffer_contents_persist_only_after_submission() {
         drop(frame); // No submission: the clear must not initialize the resource.
         let mut frame = framebuffer.begin_frame().unwrap();
         assert!(matches!(
-            frame.render_pass().load().begin(),
+            frame.render_pass().load_color().begin(),
             Err(Error::UninitializedFramebuffer)
         ));
         drop(frame);
@@ -98,7 +98,7 @@ fn framebuffer_contents_persist_only_after_submission() {
                 Err(Error::InvalidClearColor)
             ));
             assert!(matches!(
-                frame.render_pass().load().begin(),
+                frame.render_pass().load_color().begin(),
                 Err(Error::UninitializedFramebuffer)
             ));
             drop(
@@ -108,7 +108,7 @@ fn framebuffer_contents_persist_only_after_submission() {
                     .begin()
                     .unwrap(),
             );
-            drop(frame.render_pass().load().begin().unwrap());
+            drop(frame.render_pass().load_color().begin().unwrap());
         });
         assert!(
             red.as_chunks::<4>()
@@ -117,7 +117,7 @@ fn framebuffer_contents_persist_only_after_submission() {
                 .all(|p| p == &[255, 0, 0, 255])
         );
         let preserved = pixels(&graphics, &mut framebuffer, |frame| {
-            drop(frame.render_pass().load().begin().unwrap());
+            drop(frame.render_pass().load_color().begin().unwrap());
         });
         assert_eq!(
             red, preserved,
@@ -133,7 +133,7 @@ fn framebuffer_contents_persist_only_after_submission() {
         );
         drop(frame);
         let preserved = pixels(&graphics, &mut framebuffer, |frame| {
-            drop(frame.render_pass().load().begin().unwrap());
+            drop(frame.render_pass().load_color().begin().unwrap());
         });
         assert_eq!(
             red, preserved,
@@ -152,7 +152,7 @@ fn framebuffer_contents_persist_only_after_submission() {
             )
             .unwrap();
         let blended = pixels(&graphics, &mut framebuffer, |frame| {
-            let mut pass = frame.render_pass().load().begin().unwrap();
+            let mut pass = frame.render_pass().load_color().begin().unwrap();
             renderer.draw(&mut pass, &blue).unwrap();
         });
         let point = 40 * 256 + 32 * 4;
@@ -183,7 +183,7 @@ fn framebuffer_contents_persist_only_after_submission() {
         assert_ne!(framebuffer.color_texture().unwrap(), &output);
         let mut frame = framebuffer.begin_frame().unwrap();
         assert!(matches!(
-            frame.render_pass().load().begin(),
+            frame.render_pass().load_color().begin(),
             Err(Error::UninitializedFramebuffer)
         ));
         drop(frame);
@@ -288,7 +288,7 @@ fn framebuffer_passes_share_submission_and_validate_destinations() {
         drop(frame);
         let mut frame = source.begin_frame().unwrap();
         assert!(matches!(
-            frame.render_pass().load().begin(),
+            frame.render_pass().load_color().begin(),
             Err(Error::UninitializedFramebuffer)
         ));
         drop(frame);
@@ -300,7 +300,7 @@ fn framebuffer_passes_share_submission_and_validate_destinations() {
                     .begin()
                     .unwrap(),
             );
-            drop(frame.render_to(&mut source).load().begin().unwrap());
+            drop(frame.render_to(&mut source).load_color().begin().unwrap());
             let mut pass = frame.render_pass().begin().unwrap();
             let raw = pass.as_wgpu();
             raw.set_pipeline(&pipeline);
@@ -316,7 +316,7 @@ fn framebuffer_passes_share_submission_and_validate_destinations() {
             "the same submission resolves MSAA and samples its output"
         );
         let source_contents = pixels(&graphics, &mut source, |frame| {
-            drop(frame.render_pass().load().begin().unwrap());
+            drop(frame.render_pass().load_color().begin().unwrap());
         });
         assert_eq!(copied, source_contents);
         // A queued clear of old attachments cannot initialize replacements.
@@ -326,7 +326,7 @@ fn framebuffer_passes_share_submission_and_validate_destinations() {
         frame.finish().unwrap();
         let mut frame = source.begin_frame().unwrap();
         assert!(matches!(
-            frame.render_pass().load().begin(),
+            frame.render_pass().load_color().begin(),
             Err(Error::UninitializedFramebuffer)
         ));
         drop(frame);
@@ -356,7 +356,7 @@ fn framebuffer_passes_share_submission_and_validate_destinations() {
             frame.render_to(&mut suspended).begin(),
             Err(Error::TargetSuspended)
         ));
-        drop(frame.render_pass().load().begin().unwrap());
+        drop(frame.render_pass().load_color().begin().unwrap());
         frame.finish().unwrap();
         for format in [
             wgpu::TextureFormat::Depth32Float,

@@ -1,74 +1,59 @@
 use super::*;
 use crate::framebuffer::tests::pixels;
-use crate::{FramebufferOptions, MeshRenderer, TextureOptions, Vertex};
+use crate::{Framebuffer, FramebufferOptions, MeshRenderer, TextureOptions, Vertex};
 
-fn output(graphics: &GraphicsContext, count: u32) -> crate::Framebuffer {
-    graphics
-        .create_framebuffer(FramebufferOptions::new(64, 64).sample_count(count).usage(
-            wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-        ))
-        .unwrap()
+fn output(g: &GraphicsContext, count: u32) -> Framebuffer {
+    g.create_framebuffer(FramebufferOptions::new(64, 64).sample_count(count).usage(
+        wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
+    ))
+    .unwrap()
 }
-
 fn pixel(bytes: &[u8], x: usize, y: usize) -> [u8; 4] {
     bytes[(y * 64 + x) * 4..(y * 64 + x + 1) * 4]
         .try_into()
         .unwrap()
 }
-
 fn near(actual: [u8; 4], expected: [u8; 4]) {
     for (a, e) in actual.into_iter().zip(expected) {
         assert!(a.abs_diff(e) <= 2, "{actual:?} != {expected:?}");
     }
 }
-
-fn image(graphics: &GraphicsContext, width: u32, height: u32, bytes: &[u8]) -> crate::Texture {
-    let texture = graphics
-        .create_texture(TextureOptions::new(width, height).format(wgpu::TextureFormat::Rgba8Unorm))
+fn image(g: &GraphicsContext, w: u32, h: u32, bytes: &[u8]) -> crate::Texture {
+    let t = g
+        .create_texture(TextureOptions::new(w, h).format(wgpu::TextureFormat::Rgba8Unorm))
         .unwrap();
-    texture.write(bytes).unwrap();
-    texture
+    t.write(bytes).unwrap();
+    t
 }
-
 #[test]
-fn uploads_validate_before_queueing_and_regions_preserve_other_texels() {
+fn uploads_validate_and_regions_preserve_other_texels() {
     pollster::block_on(async {
-        let graphics = GraphicsContext::headless().await.unwrap();
-        let device = graphics.device();
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        assert!(matches!(
-            graphics.create_texture(TextureOptions::new(0, 2)),
-            Err(Error::InvalidTextureSize { .. })
-        ));
-        assert!(matches!(
-            graphics.create_texture(TextureOptions::new(u32::MAX, 2)),
-            Err(Error::InvalidTextureSize { .. })
-        ));
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        for (width, height) in [(0, 2), (u32::MAX, 2)] {
+            assert!(matches!(
+                g.create_texture(TextureOptions::new(width, height)),
+                Err(Error::InvalidTextureSize { .. })
+            ));
+        }
         for format in [
             wgpu::TextureFormat::Depth24Plus,
             wgpu::TextureFormat::Bc1RgbaUnorm,
         ] {
             assert!(matches!(
-                graphics.create_texture(TextureOptions::new(2, 2).format(format)),
+                g.create_texture(TextureOptions::new(2, 2).format(format)),
                 Err(Error::UnsupportedTextureFormat { .. })
             ));
         }
         assert!(matches!(
-            graphics.create_texture(TextureOptions::new(2, 2).usage(wgpu::TextureUsages::empty())),
+            g.create_texture(TextureOptions::new(2, 2).usage(wgpu::TextureUsages::empty())),
             Err(Error::InvalidTextureUsage { .. })
         ));
-        let no_upload = graphics
-            .create_texture(TextureOptions::new(2, 2).usage(wgpu::TextureUsages::TEXTURE_BINDING))
-            .unwrap();
+        let t = image(&g, 3, 2, &[255, 0, 0, 255].repeat(6));
         assert!(matches!(
-            no_upload.write(&[0; 16]),
-            Err(Error::InvalidTextureUsage { .. })
-        ));
-        let texture = image(&graphics, 3, 2, &[255, 0, 0, 255].repeat(6)); // 12-byte rows need no 256-byte padding.
-        assert!(matches!(
-            texture.write(&[0; 23]),
+            t.write(&[0; 23]),
             Err(Error::InvalidTextureData {
                 expected: 24,
                 actual: 23
@@ -76,24 +61,27 @@ fn uploads_validate_before_queueing_and_regions_preserve_other_texels() {
         ));
         for (origin, size) in [([0, 0], [0, 1]), ([2, 0], [2, 1]), ([u32::MAX, 0], [1, 1])] {
             assert!(matches!(
-                texture.write_region(origin, size, &[0; 4]),
+                t.write_region(origin, size, &[0; 4]),
                 Err(Error::InvalidTextureRegion)
             ));
         }
-        texture
-            .write_region([1, 0], [1, 2], &[0, 255, 0, 255].repeat(2))
+        t.write_region([1, 0], [1, 2], &[0, 255, 0, 255].repeat(2))
             .unwrap();
-        let mut renderer = TextureRenderer::new(&graphics);
-        let binding = renderer
+        let mut r = TextureRenderer::new(&g);
+        let b = r
             .create_binding(
-                texture.view(),
-                TextureDrawOptions::new().filter(TextureFilter::Nearest),
+                t.view(),
+                TextureBindingOptions::new().filter(TextureFilter::Nearest),
             )
             .unwrap();
-        let mut target = output(&graphics, 1);
-        let bytes = pixels(&graphics, &mut target, |frame| {
-            let mut pass = frame.render_pass().begin().unwrap();
-            renderer.draw(&mut pass, &binding).unwrap();
+        let mut target = output(&g, 1);
+        let bytes = pixels(&g, &mut target, |f| {
+            r.draw(
+                &mut f.render_pass().begin().unwrap(),
+                &b,
+                TextureDraw::default(),
+            )
+            .unwrap();
         });
         assert_eq!(pixel(&bytes, 8, 8), [255, 0, 0, 255]);
         assert_eq!(pixel(&bytes, 32, 8), [0, 255, 0, 255]);
@@ -101,104 +89,157 @@ fn uploads_validate_before_queueing_and_regions_preserve_other_texels() {
         assert!(scope.pop().await.is_none());
     });
 }
-
 #[test]
-fn crops_filters_srgb_alpha_tint_and_replacement_produce_expected_pixels() {
+fn changing_draws_reuse_binding_and_preserve_pixels_and_parameters() {
     pollster::block_on(async {
-        let graphics = GraphicsContext::headless().await.unwrap();
-        let scope = graphics
-            .device()
-            .push_error_scope(wgpu::ErrorFilter::Validation);
-        let mut renderer = TextureRenderer::new(&graphics);
-        let mut target = output(&graphics, 1);
-        let texture = image(
-            &graphics,
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let t = image(
+            &g,
             2,
             2,
             &[
                 255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
             ],
         );
-        let binding = renderer
+        let mut r = TextureRenderer::new(&g);
+        let mut target = output(&g, 1);
+        let b = r
             .create_binding(
-                texture.view(),
-                TextureDrawOptions::new().filter(TextureFilter::Nearest),
+                t.view(),
+                TextureBindingOptions::new().filter(TextureFilter::Nearest),
             )
             .unwrap();
-        let bytes = pixels(&graphics, &mut target, |frame| {
-            renderer
-                .draw(&mut frame.render_pass().begin().unwrap(), &binding)
+        let group = b.group.clone();
+        r.prepare(&b, &target.render_format()).unwrap();
+        let pipelines = r.pipelines.len();
+        for _ in 0..2 {
+            let bytes = pixels(&g, &mut target, |f| {
+                let mut pass = f.render_pass().begin().unwrap();
+                r.draw(
+                    &mut pass,
+                    &b,
+                    TextureDraw::new(Rect::new(0., 0., 32., 64.)).uv(UvRect::new(0., 0., 0.5, 0.5)),
+                )
                 .unwrap();
+                r.draw(
+                    &mut pass,
+                    &b,
+                    TextureDraw::normalized(Rect::new(0.5, 0., 0.5, 1.))
+                        .uv(UvRect::new(0.5, 0., 0.5, 0.5))
+                        .tint([1., 1., 1., 0.5]),
+                )
+                .unwrap();
+                assert!(matches!(
+                    r.draw(&mut pass, &b, TextureDraw::new(Rect::new(0., 0., -1., 1.))),
+                    Err(Error::InvalidTextureDraw)
+                ));
+                assert!(matches!(
+                    r.draw(&mut pass, &b, TextureDraw::default().tint([1., 1., 1., 2.])),
+                    Err(Error::InvalidTextureDraw)
+                ));
+            });
+            assert_eq!(pixel(&bytes, 8, 8), [255, 0, 0, 255]);
+            near(pixel(&bytes, 56, 8), [0, 128, 0, 128]);
+            assert_eq!(group, b.group);
+            assert_eq!(pipelines, r.pipelines.len());
+            assert_eq!(g.upload_pool.lock().unwrap().len(), 1);
+        }
+        let bytes = pixels(&g, &mut target, |f| {
+            let mut pass = f.render_pass().begin().unwrap();
+            r.draw_many(
+                &mut pass,
+                &b,
+                &[
+                    TextureDraw::new(Rect::new(0., 0., 16., 16.))
+                        .uv(UvRect::new(0., 0., 0.5, 0.5))
+                        .transform([1., 0., 0., 1., 16., 16.]),
+                    TextureDraw::new(Rect::new(32., 32., 16., 16.))
+                        .uv(UvRect::new(0.5, 0., 0.5, 0.5)),
+                ],
+            )
+            .unwrap();
         });
-        assert_eq!(pixel(&bytes, 8, 8), [255, 0, 0, 255]);
-        assert_eq!(pixel(&bytes, 56, 8), [0, 255, 0, 255]);
-        assert_eq!(pixel(&bytes, 8, 56), [0, 0, 255, 255]);
-        assert_eq!(pixel(&bytes, 56, 56), [255, 255, 255, 255]);
-        let crop = renderer
-            .create_binding(
-                texture.view(),
-                TextureDrawOptions::new()
-                    .source([0.5, 0.0, 0.5, 0.5])
-                    .destination([0.25, 0.25, 0.5, 0.5])
-                    .filter(TextureFilter::Nearest),
-            )
-            .unwrap();
-        let bytes = pixels(&graphics, &mut target, |frame| {
-            renderer
-                .draw(&mut frame.render_pass().begin().unwrap(), &crop)
-                .unwrap();
+        assert_eq!(pixel(&bytes, 20, 20), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 40, 40), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 4, 4), [0; 4]);
+        // Nonidentical instance data across chunk/page boundaries preserves draw order.
+        let mut many = vec![TextureDraw::default().tint([1., 1., 1., 0.]); 1100];
+        many[1099] = TextureDraw::default().uv(UvRect::new(0., 0., 0.5, 0.5));
+        let bytes = pixels(&g, &mut target, |f| {
+            r.draw_many(&mut f.render_pass().begin().unwrap(), &b, &many)
+                .unwrap()
         });
-        assert_eq!(pixel(&bytes, 32, 32), [0, 255, 0, 255]);
-        assert_eq!(pixel(&bytes, 8, 8), [0; 4]);
-        let center = renderer
-            .create_binding(
-                texture.view(),
-                TextureDrawOptions::new().source([0.5, 0.5, 0.0, 0.0]),
-            )
+        assert_eq!(pixel(&bytes, 32, 32), [255, 0, 0, 255]);
+        assert!(scope.pop().await.is_none());
+    });
+}
+#[test]
+fn filtering_srgb_alpha_and_material_blending() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut r = TextureRenderer::new(&g);
+        let mut target = output(&g, 1);
+        let t = image(
+            &g,
+            2,
+            2,
+            &[
+                255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+            ],
+        );
+        let b = r
+            .create_binding(t.view(), TextureBindingOptions::new())
             .unwrap();
-        let bytes = pixels(&graphics, &mut target, |frame| {
-            renderer
-                .draw(&mut frame.render_pass().begin().unwrap(), &center)
-                .unwrap();
+        let bytes = pixels(&g, &mut target, |f| {
+            r.draw(
+                &mut f.render_pass().begin().unwrap(),
+                &b,
+                TextureDraw::default().uv(UvRect::new(0.5, 0.5, 0., 0.)),
+            )
+            .unwrap()
         });
         near(pixel(&bytes, 32, 32), [128, 128, 128, 255]);
-        let srgb = graphics.create_texture(TextureOptions::new(1, 1)).unwrap();
+        let srgb = g.create_texture(TextureOptions::new(1, 1)).unwrap();
         srgb.write(&[128, 128, 128, 255]).unwrap();
-        let srgb = renderer
-            .create_binding(srgb.view(), TextureDrawOptions::new())
+        let b = r
+            .create_binding(srgb.view(), TextureBindingOptions::new())
             .unwrap();
-        let bytes = pixels(&graphics, &mut target, |frame| {
-            renderer
-                .draw(&mut frame.render_pass().begin().unwrap(), &srgb)
-                .unwrap();
+        let bytes = pixels(&g, &mut target, |f| {
+            r.draw(
+                &mut f.render_pass().begin().unwrap(),
+                &b,
+                TextureDraw::default(),
+            )
+            .unwrap()
         });
         near(pixel(&bytes, 32, 32), [55, 55, 55, 255]);
         for (alpha, bytes) in [
             (TextureAlpha::Straight, [255, 64, 0, 128]),
             (TextureAlpha::Premultiplied, [128, 32, 0, 128]),
         ] {
-            let texture = image(&graphics, 1, 1, &bytes);
+            let t = image(&g, 1, 1, &bytes);
+            let b = r
+                .create_binding(t.view(), TextureBindingOptions::new().alpha(alpha))
+                .unwrap();
             for blend in [TextureBlend::Alpha, TextureBlend::Replace] {
-                let binding = renderer
-                    .create_binding(
-                        texture.view(),
-                        TextureDrawOptions::new()
-                            .alpha(alpha)
-                            .blend(blend)
-                            .tint([0.5, 1.0, 1.0, 0.5]),
-                    )
+                let m = g.create_texture_material(TextureMaterialOptions::new().blend(blend));
+                r.try_prepare_material(&b, &m, &target.render_format())
+                    .await
                     .unwrap();
-                let bytes = pixels(&graphics, &mut target, |frame| {
-                    renderer
-                        .draw(
-                            &mut frame
-                                .render_pass()
-                                .clear_color(wgpu::Color::BLACK)
-                                .begin()
-                                .unwrap(),
-                            &binding,
-                        )
-                        .unwrap();
+                let bytes = pixels(&g, &mut target, |f| {
+                    r.draw_with_material(
+                        &mut f
+                            .render_pass()
+                            .clear_color(wgpu::Color::BLACK)
+                            .begin()
+                            .unwrap(),
+                        &b,
+                        &m,
+                        TextureDraw::default().tint([0.5, 1., 1., 0.5]),
+                    )
+                    .unwrap()
                 });
                 near(
                     pixel(&bytes, 32, 32),
@@ -218,342 +259,312 @@ fn crops_filters_srgb_alpha_tint_and_replacement_produce_expected_pixels() {
         assert!(scope.pop().await.is_none());
     });
 }
-
 #[test]
-fn bindings_snapshot_sources_rebind_after_resize_and_share_renderer_layouts() {
+fn live_sources_follow_resize_and_snapshot_bindings_retain_recorded_views() {
     pollster::block_on(async {
-        let graphics = GraphicsContext::headless().await.unwrap();
-        let scope = graphics
-            .device()
-            .push_error_scope(wgpu::ErrorFilter::Validation);
-        let mut renderer = TextureRenderer::new(&graphics);
-        let mut other = TextureRenderer::new(&graphics);
-        let mut source = output(&graphics, 4);
-        let old = source.color_view().unwrap().clone();
-        let mut binding = renderer
-            .create_binding(
-                &old,
-                TextureDrawOptions::new().alpha(TextureAlpha::Premultiplied),
-            )
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut r = TextureRenderer::new(&g);
+        let mut other = TextureRenderer::new(&g);
+        let mut source = output(&g, 4);
+        let mut target = output(&g, 1);
+        let live = source.sampled_color();
+        let b = r.create_sampled_binding(&live).unwrap();
+        let old = live.view().unwrap();
+        for count in [1, 4] {
+            source.resize(32, 32).unwrap();
+            source.set_sample_count(count).unwrap();
+            let bytes = pixels(&g, &mut target, |f| {
+                drop(
+                    f.render_to(&mut source)
+                        .clear_color(wgpu::Color::GREEN)
+                        .begin()
+                        .unwrap(),
+                );
+                other
+                    .draw(
+                        &mut f.render_pass().begin().unwrap(),
+                        &b,
+                        TextureDraw::default(),
+                    )
+                    .unwrap();
+            });
+            assert_eq!(pixel(&bytes, 32, 32), [0, 255, 0, 255]);
+            assert_ne!(old, live.view().unwrap());
+        }
+        source.resize(0, 0).unwrap();
+        assert!(matches!(live.view(), Err(Error::TargetSuspended)));
+        let red = image(&g, 1, 1, &[255, 0, 0, 255]);
+        let green = image(&g, 1, 1, &[0, 255, 0, 255]);
+        let mut b = r
+            .create_binding(red.view(), TextureBindingOptions::new())
             .unwrap();
-        let old_group = binding.group.clone();
-        let parameters = binding.parameters.clone();
-        renderer.rebind(&mut binding, &old).unwrap();
-        assert_eq!(old_group, binding.group);
-        let red = image(&graphics, 1, 1, &[255, 0, 0, 255]);
-        let green = image(&graphics, 1, 1, &[0, 255, 0, 255]);
-        let mut snapshots = renderer
-            .create_binding(red.view(), TextureDrawOptions::new())
-            .unwrap();
-        let mut target = output(&graphics, 1);
-        let bytes = pixels(&graphics, &mut target, |frame| {
-            let mut pass = frame
-                .render_pass()
-                .scissor_rect(0, 0, 32, 64)
-                .begin()
-                .unwrap();
-            renderer.draw(&mut pass, &snapshots).unwrap();
-            renderer.rebind(&mut snapshots, green.view()).unwrap();
-            pass.set_scissor_rect(32, 0, 32, 64).unwrap();
-            other.draw(&mut pass, &snapshots).unwrap();
+        let group = b.group.clone();
+        r.rebind(&mut b, red.view()).unwrap();
+        assert_eq!(group, b.group);
+        let bytes = pixels(&g, &mut target, |f| {
+            let mut p = f.render_pass().scissor_rect(0, 0, 32, 64).begin().unwrap();
+            r.draw(&mut p, &b, TextureDraw::default()).unwrap();
+            r.rebind(&mut b, green.view()).unwrap();
+            p.set_scissor_rect(32, 0, 32, 64).unwrap();
+            other.draw(&mut p, &b, TextureDraw::default()).unwrap();
         });
         assert_eq!(pixel(&bytes, 8, 8), [255, 0, 0, 255]);
         assert_eq!(pixel(&bytes, 56, 8), [0, 255, 0, 255]);
-        source.resize(32, 32).unwrap();
-        assert_eq!(binding.view, old);
-        renderer
-            .rebind(&mut binding, source.color_view().unwrap())
-            .unwrap();
-        assert_ne!(binding.group, old_group);
-        assert_eq!(binding.parameters, parameters);
-        let new_group = binding.group.clone();
-        source.set_sample_count(1).unwrap();
-        renderer
-            .rebind(&mut binding, source.color_view().unwrap())
-            .unwrap();
-        assert_ne!(binding.group, new_group);
-        let mut frame = source.begin_frame().unwrap();
-        drop(
-            frame
-                .render_pass()
-                .clear_color(wgpu::Color::GREEN)
-                .begin()
-                .unwrap(),
-        );
-        frame.finish().unwrap();
-        let bytes = pixels(&graphics, &mut target, |frame| {
-            other
-                .draw(&mut frame.render_pass().begin().unwrap(), &binding)
-                .unwrap();
-        });
-        assert_eq!(pixel(&bytes, 32, 32), [0, 255, 0, 255]);
         assert!(scope.pop().await.is_none());
     });
 }
-
 #[test]
-fn msaa_framebuffers_composite_in_one_submission_and_preserve_pass_state() {
+fn independent_recordings_lease_upload_pages_until_submission() {
     pollster::block_on(async {
-        let graphics = GraphicsContext::headless().await.unwrap();
-        let scope = graphics
-            .device()
-            .push_error_scope(wgpu::ErrorFilter::Validation);
-        let mut meshes = MeshRenderer::new(&graphics);
-        let mesh = graphics
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let t = image(&g, 1, 1, &[255; 4]);
+        let mut r = TextureRenderer::new(&g);
+        let b = r
+            .create_binding(t.view(), TextureBindingOptions::new())
+            .unwrap();
+        let mut a = output(&g, 1);
+        let mut second = output(&g, 1);
+        let mut first = a.begin_frame().unwrap();
+        r.draw(
+            &mut first.render_pass().begin().unwrap(),
+            &b,
+            TextureDraw::default().tint([1., 0., 0., 1.]),
+        )
+        .unwrap();
+        let green = pixels(&g, &mut second, |f| {
+            r.draw(
+                &mut f.render_pass().begin().unwrap(),
+                &b,
+                TextureDraw::default().tint([0., 1., 0., 1.]),
+            )
+            .unwrap()
+        });
+        assert_eq!(pixel(&green, 32, 32), [0, 255, 0, 255]);
+        first.finish().unwrap();
+        let red = pixels(&g, &mut a, |f| {
+            drop(f.render_pass().load_all().begin().unwrap())
+        });
+        assert_eq!(pixel(&red, 32, 32), [255, 0, 0, 255]);
+        // Abandoned draws upload nothing and return their page for subsequent recording.
+        {
+            let mut f = a.begin_frame().unwrap();
+            r.draw(
+                &mut f.render_pass().begin().unwrap(),
+                &b,
+                TextureDraw::default().tint([0., 0., 1., 1.]),
+            )
+            .unwrap();
+        }
+        let red = pixels(&g, &mut a, |f| {
+            drop(f.render_pass().load_all().begin().unwrap())
+        });
+        assert_eq!(pixel(&red, 32, 32), [255, 0, 0, 255]);
+        assert!(scope.pop().await.is_none());
+    });
+}
+#[test]
+fn texture_stencil_clipping_and_raw_state_restoration() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let t = image(&g, 1, 1, &[255, 0, 0, 255]);
+        let mut r = TextureRenderer::new(&g);
+        let b = r
+            .create_binding(t.view(), TextureBindingOptions::new())
+            .unwrap();
+        let mut meshes = MeshRenderer::new(&g);
+        let mask = g
             .create_mesh(
                 &[
-                    Vertex::new([-1., 1., 0.], [1., 0., 0., 0.5]),
-                    Vertex::new([-1., -1., 0.], [1., 0., 0., 0.5]),
-                    Vertex::new([1., 1., 0.], [1., 0., 0., 0.5]),
-                    Vertex::new([1., -1., 0.], [1., 0., 0., 0.5]),
+                    Vertex::new([-1., 1., 0.], [1.; 4]),
+                    Vertex::new([-1., -1., 0.], [1.; 4]),
+                    Vertex::new([0., 1., 0.], [1.; 4]),
+                    Vertex::new([0., -1., 0.], [1.; 4]),
                 ],
                 &[0, 1, 2, 2, 1, 3],
             )
             .unwrap();
-        let mut textures = TextureRenderer::new(&graphics);
-        let mut source = output(&graphics, 4);
-        let binding = textures
-            .create_binding(
-                source.color_view().unwrap(),
-                TextureDrawOptions::new().alpha(TextureAlpha::Premultiplied),
+        let stencil = |compare, pass_op, write_mask| wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth24PlusStencil8,
+            depth_write_enabled: Some(false),
+            depth_compare: None,
+            stencil: wgpu::StencilState {
+                front: wgpu::StencilFaceState {
+                    compare,
+                    pass_op,
+                    ..Default::default()
+                },
+                back: wgpu::StencilFaceState {
+                    compare,
+                    pass_op,
+                    ..Default::default()
+                },
+                read_mask: 255,
+                write_mask,
+            },
+            bias: Default::default(),
+        };
+        let mut mask_options = crate::MaterialOptions::new(meshes.default_material().shader())
+            .depth_stencil(Some(stencil(
+                wgpu::CompareFunction::Always,
+                wgpu::StencilOperation::Replace,
+                255,
+            )));
+        mask_options.write_mask = wgpu::ColorWrites::empty();
+        let mask_material = g.create_material(mask_options);
+        let material =
+            g.create_texture_material(TextureMaterialOptions::new().depth_stencil(Some(stencil(
+                wgpu::CompareFunction::Equal,
+                wgpu::StencilOperation::Keep,
+                0,
+            ))));
+        let mut target = g
+            .create_framebuffer(
+                FramebufferOptions::new(64, 64)
+                    .sample_count(4)
+                    .depth_stencil(wgpu::TextureFormat::Depth24PlusStencil8)
+                    .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
             )
             .unwrap();
-        for count in [1, 4] {
-            let target = graphics
-                .create_framebuffer(
-                    FramebufferOptions::new(64, 64)
-                        .sample_count(count)
-                        .depth_stencil(wgpu::TextureFormat::Depth24PlusStencil8)
-                        .usage(
-                            wgpu::TextureUsages::RENDER_ATTACHMENT
-                                | wgpu::TextureUsages::TEXTURE_BINDING
-                                | wgpu::TextureUsages::COPY_SRC,
-                        ),
-                )
+        let bytes = pixels(&g, &mut target, |f| {
+            {
+                let mut p = f.render_pass().stencil_reference(1).begin().unwrap();
+                meshes
+                    .draw_with_material(&mut p, &mask, &mask_material)
+                    .unwrap();
+            }
+            let mut p = f
+                .render_pass()
+                .load_all()
+                .stencil_reference(1)
+                .begin()
                 .unwrap();
-            let target = crate::RenderTarget::from(target);
-            textures.prepare_for_target(&binding, &target).unwrap();
-            textures.prepare_for_target(&binding, &target).unwrap();
-            let mut target = match target {
-                crate::RenderTarget::Framebuffer(target) => target,
-                _ => unreachable!(),
-            };
-            let pipelines = textures.pipelines.len();
-            let bytes = pixels(&graphics, &mut target, |frame| {
-                {
-                    let mut pass = frame.render_to(&mut source).begin().unwrap();
-                    meshes.draw(&mut pass, &mesh).unwrap();
-                }
-                {
-                    let mut pass = frame
-                        .render_pass()
-                        .clear_color(wgpu::Color::BLUE)
-                        .viewport(16., 16., 32., 32., 0., 1.)
-                        .scissor_rect(20, 20, 24, 24)
-                        .begin()
-                        .unwrap();
-                    pass.as_wgpu().set_scissor_rect(0, 0, 64, 64);
-                    textures.draw(&mut pass, &binding).unwrap();
-                }
-                {
-                    let mut pass = frame
-                        .render_pass()
-                        .load()
-                        .depth_ops(None)
-                        .stencil_ops(None)
-                        .scissor_rect(0, 0, 1, 1)
-                        .begin()
-                        .unwrap();
-                    textures.draw(&mut pass, &binding).unwrap();
-                }
-            });
-            near(pixel(&bytes, 32, 30), [128, 0, 127, 255]);
-            assert_eq!(pixel(&bytes, 18, 18), [0, 0, 255, 255]);
-            assert_eq!(pixel(&bytes, 50, 50), [0, 0, 255, 255]);
-            assert_eq!(textures.pipelines.len(), pipelines);
-        }
+            p.as_wgpu().set_stencil_reference(0);
+            r.draw_with_material(&mut p, &b, &material, TextureDraw::default())
+                .unwrap();
+        });
+        assert_eq!(pixel(&bytes, 8, 32), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 56, 32), [0; 4]);
+        assert!(scope.pop().await.is_none());
+    });
+}
+#[test]
+fn invalid_sources_feedback_and_devices_are_rejected() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut r = TextureRenderer::new(&g);
+        let integer = g
+            .create_texture(TextureOptions::new(1, 1).format(wgpu::TextureFormat::Rgba8Uint))
+            .unwrap();
+        assert!(matches!(
+            r.create_binding(integer.view(), TextureBindingOptions::new()),
+            Err(Error::InvalidTextureSource { .. })
+        ));
+        let float = g
+            .create_texture(TextureOptions::new(1, 1).format(wgpu::TextureFormat::R32Float))
+            .unwrap();
+        float.write(bytemuck::bytes_of(&0.5f32)).unwrap();
+        assert!(matches!(
+            r.create_binding(float.view(), TextureBindingOptions::new()),
+            Err(Error::InvalidTextureSource { .. })
+        ));
+        let b = r
+            .create_binding(
+                float.view(),
+                TextureBindingOptions::new().filter(TextureFilter::Nearest),
+            )
+            .unwrap();
+        let mut target = output(&g, 1);
+        let bytes = pixels(&g, &mut target, |f| {
+            r.draw(
+                &mut f.render_pass().begin().unwrap(),
+                &b,
+                TextureDraw::default(),
+            )
+            .unwrap()
+        });
+        near(pixel(&bytes, 32, 32), [128, 0, 0, 255]);
+        let feedback = r
+            .create_binding(target.color_view().unwrap(), TextureBindingOptions::new())
+            .unwrap();
+        let foreign = GraphicsContext::headless().await.unwrap();
+        let ft = image(&foreign, 1, 1, &[255; 4]);
+        let fr = TextureRenderer::new(&foreign);
+        let fb = fr
+            .create_binding(ft.view(), TextureBindingOptions::new())
+            .unwrap();
+        let mut f = target.begin_frame().unwrap();
+        let mut p = f.render_pass().begin().unwrap();
+        assert!(matches!(
+            r.draw(&mut p, &feedback, TextureDraw::default()),
+            Err(Error::TextureFeedback)
+        ));
+        assert!(matches!(
+            r.draw(&mut p, &fb, TextureDraw::default()),
+            Err(Error::DeviceMismatch)
+        ));
+        drop(p);
+        drop(f);
         assert!(scope.pop().await.is_none());
     });
 }
 
 #[test]
-fn invalid_sources_feedback_and_devices_are_rejected_without_draws() {
+fn prepared_draws_reuse_static_instance_storage_and_validate_pixel_viewports() {
     pollster::block_on(async {
-        let graphics = GraphicsContext::headless().await.unwrap();
-        let scope = graphics
-            .device()
-            .push_error_scope(wgpu::ErrorFilter::Validation);
-        let mut renderer = TextureRenderer::new(&graphics);
-        let texture = image(&graphics, 1, 1, &[255, 0, 0, 255]);
-        for options in [
-            TextureDrawOptions::new().destination([0., 0., -1., 1.]),
-            TextureDrawOptions::new().source([f32::NAN, 0., 1., 1.]),
-            TextureDrawOptions::new().tint([1., 1., 1., 2.]),
-        ] {
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let texture = image(&g, 1, 1, &[255; 4]);
+        let mut renderer = TextureRenderer::new(&g);
+        let binding = renderer
+            .create_binding(texture.view(), TextureBindingOptions::new())
+            .unwrap();
+        let prepared = renderer
+            .prepare_draws(
+                &[
+                    TextureDraw::new(Rect::new(0., 0., 32., 64.)).tint([1., 0., 0., 1.]),
+                    TextureDraw::new(Rect::new(32., 0., 32., 64.)).tint([0., 1., 0., 1.]),
+                ],
+                [64., 64.],
+            )
+            .unwrap();
+        let mut target = output(&g, 1);
+        for _ in 0..2 {
+            let bytes = pixels(&g, &mut target, |frame| {
+                renderer
+                    .draw_prepared(
+                        &mut frame.render_pass().begin().unwrap(),
+                        &binding,
+                        &prepared,
+                    )
+                    .unwrap();
+            });
+            assert_eq!(pixel(&bytes, 8, 32), [255, 0, 0, 255]);
+            assert_eq!(pixel(&bytes, 56, 32), [0, 255, 0, 255]);
+            assert!(g.upload_pool.lock().unwrap().is_empty());
+        }
+        let normalized = renderer
+            .prepare_draws(&[TextureDraw::default()], [1., 1.])
+            .unwrap();
+        let bytes = pixels(&g, &mut target, |frame| {
+            let mut pass = frame
+                .render_pass()
+                .viewport(0., 0., 32., 32., 0., 1.)
+                .begin()
+                .unwrap();
             assert!(matches!(
-                renderer.create_binding(texture.view(), options),
+                renderer.draw_prepared(&mut pass, &binding, &prepared),
                 Err(Error::InvalidTextureDraw)
             ));
-        }
-        let unfilterable = graphics
-            .create_texture(TextureOptions::new(1, 1).format(wgpu::TextureFormat::R32Float))
-            .unwrap();
-        unfilterable.write(bytemuck::bytes_of(&0.5f32)).unwrap();
-        assert!(matches!(
-            renderer.create_binding(unfilterable.view(), TextureDrawOptions::new()),
-            Err(Error::InvalidTextureSource { .. })
-        ));
-        let nearest = renderer
-            .create_binding(
-                unfilterable.view(),
-                TextureDrawOptions::new().filter(TextureFilter::Nearest),
-            )
-            .unwrap();
-        let mut output = output(&graphics, 1);
-        let bytes = pixels(&graphics, &mut output, |frame| {
             renderer
-                .draw(&mut frame.render_pass().begin().unwrap(), &nearest)
+                .draw_prepared(&mut pass, &binding, &normalized)
                 .unwrap();
         });
-        near(pixel(&bytes, 32, 32), [128, 0, 0, 255]);
-        let integer = graphics
-            .create_texture(TextureOptions::new(1, 1).format(wgpu::TextureFormat::Rgba8Uint))
-            .unwrap();
-        assert!(matches!(
-            renderer.create_binding(integer.view(), TextureDrawOptions::new()),
-            Err(Error::InvalidTextureSource { .. })
-        ));
-        let missing_usage = graphics
-            .create_texture(TextureOptions::new(1, 1).usage(wgpu::TextureUsages::COPY_DST))
-            .unwrap();
-        assert!(matches!(
-            renderer.create_binding(missing_usage.view(), TextureDrawOptions::new()),
-            Err(Error::InvalidTextureSource { .. })
-        ));
-        let multisampled = graphics.device().create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: 4,
-                height: 4,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 4,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        assert!(matches!(
-            renderer.create_binding(
-                &multisampled.create_view(&Default::default()),
-                TextureDrawOptions::new()
-            ),
-            Err(Error::InvalidTextureSource { .. })
-        ));
-        let mut binding = renderer
-            .create_binding(texture.view(), TextureDrawOptions::new())
-            .unwrap();
-        let group = binding.group.clone();
-        assert!(matches!(
-            renderer.rebind(&mut binding, integer.view()),
-            Err(Error::InvalidTextureSource { .. })
-        ));
-        assert_eq!(group, binding.group);
-        for count in [1, 4] {
-            let mut target = super::tests::output(&graphics, count);
-            let feedback = renderer
-                .create_binding(target.color_view().unwrap(), TextureDrawOptions::new())
-                .unwrap();
-            let bytes = pixels(&graphics, &mut target, |frame| {
-                let mut pass = frame
-                    .render_pass()
-                    .clear_color(wgpu::Color::BLUE)
-                    .begin()
-                    .unwrap();
-                assert!(matches!(
-                    renderer.draw(&mut pass, &feedback),
-                    Err(Error::TextureFeedback)
-                ));
-                renderer.draw(&mut pass, &binding).unwrap();
-            });
-            assert_eq!(pixel(&bytes, 32, 32), [255, 0, 0, 255]);
-        }
-        let foreign = GraphicsContext::headless().await.unwrap();
-        let foreign_renderer = TextureRenderer::new(&foreign);
-        assert!(matches!(
-            foreign_renderer.rebind(&mut binding, texture.view()),
-            Err(Error::DeviceMismatch)
-        ));
-        // Cross-instance identity also protects existing meshes, materials, and additional targets.
-        let foreign_texture = image(&foreign, 1, 1, &[0, 255, 0, 255]);
-        let foreign_binding = foreign_renderer
-            .create_binding(foreign_texture.view(), TextureDrawOptions::new())
-            .unwrap();
-        let foreign_mesh = foreign
-            .create_mesh(
-                &[
-                    Vertex::new([-1., -1., 0.], [1.; 4]),
-                    Vertex::new([1., -1., 0.], [1.; 4]),
-                    Vertex::new([0., 1., 0.], [1.; 4]),
-                ],
-                &[0, 1, 2],
-            )
-            .unwrap();
-        let mut foreign_meshes = MeshRenderer::new(&foreign);
-        let mut meshes = MeshRenderer::new(&graphics);
-        let own_mesh = graphics
-            .create_mesh(
-                &[
-                    Vertex::new([-1., -1., 0.], [1.; 4]),
-                    Vertex::new([1., -1., 0.], [1.; 4]),
-                    Vertex::new([0., 1., 0.], [1.; 4]),
-                ],
-                &[0, 1, 2],
-            )
-            .unwrap();
-        assert!(matches!(
-            meshes.prepare_material(
-                foreign_meshes.default_material(),
-                wgpu::TextureFormat::Rgba8Unorm,
-                1
-            ),
-            Err(Error::DeviceMismatch)
-        ));
-        let mut extra = super::tests::output(&foreign, 1);
-        let mut frame = output.begin_frame().unwrap();
-        assert!(matches!(
-            frame.render_to(&mut extra).begin(),
-            Err(Error::DeviceMismatch)
-        ));
-        {
-            let mut pass = frame.render_pass().begin().unwrap();
-            assert!(matches!(
-                renderer.draw(&mut pass, &foreign_binding),
-                Err(Error::DeviceMismatch)
-            ));
-            assert!(matches!(
-                meshes.draw(&mut pass, &foreign_mesh),
-                Err(Error::DeviceMismatch)
-            ));
-            assert!(matches!(
-                foreign_meshes.draw(&mut pass, &own_mesh),
-                Err(Error::DeviceMismatch)
-            ));
-            assert!(matches!(
-                meshes.draw_with_material(&mut pass, &own_mesh, foreign_meshes.default_material()),
-                Err(Error::DeviceMismatch)
-            ));
-            renderer.draw(&mut pass, &binding).unwrap();
-        }
-        frame.finish().unwrap();
-        let mut foreign_target = super::tests::output(&foreign, 1);
-        let mut frame = foreign_target.begin_frame().unwrap();
-        assert!(matches!(
-            renderer.draw(&mut frame.render_pass().begin().unwrap(), &binding),
-            Err(Error::DeviceMismatch)
-        ));
-        drop(frame);
+        assert_eq!(pixel(&bytes, 8, 8), [255; 4]);
+        assert_eq!(pixel(&bytes, 56, 56), [0; 4]);
         assert!(scope.pop().await.is_none());
     });
 }
