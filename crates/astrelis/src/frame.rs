@@ -177,7 +177,7 @@ impl<'target, 'window> Frame<'target, 'window> {
         match &self.target {
             FrameTarget::Surface { view, target, .. } => RenderPassBuilder::new(
                 &mut self.encoder,
-                target.graphics.device(),
+                &target.graphics,
                 ColorAttachment {
                     view: target.multisample_view.as_ref().unwrap_or(view),
                     resolve_target: target.multisample_view.as_ref().map(|_| view),
@@ -190,7 +190,7 @@ impl<'target, 'window> Frame<'target, 'window> {
             .with_depth_stencil(target.depth_stencil.as_ref(), &mut self.writes),
             FrameTarget::Framebuffer(target) => RenderPassBuilder::for_framebuffer(
                 &mut self.encoder,
-                target.graphics.device(),
+                &target.graphics,
                 target,
                 &mut self.writes,
             ),
@@ -223,7 +223,7 @@ impl<'target, 'window> Frame<'target, 'window> {
     ) -> RenderPassBuilder<'pass> {
         RenderPassBuilder::for_framebuffer(
             &mut self.encoder,
-            self.target.graphics().device(),
+            self.target.graphics(),
             target,
             &mut self.writes,
         )

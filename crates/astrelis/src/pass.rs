@@ -68,7 +68,7 @@ impl Default for PassOptions<'_> {
 pub struct RenderPassBuilder<'frame> {
     encoder: &'frame mut wgpu::CommandEncoder,
     attachment: Result<ColorAttachment<'frame>, Error>,
-    device: &'frame wgpu::Device,
+    graphics: &'frame crate::GraphicsContext,
     initialization: Initialization<'frame>,
     options: PassOptions<'frame>,
     writes: Option<&'frame mut AttachmentWrites>,
@@ -77,14 +77,14 @@ pub struct RenderPassBuilder<'frame> {
 impl<'frame> RenderPassBuilder<'frame> {
     pub(crate) fn new(
         encoder: &'frame mut wgpu::CommandEncoder,
-        device: &'frame wgpu::Device,
+        graphics: &'frame crate::GraphicsContext,
         attachment: ColorAttachment<'frame>,
         initialized: &'frame mut bool,
     ) -> Self {
         Self {
             encoder,
             attachment: Ok(attachment),
-            device,
+            graphics,
             initialization: Initialization::Surface(initialized),
             options: PassOptions::default(),
             writes: None,
@@ -93,11 +93,11 @@ impl<'frame> RenderPassBuilder<'frame> {
 
     pub(crate) fn for_framebuffer(
         encoder: &'frame mut wgpu::CommandEncoder,
-        device: &'frame wgpu::Device,
+        graphics: &'frame crate::GraphicsContext,
         framebuffer: &'frame Framebuffer,
         writes: &'frame mut AttachmentWrites,
     ) -> Self {
-        let attachment = if device != framebuffer.graphics.device() {
+        let attachment = if !graphics.same_device(&framebuffer.graphics) {
             Err(Error::DeviceMismatch)
         } else {
             framebuffer.attachment()
@@ -105,7 +105,7 @@ impl<'frame> RenderPassBuilder<'frame> {
         Self {
             encoder,
             attachment,
-            device,
+            graphics,
             initialization: Initialization::Framebuffer(&framebuffer.initialized),
             options: PassOptions {
                 depth_stencil: framebuffer.depth_stencil.as_ref(),
@@ -299,7 +299,7 @@ impl<'frame> RenderPassBuilder<'frame> {
         let depth_stencil = self.options.depth_stencil;
         let depth_ops = self.options.depth_ops;
         let stencil_ops = self.options.stencil_ops;
-        let pass = RenderPass::new(self.encoder, self.device, attachment, self.options)?;
+        let pass = RenderPass::new(self.encoder, self.graphics, attachment, self.options)?;
         match self.initialization {
             Initialization::Surface(initialized) => *initialized = true,
             Initialization::Framebuffer(state) => self.writes.as_mut().unwrap().record(state, true),
@@ -339,7 +339,7 @@ impl<'frame> RenderPassBuilder<'frame> {
 #[must_use = "keep the pass in scope while recording draws"]
 pub struct RenderPass<'frame> {
     pub(crate) inner: wgpu::RenderPass<'frame>,
-    pub(crate) device: &'frame wgpu::Device,
+    graphics: &'frame crate::GraphicsContext,
     format: wgpu::TextureFormat,
     size: [u32; 2],
     sample_count: u32,
@@ -349,15 +349,18 @@ pub struct RenderPass<'frame> {
     depth_read_only: bool,
     stencil_read_only: bool,
     stencil_reference: u32,
+    color_texture: wgpu::Texture,
+    resolve_texture: Option<wgpu::Texture>,
 }
 
 impl<'frame> RenderPass<'frame> {
     pub(crate) fn new(
         encoder: &'frame mut wgpu::CommandEncoder,
-        device: &'frame wgpu::Device,
+        graphics: &'frame crate::GraphicsContext,
         attachment: ColorAttachment<'_>,
         options: PassOptions<'_>,
     ) -> Result<Self, Error> {
+        let device = graphics.device();
         validate_depth_stencil_options(&options)?;
         let ColorAttachment {
             view,
@@ -412,7 +415,7 @@ impl<'frame> RenderPass<'frame> {
         });
         let mut pass = Self {
             inner,
-            device,
+            graphics,
             format,
             size,
             sample_count,
@@ -422,9 +425,19 @@ impl<'frame> RenderPass<'frame> {
             depth_read_only: options.depth_ops.is_none(),
             stencil_read_only: options.stencil_ops.is_none(),
             stencil_reference: options.stencil_reference,
+            color_texture: view.texture().clone(),
+            resolve_texture: resolve_target.map(|view| view.texture().clone()),
         };
         pass.apply_raster_state();
         Ok(pass)
+    }
+
+    pub(crate) fn same_device(&self, graphics: &crate::GraphicsContext) -> bool {
+        self.graphics.same_device(graphics)
+    }
+
+    pub(crate) fn uses_color_texture(&self, texture: &wgpu::Texture) -> bool {
+        &self.color_texture == texture || self.resolve_texture.as_ref() == Some(texture)
     }
 
     /// Sets the viewport for subsequent draws, in physical pixels.
@@ -447,7 +460,7 @@ impl<'frame> RenderPass<'frame> {
         max_depth: f32,
     ) -> Result<(), Error> {
         let viewport = [x, y, width, height, min_depth, max_depth];
-        validate_viewport(self.device, viewport)?;
+        validate_viewport(self.graphics.device(), viewport)?;
         self.viewport = viewport;
         self.apply_raster_state();
         Ok(())
@@ -527,7 +540,7 @@ impl<'frame> RenderPass<'frame> {
 
     /// Returns the device that all resources used in this pass must belong to.
     pub fn device(&self) -> &wgpu::Device {
-        self.device
+        self.graphics.device()
     }
 
     /// Borrows the underlying wgpu pass for application-defined rendering.

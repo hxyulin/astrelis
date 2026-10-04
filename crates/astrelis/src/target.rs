@@ -245,10 +245,10 @@ impl<'window> RenderTarget<'window> {
         Ok(())
     }
 
-    pub(crate) fn device(&self) -> &wgpu::Device {
+    pub(crate) fn graphics(&self) -> &GraphicsContext {
         match self {
-            Self::Surface(target) => target.graphics.device(),
-            Self::Framebuffer(target) => target.graphics.device(),
+            Self::Surface(target) => &target.graphics,
+            Self::Framebuffer(target) => &target.graphics,
         }
     }
 

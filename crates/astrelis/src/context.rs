@@ -1,6 +1,6 @@
 use crate::{
     Error, Framebuffer, FramebufferOptions, Material, MaterialOptions, Mesh, RenderTarget,
-    SurfaceOptions, Vertex,
+    SurfaceOptions, Texture, TextureOptions, Vertex,
 };
 
 /// Shared wgpu initialization and GPU resources for one or more render targets.
@@ -28,6 +28,20 @@ pub struct GraphicsContext {
 }
 
 impl GraphicsContext {
+    pub(crate) fn same_device(&self, other: &Self) -> bool {
+        self.instance == other.instance && self.device == other.device
+    }
+
+    /// Creates a reusable single-mip 2D color texture with a default sampling view.
+    ///
+    /// Creation validates nonzero dimensions, uncompressed format support, enabled
+    /// device features, and usages before allocation. Defaults use sRGB RGBA8 with
+    /// sampling and upload usages. Upload pixels separately with [`Texture::write`].
+    /// No queue work is submitted or waited for by this factory.
+    pub fn create_texture(&self, options: TextureOptions) -> Result<Texture, Error> {
+        Texture::create(self, options)
+    }
+
     /// Initializes wgpu and a first surface, selecting a compatible adapter.
     ///
     /// Options select physical dimensions and the initial sample count. A zero

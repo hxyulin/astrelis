@@ -1,6 +1,6 @@
-//! Indexed triangle-mesh rendering with custom materials, built directly on wgpu.
+//! Mesh and texture rendering with custom materials, built directly on wgpu.
 //!
-//! Astrelis handles GPU initialization, meshes, materials, surfaces, offscreen framebuffers, and
+//! Astrelis handles GPU initialization, meshes, textures, materials, surfaces, offscreen framebuffers, and
 //! frame submission. The application owns its windows, event loop, redraw schedule,
 //! and rendering order. The library has no windowing-framework dependency.
 //!
@@ -475,6 +475,76 @@
 //! Default initialization requires no optional features. Normal rendering does
 //! not wait for GPU completion; surface reconfiguration may synchronize with GPU work.
 
+//! # Textures and framebuffer compositing
+//!
+//! [`GraphicsContext::create_texture`] allocates a single-layer, single-mip 2D
+//! color texture. [`TextureOptions::new`] selects sRGB RGBA8 with sampling and
+//! upload usages. [`Texture::write`] uploads tightly packed texels; region uploads
+//! use [`Texture::write_region`]. Bytes must match the selected format, including
+//! its color space and alpha encoding. Queue uploads execute before commands in
+//! the next submission, rather than between recorded draws. Submit older work
+//! before replacing pixels that older draws should observe.
+//!
+//! [`TextureRenderer`] draws prepared [`TextureBinding`] values into the same
+//! [`RenderPass`] as meshes and application renderers. Prepare source bindings
+//! once, and optionally warm pipelines before drawing. Source and destination
+//! rectangles, tint, filtering, alpha interpretation, and blending are immutable
+//! binding settings. Repeated prepared draws create no GPU resources or uploads;
+//! a first draw may lazily create its pipeline. Create another binding for changed
+//! settings. Pipeline variants do not depend on rectangles, tint, or texture size.
+//!
+//! ```no_run
+//! use astrelis::{GraphicsContext, RenderTarget, TextureDrawOptions,
+//!     TextureFilter, TextureOptions, TextureRenderer};
+//! fn draw_image(graphics: &GraphicsContext, target: &mut RenderTarget<'_>,
+//!     rgba: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+//!     let texture = graphics.create_texture(TextureOptions::new(2, 2))?;
+//!     texture.write(rgba)?; // Exactly four sRGB RGBA8 texels, with straight alpha.
+//!     let mut renderer = TextureRenderer::new(graphics);
+//!     let image = renderer.create_binding(texture.view(), TextureDrawOptions::new()
+//!         .destination([0.1, 0.1, 0.8, 0.8]).filter(TextureFilter::Nearest))?;
+//!     renderer.prepare_for_target(&image, target)?;
+//!     // Keep these resources between redraws in a real application.
+//!     let mut frame = target.begin_frame()?;
+//!     renderer.draw(&mut frame.render_pass().begin()?, &image)?;
+//!     frame.finish()?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! Rectangles use `[x, y, width, height]`. Destination coordinates are relative
+//! to the current viewport, from top-left `(0, 0)` to bottom-right `(1, 1)`;
+//! source rectangles use normalized texture UVs with the same orientation.
+//! A full-target blit uses the default rectangles. A custom viewport can supply
+//! physical placement, while scissor clips each draw. Source sampling clamps to
+//! texture edges. The built-in renderer disables depth/stencil tests and writes;
+//! it can share depth-enabled passes and respects wrapped raster state.
+//!
+//! Uploads commonly have [`TextureAlpha::Straight`] alpha. Built-in mesh rendering
+//! into transparent framebuffers produces [`TextureAlpha::Premultiplied`] output;
+//! choose that explicitly to avoid multiplying alpha twice. Tint uses linear RGB
+//! and straight opacity. Both alpha modes produce premultiplied output, including
+//! with [`TextureBlend::Replace`]. [`TextureBlend::Alpha`] selects source-over blending.
+//!
+//! Sample an offscreen target with [`Framebuffer::color_view`]: its output is
+//! single-sampled even when rendering with MSAA. Record its render pass first, then
+//! composite it into the surface pass, and submit both with one [`Frame::finish`].
+//! Bindings also accept application-created sampled 2D float-color views.
+//! [`TextureFilter::Linear`] requires filterable storage; nearest sampling supports
+//! unfilterable float formats. Custom view dimensions and foreign raw GPU handles
+//! follow wgpu validation. Sampling an active managed color/resolve attachment is
+//! rejected as [`Error::TextureFeedback`]; render to another target first.
+//!
+//! A binding retains its view, so replacing framebuffer storage does not update
+//! the source automatically. After nonzero resize or MSAA changes, explicitly call
+//! `renderer.rebind(&mut binding, framebuffer.color_view()?)?`. The sampler and
+//! parameter buffer are retained and a new bind group is created only for a new
+//! view. Recorded draws retain their original bind groups. Pixel uploads into
+//! existing texture storage require no rebind. Textures and bindings can be cloned
+//! to share storage and GPU handles. Basic texture creation does not perform image
+//! file decoding, generate mipmaps, or convert pixels; custom resources remain
+//! available through wgpu interoperability.
+
 mod context;
 mod depth_stencil;
 mod error;
@@ -485,6 +555,8 @@ mod mesh;
 mod mesh_renderer;
 mod pass;
 mod target;
+mod texture;
+mod texture_renderer;
 
 pub use context::GraphicsContext;
 pub use error::Error;
@@ -495,6 +567,10 @@ pub use mesh::{Mesh, Vertex};
 pub use mesh_renderer::MeshRenderer;
 pub use pass::{RenderPass, RenderPassBuilder};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
+pub use texture::{Texture, TextureOptions};
+pub use texture_renderer::{
+    TextureAlpha, TextureBinding, TextureBlend, TextureDrawOptions, TextureFilter, TextureRenderer,
+};
 
 /// The exact wgpu version used by Astrelis, available for GPU interoperability.
 pub use wgpu;

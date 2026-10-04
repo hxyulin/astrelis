@@ -92,7 +92,7 @@ pub(super) fn pass<'encoder>(
     options.load = load;
     RenderPass::new(
         encoder,
-        graphics.device(),
+        graphics,
         crate::pass::ColorAttachment {
             view,
             resolve_target: None,
@@ -112,7 +112,7 @@ fn builder<'frame>(
 ) -> crate::RenderPassBuilder<'frame> {
     crate::RenderPassBuilder::new(
         encoder,
-        graphics.device(),
+        graphics,
         crate::pass::ColorAttachment {
             view,
             resolve_target: None,
@@ -527,7 +527,7 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
                     let mut initialized = false;
                     let mut pass = crate::RenderPassBuilder::new(
                         encoder,
-                        graphics.device(),
+                        &graphics,
                         attachment(view, multisample_view.as_ref(), count),
                         &mut initialized,
                     )
@@ -557,7 +557,7 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
                         let mut initialized = false;
                         let mut pass = crate::RenderPassBuilder::new(
                             encoder,
-                            graphics.device(),
+                            &graphics,
                             attachment(view, multisample_view.as_ref(), count),
                             &mut initialized,
                         )
@@ -569,7 +569,7 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
                             drop(pass);
                             pass = crate::RenderPassBuilder::new(
                                 encoder,
-                                graphics.device(),
+                                &graphics,
                                 attachment(view, multisample_view.as_ref(), count),
                                 &mut initialized,
                             )
@@ -599,7 +599,7 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
                     drop(
                         crate::RenderPassBuilder::new(
                             encoder,
-                            graphics.device(),
+                            &graphics,
                             attachment(view, multisample_view.as_ref(), count),
                             &mut initialized,
                         )

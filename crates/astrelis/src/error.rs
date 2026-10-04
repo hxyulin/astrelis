@@ -3,6 +3,45 @@ use std::{error, fmt};
 /// An initialization, mesh validation, target, or rendering failure.
 #[derive(Debug)]
 pub enum Error {
+    /// Texture dimensions must be nonzero and fit the device's 2D limit.
+    InvalidTextureSize {
+        /// Requested width.
+        width: u32,
+        /// Requested height.
+        height: u32,
+        /// Maximum dimension supported by the device.
+        max: u32,
+    },
+    /// The texture helper cannot allocate this format with the enabled device features.
+    UnsupportedTextureFormat {
+        /// Requested color format.
+        format: wgpu::TextureFormat,
+    },
+    /// Texture usages are unavailable or omit a required upload usage.
+    InvalidTextureUsage {
+        /// Texture format.
+        format: wgpu::TextureFormat,
+        /// Selected usages.
+        usage: wgpu::TextureUsages,
+    },
+    /// A texture upload rectangle is empty, overflows, or exceeds storage bounds.
+    InvalidTextureRegion,
+    /// A tightly packed texture upload has the wrong byte count.
+    InvalidTextureData {
+        /// Required byte count.
+        expected: u64,
+        /// Supplied byte count.
+        actual: usize,
+    },
+    /// The source is not single-sampled float color with the required sampling support.
+    InvalidTextureSource {
+        /// Underlying source format.
+        format: wgpu::TextureFormat,
+    },
+    /// A prepared texture rectangle/tint is nonfinite, has negative extents, or invalid opacity.
+    InvalidTextureDraw,
+    /// Sampling would read from an active color or resolve attachment.
+    TextureFeedback,
     /// A window or canvas could not be turned into a wgpu surface.
     CreateSurface(wgpu::CreateSurfaceError),
     /// No suitable GPU adapter could be selected.
@@ -122,6 +161,14 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidTextureSize { width, height, max } => write!(f, "texture size {width}x{height} must be nonzero and fit {max}"),
+            Self::UnsupportedTextureFormat { format } => write!(f, "{format:?} is not a supported uncompressed color texture format"),
+            Self::InvalidTextureUsage { format, usage } => write!(f, "invalid texture usage {usage:?} for {format:?}"),
+            Self::InvalidTextureRegion => f.write_str("texture upload region must be nonempty and fit the texture"),
+            Self::InvalidTextureData { expected, actual } => write!(f, "texture upload requires {expected} bytes, got {actual}"),
+            Self::InvalidTextureSource { format } => write!(f, "{format:?} requires single-sampled float color storage with compatible sampling usages/filtering"),
+            Self::InvalidTextureDraw => f.write_str("texture rectangles/tint must be finite, extents nonnegative, and opacity in 0..=1"),
+            Self::TextureFeedback => f.write_str("cannot sample an active color or resolve attachment"),
             Self::CreateSurface(error) => write!(f, "could not create a GPU surface: {error}"),
             Self::Adapter(error) => write!(f, "could not request a GPU adapter: {error}"),
             Self::Device(error) => write!(f, "could not request a GPU device: {error}"),

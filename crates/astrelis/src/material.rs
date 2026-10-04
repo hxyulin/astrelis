@@ -125,6 +125,7 @@ impl<'a> MaterialOptions<'a> {
 pub struct Material {
     pub(crate) id: u64,
     pub(crate) device: wgpu::Device,
+    pub(crate) instance: wgpu::Instance,
     pub(crate) shader: wgpu::ShaderModule,
     pub(crate) layout: wgpu::PipelineLayout,
     pub(crate) vertex_entry: String,
@@ -152,6 +153,7 @@ impl Material {
         Self {
             id,
             device: graphics.device().clone(),
+            instance: graphics.instance().clone(),
             shader: options.shader.clone(),
             layout,
             vertex_entry: options.vertex_entry.to_owned(),

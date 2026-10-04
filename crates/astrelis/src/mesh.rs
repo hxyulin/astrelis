@@ -41,6 +41,7 @@ impl Vertex {
 #[derive(Debug)]
 pub struct Mesh {
     pub(crate) device: wgpu::Device,
+    pub(crate) instance: wgpu::Instance,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     vertex_count: u32,
@@ -80,6 +81,7 @@ impl Mesh {
                 });
         Ok(Self {
             device: graphics.device().clone(),
+            instance: graphics.instance().clone(),
             vertex_buffer,
             index_buffer,
             vertex_count: vertices.len() as u32,

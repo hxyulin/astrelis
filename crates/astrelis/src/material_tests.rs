@@ -155,7 +155,7 @@ fn materials_bind_dynamic_uniforms_and_reuse_prepared_pipelines() {
         let multisampled = pixels(&graphics, |encoder, view| {
             let mut pass = RenderPass::new(
                 encoder,
-                device,
+                &graphics,
                 crate::pass::ColorAttachment {
                     view: &msaa_view,
                     resolve_target: Some(view),

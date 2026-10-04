@@ -3,7 +3,7 @@
 The `next` branch starts a new rendering API built directly on wgpu, with one
 workspace crate. The existing implementation remains on `main`.
 
-This version renders indexed, colored triangle meshes into window surfaces and
+This version renders indexed triangle meshes and sampled texture rectangles into window surfaces and
 offscreen framebuffers. It provides a shared `GraphicsContext`, uploaded `Mesh`
 resources, a `RenderTarget` enum with surface/framebuffer variants, scoped `Frame`
 and `RenderPass` types, and an independent `MeshRenderer`. Create GPU resources
@@ -152,6 +152,70 @@ may allocate an attachment, and its first mesh draw may create a pipeline.
 context and mesh expose their wgpu resources for custom GPU work. The context
 requests no timestamp features. Normal frames do not wait for GPU completion;
 resizing or recovering an outdated surface may synchronize with the GPU.
+
+## Textures and compositing
+
+Create textures through the context, upload pixels, and prepare reusable draws
+through an independent `TextureRenderer`:
+
+```rust
+let texture = graphics.create_texture(TextureOptions::new(width, height))?;
+texture.write(&rgba_pixels)?; // Tightly packed sRGB RGBA8; no 256-byte row padding.
+
+let mut renderer = TextureRenderer::new(&graphics);
+let image = renderer.create_binding(texture.view(), TextureDrawOptions::new()
+    .destination([0.1, 0.1, 0.8, 0.8])
+    .source([0.0, 0.0, 0.5, 0.5])
+    .filter(TextureFilter::Nearest)
+    .tint([1.0, 0.8, 0.8, 0.75]))?;
+renderer.prepare_for_target(&image, &target)?;
+
+let mut frame = target.begin_frame()?;
+{
+    let mut pass = frame.render_pass().begin()?;
+    renderer.draw(&mut pass, &image)?;
+}
+frame.finish()?;
+```
+
+Rectangles are `[x, y, width, height]`. Destination coordinates are relative to
+the active viewport, from top-left `(0, 0)` to bottom-right `(1, 1)`. Source
+coordinates are normalized texture UVs with the same orientation. Defaults draw
+the complete source into the full viewport, providing a full-target blit.
+Sampling clamps to texture edges. Nearest and linear filtering, tint/opacity,
+and `TextureBlend::Alpha` / `Replace` are supported. Tint is linear RGB with straight
+opacity. Draw output is premultiplied in both blend modes. Texture draws restore
+wrapped viewport/scissor state and disable depth/stencil tests and writes.
+
+A `TextureBinding` retains its source, sampler, and immutable GPU parameters.
+Reuse it across frames and renderers on the same device. Prepared repeated draws
+create no GPU resources or uploads. Create another binding for different settings.
+Pipeline variants depend on formats, MSAA, filtering, alpha mode, and blending;
+rectangles, tint, and image dimensions do not create additional pipelines.
+
+For framebuffer compositing, bind `framebuffer.color_view()` with
+`TextureDrawOptions::new().alpha(TextureAlpha::Premultiplied)`. The framebuffer's
+resolved color is always single-sampled. Record the offscreen pass with
+`frame.render_to(&mut framebuffer)` first, then draw its binding into the surface
+pass and finish once. Sampling an active color/resolve attachment is rejected as
+`Error::TextureFeedback`.
+
+Framebuffer resize and MSAA changes replace storage. Refresh the binding explicitly
+with `renderer.rebind(&mut binding, framebuffer.color_view()?)?` after allocation.
+The sampler and parameter buffer are reused; the same view needs no new bind group.
+Previously recorded draws retain their original bindings. Uploaded images normally
+use the default `TextureAlpha::Straight`; mesh-rendered transparent framebuffer
+contents use `Premultiplied` to avoid applying alpha twice.
+
+Texture creation supports uncompressed 2D color formats, one mip, and one layer.
+Defaults are sRGB RGBA8 with `TEXTURE_BINDING | COPY_DST`; format and usages are
+configurable. Upload bytes must use the texture's encoding. `write_region` updates
+an in-bounds rectangle with tightly packed rows. Uploads execute before commands
+in the next queue submission; submit older draws before changing pixels they
+should observe. Texture drawing also accepts application-created sampled 2D
+float-color views, including unfilterable float formats with nearest sampling.
+Custom view/device mismatches follow wgpu validation. File decoding and mipmap
+generation remain application-controlled.
 
 ## Materials and custom mesh shaders
 
@@ -350,6 +414,8 @@ cargo run -p astrelis --example depth
 cargo run -p astrelis --example stencil
 cargo run -p astrelis --example msaa
 cargo run -p astrelis --example framebuffer
+cargo run -p astrelis --example textures
+cargo run -p astrelis --example compositing
 cargo run -p astrelis --example multi_window
 ```
 
@@ -369,6 +435,10 @@ red and blue. Both passes share one submission. Its cached bind group is rebuilt
 when resizing changes the output view.
 The multi-window example shares one context and its rendering resources between
 two independently sized windows using 1x and 4x samples.
+The textures example uploads an image and compares nearest/linear sampling with
+a cropped, tinted translucent overlay. The compositing example draws a cropped
+MSAA framebuffer into a clipped region of a depth-enabled surface; Space changes
+offscreen MSAA and refreshes the prepared source binding.
 
 Each example is a standalone file with its own window creation, application state,
 event handling, redraw scheduling, resize handling, and surface-loss recovery.
@@ -405,6 +475,10 @@ cloned material reuse, independent renderers, culling, color masks, integer outp
 device rejection, and wgpu validation diagnostics. Depth/stencil pixel tests verify
 occlusion, reversed-Z, persistent loads, MSAA, read-only rejection, independent
 stencil flags, dynamic references, discard/abandonment, and attachment replacement.
+Texture pixel tests cover region uploads, byte-count validation, source orientation,
+crop/placement, filtering, sRGB decoding, alpha modes, tint, replacement, bind-group
+snapshots, framebuffer resize/MSAA rebinding, feedback rejection, viewport/scissor,
+prepared pipeline reuse, and resources from separate instances/devices.
 
 Wrapped passes currently provide one color attachment. Custom renderers can use
 raw pass access for instancing or indirect draws, and encoder access for compute,

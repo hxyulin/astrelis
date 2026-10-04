@@ -55,7 +55,7 @@ impl MeshRenderer {
     /// to share a depth-enabled pass. Errors follow [`Self::prepare`].
     /// A target on another device returns [`Error::DeviceMismatch`].
     pub fn prepare_for_target(&mut self, target: &crate::RenderTarget<'_>) -> Result<(), Error> {
-        if target.device() != self.graphics.device() {
+        if !target.graphics().same_device(&self.graphics) {
             return Err(Error::DeviceMismatch);
         }
         pipeline(
@@ -82,7 +82,10 @@ impl MeshRenderer {
         material: &Material,
         target: &crate::RenderTarget<'_>,
     ) -> Result<(), Error> {
-        if &material.device != self.graphics.device() || target.device() != self.graphics.device() {
+        if (&material.device != self.graphics.device()
+            || &material.instance != self.graphics.instance())
+            || !target.graphics().same_device(&self.graphics)
+        {
             return Err(Error::DeviceMismatch);
         }
         pipeline(
@@ -152,7 +155,9 @@ impl MeshRenderer {
         format: wgpu::TextureFormat,
         sample_count: u32,
     ) -> Result<(), Error> {
-        if &material.device != self.graphics.device() {
+        if &material.device != self.graphics.device()
+            || &material.instance != self.graphics.instance()
+        {
             return Err(Error::DeviceMismatch);
         }
         pipeline(
@@ -222,7 +227,9 @@ impl MeshRenderer {
         material: &Material,
     ) -> Result<(), Error> {
         self.validate_devices(pass, mesh)?;
-        if &material.device != self.graphics.device() {
+        if &material.device != self.graphics.device()
+            || &material.instance != self.graphics.instance()
+        {
             return Err(Error::DeviceMismatch);
         }
         if let Some(state) = &material.depth_stencil {
@@ -247,7 +254,10 @@ impl MeshRenderer {
     }
 
     fn validate_devices(&self, pass: &RenderPass<'_>, mesh: &Mesh) -> Result<(), Error> {
-        if pass.device() != self.graphics.device() || &mesh.device != self.graphics.device() {
+        if !pass.same_device(&self.graphics)
+            || &mesh.device != self.graphics.device()
+            || &mesh.instance != self.graphics.instance()
+        {
             return Err(Error::DeviceMismatch);
         }
         Ok(())
