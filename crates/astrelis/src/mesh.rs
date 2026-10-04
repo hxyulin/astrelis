@@ -32,6 +32,8 @@ impl Vertex {
 
 /// An immutable indexed triangle mesh uploaded once to a GPU device.
 ///
+/// Create meshes through [`GraphicsContext::create_mesh`].
+///
 /// The mesh owns its vertex and Uint32 index buffers. Rendering borrows those
 /// buffers without rebuilding or uploading the mesh each frame. Drop the mesh
 /// when it is no longer needed; wgpu retains resources used by in-flight work.
@@ -49,7 +51,7 @@ impl Mesh {
     ///
     /// Every three indices describe one triangle. Vertex colors use straight
     /// alpha; the fragment shader premultiplies them before blending.
-    pub fn new(
+    pub(crate) fn upload(
         graphics: &GraphicsContext,
         vertices: &[Vertex],
         indices: &[u32],

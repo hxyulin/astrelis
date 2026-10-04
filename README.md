@@ -5,7 +5,9 @@ workspace crate. The existing implementation remains on `main`.
 
 This first slice renders indexed, colored triangle meshes into window surfaces.
 It provides a shared `GraphicsContext`, uploaded `Mesh` resources, a surface-only
-`RenderTarget` enum, and a `Renderer` that submits and presents frames.
+`RenderTarget` enum, scoped `Frame` and `RenderPass` types, and a `MeshRenderer` that
+records mesh draws. Device-bound resources are created through the context:
+`graphics.create_mesh(vertices, indices)` and `MeshRenderer::new(&graphics)`.
 
 ## API
 
@@ -13,17 +15,16 @@ Window creation belongs to the application. An owned window handle such as
 `Arc<winit::window::Window>` allows the surface to have a `'static` lifetime:
 
 ```rust,no_run
-use astrelis::{GraphicsContext, Mesh, Renderer, Vertex, wgpu};
+use astrelis::{FrameError, GraphicsContext, MeshRenderer, Vertex, wgpu};
 
-async fn example(window: std::sync::Arc<winit::window::Window>) -> Result<(), astrelis::Error> {
+async fn example(window: std::sync::Arc<winit::window::Window>) -> Result<(), Box<dyn std::error::Error>> {
     let size = window.inner_size();
     let (graphics, mut target) = GraphicsContext::with_surface(
         window, size.width, size.height,
     ).await?;
-    let mut renderer = Renderer::new(&graphics);
+    let mut renderer = MeshRenderer::new(&graphics);
 
-    let triangle = Mesh::new(
-        &graphics,
+    let triangle = graphics.create_mesh(
         &[
             Vertex::new([ 0.0,  0.7, 0.0], [1.0, 0.0, 0.0, 1.0]),
             Vertex::new([-0.7, -0.7, 0.0], [0.0, 1.0, 0.0, 1.0]),
@@ -33,7 +34,17 @@ async fn example(window: std::sync::Arc<winit::window::Window>) -> Result<(), as
     )?;
 
     // In the window's redraw handler; upload the mesh only once.
-    let _status = renderer.render(&mut target, wgpu::Color::BLACK, &[&triangle])?;
+    let mut frame = match target.begin_frame() {
+        Ok(frame) => frame,
+        Err(FrameError::Retry) => { /* Schedule a later redraw. */ return Ok(()); }
+        Err(FrameError::Suspended) => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    {
+        let mut pass = frame.begin_pass(wgpu::LoadOp::Clear(wgpu::Color::BLACK))?;
+        renderer.draw(&mut pass, &triangle)?;
+    }
+    frame.present()?;
     Ok(())
 }
 ```
@@ -41,13 +52,28 @@ async fn example(window: std::sync::Arc<winit::window::Window>) -> Result<(), as
 Vertices use clip-space X/Y in `[-1, 1]`, Z in `[0, 1]`, and linear, straight-alpha
 RGBA colors. The shader interpolates color and premultiplies it for blending.
 Meshes draw in submission order without depth testing or face culling. Indices
-are `u32`; an empty mesh submission clears the surface.
+are `u32`; a clear pass with no draws is valid.
 
-`FrameStatus::Presented` includes the wgpu submission index. `Retry` requests a
-later redraw after a transient acquisition failure. `Suspended` means the target
-is zero-sized or occluded. Resize with physical dimensions using `target.resize`.
-Outdated surfaces are reconfigured once; a lost surface must be recreated by the
-application. The examples show this lifecycle and sleep while idle.
+`target.begin_frame()` returns `Result<Frame, FrameError>` independently of any
+renderer. Multiple renderers on the same device can draw into its passes. The first
+pass uses
+`wgpu::LoadOp::Clear`; subsequent passes can use `Load` to preserve earlier work.
+Passes end when dropped. `frame.present()` consumes the frame, submits once, and
+presents, returning a wgpu submission index. Dropping a frame releases its acquired
+image and discards recorded commands without submitting or presenting. Presentation
+without a clear pass returns `Error::UninitializedFrame`.
+
+`FrameError::Retry` requires a later redraw after a transient acquisition
+failure. `FrameError::Suspended` means the target is zero-sized or occluded. Resize
+with physical dimensions using `target.resize` when no frame is active. Frame/pass
+borrows prevent
+resizing during recording or presenting while a pass is active. Outdated surfaces
+are reconfigured once; a lost surface must be recreated by the application. The
+examples show this lifecycle and sleep while idle.
+
+`pass.as_wgpu()` supports custom drawing within the same pass. Custom renderers must
+set the GPU state they rely on. The built-in mesh renderer restores its pipeline,
+geometry bindings, full viewport, and full scissor rectangle for every draw.
 
 A context owns one wgpu instance, adapter, device, and queue. Use
 `graphics.create_surface(window, width, height)` for additional windows; each target
@@ -70,11 +96,20 @@ cargo run -p astrelis --example multi_window
 ```
 
 The triangle demonstrates interpolated vertex color. The meshes example draws
-overlapping opaque and translucent quads, each using a vertex and index buffer.
-The multi-window example shares one context, renderer, and mesh between two windows.
-All native examples support `--smoke` to verify zero-size suspension, render at
-least three frames, confirm a resize to 640×480, and exit. winit and pollster are
-development dependencies, not library dependencies.
+overlapping opaque and translucent quads through two independent renderers sharing
+one pass, each mesh using a vertex and index buffer.
+The multi-window example shares one context and its rendering resources between
+two independently sized windows.
+
+Each example is a standalone file with its own window creation, application state,
+event handling, redraw scheduling, resize handling, and surface-loss recovery.
+Copy one into a binary that depends on `astrelis`, `winit = "0.30"`, and
+`pollster = "0.4"`; no shared support module or extra source files are needed.
+
+The examples contain application code only. For automated native checks, copy an
+example to a temporary binary and add presentation counters, resize checks, and
+an exit deadline there. winit and pollster are development dependencies, not
+library dependencies.
 
 ## Development
 
@@ -82,15 +117,14 @@ development dependencies, not library dependencies.
 cargo fmt --all --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo run -p astrelis --example triangle -- --smoke
-cargo run -p astrelis --example meshes -- --smoke
-cargo run -p astrelis --example multi_window -- --smoke
 ```
 
-The GPU test reads pixels back to verify indexed drawing, submission order,
-alpha blending, clear-only rendering, and resource reuse. It fails when no GPU
-adapter is available. It uses an internal offscreen attachment; the public target
-API remains surface-only.
+The GPU test reads pixels back to verify multiple renderers sharing a pass, indexed
+drawing, draw order, alpha blending, sequential load/clear passes, restored GPU
+state, device validation, and resource reuse. Compile-fail documentation tests
+verify the frame/pass lifetime constraints. The GPU test fails when no adapter is
+available. It uses an internal offscreen attachment; the public target API remains
+surface-only.
 
 This version deliberately starts with a fixed mesh pipeline. Canvas recording,
 materials, cameras, scene APIs, and UI integration will be designed in later slices.

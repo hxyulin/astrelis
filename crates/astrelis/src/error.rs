@@ -45,10 +45,8 @@ pub enum Error {
     DeviceMismatch,
     /// The clear color contains a nonfinite component.
     InvalidClearColor,
-    /// The surface was lost; recreate it with the owning window and instance.
-    SurfaceLost,
-    /// wgpu reported a surface acquisition validation error.
-    SurfaceValidation,
+    /// A first pass tried to load contents, or presentation had no clear pass.
+    UninitializedFrame,
 }
 
 impl fmt::Display for Error {
@@ -84,10 +82,9 @@ impl fmt::Display for Error {
             Self::MeshTooLarge => f.write_str("mesh data exceeds device or draw-count limits"),
             Self::DeviceMismatch => f.write_str("resources belong to different GPU devices"),
             Self::InvalidClearColor => f.write_str("clear color must contain finite components"),
-            Self::SurfaceLost => {
-                f.write_str("surface lost; recreate the surface and render target")
+            Self::UninitializedFrame => {
+                f.write_str("a frame must start with a clear pass before presentation")
             }
-            Self::SurfaceValidation => f.write_str("wgpu rejected surface acquisition"),
         }
     }
 }

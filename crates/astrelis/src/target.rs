@@ -1,4 +1,4 @@
-use crate::{Error, GraphicsContext};
+use crate::{Error, Frame, FrameError, GraphicsContext};
 
 /// A rendering destination. This first version supports window surfaces only.
 #[derive(Debug)]
@@ -63,6 +63,41 @@ impl<'window> RenderTarget<'window> {
         Ok(Self::Surface(target))
     }
 
+    /// Acquires one frame without borrowing any renderer.
+    ///
+    /// The ready frame exclusively borrows this target until presentation or drop.
+    /// Zero-sized or occluded targets return [`FrameError::Suspended`]. An
+    /// outdated surface is reconfigured and acquisition retried once. Timeouts and
+    /// surfaces that remain outdated return [`FrameError::Retry`].
+    ///
+    /// # Errors
+    ///
+    /// [`FrameError::SurfaceLost`] requires replacing the target with a new surface from
+    /// the owning window. [`FrameError::Validation`] indicates a wgpu acquisition
+    /// validation failure.
+    pub fn begin_frame(&mut self) -> Result<Frame<'_, 'window>, FrameError> {
+        let Self::Surface(target) = self;
+        if target.size.contains(&0) {
+            return Err(FrameError::Suspended);
+        }
+        let mut acquisition = target.surface.get_current_texture();
+        if matches!(acquisition, wgpu::CurrentSurfaceTexture::Outdated) {
+            target.configure();
+            acquisition = target.surface.get_current_texture();
+        }
+        let (image, suboptimal) = match acquisition {
+            wgpu::CurrentSurfaceTexture::Success(image) => (image, false),
+            wgpu::CurrentSurfaceTexture::Suboptimal(image) => (image, true),
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Outdated => {
+                return Err(FrameError::Retry);
+            }
+            wgpu::CurrentSurfaceTexture::Occluded => return Err(FrameError::Suspended),
+            wgpu::CurrentSurfaceTexture::Lost => return Err(FrameError::SurfaceLost),
+            wgpu::CurrentSurfaceTexture::Validation => return Err(FrameError::Validation),
+        };
+        Ok(Frame::new(target, image, suboptimal))
+    }
+
     /// Updates the physical size, configuring only nonzero, changed dimensions.
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), Error> {
         let Self::Surface(target) = self;
@@ -93,7 +128,7 @@ impl<'window> RenderTarget<'window> {
 
     /// Returns the owned wgpu surface for inspection or low-level integration.
     ///
-    /// Configure and acquire through Astrelis while using [`crate::Renderer`].
+    /// Configure and acquire through Astrelis while using [`Self::begin_frame`].
     /// External reconfiguration would invalidate the target's managed state.
     pub fn as_surface(&self) -> &wgpu::Surface<'window> {
         let Self::Surface(target) = self;

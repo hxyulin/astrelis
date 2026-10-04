@@ -1,4 +1,4 @@
-use crate::{Error, RenderTarget};
+use crate::{Error, Mesh, RenderTarget, Vertex};
 
 /// Shared wgpu initialization and GPU resources for one or more render targets.
 ///
@@ -87,6 +87,20 @@ impl GraphicsContext {
             .create_surface(window)
             .map_err(Error::CreateSurface)?;
         RenderTarget::surface(self, surface, width, height)
+    }
+
+    /// Validates and uploads an immutable indexed triangle mesh on this device.
+    ///
+    /// Every three Uint32 indices describe a triangle. Vertex positions use clip
+    /// space, and colors use linear RGB with straight alpha. Upload once and reuse
+    /// the mesh across frames and renderers on this device.
+    ///
+    /// # Errors
+    ///
+    /// Rejects empty geometry, incomplete triangles, out-of-bounds indices,
+    /// nonfinite vertex components, and data exceeding the device's buffer limits.
+    pub fn create_mesh(&self, vertices: &[Vertex], indices: &[u32]) -> Result<Mesh, Error> {
+        Mesh::upload(self, vertices, indices)
     }
 
     /// Requests a device from an application-created wgpu instance.
