@@ -146,6 +146,27 @@ Zero-area geometry draws nothing. Paths, connected stroke joins, and shape outli
 are outside these initial primitive types. Shader edge coverage is independent of
 attachment MSAA, selected with `EdgeAntialiasing`.
 
+`ShapeRenderer` and `LineRenderer` record these primitives directly into existing
+passes. Both provide `draw`, `draw_many`, and `bind` scopes. Batches validate every
+item before drawing, preserve order, and split by upload capacity. Warmed workloads
+reuse buffers, pipeline variants, and CPU scratch. Defaults disable depth/stencil
+tests and writes so primitives can overlay a 3D pass, including read-only aspects.
+Custom stencil-tested primitives can use mesh materials.
+
+```rust
+let mut shapes = ShapeRenderer::new(&graphics);
+let mut lines = LineRenderer::new(&graphics);
+shapes.prepare(&target.render_format())?;
+lines.prepare(&target.render_format())?;
+
+let mut pass = frame.render_pass().begin()?;
+shapes.draw(&mut pass,
+    ShapeDraw::rounded_rect(Rect::new(20., 20., 120., 60.), 12., [0.1, 0.3, 0.6, 1.]))?;
+let mut strokes = lines.bind(&mut pass)?;
+strokes.draw(LineDraw::new([30., 50.], [130., 50.], [1.; 4])
+    .width(3.).cap(LineCap::Round))?;
+```
+
 ## Scoped drawing
 
 For consecutive draws that keep the same mesh/material or image/material, bind a

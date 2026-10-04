@@ -1,6 +1,6 @@
 [package]
 name = "astrelis"
-description = "A small mesh and texture rendering API built directly on wgpu"
+description = "A small mesh, image, and 2D primitive rendering API built directly on wgpu"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

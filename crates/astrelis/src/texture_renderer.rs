@@ -310,7 +310,7 @@ fn validate_prepared_viewport(
 }
 fn record_parameters(pass: &mut RenderPass<'_>, parameters: &[Parameters]) {
     for chunk in parameters.chunks(1024) {
-        let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk));
+        let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk), 64);
         pass.set_vertex_buffer(0, &buffer, 0..buffer.size());
         let first = (range.start / 64) as u32;
         pass.inner.draw(0..6, first..first + chunk.len() as u32);

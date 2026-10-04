@@ -783,11 +783,12 @@ impl<'frame> RenderPass<'frame> {
     pub(crate) fn upload_instances(
         &mut self,
         bytes: &[u8],
+        alignment: u64,
     ) -> (wgpu::Buffer, std::ops::Range<u64>) {
         self.uploads
             .as_mut()
             .expect("instance uploads require a frame-owned pass")
-            .append(self.graphics, bytes)
+            .append(self.graphics, bytes, alignment)
     }
 
     pub(crate) fn viewport_size(&self) -> [f32; 2] {

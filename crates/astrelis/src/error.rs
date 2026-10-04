@@ -79,6 +79,11 @@ pub enum Error {
         /// Pass format incompatible with the built-in mesh renderer.
         format: wgpu::TextureFormat,
     },
+    /// Solid primitive shading requires a blendable floating-point color attachment.
+    UnsupportedPrimitiveFormat {
+        /// Incompatible pass color format.
+        format: wgpu::TextureFormat,
+    },
     /// A material requests blending on a color format that does not support it.
     UnsupportedMaterialFormat {
         /// Pass format incompatible with the material's blend settings.
@@ -194,6 +199,7 @@ impl fmt::Display for Error {
             Self::UnsupportedColorFormat { format } => write!(f, "{format:?} cannot be a color attachment on this device"),
             Self::InvalidFramebufferUsage { format, usage } => write!(f, "invalid framebuffer usage {usage:?} for {format:?}"),
             Self::UnsupportedMeshFormat { format } => write!(f, "the mesh renderer requires a blendable floating-point output, got {format:?}"),
+            Self::UnsupportedPrimitiveFormat { format } => write!(f, "solid primitives require a blendable floating-point output, got {format:?}"),
             Self::UnsupportedMaterialFormat { format } => write!(f, "material blending is unsupported for {format:?}"),
             Self::UnsupportedDepthStencilFormat { format } => write!(f, "{format:?} is not an available depth/stencil attachment"),
             Self::InvalidDepthStencilUsage { format, usage } => write!(f, "invalid depth/stencil usage {usage:?} for {format:?}"),

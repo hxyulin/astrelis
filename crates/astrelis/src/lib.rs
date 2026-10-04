@@ -190,6 +190,34 @@
 //! not at their source-code position between draws. Use encoder copies or custom
 //! commands when updates must occur at a precise point in the command sequence.
 //!
+//! # Solid 2D primitives
+//!
+//! [`ShapeRenderer`] fills rectangles, uniformly rounded rectangles, and ellipses.
+//! [`LineRenderer`] draws independent segments with width and end caps. Geometry
+//! uses [`DrawSpace`] and [`Transform2D`], relative to the current viewport. Input
+//! colors are linear straight RGBA; shader output is premultiplied source-over.
+//! Analytic edge coverage works on single-sampled targets and is independent of
+//! target MSAA. Defaults disable depth/stencil tests and writes.
+//!
+//! ```no_run
+//! use astrelis::{Error, LineCap, LineDraw, LineRenderer, Rect, RenderPass, ShapeDraw, ShapeRenderer};
+//! fn primitives(pass: &mut RenderPass<'_>, shapes: &mut ShapeRenderer,
+//!     lines: &mut LineRenderer) -> Result<(), Error> {
+//!     shapes.draw(pass, ShapeDraw::rounded_rect(Rect::new(20., 20., 120., 60.),
+//!         12., [0.1, 0.3, 0.6, 1.]))?;
+//!     let mut strokes = lines.bind(pass)?;
+//!     strokes.draw(LineDraw::new([30., 50.], [130., 50.], [1.; 4])
+//!         .width(3.).cap(LineCap::Round))?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! Both renderers support explicit ordered batches and scoped draws. Pass access
+//! inside a scope permits clipping/custom rendering; the next primitive restores
+//! its pipeline and wrapped raster state. Paths, connected joins, and shape outlines
+//! are not part of these initial primitives. Renderer internals share frame uploads
+//! with images, using appropriate per-allocation alignment for mixed instance strides.
+//!
 //! # Scoped repeated drawing
 //!
 //! Individual draw calls remain useful for simple and mixed rendering. When a
@@ -285,6 +313,7 @@ mod material;
 mod mesh;
 mod mesh_renderer;
 mod pass;
+mod primitive;
 mod target;
 mod texture;
 mod texture_renderer;
@@ -307,6 +336,7 @@ pub use mesh::{
 };
 pub use mesh_renderer::{MeshDrawSession, MeshRenderer};
 pub use pass::{RenderPass, RenderPassBuilder};
+pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{

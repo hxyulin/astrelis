@@ -28,13 +28,12 @@ impl DrawUploads {
         &mut self,
         graphics: &crate::GraphicsContext,
         bytes: &[u8],
+        alignment: u64,
     ) -> (wgpu::Buffer, std::ops::Range<u64>) {
         let length = bytes.len() as u64;
-        if self
-            .pages
-            .last()
-            .is_none_or(|p| p.bytes.len() as u64 + length > p.buffer.size())
-        {
+        if self.pages.last().is_none_or(|p| {
+            (p.bytes.len() as u64).div_ceil(alignment) * alignment + length > p.buffer.size()
+        }) {
             let mut pool = graphics
                 .upload_pool
                 .lock()
@@ -63,7 +62,10 @@ impl DrawUploads {
             });
         }
         let page = self.pages.last_mut().unwrap();
-        let start = page.bytes.len() as u64;
+        // Renderers with different instance strides can share a page. Callers
+        // using first_instance offsets must align starts to their record stride.
+        let start = (page.bytes.len() as u64).div_ceil(alignment) * alignment;
+        page.bytes.resize(start as usize, 0);
         page.bytes.extend_from_slice(bytes);
         (page.buffer.clone(), start..start + length)
     }

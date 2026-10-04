@@ -2,7 +2,7 @@ use std::collections::{HashMap, hash_map::Entry};
 
 use crate::{Error, GraphicsContext, Material, MaterialOptions, Mesh, RenderPass};
 
-type Pipelines =
+pub(crate) type Pipelines =
     HashMap<(u64, wgpu::TextureFormat, u32, Option<wgpu::TextureFormat>), wgpu::RenderPipeline>;
 
 /// A device-bound renderer for indexed triangle meshes, with optional materials.
@@ -500,7 +500,7 @@ fn validate_aspects(pass: &RenderPass<'_>, material: &Material) -> Result<(), Er
     Ok(())
 }
 
-fn pipeline<'cache>(
+pub(crate) fn pipeline<'cache>(
     graphics: &GraphicsContext,
     pipelines: &'cache mut Pipelines,
     material: &Material,

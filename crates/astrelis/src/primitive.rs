@@ -1,0 +1,481 @@
+use crate::{
+    DrawSpace, EdgeAntialiasing, Error, GraphicsContext, LineCap, LineDraw, Material,
+    MaterialOptions, Rect, RenderFormat, RenderPass, Shape, ShapeDraw, Transform2D, VertexLayout,
+};
+use bytemuck::{Pod, Zeroable};
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct Parameters {
+    origin_axis_x: [f32; 4],
+    axis_y_min: [f32; 4],
+    span_style: [f32; 4],
+    geometry: [f32; 4],
+    color: [f32; 4],
+}
+const PAGE_INSTANCES: usize = 819; // 80-byte records fit a 64 KiB upload page.
+
+trait PrimitiveData: Copy {
+    fn parameters(self, viewport: [f32; 2]) -> Result<Parameters, Error>;
+}
+impl PrimitiveData for ShapeDraw {
+    fn parameters(self, viewport: [f32; 2]) -> Result<Parameters, Error> {
+        self.validate()?;
+        let Rect {
+            x,
+            y,
+            width,
+            height,
+        } = self.rect;
+        if width == 0. || height == 0. {
+            return Ok(Parameters::zeroed());
+        }
+        let (kind, radius) = match self.shape {
+            Shape::Rectangle => (0., 0.),
+            Shape::RoundedRectangle { radius } => (1., radius.min(width.min(height) * 0.5)),
+            Shape::Ellipse => (2., 0.),
+        };
+        pack(
+            [x + width * 0.5, y + height * 0.5],
+            [1., 0.],
+            [0., 1.],
+            [width * 0.5, height * 0.5],
+            [width * 0.5, height * 0.5],
+            kind,
+            radius,
+            self.color,
+            self.space,
+            self.transform,
+            self.antialiasing,
+            viewport,
+        )
+        .ok_or(Error::InvalidShapeDraw)
+    }
+}
+impl PrimitiveData for LineDraw {
+    fn parameters(self, viewport: [f32; 2]) -> Result<Parameters, Error> {
+        self.validate()?;
+        let dx = self.end[0] - self.start[0];
+        let dy = self.end[1] - self.start[1];
+        let length = dx.hypot(dy);
+        if !length.is_finite() {
+            return Err(Error::InvalidLineDraw);
+        }
+        if self.width == 0. || (length == 0. && self.cap == LineCap::Butt) {
+            return Ok(Parameters::zeroed());
+        }
+        let axis = if length == 0. {
+            [1., 0.]
+        } else {
+            [dx / length, dy / length]
+        };
+        let half_width = self.width * 0.5;
+        let kind = match self.cap {
+            LineCap::Butt => 3.,
+            LineCap::Square => 4.,
+            LineCap::Round => 5.,
+        };
+        let extent = length * 0.5
+            + if self.cap == LineCap::Butt {
+                0.
+            } else {
+                half_width
+            };
+        pack(
+            [self.start[0] + dx * 0.5, self.start[1] + dy * 0.5],
+            axis,
+            [-axis[1], axis[0]],
+            [extent, half_width],
+            [length * 0.5, half_width],
+            kind,
+            0.,
+            self.color,
+            self.space,
+            self.transform,
+            self.antialiasing,
+            viewport,
+        )
+        .ok_or(Error::InvalidLineDraw)
+    }
+}
+
+// One private encoder serves both public APIs. Convert through f64 so validation
+// catches overflow, including the analytic fringe under rotation/shear/scaling.
+#[allow(clippy::too_many_arguments)]
+fn pack(
+    center: [f32; 2],
+    x: [f32; 2],
+    y: [f32; 2],
+    bounds: [f32; 2],
+    geometry: [f32; 2],
+    kind: f32,
+    radius: f32,
+    color: [f32; 4],
+    space: DrawSpace,
+    t: Transform2D,
+    aa: EdgeAntialiasing,
+    viewport: [f32; 2],
+) -> Option<Parameters> {
+    let [a, b, c, d, tx, ty] = t.0.map(f64::from);
+    let [vx, vy] = viewport.map(f64::from);
+    if vx == 0. || vy == 0. {
+        return Some(Parameters::zeroed());
+    }
+    let scale = match space {
+        DrawSpace::Pixels => [1., 1.],
+        DrawSpace::Normalized => [vx, vy],
+    };
+    let axis = |p: [f32; 2]| {
+        [
+            (a * f64::from(p[0]) + c * f64::from(p[1])) * scale[0],
+            (b * f64::from(p[0]) + d * f64::from(p[1])) * scale[1],
+        ]
+    };
+    let ax = axis(x);
+    let ay = axis(y);
+    let determinant = ax[0] * ay[1] - ax[1] * ay[0];
+    if determinant == 0. {
+        return Some(Parameters::zeroed());
+    }
+    let padding = if aa == EdgeAntialiasing::Coverage {
+        [
+            (ay[0].abs() + ay[1].abs()) / determinant.abs(),
+            (ax[0].abs() + ax[1].abs()) / determinant.abs(),
+        ]
+    } else {
+        [0., 0.]
+    };
+    let bx = f64::from(bounds[0]) + padding[0];
+    let by = f64::from(bounds[1]) + padding[1];
+    let origin = [
+        (a * f64::from(center[0]) + c * f64::from(center[1]) + tx) * scale[0] / vx,
+        (b * f64::from(center[0]) + d * f64::from(center[1]) + ty) * scale[1] / vy,
+    ];
+    let p = Parameters {
+        origin_axis_x: [
+            origin[0] as f32,
+            origin[1] as f32,
+            (ax[0] / vx) as f32,
+            (ax[1] / vy) as f32,
+        ],
+        axis_y_min: [
+            (ay[0] / vx) as f32,
+            (ay[1] / vy) as f32,
+            -bx as f32,
+            -by as f32,
+        ],
+        span_style: [(bx * 2.) as f32, (by * 2.) as f32, kind, radius],
+        geometry: [
+            geometry[0],
+            geometry[1],
+            0.,
+            if aa == EdgeAntialiasing::Coverage {
+                1.
+            } else {
+                0.
+            },
+        ],
+        color,
+    };
+    if !bytemuck::cast_slice::<Parameters, f32>(&[p])
+        .iter()
+        .all(|v| v.is_finite())
+    {
+        return None;
+    }
+    for sx in [-bx, bx] {
+        for sy in [-by, by] {
+            let point = [
+                origin[0] + sx * ax[0] / vx + sy * ay[0] / vx,
+                origin[1] + sx * ax[1] / vy + sy * ay[1] / vy,
+            ];
+            if point
+                .iter()
+                .any(|v| !(*v as f32).is_finite() || !(*v as f32 * 2.).is_finite())
+            {
+                return None;
+            }
+        }
+    }
+    Some(p)
+}
+
+#[derive(Debug)]
+struct PrimitiveRenderer {
+    graphics: GraphicsContext,
+    material: Material,
+    pipelines: crate::mesh_renderer::Pipelines,
+    parameters: Vec<Parameters>,
+}
+impl PrimitiveRenderer {
+    fn new(g: &GraphicsContext) -> Self {
+        let shader = g
+            .device()
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("Astrelis solid primitives"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("primitive.wgsl").into()),
+            });
+        let layout=VertexLayout {stride:80,step_mode:wgpu::VertexStepMode::Instance,
+            attributes:wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4,4=>Float32x4].to_vec()};
+        Self {
+            graphics: g.clone(),
+            material: g.create_material(MaterialOptions::new(&shader).vertex_layouts(&[layout])),
+            pipelines: Default::default(),
+            parameters: Vec::new(),
+        }
+    }
+    fn pipeline(&mut self, format: &RenderFormat) -> Result<wgpu::RenderPipeline, Error> {
+        let color = if format.colors.len() == 1 {
+            format.colors[0]
+        } else {
+            None
+        }
+        .ok_or(Error::ExpectedSingleColor)?;
+        // Built-in solid shading requires floating-point, blendable color, just as
+        // built-in mesh shading does. Inert depth/stencil permits sharing a 3D pass.
+        Ok(crate::mesh_renderer::pipeline(
+            &self.graphics,
+            &mut self.pipelines,
+            &self.material,
+            color,
+            format.sample_count,
+            format.depth_stencil,
+            true,
+        )
+        .map_err(|error| match error {
+            Error::UnsupportedMeshFormat { format } => Error::UnsupportedPrimitiveFormat { format },
+            other => other,
+        })?
+        .clone())
+    }
+    fn bind<'draw, 'frame>(
+        &'draw mut self,
+        pass: &'draw mut RenderPass<'frame>,
+    ) -> Result<Session<'draw, 'frame>, Error> {
+        if !pass.same_device(&self.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        let pipeline = self.pipeline(&pass.render_format())?;
+        pass.apply_raster_state();
+        pass.set_pipeline(&pipeline);
+        Ok(Session {
+            pass,
+            pipeline,
+            parameters: &mut self.parameters,
+            dirty: false,
+        })
+    }
+}
+#[derive(Debug)]
+struct Session<'draw, 'frame> {
+    pass: &'draw mut RenderPass<'frame>,
+    pipeline: wgpu::RenderPipeline,
+    parameters: &'draw mut Vec<Parameters>,
+    dirty: bool,
+}
+impl<'frame> Session<'_, 'frame> {
+    fn restore(&mut self) {
+        if self.dirty {
+            self.pass.apply_raster_state();
+            self.pass.set_pipeline(&self.pipeline);
+            self.dirty = false;
+        }
+    }
+    fn draw<T: PrimitiveData>(&mut self, draw: T) -> Result<(), Error> {
+        let p = draw.parameters(self.pass.viewport_size())?;
+        self.restore();
+        record(self.pass, std::slice::from_ref(&p));
+        Ok(())
+    }
+    fn draw_many<T: PrimitiveData>(&mut self, draws: &[T]) -> Result<(), Error> {
+        self.parameters.clear();
+        for draw in draws {
+            self.parameters
+                .push(draw.parameters(self.pass.viewport_size())?);
+        }
+        if !self.parameters.is_empty() {
+            self.restore();
+            record(self.pass, self.parameters);
+        }
+        Ok(())
+    }
+    fn pass(&mut self) -> &mut RenderPass<'frame> {
+        self.dirty = true;
+        self.pass
+    }
+}
+fn record(pass: &mut RenderPass<'_>, parameters: &[Parameters]) {
+    for chunk in parameters.chunks(PAGE_INSTANCES) {
+        let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk), 4);
+        pass.set_vertex_buffer(0, &buffer, range);
+        pass.inner.draw(0..6, 0..chunk.len() as u32);
+    }
+}
+
+/// Independent renderer for filled rectangles, rounded rectangles, and ellipses.
+///
+/// Owns shaders, pipeline variants, and reusable CPU scratch, but no windows or
+/// frames. Colors are linear straight RGBA; output uses premultiplied source-over.
+/// Draws do not test/write depth or stencil, even when sharing a depth-enabled
+/// pass. Use pass clipping or custom mesh materials for explicit stencil tests.
+/// Shader edge coverage works without MSAA. No draw sorting or implicit batching
+/// occurs. Prepare pipelines before rendering to avoid first-use pipeline creation.
+#[derive(Debug)]
+pub struct ShapeRenderer {
+    inner: PrimitiveRenderer,
+}
+impl ShapeRenderer {
+    /// Creates shaders and an empty pipeline cache on this context's device.
+    pub fn new(graphics: &GraphicsContext) -> Self {
+        Self {
+            inner: PrimitiveRenderer::new(graphics),
+        }
+    }
+    /// Prepares a target's color/sample/depth-stencil variant without drawing.
+    pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), Error> {
+        self.inner.pipeline(format)?;
+        Ok(())
+    }
+    /// Prepares a surface variant, rejecting targets on another device.
+    pub fn prepare_for_target(&mut self, target: &crate::RenderTarget<'_>) -> Result<(), Error> {
+        if !target.graphics().same_device(&self.inner.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        self.prepare(&target.render_format())
+    }
+    /// Validates and records one primitive. Rejected operations record no draw.
+    pub fn draw(&mut self, pass: &mut RenderPass<'_>, draw: ShapeDraw) -> Result<(), Error> {
+        self.bind(pass)?.draw(draw)
+    }
+    /// Validates the whole slice, then instances consecutive primitives in input
+    /// order, splitting at upload-page boundaries. Empty slices are a no-op.
+    /// Validation failure records no draw from this slice. Storage is reused after warm-up.
+    pub fn draw_many(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        draws: &[ShapeDraw],
+    ) -> Result<(), Error> {
+        if draws.is_empty() {
+            return Ok(());
+        }
+        self.bind(pass)?.draw_many(draws)
+    }
+    /// Selects the pipeline once for repeated drawing in an exclusive pass scope.
+    /// Dynamic geometry still gets validated and uploaded through frame-owned pages.
+    /// Dropping the scope leaves the pass open; it does not submit or present.
+    pub fn bind<'draw, 'frame>(
+        &'draw mut self,
+        pass: &'draw mut RenderPass<'frame>,
+    ) -> Result<ShapeDrawSession<'draw, 'frame>, Error> {
+        Ok(ShapeDrawSession {
+            inner: self.inner.bind(pass)?,
+        })
+    }
+}
+/// A scoped shape pipeline with validated dynamic data and explicit pass access.
+/// Created with [`ShapeRenderer::bind`]. Borrows renderer scratch and the pass.
+#[derive(Debug)]
+pub struct ShapeDrawSession<'draw, 'frame> {
+    inner: Session<'draw, 'frame>,
+}
+impl<'frame> ShapeDrawSession<'_, 'frame> {
+    /// Validates and records one primitive in the current viewport and clip.
+    pub fn draw(&mut self, draw: ShapeDraw) -> Result<(), Error> {
+        self.inner.draw(draw)
+    }
+    /// Validates the whole slice before recording ordered, page-sized instance batches.
+    pub fn draw_many(&mut self, draws: &[ShapeDraw]) -> Result<(), Error> {
+        self.inner.draw_many(draws)
+    }
+    /// Borrows the pass for clipping, bindings, other renderers, or raw commands.
+    /// The next draw restores this scope's pipeline and wrapped raster state.
+    pub fn pass(&mut self) -> &mut RenderPass<'frame> {
+        self.inner.pass()
+    }
+}
+
+/// Independent renderer for independent width-aware line segments.
+///
+/// Owns shaders, pipeline variants, and reusable CPU scratch, but no windows or
+/// frames. Colors are linear straight RGBA; output uses premultiplied source-over.
+/// Draws do not test/write depth or stencil, even when sharing a depth-enabled
+/// pass. Use pass clipping or custom mesh materials for explicit stencil tests.
+/// Shader edge coverage works without MSAA. No draw sorting or implicit batching
+/// occurs. Prepare pipelines before rendering to avoid first-use pipeline creation.
+#[derive(Debug)]
+pub struct LineRenderer {
+    inner: PrimitiveRenderer,
+}
+impl LineRenderer {
+    /// Creates shaders and an empty pipeline cache on this context's device.
+    pub fn new(graphics: &GraphicsContext) -> Self {
+        Self {
+            inner: PrimitiveRenderer::new(graphics),
+        }
+    }
+    /// Prepares a target's color/sample/depth-stencil variant without drawing.
+    pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), Error> {
+        self.inner.pipeline(format)?;
+        Ok(())
+    }
+    /// Prepares a surface variant, rejecting targets on another device.
+    pub fn prepare_for_target(&mut self, target: &crate::RenderTarget<'_>) -> Result<(), Error> {
+        if !target.graphics().same_device(&self.inner.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        self.prepare(&target.render_format())
+    }
+    /// Validates and records one primitive. Rejected operations record no draw.
+    pub fn draw(&mut self, pass: &mut RenderPass<'_>, draw: LineDraw) -> Result<(), Error> {
+        self.bind(pass)?.draw(draw)
+    }
+    /// Validates the whole slice, then instances consecutive primitives in input
+    /// order, splitting at upload-page boundaries. Empty slices are a no-op.
+    /// Validation failure records no draw from this slice. Storage is reused after warm-up.
+    pub fn draw_many(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        draws: &[LineDraw],
+    ) -> Result<(), Error> {
+        if draws.is_empty() {
+            return Ok(());
+        }
+        self.bind(pass)?.draw_many(draws)
+    }
+    /// Selects the pipeline once for repeated drawing in an exclusive pass scope.
+    /// Dynamic geometry still gets validated and uploaded through frame-owned pages.
+    /// Dropping the scope leaves the pass open; it does not submit or present.
+    pub fn bind<'draw, 'frame>(
+        &'draw mut self,
+        pass: &'draw mut RenderPass<'frame>,
+    ) -> Result<LineDrawSession<'draw, 'frame>, Error> {
+        Ok(LineDrawSession {
+            inner: self.inner.bind(pass)?,
+        })
+    }
+}
+/// A scoped line pipeline with validated dynamic data and explicit pass access.
+/// Created with [`LineRenderer::bind`]. Borrows renderer scratch and the pass.
+#[derive(Debug)]
+pub struct LineDrawSession<'draw, 'frame> {
+    inner: Session<'draw, 'frame>,
+}
+impl<'frame> LineDrawSession<'_, 'frame> {
+    /// Validates and records one primitive in the current viewport and clip.
+    pub fn draw(&mut self, draw: LineDraw) -> Result<(), Error> {
+        self.inner.draw(draw)
+    }
+    /// Validates the whole slice before recording ordered, page-sized instance batches.
+    pub fn draw_many(&mut self, draws: &[LineDraw]) -> Result<(), Error> {
+        self.inner.draw_many(draws)
+    }
+    /// Borrows the pass for clipping, bindings, other renderers, or raw commands.
+    /// The next draw restores this scope's pipeline and wrapped raster state.
+    pub fn pass(&mut self) -> &mut RenderPass<'frame> {
+        self.inner.pass()
+    }
+}
+
+#[cfg(test)]
+#[path = "primitive_tests.rs"]
+mod tests;
