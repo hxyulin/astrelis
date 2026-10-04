@@ -1,4 +1,12 @@
-use crate::{Error, RenderPassBuilder, target::SurfaceTarget};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
+use crate::{
+    Error, Framebuffer, GraphicsContext, RenderPassBuilder, pass::ColorAttachment,
+    target::SurfaceTarget,
+};
 
 /// A reason a [`crate::RenderTarget`] could not provide a frame.
 ///
@@ -30,24 +38,67 @@ impl std::fmt::Display for FrameError {
 
 impl std::error::Error for FrameError {}
 
-/// One acquired surface image and its command recording.
+#[derive(Debug, Default)]
+pub(crate) struct FramebufferWrites(Vec<Arc<AtomicBool>>);
+
+impl FramebufferWrites {
+    pub(crate) fn is_initialized(&self, state: &Arc<AtomicBool>) -> bool {
+        state.load(Ordering::Acquire) || self.0.iter().any(|pending| Arc::ptr_eq(pending, state))
+    }
+
+    pub(crate) fn record(&mut self, state: &Arc<AtomicBool>) {
+        if !self.is_initialized(state) {
+            self.0.push(Arc::clone(state));
+        }
+    }
+
+    fn commit(self) {
+        for state in self.0 {
+            state.store(true, Ordering::Release);
+        }
+    }
+}
+
+#[derive(Debug)]
+enum FrameTarget<'target, 'window> {
+    Surface {
+        // Views precede the acquired image in drop order.
+        view: wgpu::TextureView,
+        image: wgpu::SurfaceTexture,
+        target: &'target mut SurfaceTarget<'window>,
+        suboptimal: bool,
+    },
+    Framebuffer(&'target mut Framebuffer),
+}
+
+impl FrameTarget<'_, '_> {
+    fn graphics(&self) -> &GraphicsContext {
+        match self {
+            Self::Surface { target, .. } => &target.graphics,
+            Self::Framebuffer(target) => &target.graphics,
+        }
+    }
+}
+
+/// Command recording for a window surface or an offscreen framebuffer.
 ///
-/// Created by [`crate::RenderTarget::begin_frame`]. The frame exclusively borrows
-/// its target until it is presented or dropped, preventing resize and acquisition
-/// of another frame through that target. It does not borrow a renderer: multiple
-/// renderers on the same device can contribute to its passes.
+/// Created by [`crate::RenderTarget::begin_frame`] or [`Framebuffer::begin_frame`].
+/// The default destination is exclusively borrowed until finish or drop, preventing
+/// its resize and another recording. Renderers are independent of this borrow.
+/// [`Self::render_to`] records additional framebuffer passes into the same encoder.
 ///
-/// Dropping a frame discards its recorded commands and releases the acquired image
-/// without submitting or presenting it. Call [`Self::present`] explicitly to submit.
+/// [`Self::finish`] submits once and presents only for a surface frame. Dropping
+/// the frame discards all recorded commands, releases any acquired image, and
+/// does not commit framebuffer initialization. Submission never waits for GPU completion.
 ///
-/// A target cannot be resized while its frame is still in use:
+/// A destination cannot be resized while its frame is still in use:
 ///
 /// ```compile_fail
 /// use astrelis::{FrameError, RenderTarget};
 /// fn resize_during_frame(target: &mut RenderTarget<'_>) -> Result<(), FrameError> {
 ///     let frame = target.begin_frame()?;
 ///     target.resize(640, 480).unwrap();
-///     frame.present().unwrap();
+///     frame.finish().unwrap();
 ///     Ok(())
 /// }
 /// ```
@@ -56,23 +107,21 @@ impl std::error::Error for FrameError {}
 ///
 /// ```compile_fail
 /// use astrelis::{Error, Frame};
-/// fn present_during_pass(mut frame: Frame<'_, '_>) -> Result<(), Error> {
+/// fn finish_during_pass(mut frame: Frame<'_, '_>) -> Result<(), Error> {
 ///     let pass = frame.render_pass().begin()?;
-///     frame.present()?;
+///     frame.finish()?;
 ///     drop(pass);
 ///     Ok(())
 /// }
 /// ```
 #[derive(Debug)]
-#[must_use = "call present to submit the frame; dropping it discards the recorded work"]
+#[must_use = "call finish to submit the frame; dropping it discards the recorded work"]
 pub struct Frame<'target, 'window> {
-    // Recording and views are released before the acquired image when abandoned.
+    // Recording is released before an acquired image when abandoned.
     encoder: wgpu::CommandEncoder,
-    view: wgpu::TextureView,
-    image: wgpu::SurfaceTexture,
-    target: &'target mut SurfaceTarget<'window>,
-    suboptimal: bool,
+    target: FrameTarget<'target, 'window>,
     initialized: bool,
+    writes: FramebufferWrites,
 }
 
 impl<'target, 'window> Frame<'target, 'window> {
@@ -82,47 +131,96 @@ impl<'target, 'window> Frame<'target, 'window> {
         suboptimal: bool,
     ) -> Self {
         let view = image.texture.create_view(&Default::default());
-        let encoder =
-            target
-                .graphics
-                .device()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Astrelis frame"),
-                });
+        let encoder = create_encoder(&target.graphics);
         Self {
             encoder,
-            view,
-            image,
-            target,
-            suboptimal,
+            target: FrameTarget::Surface {
+                view,
+                image,
+                target,
+                suboptimal,
+            },
             initialized: false,
+            writes: FramebufferWrites::default(),
         }
     }
 
-    /// Configures a color pass targeting this frame's acquired image.
+    pub(crate) fn for_framebuffer(target: &'target mut Framebuffer) -> Self {
+        let encoder = create_encoder(&target.graphics);
+        Self {
+            encoder,
+            target: FrameTarget::Framebuffer(target),
+            initialized: false,
+            writes: FramebufferWrites::default(),
+        }
+    }
+
+    /// Configures a color pass writing to this frame's default destination.
     ///
-    /// The builder defaults to clearing transparent black, storing results, and
-    /// using the full viewport and scissor rectangle. Call `begin()` to record.
-    /// Defaults are consistent for each pass; call `load()` on later passes to
-    /// preserve earlier drawing. Dropping a builder records nothing.
+    /// Defaults clear transparent black, store results, and use the full viewport
+    /// and scissor. Later `load()` passes preserve individual MSAA samples.
+    /// A surface frame's first pass must clear; a framebuffer may load contents
+    /// from earlier submitted recordings. Dropping a builder records nothing.
     pub fn render_pass(&mut self) -> RenderPassBuilder<'_> {
-        RenderPassBuilder::new(
+        match &self.target {
+            FrameTarget::Surface { view, target, .. } => RenderPassBuilder::new(
+                &mut self.encoder,
+                target.graphics.device(),
+                ColorAttachment {
+                    view: target.multisample_view.as_ref().unwrap_or(view),
+                    resolve_target: target.multisample_view.as_ref().map(|_| view),
+                    format: target.configuration.format,
+                    size: target.size,
+                    sample_count: target.sample_count,
+                },
+                &mut self.initialized,
+            ),
+            FrameTarget::Framebuffer(target) => RenderPassBuilder::for_framebuffer(
+                &mut self.encoder,
+                target.graphics.device(),
+                target,
+                &mut self.writes,
+            ),
+        }
+    }
+
+    /// Configures a pass writing to another framebuffer in this recording.
+    ///
+    /// Commands share the frame's encoder and submission. End this pass before
+    /// sampling its resolved output in a subsequent pass. The destination is
+    /// exclusively borrowed while its builder/pass is active. Change its size
+    /// and MSAA between recordings; replacing attachments invalidates old views.
+    ///
+    /// `begin()` rejects another device, a zero-sized target, or an initial load
+    /// with no submitted or earlier recorded clear. This pass never initializes
+    /// a surface frame's default destination; clear that surface before finish.
+    ///
+    /// ```compile_fail
+    /// use astrelis::{Error, Frame, Framebuffer};
+    /// fn resize_during_pass(frame: &mut Frame<'_, '_>, target: &mut Framebuffer) -> Result<(), Error> {
+    ///     let pass = frame.render_to(target).begin()?;
+    ///     target.resize(640, 480)?;
+    ///     drop(pass);
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn render_to<'pass>(
+        &'pass mut self,
+        target: &'pass mut Framebuffer,
+    ) -> RenderPassBuilder<'pass> {
+        RenderPassBuilder::for_framebuffer(
             &mut self.encoder,
-            &self.view,
-            self.target.graphics.device(),
-            self.target.configuration.format,
-            self.target.size,
-            &mut self.initialized,
+            self.target.graphics().device(),
+            target,
+            &mut self.writes,
         )
     }
 
     /// Borrows the command encoder for copies, compute, and custom GPU recording.
     ///
-    /// Available before, between, and after scoped passes. Commands remain part of
-    /// this frame: `present()` submits them, while dropping the frame discards them.
-    /// Use resources from the context's device and leave encoder ownership with the
-    /// frame. Raw commands do not initialize the managed surface attachment; record
-    /// a wrapped clear pass before presentation.
+    /// Commands participate in `finish()` or are discarded when the frame drops.
+    /// Use resources on the same device. Raw writes do not update framebuffer
+    /// initialization, and a surface still needs a wrapped clear before finish.
     ///
     /// Encoder access is rejected while a pass is active:
     ///
@@ -139,36 +237,75 @@ impl<'target, 'window> Frame<'target, 'window> {
         &mut self.encoder
     }
 
-    /// Returns the frame's physical pixel dimensions, fixed at acquisition.
+    /// Returns the default destination's physical size, fixed for this recording.
     pub fn size(&self) -> [u32; 2] {
-        self.target.size
+        match &self.target {
+            FrameTarget::Surface { target, .. } => target.size,
+            FrameTarget::Framebuffer(target) => target.size(),
+        }
     }
 
-    /// Returns the frame's color attachment format.
+    /// Returns the default destination's color format.
     pub fn format(&self) -> wgpu::TextureFormat {
-        self.target.configuration.format
+        match &self.target {
+            FrameTarget::Surface { target, .. } => target.configuration.format,
+            FrameTarget::Framebuffer(target) => target.format(),
+        }
     }
 
-    /// Consumes the frame, submits its commands, and requests presentation once.
+    /// Returns the default destination's color sample count.
     ///
-    /// The submission index identifies queued work; it does not mean the GPU has
-    /// completed it. Normal presentation does not wait for GPU completion. A
-    /// suboptimal surface is reconfigured after presentation, which may synchronize.
+    /// Additional framebuffer passes can have different counts; custom renderers
+    /// should use the active pass's count for pipeline selection.
+    pub fn sample_count(&self) -> u32 {
+        match &self.target {
+            FrameTarget::Surface { target, .. } => target.sample_count,
+            FrameTarget::Framebuffer(target) => target.sample_count(),
+        }
+    }
+
+    /// Submits once, committing framebuffer writes and presenting a surface if owned.
+    ///
+    /// Offscreen frames submit without presenting. The submission index identifies
+    /// queued work, not GPU completion. Suboptimal surfaces are reconfigured after
+    /// presentation, which may synchronize. Empty offscreen recordings are allowed.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UninitializedFrame`] and discards the frame if no clear pass
-    /// was recorded. A clear-only pass is sufficient to initialize the frame.
-    pub fn present(self) -> Result<wgpu::SubmissionIndex, Error> {
-        if !self.initialized {
+    /// Returns [`Error::UninitializedFrame`] and discards all recorded work if a
+    /// surface frame has no clear pass for its default destination. Clearing an
+    /// additional framebuffer does not satisfy this requirement.
+    pub fn finish(self) -> Result<wgpu::SubmissionIndex, Error> {
+        if matches!(self.target, FrameTarget::Surface { .. }) && !self.initialized {
             return Err(Error::UninitializedFrame);
         }
-        let submission = self.target.graphics.queue().submit([self.encoder.finish()]);
-        self.target.graphics.queue().present(self.image);
-        drop(self.view);
-        if self.suboptimal {
-            self.target.configure();
+        let submission = self
+            .target
+            .graphics()
+            .queue()
+            .submit([self.encoder.finish()]);
+        self.writes.commit();
+        if let FrameTarget::Surface {
+            view,
+            image,
+            target,
+            suboptimal,
+        } = self.target
+        {
+            target.graphics.queue().present(image);
+            drop(view);
+            if suboptimal {
+                target.configure();
+            }
         }
         Ok(submission)
     }
+}
+
+fn create_encoder(graphics: &GraphicsContext) -> wgpu::CommandEncoder {
+    graphics
+        .device()
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Astrelis frame"),
+        })
 }

@@ -1,4 +1,4 @@
-//! Two independent windows share one graphics context, renderer, and uploaded mesh.
+//! Two windows with different sample counts share a context, renderer, and mesh.
 //! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
 
 use std::{
@@ -7,7 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use astrelis::{Error, FrameError, GraphicsContext, Mesh, MeshRenderer, RenderTarget, Vertex};
+use astrelis::{
+    Error, FrameError, GraphicsContext, Mesh, MeshRenderer, RenderTarget, SurfaceOptions, Vertex,
+};
 use winit::{
     application::ApplicationHandler,
     dpi::{PhysicalPosition, PhysicalSize},
@@ -34,7 +36,7 @@ impl State {
         let first = Arc::new(
             event_loop.create_window(
                 Window::default_attributes()
-                    .with_title("Astrelis — first window")
+                    .with_title("Astrelis — first window (1x)")
                     .with_inner_size(PhysicalSize::new(800, 600))
                     .with_position(PhysicalPosition::new(80, 80)),
             )?,
@@ -42,20 +44,22 @@ impl State {
         let size = first.inner_size();
         let (graphics, first_target) = pollster::block_on(GraphicsContext::with_surface(
             first.clone(),
-            size.width,
-            size.height,
+            SurfaceOptions::new(size.width, size.height),
         ))?;
 
         let second = Arc::new(
             event_loop.create_window(
                 Window::default_attributes()
-                    .with_title("Astrelis — second window")
+                    .with_title("Astrelis — second window (4x MSAA)")
                     .with_inner_size(PhysicalSize::new(600, 500))
                     .with_position(PhysicalPosition::new(460, 120)),
             )?,
         );
         let size = second.inner_size();
-        let second_target = graphics.create_surface(second.clone(), size.width, size.height)?;
+        let second_target = graphics.create_surface(
+            second.clone(),
+            SurfaceOptions::new(size.width, size.height).sample_count(4),
+        )?;
 
         let renderer = MeshRenderer::new(&graphics);
         let mesh = graphics.create_mesh(
@@ -121,7 +125,7 @@ impl App {
             let mut pass = frame.render_pass().begin()?;
             state.renderer.draw(&mut pass, &state.mesh)?;
         }
-        frame.present()?;
+        frame.finish()?;
         window.retry_at = None;
         Ok(())
     }
@@ -132,10 +136,11 @@ impl App {
         };
         let window = &mut state.windows[index];
         let size = window.window.inner_size();
-        window.target =
-            state
-                .graphics
-                .create_surface(window.window.clone(), size.width, size.height)?;
+        let count = window.target.sample_count();
+        window.target = state.graphics.create_surface(
+            window.window.clone(),
+            SurfaceOptions::new(size.width, size.height).sample_count(count),
+        )?;
         window.window.request_redraw();
         Ok(())
     }

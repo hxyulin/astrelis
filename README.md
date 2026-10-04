@@ -3,11 +3,12 @@
 The `next` branch starts a new rendering API built directly on wgpu, with one
 workspace crate. The existing implementation remains on `main`.
 
-This first slice renders indexed, colored triangle meshes into window surfaces.
-It provides a shared `GraphicsContext`, uploaded `Mesh` resources, a surface-only
-`RenderTarget` enum, scoped `Frame` and `RenderPass` types, and a `MeshRenderer` that
-records mesh draws. Device-bound resources are created through the context:
-`graphics.create_mesh(vertices, indices)` and `MeshRenderer::new(&graphics)`.
+This version renders indexed, colored triangle meshes into window surfaces and
+offscreen framebuffers. It provides a shared `GraphicsContext`, uploaded `Mesh`
+resources, a `RenderTarget` enum with surface/framebuffer variants, scoped `Frame`
+and `RenderPass` types, and an independent `MeshRenderer`. Create GPU resources
+with `graphics.create_mesh(...)` and `graphics.create_framebuffer(...)`; construct
+the built-in renderer with `MeshRenderer::new(&graphics)`.
 
 ## API
 
@@ -15,12 +16,12 @@ Window creation belongs to the application. An owned window handle such as
 `Arc<winit::window::Window>` allows the surface to have a `'static` lifetime:
 
 ```rust,no_run
-use astrelis::{FrameError, GraphicsContext, MeshRenderer, Vertex, wgpu};
+use astrelis::{FrameError, GraphicsContext, MeshRenderer, SurfaceOptions, Vertex, wgpu};
 
 async fn example(window: std::sync::Arc<winit::window::Window>) -> Result<(), Box<dyn std::error::Error>> {
     let size = window.inner_size();
     let (graphics, mut target) = GraphicsContext::with_surface(
-        window, size.width, size.height,
+        window, SurfaceOptions::new(size.width, size.height),
     ).await?;
     let mut renderer = MeshRenderer::new(&graphics);
 
@@ -44,7 +45,7 @@ async fn example(window: std::sync::Arc<winit::window::Window>) -> Result<(), Bo
         let mut pass = frame.render_pass().clear_color(wgpu::Color::BLACK).begin()?;
         renderer.draw(&mut pass, &triangle)?;
     }
-    frame.present()?;
+    frame.finish()?;
     Ok(())
 }
 ```
@@ -79,8 +80,8 @@ take a depth range, following wgpu. Scissor rectangles must fit the attachment;
 zero dimensions clip all drawing. `MeshRenderer` uses the pass's selected viewport
 and scissor instead of forcing full-target drawing.
 
-Passes end when dropped. `frame.present()` consumes the frame, submits once, and
-presents, returning a wgpu submission index. Dropping a frame releases its acquired
+Passes end when dropped. `frame.finish()` consumes the frame, submits once, and
+presents only for surface frames, returning a wgpu submission index. Dropping a frame releases its acquired
 image and discards recorded commands without submitting or presenting. Presentation
 without a clear pass returns `Error::UninitializedFrame`.
 
@@ -105,30 +106,122 @@ and encoder lifetime. A wrapped clear pass is still required to initialize the
 surface for presentation. Frame borrows prevent encoder access while a pass is in use.
 
 A context owns one wgpu instance, adapter, device, and queue. Use
-`graphics.create_surface(window, width, height)` for additional windows; each target
+`graphics.create_surface(window, SurfaceOptions::new(width, height))` for additional windows; each target
 has its own size and presentation state. The same renderer and meshes can draw to
 all compatible targets. An incompatible surface returns `Error::UnsupportedSurface`
 without selecting a different GPU. `GraphicsContext::headless()` initializes
 without a window.
+
+`SurfaceOptions::new(width, height)` defaults to one sample per pixel. Select
+initial MSAA when creating the target:
+
+```rust
+let options = SurfaceOptions::new(width, height).sample_count(4);
+let (graphics, mut target) = GraphicsContext::with_surface(window, options).await?;
+
+// For a settings change during gameplay, between frames:
+let supported = target.supported_sample_counts(); // Borrowed &[u32], no allocation.
+assert!(supported.contains(&4));
+target.set_sample_count(1)?;
+```
+
+Creation validates the initial count and caches counts usable for the selected
+surface format on the current device, including render and resolve support.
+`supported_sample_counts()` borrows that cache; the runtime setter uses it without
+repeating capability queries. Unsupported creation requests return
+`Error::UnsupportedSampleCount` before surface configuration or attachment allocation;
+unsupported runtime changes leave the target unchanged. No fallback is selected
+implicitly. Zero-sized targets validate MSAA at creation and defer allocation until
+resized. Native counts beyond the portable set may require
+`wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES` enabled on an
+application-created device adopted through `GraphicsContext::from_wgpu`.
+
+The surface image stays single-sampled. The target reuses a multisampled color
+attachment, recreating it on resize or sample-count changes and releasing it when
+suspended. Each pass resolves to the surface image and retains its multisampled
+contents for later `.load()` passes. This preserves edge coverage across passes;
+every new frame still starts with a clear. `MeshRenderer` selects pipelines by
+format and sample count, so one renderer can draw to targets with different counts.
+Custom pipelines must match `pass.sample_count()`. Surface recreation creates a
+new target; include the desired count in its creation options as shown in the examples.
+At 1x there is no multisampled attachment or resolve. Ordinary frame/pass recording
+does not query capabilities or allocate MSAA attachments. Changing to a new count
+may allocate an attachment, and its first mesh draw may create a pipeline.
 
 `GraphicsContext::from_wgpu` accepts an existing instance/adapter/device/queue, and the
 context and mesh expose their wgpu resources for custom GPU work. The context
 requests no timestamp features. Normal frames do not wait for GPU completion;
 resizing or recovering an outdated surface may synchronize with the GPU.
 
+## Offscreen framebuffers
+
+```rust
+let mut framebuffer = graphics.create_framebuffer(
+    FramebufferOptions::new(1024, 1024)
+        .format(wgpu::TextureFormat::Rgba8Unorm)
+        .sample_count(4),
+)?;
+
+let mut frame = window_target.begin_frame()?;
+{
+    let mut pass = frame.render_to(&mut framebuffer).begin()?;
+    mesh_renderer.draw(&mut pass, &mesh)?;
+}
+{
+    let mut pass = frame.render_pass().begin()?;
+    // Application-defined drawing using framebuffer.color_view()? goes here.
+}
+frame.finish()?; // One submission, then surface presentation.
+```
+
+For headless rendering, start with `framebuffer.begin_frame()` and use the same
+pass API and `finish()`. This submits without presentation. Framebuffers can also
+be moved into `RenderTarget::Framebuffer` for generic destination handling.
+
+Defaults are linear RGBA8, 1x samples, and `RENDER_ATTACHMENT | TEXTURE_BINDING`.
+Use `.usage(...)` to add `COPY_SRC` for copying/readback. The output texture is
+always single-sampled. `color_texture()` and `color_view()` return `Result` because
+zero-sized framebuffers have no attachments. Zero size suspends standalone frames;
+`render_to(...).begin()` returns `Error::TargetSuspended`. A foreign device is
+rejected before recording commands.
+
+Framebuffer `.load()` preserves contents across submitted recordings. An initial
+load requires a submitted clear or an earlier clear in the current frame.
+Dropping the recording does not initialize the framebuffer or change prior contents.
+Surface frames still need a clear for their own default destination; clearing an
+additional framebuffer does not satisfy this requirement.
+
+`resize()` and `set_sample_count()` replace attachments, discard their contents,
+and invalidate previous output bindings. Rebuild bind groups using the new view
+and clear before loading again. Unchanged settings reuse attachments, and sample
+counts are validated against the cache. Make attachment changes between recordings.
+Old cloned views and pending GPU commands continue to reference old textures.
+
+This implementation has one color attachment with optional MSAA. Depth/stencil,
+multiple color attachments, and imported attachments remain future work. Integer
+color formats can be used with custom shaders; the built-in floating-point mesh
+renderer returns `Error::UnsupportedMeshFormat` for incompatible formats.
+
 ## Examples
 
 ```sh
 cargo run -p astrelis --example triangle
 cargo run -p astrelis --example meshes
+cargo run -p astrelis --example msaa
+cargo run -p astrelis --example framebuffer
 cargo run -p astrelis --example multi_window
 ```
 
 The triangle demonstrates interpolated vertex color. The meshes example draws
 overlapping opaque and translucent quads through two independent renderers sharing
 one pass, each mesh using a vertex and index buffer.
+The MSAA example creates its target with 4x MSAA; press Space to cycle usable counts.
+The framebuffer example renders a 4x MSAA triangle offscreen, then samples its
+resolved texture into the window through an application-defined shader that swaps
+red and blue. Both passes share one submission. Its cached bind group is rebuilt
+when resizing changes the output view.
 The multi-window example shares one context and its rendering resources between
-two independently sized windows.
+two independently sized windows using 1x and 4x samples.
 
 Each example is a standalone file with its own window creation, application state,
 event handling, redraw scheduling, resize handling, and surface-loss recovery.
@@ -151,10 +244,13 @@ cargo clippy --workspace --all-targets -- -D warnings
 The GPU test reads pixels back to verify multiple renderers sharing a pass, indexed
 drawing, draw order, alpha blending, sequential load/clear passes, restored GPU
 state, default builder behavior, initial and dynamic viewport/scissor settings,
-configuration validation, device validation, and resource reuse. Compile-fail documentation tests
+configuration validation, device validation, and resource reuse. MSAA pixel tests
+verify partial edge coverage, resolves, and equivalent blending across one pass
+and sequential load passes. Compile-fail documentation tests
 verify the frame/pass lifetime constraints. The GPU test fails when no adapter is
-available. It uses an internal offscreen attachment; the public target API remains
-surface-only.
+available. Public framebuffer tests verify persisted contents, abandoned recordings,
+attachment replacement, suspended destinations, validation, and resolving/sampling
+across multiple targets in one submission.
 
 This version deliberately starts with a fixed mesh pipeline. Canvas recording,
 materials, cameras, scene APIs, and UI integration will be designed in later slices.

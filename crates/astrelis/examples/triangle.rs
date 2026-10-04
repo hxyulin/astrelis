@@ -7,7 +7,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use astrelis::{Error, FrameError, GraphicsContext, Mesh, MeshRenderer, RenderTarget, Vertex};
+use astrelis::{
+    Error, FrameError, GraphicsContext, Mesh, MeshRenderer, RenderTarget, SurfaceOptions, Vertex,
+};
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
@@ -36,8 +38,7 @@ impl State {
         let size = window.inner_size();
         let (graphics, target) = pollster::block_on(GraphicsContext::with_surface(
             window.clone(),
-            size.width,
-            size.height,
+            SurfaceOptions::new(size.width, size.height),
         ))?;
         let renderer = MeshRenderer::new(&graphics);
         let mesh = graphics.create_mesh(
@@ -92,7 +93,7 @@ impl App {
             let mut pass = frame.render_pass().begin()?;
             state.renderer.draw(&mut pass, &state.mesh)?;
         }
-        frame.present()?;
+        frame.finish()?;
         self.retry_at = None;
         Ok(())
     }
@@ -102,10 +103,11 @@ impl App {
             return Ok(());
         };
         let size = state.window.inner_size();
-        state.target =
-            state
-                .graphics
-                .create_surface(state.window.clone(), size.width, size.height)?;
+        let count = state.target.sample_count();
+        state.target = state.graphics.create_surface(
+            state.window.clone(),
+            SurfaceOptions::new(size.width, size.height).sample_count(count),
+        )?;
         state.window.request_redraw();
         Ok(())
     }

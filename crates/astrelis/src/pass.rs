@@ -1,4 +1,24 @@
-use crate::Error;
+use std::sync::{Arc, atomic::AtomicBool};
+
+use crate::{Error, Framebuffer, frame::FramebufferWrites};
+
+#[derive(Debug)]
+enum Initialization<'frame> {
+    Surface(&'frame mut bool),
+    Framebuffer {
+        state: &'frame Arc<AtomicBool>,
+        writes: &'frame mut FramebufferWrites,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ColorAttachment<'view> {
+    pub(crate) view: &'view wgpu::TextureView,
+    pub(crate) resolve_target: Option<&'view wgpu::TextureView>,
+    pub(crate) format: wgpu::TextureFormat,
+    pub(crate) size: [u32; 2],
+    pub(crate) sample_count: u32,
+}
 
 #[derive(Debug)]
 pub(crate) struct PassOptions<'label> {
@@ -21,7 +41,7 @@ impl Default for PassOptions<'_> {
 
 /// Configuration for a frame's next color pass, before command recording begins.
 ///
-/// Created by [`crate::Frame::render_pass`]. Defaults clear to transparent black,
+/// Created by [`crate::Frame::render_pass`] or [`crate::Frame::render_to`]. Defaults clear to transparent black,
 /// store the results, and use the full attachment for viewport and scissor. These
 /// defaults are the same for every pass; use [`Self::load`] to preserve earlier work.
 /// No GPU commands are recorded until [`Self::begin`]. Dropping the builder leaves
@@ -30,30 +50,47 @@ impl Default for PassOptions<'_> {
 #[must_use = "call begin to record a pass; dropping this builder does nothing"]
 pub struct RenderPassBuilder<'frame> {
     encoder: &'frame mut wgpu::CommandEncoder,
-    view: &'frame wgpu::TextureView,
+    attachment: Result<ColorAttachment<'frame>, Error>,
     device: &'frame wgpu::Device,
-    format: wgpu::TextureFormat,
-    size: [u32; 2],
-    initialized: &'frame mut bool,
+    initialization: Initialization<'frame>,
     options: PassOptions<'frame>,
 }
 
 impl<'frame> RenderPassBuilder<'frame> {
     pub(crate) fn new(
         encoder: &'frame mut wgpu::CommandEncoder,
-        view: &'frame wgpu::TextureView,
         device: &'frame wgpu::Device,
-        format: wgpu::TextureFormat,
-        size: [u32; 2],
+        attachment: ColorAttachment<'frame>,
         initialized: &'frame mut bool,
     ) -> Self {
         Self {
             encoder,
-            view,
+            attachment: Ok(attachment),
             device,
-            format,
-            size,
-            initialized,
+            initialization: Initialization::Surface(initialized),
+            options: PassOptions::default(),
+        }
+    }
+
+    pub(crate) fn for_framebuffer(
+        encoder: &'frame mut wgpu::CommandEncoder,
+        device: &'frame wgpu::Device,
+        framebuffer: &'frame Framebuffer,
+        writes: &'frame mut FramebufferWrites,
+    ) -> Self {
+        let attachment = if device != framebuffer.graphics.device() {
+            Err(Error::DeviceMismatch)
+        } else {
+            framebuffer.attachment()
+        };
+        Self {
+            encoder,
+            attachment,
+            device,
+            initialization: Initialization::Framebuffer {
+                state: &framebuffer.initialized,
+                writes,
+            },
             options: PassOptions::default(),
         }
     }
@@ -72,7 +109,8 @@ impl<'frame> RenderPassBuilder<'frame> {
 
     /// Selects loading existing contents, replacing any previous clear operation.
     ///
-    /// A previous pass must have initialized this frame before loading is allowed.
+    /// A surface needs an earlier clear in this frame. A framebuffer may also
+    /// load contents initialized in a previously submitted recording.
     pub fn load(mut self) -> Self {
         self.options.load = wgpu::LoadOp::Load;
         self
@@ -106,29 +144,38 @@ impl<'frame> RenderPassBuilder<'frame> {
 
     /// Validates configuration and starts a scoped color pass.
     ///
-    /// Every pass stores its results. A clear-only pass with no draws is valid.
+    /// Every pass stores its results. With MSAA enabled, this preserves individual
+    /// samples and resolves to the single-sampled output. A clear-only pass is valid.
     /// Dropping the returned pass ends recording; the frame still owns submission.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::UninitializedFrame`] for an initial load,
+    /// Returns [`Error::UninitializedFrame`] for an initial surface load,
+    /// [`Error::UninitializedFramebuffer`] for loading unsubmitted framebuffer contents,
+    /// [`Error::TargetSuspended`] for a zero-sized framebuffer,
+    /// [`Error::DeviceMismatch`] for a framebuffer on another device,
     /// [`Error::InvalidClearColor`] for nonfinite clear components,
     /// [`Error::InvalidViewport`] for invalid viewport values, or
     /// [`Error::InvalidScissorRect`] for a rectangle outside the attachment.
     /// Rejected configuration records no commands and leaves the frame unchanged.
     pub fn begin(self) -> Result<RenderPass<'frame>, Error> {
-        if !*self.initialized && matches!(self.options.load, wgpu::LoadOp::Load) {
-            return Err(Error::UninitializedFrame);
+        let attachment = self.attachment?;
+        if matches!(self.options.load, wgpu::LoadOp::Load) {
+            match &self.initialization {
+                Initialization::Surface(initialized) if !**initialized => {
+                    return Err(Error::UninitializedFrame);
+                }
+                Initialization::Framebuffer { state, writes } if !writes.is_initialized(state) => {
+                    return Err(Error::UninitializedFramebuffer);
+                }
+                _ => {}
+            }
         }
-        let pass = RenderPass::new(
-            self.encoder,
-            self.view,
-            self.device,
-            self.format,
-            self.size,
-            self.options,
-        )?;
-        *self.initialized = true;
+        let pass = RenderPass::new(self.encoder, self.device, attachment, self.options)?;
+        match self.initialization {
+            Initialization::Surface(initialized) => *initialized = true,
+            Initialization::Framebuffer { state, writes } => writes.record(state),
+        }
         Ok(pass)
     }
 }
@@ -146,6 +193,7 @@ pub struct RenderPass<'frame> {
     pub(crate) device: &'frame wgpu::Device,
     format: wgpu::TextureFormat,
     size: [u32; 2],
+    sample_count: u32,
     viewport: [f32; 6],
     scissor: [u32; 4],
 }
@@ -153,12 +201,17 @@ pub struct RenderPass<'frame> {
 impl<'frame> RenderPass<'frame> {
     pub(crate) fn new(
         encoder: &'frame mut wgpu::CommandEncoder,
-        view: &wgpu::TextureView,
         device: &'frame wgpu::Device,
-        format: wgpu::TextureFormat,
-        size: [u32; 2],
+        attachment: ColorAttachment<'_>,
         options: PassOptions<'_>,
     ) -> Result<Self, Error> {
+        let ColorAttachment {
+            view,
+            resolve_target,
+            format,
+            size,
+            sample_count,
+        } = attachment;
         if let wgpu::LoadOp::Clear(color) = options.load
             && ![color.r, color.g, color.b, color.a]
                 .iter()
@@ -176,7 +229,7 @@ impl<'frame> RenderPass<'frame> {
         let attachments = [Some(wgpu::RenderPassColorAttachment {
             view,
             depth_slice: None,
-            resolve_target: None,
+            resolve_target,
             ops: wgpu::Operations {
                 load: options.load,
                 store: wgpu::StoreOp::Store,
@@ -192,6 +245,7 @@ impl<'frame> RenderPass<'frame> {
             device,
             format,
             size,
+            sample_count,
             viewport,
             scissor,
         };
@@ -251,6 +305,14 @@ impl<'frame> RenderPass<'frame> {
         self.format
     }
 
+    /// Returns the color attachment sample count required by compatible pipelines.
+    ///
+    /// Custom renderers must use this count in [`wgpu::MultisampleState`]. The
+    /// built-in [`crate::MeshRenderer`] selects it automatically.
+    pub fn sample_count(&self) -> u32 {
+        self.sample_count
+    }
+
     /// Returns the attachment's physical pixel dimensions.
     pub fn size(&self) -> [u32; 2] {
         self.size
@@ -263,7 +325,8 @@ impl<'frame> RenderPass<'frame> {
 
     /// Borrows the underlying wgpu pass for application-defined rendering.
     ///
-    /// Use compatible pipelines and resources from [`Self::device`]. Raw changes
+    /// Use pipelines matching [`Self::format`] and [`Self::sample_count`], and
+    /// resources from [`Self::device`]. Raw changes
     /// persist in wgpu's state but do not update this wrapper's viewport or scissor.
     /// [`crate::MeshRenderer`] reapplies the wrapper's chosen viewport and scissor
     /// before each draw. Use the wrapped setters to control mesh rasterization.

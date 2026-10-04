@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
 use crate::{Error, GraphicsContext, Mesh, RenderPass, Vertex};
 
@@ -7,8 +7,8 @@ use crate::{Error, GraphicsContext, Mesh, RenderPass, Vertex};
 /// Construct with [`Self::new`]. This is a rendering component that caches its
 /// pipeline state; it is independent of the graphics context's resource factories.
 ///
-/// Pipelines are cached by target format. Meshes are drawn in call order, with
-/// alpha blending and without depth testing or back-face culling. This is a
+/// Pipelines are cached by target format and sample count. Meshes are drawn in
+/// call order, with alpha blending and without depth testing or back-face culling. This is a
 /// clip-space mesh API. Frame acquisition, pass creation, and presentation belong
 /// to the target and frame, allowing independent renderers to share a pass.
 #[derive(Debug)]
@@ -16,7 +16,7 @@ pub struct MeshRenderer {
     graphics: GraphicsContext,
     shader: wgpu::ShaderModule,
     layout: wgpu::PipelineLayout,
-    pipelines: HashMap<wgpu::TextureFormat, wgpu::RenderPipeline>,
+    pipelines: HashMap<(wgpu::TextureFormat, u32), wgpu::RenderPipeline>,
 }
 
 impl MeshRenderer {
@@ -47,7 +47,8 @@ impl MeshRenderer {
     ///
     /// This method does not acquire, clear, submit, or present. Any number of
     /// renderers sharing the pass's device can contribute draws in application order.
-    /// Pipelines are cached by attachment format, and mesh data is not reuploaded.
+    /// Pipelines are cached by attachment format and sample count, and mesh data
+    /// is not reuploaded. MSAA follows the pass without renderer configuration.
     /// Each draw restores the mesh pipeline and vertex/index bindings and applies
     /// the pass's chosen viewport and scissor rectangle. Application clipping and
     /// viewport settings persist across draws and independent mesh renderers.
@@ -56,39 +57,58 @@ impl MeshRenderer {
     ///
     /// Returns [`Error::DeviceMismatch`] without recording a draw if the pass or
     /// mesh belongs to a different device.
+    /// Returns [`Error::UnsupportedMeshFormat`] for integer or nonblendable color
+    /// attachments; these remain usable by application-defined renderers.
     pub fn draw(&mut self, pass: &mut RenderPass<'_>, mesh: &Mesh) -> Result<(), Error> {
         if pass.device() != self.graphics.device() || &mesh.device != self.graphics.device() {
             return Err(Error::DeviceMismatch);
         }
-        let pipeline = self.pipelines.entry(pass.format()).or_insert_with(|| {
-            self.graphics
-                .device()
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Astrelis colored mesh pipeline"),
-                    layout: Some(&self.layout),
-                    vertex: wgpu::VertexState {
-                        module: &self.shader,
-                        entry_point: Some("vertex_main"),
-                        compilation_options: Default::default(),
-                        buffers: &[Some(Vertex::layout())],
+        let pipeline = match self.pipelines.entry((pass.format(), pass.sample_count())) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let format = pass.format();
+                let features = crate::target::format_features(&self.graphics, format);
+                if !matches!(
+                    format.sample_type(None, Some(self.graphics.device().features())),
+                    Some(wgpu::TextureSampleType::Float { .. })
+                ) || !features
+                    .flags
+                    .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)
+                {
+                    return Err(Error::UnsupportedMeshFormat { format });
+                }
+                entry.insert(self.graphics.device().create_render_pipeline(
+                    &wgpu::RenderPipelineDescriptor {
+                        label: Some("Astrelis colored mesh pipeline"),
+                        layout: Some(&self.layout),
+                        vertex: wgpu::VertexState {
+                            module: &self.shader,
+                            entry_point: Some("vertex_main"),
+                            compilation_options: Default::default(),
+                            buffers: &[Some(Vertex::layout())],
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &self.shader,
+                            entry_point: Some("fragment_main"),
+                            compilation_options: Default::default(),
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: pass.format(),
+                                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                        }),
+                        primitive: wgpu::PrimitiveState::default(),
+                        depth_stencil: None,
+                        multisample: wgpu::MultisampleState {
+                            count: pass.sample_count(),
+                            ..Default::default()
+                        },
+                        multiview_mask: None,
+                        cache: None,
                     },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &self.shader,
-                        entry_point: Some("fragment_main"),
-                        compilation_options: Default::default(),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: pass.format(),
-                            blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState::default(),
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    multiview_mask: None,
-                    cache: None,
-                })
-        });
+                ))
+            }
+        };
         pass.apply_raster_state();
         pass.inner.set_pipeline(pipeline);
         pass.inner

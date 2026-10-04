@@ -1,4 +1,4 @@
-//! Two independent renderers draw overlapping meshes into one pass.
+//! Multisampled triangle edges. Press Space to cycle usable sample counts.
 //! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
 
 use std::{
@@ -9,37 +9,22 @@ use std::{
 
 use astrelis::{
     Error, FrameError, GraphicsContext, Mesh, MeshRenderer, RenderTarget, SurfaceOptions, Vertex,
-    wgpu,
 };
 use winit::{
     application::ApplicationHandler,
     dpi::PhysicalSize,
-    event::WindowEvent,
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
-
-fn quad(graphics: &GraphicsContext, bounds: [f32; 4], color: [f32; 4]) -> Result<Mesh, Error> {
-    let [left, bottom, right, top] = bounds;
-    graphics.create_mesh(
-        &[
-            Vertex::new([left, bottom, 0.0], color),
-            Vertex::new([right, bottom, 0.0], color),
-            Vertex::new([right, top, 0.0], color),
-            Vertex::new([left, top, 0.0], color),
-        ],
-        &[0, 1, 2, 0, 2, 3],
-    )
-}
 
 struct State {
     window: Arc<Window>,
     graphics: GraphicsContext,
     target: RenderTarget<'static>,
-    background_renderer: MeshRenderer,
-    overlay_renderer: MeshRenderer,
-    background: Mesh,
-    overlay: Mesh,
+    renderer: MeshRenderer,
+    mesh: Mesh,
 }
 
 impl State {
@@ -47,28 +32,32 @@ impl State {
         let window = Arc::new(
             event_loop.create_window(
                 Window::default_attributes()
-                    .with_title("Astrelis — two renderers, one pass")
+                    .with_title("Astrelis — MSAA")
                     .with_inner_size(PhysicalSize::new(800, 600)),
             )?,
         );
         let size = window.inner_size();
         let (graphics, target) = pollster::block_on(GraphicsContext::with_surface(
             window.clone(),
-            SurfaceOptions::new(size.width, size.height),
+            SurfaceOptions::new(size.width, size.height).sample_count(4),
         ))?;
-        let background_renderer = MeshRenderer::new(&graphics);
-        let overlay_renderer = MeshRenderer::new(&graphics);
-        let background = quad(&graphics, [-0.8, -0.65, 0.3, 0.7], [1.0, 0.18, 0.08, 1.0])?;
-        let overlay = quad(&graphics, [-0.3, -0.7, 0.8, 0.65], [0.05, 0.35, 1.0, 0.65])?;
+        window.set_title("Astrelis — 4x MSAA (Space to change)");
+        let renderer = MeshRenderer::new(&graphics);
+        let mesh = graphics.create_mesh(
+            &[
+                Vertex::new([0.0, 0.75, 0.0], [1.0, 0.15, 0.15, 1.0]),
+                Vertex::new([-0.75, -0.65, 0.0], [0.15, 1.0, 0.15, 1.0]),
+                Vertex::new([0.75, -0.65, 0.0], [0.15, 0.35, 1.0, 1.0]),
+            ],
+            &[0, 1, 2],
+        )?;
         window.request_redraw();
         Ok(Self {
             window,
             graphics,
             target,
-            background_renderer,
-            overlay_renderer,
-            background,
-            overlay,
+            renderer,
+            mesh,
         })
     }
 }
@@ -103,15 +92,8 @@ impl App {
             Err(error) => return Err(error.into()),
         };
         {
-            let mut pass = frame
-                .render_pass()
-                .label("background and overlay")
-                .clear_color(wgpu::Color::BLACK)
-                .begin()?;
-            state
-                .background_renderer
-                .draw(&mut pass, &state.background)?;
-            state.overlay_renderer.draw(&mut pass, &state.overlay)?;
+            let mut pass = frame.render_pass().begin()?;
+            state.renderer.draw(&mut pass, &state.mesh)?;
         }
         frame.finish()?;
         self.retry_at = None;
@@ -156,6 +138,26 @@ impl ApplicationHandler for App {
         }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::KeyboardInput { event, .. }
+                if event.state == ElementState::Pressed
+                    && !event.repeat
+                    && event.logical_key == Key::Named(NamedKey::Space) =>
+            {
+                let supported = state.target.supported_sample_counts();
+                let current = supported
+                    .iter()
+                    .position(|&count| count == state.target.sample_count())
+                    .expect("the current sample count is supported");
+                let count = supported[(current + 1) % supported.len()];
+                if let Err(error) = state.target.set_sample_count(count) {
+                    self.fail(event_loop, error);
+                    return;
+                }
+                state
+                    .window
+                    .set_title(&format!("Astrelis — {count}x MSAA (Space to change)"));
+                state.window.request_redraw();
+            }
             WindowEvent::Resized(size) => {
                 if let Err(error) = state.target.resize(size.width, size.height) {
                     self.fail(event_loop, error);

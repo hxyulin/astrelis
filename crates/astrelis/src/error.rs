@@ -11,6 +11,34 @@ pub enum Error {
     Device(wgpu::RequestDeviceError),
     /// The context's adapter cannot present to this surface.
     UnsupportedSurface,
+    /// This format cannot be a color attachment with the device's enabled features.
+    UnsupportedColorFormat {
+        /// Requested color format.
+        format: wgpu::TextureFormat,
+    },
+    /// Framebuffer usages omit rendering, request transient storage, or exceed format support.
+    InvalidFramebufferUsage {
+        /// Requested color format.
+        format: wgpu::TextureFormat,
+        /// Requested texture usages.
+        usage: wgpu::TextureUsages,
+    },
+    /// The colored mesh shader requires a floating-point color output and alpha blending.
+    UnsupportedMeshFormat {
+        /// Pass format incompatible with the built-in mesh renderer.
+        format: wgpu::TextureFormat,
+    },
+    /// A zero-sized framebuffer has no color attachment.
+    TargetSuspended,
+    /// A framebuffer load requires a submitted clear or an earlier clear in this recording.
+    UninitializedFramebuffer,
+    /// The selected color format cannot render and resolve this sample count on the device.
+    UnsupportedSampleCount {
+        /// Color attachment format.
+        format: wgpu::TextureFormat,
+        /// Requested number of samples per pixel; one disables MSAA.
+        count: u32,
+    },
     /// Target dimensions exceed the device's two-dimensional texture limit.
     InvalidTargetSize {
         /// Requested physical width.
@@ -49,7 +77,7 @@ pub enum Error {
     InvalidViewport,
     /// The scissor rectangle does not fit the pass attachment.
     InvalidScissorRect,
-    /// A first pass tried to load contents, or presentation had no clear pass.
+    /// A first surface pass tried to load contents, or finish had no surface clear pass.
     UninitializedFrame,
 }
 
@@ -60,6 +88,14 @@ impl fmt::Display for Error {
             Self::Adapter(error) => write!(f, "could not request a GPU adapter: {error}"),
             Self::Device(error) => write!(f, "could not request a GPU device: {error}"),
             Self::UnsupportedSurface => f.write_str("the adapter cannot present to this surface"),
+            Self::UnsupportedColorFormat { format } => write!(f, "{format:?} cannot be a color attachment on this device"),
+            Self::InvalidFramebufferUsage { format, usage } => write!(f, "invalid framebuffer usage {usage:?} for {format:?}"),
+            Self::UnsupportedMeshFormat { format } => write!(f, "the mesh renderer requires a blendable floating-point output, got {format:?}"),
+            Self::TargetSuspended => f.write_str("a zero-sized framebuffer has no attachment"),
+            Self::UninitializedFramebuffer => f.write_str("a framebuffer must have a submitted clear or an earlier clear in this recording before loading"),
+            Self::UnsupportedSampleCount { format, count } => {
+                write!(f, "sample count {count} is unsupported for {format:?} on this device")
+            }
             Self::InvalidTargetSize { width, height, max } => {
                 write!(
                     f,

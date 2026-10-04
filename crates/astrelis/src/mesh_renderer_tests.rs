@@ -92,10 +92,14 @@ fn pass<'encoder>(
     options.load = load;
     RenderPass::new(
         encoder,
-        view,
         graphics.device(),
-        wgpu::TextureFormat::Rgba8Unorm,
-        [64, 64],
+        crate::pass::ColorAttachment {
+            view,
+            resolve_target: None,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            size: [64, 64],
+            sample_count: 1,
+        },
         options,
     )
 }
@@ -108,10 +112,14 @@ fn builder<'frame>(
 ) -> crate::RenderPassBuilder<'frame> {
     crate::RenderPassBuilder::new(
         encoder,
-        view,
         graphics.device(),
-        wgpu::TextureFormat::Rgba8Unorm,
-        [64, 64],
+        crate::pass::ColorAttachment {
+            view,
+            resolve_target: None,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            size: [64, 64],
+            sample_count: 1,
+        },
         initialized,
     )
 }
@@ -417,5 +425,211 @@ fn renderers_share_passes_preserve_order_and_validate_devices() {
             &[255, 0, 0, 255],
             "rejected operations leave recording usable"
         );
+    });
+}
+
+#[test]
+fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
+    pollster::block_on(async {
+        let graphics = GraphicsContext::headless().await.unwrap();
+        let mut contexts = vec![graphics];
+        let graphics = &contexts[0];
+        let native_feature = wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES;
+        if graphics.adapter().features().contains(native_feature) {
+            let (device, queue) = graphics
+                .adapter()
+                .request_device(&wgpu::DeviceDescriptor {
+                    required_features: native_feature,
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            contexts.push(GraphicsContext::from_wgpu(
+                graphics.instance().clone(),
+                graphics.adapter().clone(),
+                device,
+                queue,
+            ));
+        }
+        for graphics in contexts {
+            let format = wgpu::TextureFormat::Rgba8Unorm;
+            let counts = crate::target::supported_sample_counts(&graphics, format);
+            assert!(counts.contains(&1));
+            assert!(counts.contains(&4), "RGBA8 must support portable 4x MSAA");
+            // Default devices must not advertise native counts that they cannot use.
+            if graphics
+                .adapter()
+                .get_downlevel_capabilities()
+                .flags
+                .contains(wgpu::DownlevelFlags::WEBGPU_TEXTURE_FORMAT_SUPPORT)
+                && !graphics.device().features().contains(native_feature)
+            {
+                assert_eq!(counts, [1, 4]);
+            }
+            eprintln!(
+                "MSAA counts with native format features {}: {counts:?}",
+                graphics.device().features().contains(native_feature)
+            );
+            assert!(
+                crate::target::create_multisample_view(&graphics, format, [64, 64], 1).is_none()
+            );
+            assert!(
+                crate::target::create_multisample_view(&graphics, format, [0, 64], 4).is_none()
+            );
+            assert!(
+                crate::target::create_multisample_view(&graphics, format, [64, 0], 4).is_none()
+            );
+            let resized =
+                crate::target::create_multisample_view(&graphics, format, [32, 48], 4).unwrap();
+            assert_eq!(
+                resized.texture().size(),
+                wgpu::Extent3d {
+                    width: 32,
+                    height: 48,
+                    depth_or_array_layers: 1,
+                }
+            );
+            assert_eq!(resized.texture().sample_count(), 4);
+            let triangle = |color| {
+                graphics
+                    .create_mesh(
+                        &[
+                            Vertex::new([-0.83, -0.72, 0.0], color),
+                            Vertex::new([0.61, -0.57, 0.0], color),
+                            Vertex::new([0.13, 0.86, 0.0], color),
+                        ],
+                        &[0, 1, 2],
+                    )
+                    .unwrap()
+            };
+            let white = triangle([1.0; 4]);
+            let red = triangle([1.0, 0.0, 0.0, 1.0]);
+            let blue = triangle([0.0, 0.0, 1.0, 0.5]);
+            let mut first = MeshRenderer::new(&graphics);
+            let mut second = MeshRenderer::new(&graphics);
+            for &count in &counts {
+                let multisample_view =
+                    crate::target::create_multisample_view(&graphics, format, [64, 64], count);
+                fn attachment<'view>(
+                    view: &'view wgpu::TextureView,
+                    multisample_view: Option<&'view wgpu::TextureView>,
+                    count: u32,
+                ) -> crate::pass::ColorAttachment<'view> {
+                    crate::pass::ColorAttachment {
+                        view: multisample_view.unwrap_or(view),
+                        resolve_target: multisample_view.map(|_| view),
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        size: [64, 64],
+                        sample_count: count,
+                    }
+                }
+                let edges = pixels(&graphics, |encoder, view| {
+                    let mut initialized = false;
+                    let mut pass = crate::RenderPassBuilder::new(
+                        encoder,
+                        graphics.device(),
+                        attachment(view, multisample_view.as_ref(), count),
+                        &mut initialized,
+                    )
+                    .clear_color(wgpu::Color::BLACK)
+                    .begin()
+                    .unwrap();
+                    assert_eq!(pass.sample_count(), count);
+                    first.draw(&mut pass, &white).unwrap();
+                });
+                let partial_pixels = edges
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .filter(|pixel| pixel[0] > 0 && pixel[0] < 255)
+                    .count();
+                if count == 1 {
+                    assert_eq!(partial_pixels, 0, "1x has no sample-averaged edge pixels");
+                } else {
+                    assert!(
+                        partial_pixels > 0,
+                        "MSAA must resolve partial edge coverage"
+                    );
+                }
+
+                let mut draw_layers = |split: bool| {
+                    pixels(&graphics, |encoder, view| {
+                        let mut initialized = false;
+                        let mut pass = crate::RenderPassBuilder::new(
+                            encoder,
+                            graphics.device(),
+                            attachment(view, multisample_view.as_ref(), count),
+                            &mut initialized,
+                        )
+                        .clear_color(wgpu::Color::BLACK)
+                        .begin()
+                        .unwrap();
+                        first.draw(&mut pass, &red).unwrap();
+                        if split {
+                            drop(pass);
+                            pass = crate::RenderPassBuilder::new(
+                                encoder,
+                                graphics.device(),
+                                attachment(view, multisample_view.as_ref(), count),
+                                &mut initialized,
+                            )
+                            .load()
+                            .begin()
+                            .unwrap();
+                        }
+                        second.draw(&mut pass, &blue).unwrap();
+                    })
+                };
+                let together = draw_layers(false);
+                let separate = draw_layers(true);
+                assert_eq!(
+                    together, separate,
+                    "load must preserve individual samples, including edge coverage"
+                );
+                let center = 32 * 256 + 32 * 4;
+                for (&actual, expected) in separate[center..center + 4]
+                    .iter()
+                    .zip([128_u8, 0, 128, 255])
+                {
+                    assert!(actual.abs_diff(expected) <= 1);
+                }
+                let cleared = pixels(&graphics, |encoder, view| {
+                    let mut initialized = false;
+                    // Clearing the reused attachment starts a fresh frame.
+                    drop(
+                        crate::RenderPassBuilder::new(
+                            encoder,
+                            graphics.device(),
+                            attachment(view, multisample_view.as_ref(), count),
+                            &mut initialized,
+                        )
+                        .clear_color(wgpu::Color::GREEN)
+                        .begin()
+                        .unwrap(),
+                    );
+                });
+                assert!(
+                    cleared
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .all(|p| p == &[0, 255, 0, 255])
+                );
+            }
+            assert_eq!(first.pipelines.len(), counts.len());
+            assert_eq!(second.pipelines.len(), counts.len());
+            // Reusing the renderer on a single-sampled target selects its existing pipeline.
+            pixels(&graphics, |encoder, view| {
+                let mut pass = pass(
+                    &graphics,
+                    encoder,
+                    view,
+                    wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                )
+                .unwrap();
+                first.draw(&mut pass, &white).unwrap();
+            });
+            assert_eq!(first.pipelines.len(), counts.len());
+        }
     });
 }

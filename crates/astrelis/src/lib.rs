@@ -1,6 +1,6 @@
 //! Indexed, colored triangle-mesh rendering built directly on wgpu.
 //!
-//! Astrelis handles GPU initialization, mesh uploads, surface configuration, and
+//! Astrelis handles GPU initialization, mesh uploads, surfaces, offscreen framebuffers, and
 //! frame submission. The application owns its windows, event loop, redraw schedule,
 //! and rendering order. The library has no windowing-framework dependency.
 //!
@@ -10,10 +10,13 @@
 //! queue. Initialize it with [`GraphicsContext::with_surface`] so adapter selection
 //! accounts for the first window. Add other windows with
 //! [`GraphicsContext::create_surface`]; each surface must support the same adapter.
+//! [`SurfaceOptions`] selects the initial physical size and sample count; its
+//! constructor defaults to one sample per pixel. Creation validates options and
+//! caches the usable sample counts for the selected surface format and device.
 //! Cloning shares existing GPU handles. [`GraphicsContext::headless`] initializes
 //! without a window for custom GPU work.
 //!
-//! Each [`RenderTarget`] owns presentation state and acquires frames. A [`Frame`]
+//! Each [`RenderTarget`] owns a surface or a [`Framebuffer`]. A [`Frame`]
 //! exclusively borrows its target and configures scoped [`RenderPass`] values
 //! through [`RenderPassBuilder`]. A pass
 //! accepts drawing from any number of renderers on that device. A [`MeshRenderer`]
@@ -31,13 +34,13 @@
 //!
 //! ```no_run
 //! use std::sync::Arc;
-//! use astrelis::{FrameError, GraphicsContext, MeshRenderer, Vertex, wgpu};
+//! use astrelis::{FrameError, GraphicsContext, MeshRenderer, SurfaceOptions, Vertex, wgpu};
 //! use winit::window::Window;
 //!
 //! async fn draw(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
 //!     let size = window.inner_size();
 //!     let (graphics, mut target) = GraphicsContext::with_surface(
-//!         window, size.width, size.height,
+//!         window, SurfaceOptions::new(size.width, size.height),
 //!     ).await?;
 //!     let mut renderer = MeshRenderer::new(&graphics);
 //!     let triangle = graphics.create_mesh(
@@ -63,7 +66,7 @@
 //!         let mut pass = frame.render_pass().clear_color(wgpu::Color::BLACK).begin()?;
 //!         renderer.draw(&mut pass, &triangle)?;
 //!     } // Ends the pass without submitting.
-//!     let _submission = frame.present()?;
+//!     let _submission = frame.finish()?;
 //!     Ok(())
 //! }
 //! ```
@@ -90,14 +93,14 @@
 //!         background_renderer.draw(&mut pass, background)?;
 //!         overlay_renderer.draw(&mut pass, overlay)?;
 //!     }
-//!     frame.present()?;
+//!     frame.finish()?;
 //!     Ok(())
 //! }
 //! ```
 //!
-//! For additional windows, call `graphics.create_surface(window, width, height)`
-//! and keep each target in application state. All compatible targets can reuse
-//! the same renderers and meshes.
+//! For additional windows, pass the window and [`SurfaceOptions`] to
+//! `graphics.create_surface` and keep each target in application state. All
+//! compatible targets can reuse the same renderers and meshes.
 //!
 //! # Passes and presentation
 //!
@@ -133,10 +136,11 @@
 //! the attachment, and zero dimensions clip all drawing. The active pass exposes
 //! [`RenderPass::set_viewport`] and [`RenderPass::set_scissor_rect`]. Mesh renderers
 //! respect these choices across draws. An empty clear pass is valid.
-//! [`Frame::present`] consumes the frame, submits its commands, and requests
-//! presentation once, returning a submission index rather than waiting for GPU
-//! completion. Dropping a frame discards recorded work without submission or
-//! presentation. A frame with no clear pass cannot be presented.
+//! [`Frame::finish`] consumes the frame and submits its commands once. Surface
+//! frames also request presentation; framebuffer frames submit without presenting.
+//! It returns a submission index without waiting for GPU completion. Dropping a
+//! frame discards recorded work without submission or presentation. A surface
+//! frame with no clear pass for its default destination cannot be finished.
 //!
 //! On resize, call [`RenderTarget::resize`] with physical pixel dimensions when no
 //! frame is active. Acquisition returns `Result<Frame, FrameError>` directly.
@@ -145,6 +149,125 @@
 //! suspend acquisition. Outdated surfaces are reconfigured once before retrying.
 //! For [`FrameError::SurfaceLost`], replace the target through the context's
 //! `create_surface` method with the same window and current size.
+//!
+//! # Offscreen framebuffers
+//!
+//! [`Framebuffer`] is a persistent GPU resource created with
+//! [`GraphicsContext::create_framebuffer`]. [`FramebufferOptions`] selects its
+//! physical size, color format, output usages, and optional MSAA. Defaults are
+//! linear RGBA8, one sample, and rendering/sampling usages. Add `COPY_SRC` for
+//! texture copies or readback. Creation validates the entire configuration before
+//! allocation and caches usable sample counts, including for zero-sized resources.
+//!
+//! ```no_run
+//! use astrelis::{FramebufferOptions, GraphicsContext, MeshRenderer, Vertex, wgpu};
+//! async fn offscreen() -> Result<(), Box<dyn std::error::Error>> {
+//!     let graphics = GraphicsContext::headless().await?;
+//!     let mut framebuffer = graphics.create_framebuffer(
+//!         FramebufferOptions::new(256, 256).sample_count(4),
+//!     )?;
+//!     let mesh = graphics.create_mesh(&[
+//!         Vertex::new([0.0, 0.7, 0.0], [1.0; 4]),
+//!         Vertex::new([-0.7, -0.7, 0.0], [1.0; 4]),
+//!         Vertex::new([0.7, -0.7, 0.0], [1.0; 4]),
+//!     ], &[0, 1, 2])?;
+//!     let mut renderer = MeshRenderer::new(&graphics);
+//!     let mut frame = framebuffer.begin_frame()?;
+//!     {
+//!         let mut pass = frame.render_pass().clear_color(wgpu::Color::BLACK).begin()?;
+//!         renderer.draw(&mut pass, &mesh)?;
+//!     }
+//!     frame.finish()?; // Submit without a surface or presentation.
+//!     let _resolved_view = framebuffer.color_view()?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! [`Frame::render_to`] writes an additional framebuffer in the same encoder:
+//!
+//! ```no_run
+//! use astrelis::{Error, Frame, Framebuffer, Mesh, MeshRenderer};
+//! fn draw_layer(frame: &mut Frame<'_, '_>, layer: &mut Framebuffer,
+//!     renderer: &mut MeshRenderer, mesh: &Mesh) -> Result<(), Error> {
+//!     {
+//!         let mut pass = frame.render_to(layer).begin()?;
+//!         renderer.draw(&mut pass, mesh)?;
+//!     }
+//!     // An application-defined renderer can now sample layer.color_view()?
+//!     // in another pass. All commands share the caller's eventual finish().
+//!     Ok(())
+//! }
+//! ```
+//!
+//! The output stays single-sampled; MSAA resolves at each pass end. Framebuffer
+//! load passes can preserve contents across submitted recordings. A first load
+//! requires a submitted clear or an earlier clear in the same frame. Abandoning
+//! recording does not initialize the resource or change submitted contents.
+//! Clearing an additional framebuffer never initializes a surface frame's default
+//! destination. [`Frame::finish`] rejects that surface until its own clear is recorded.
+//!
+//! Resize or MSAA changes replace framebuffer attachments and discard contents.
+//! Update application bind groups with the new view, and clear before loading
+//! again. Unchanged settings reuse attachments. Zero dimensions release resources:
+//! acquisition returns `Suspended`, while view/texture access and `render_to(...).begin()`
+//! return [`Error::TargetSuspended`]. View and texture access return `Result` because
+//! no attachment exists while suspended. The default target cannot resize while
+//! borrowed by a frame; additional targets cannot resize during their active passes.
+//! Make all attachment changes between recordings. Pending commands and cloned raw
+//! handles continue to reference previous attachment generations.
+//!
+//! A framebuffer can also be owned by [`RenderTarget::Framebuffer`] for generic
+//! destination handling. Integer formats support custom shaders; [`MeshRenderer`]
+//! rejects formats incompatible with its floating-point output and alpha blending.
+//! Framebuffer contents require sampling usages to be bound as a shader texture;
+//! avoid reading from and writing to the same framebuffer in one pass.
+//!
+//! # Multisample antialiasing
+//!
+//! Select MSAA during creation with [`SurfaceOptions::sample_count`]. Unsupported
+//! requests return [`Error::UnsupportedSampleCount`] without choosing a fallback.
+//! One sample disables MSAA; zero-sized targets validate the count but defer allocation.
+//!
+//! ```no_run
+//! use std::sync::Arc;
+//! use astrelis::{GraphicsContext, SurfaceOptions};
+//! use winit::window::Window;
+//! async fn draw_with_msaa(window: Arc<Window>) -> Result<(), Box<dyn std::error::Error>> {
+//!     let size = window.inner_size();
+//!     let options = SurfaceOptions::new(size.width, size.height).sample_count(4);
+//!     let (_graphics, mut target) = GraphicsContext::with_surface(window, options).await?;
+//!     // Usable counts are cached during creation; this borrows them without allocation.
+//!     let supported = target.supported_sample_counts();
+//!     assert!(supported.contains(&4));
+//!     // An in-game settings change, between frames, without replacing the surface.
+//!     target.set_sample_count(1)?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! The surface image remains single-sampled. The target reuses a multisampled
+//! color attachment and recreates it when the size or sample count changes. Each
+//! pass resolves into the surface image and stores the multisampled contents, so
+//! later `load()` passes preserve individual samples and edge coverage. Every
+//! frame still starts with a clear pass. Zero dimensions release the attachment
+//! and suspend acquisition; restoring the size recreates it with the selected count.
+//! [`RenderTarget::supported_sample_counts`] returns a borrowed slice of cached
+//! capabilities. [`RenderTarget::set_sample_count`] validates against that cache
+//! and recreates the attachment only if the count changes. Neither capability
+//! lookup nor attachment allocation occurs during ordinary frame/pass recording.
+//!
+//! [`MeshRenderer`] automatically caches pipelines by format and sample count.
+//! Different targets can use different counts with the same renderer. Custom
+//! renderers must match [`RenderPass::sample_count`] in their pipeline's
+//! [`wgpu::MultisampleState`]. MSAA cannot change within a frame.
+//!
+//! Support includes render-attachment and resolve capabilities and accounts for
+//! enabled device features. Default initialization requires no optional features.
+//! Native hardware may offer extra counts through
+//! [`wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`]; enable that feature
+//! on an application-created device and adopt it with [`GraphicsContext::from_wgpu`]
+//! to use them. A recreated surface is a new target: pass the desired count in its
+//! creation options and handle [`Error::UnsupportedSampleCount`] if unsupported.
 //!
 //! # Coordinates and colors
 //!
@@ -178,7 +301,7 @@
 //!         let _pass = frame.render_pass().begin()?;
 //!     }
 //!     frame.encoder().copy_buffer_to_buffer(source, 0, destination, 4, 4);
-//!     frame.present()
+//!     frame.finish()
 //! }
 //! ```
 //!
@@ -190,6 +313,7 @@
 mod context;
 mod error;
 mod frame;
+mod framebuffer;
 mod mesh;
 mod mesh_renderer;
 mod pass;
@@ -198,10 +322,11 @@ mod target;
 pub use context::GraphicsContext;
 pub use error::Error;
 pub use frame::{Frame, FrameError};
+pub use framebuffer::{Framebuffer, FramebufferOptions};
 pub use mesh::{Mesh, Vertex};
 pub use mesh_renderer::MeshRenderer;
 pub use pass::{RenderPass, RenderPassBuilder};
-pub use target::{RenderTarget, SurfaceTarget};
+pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 
 /// The exact wgpu version used by Astrelis, available for GPU interoperability.
 pub use wgpu;

@@ -1,4 +1,4 @@
-use crate::{Error, Mesh, RenderTarget, Vertex};
+use crate::{Error, Framebuffer, FramebufferOptions, Mesh, RenderTarget, SurfaceOptions, Vertex};
 
 /// Shared wgpu initialization and GPU resources for one or more render targets.
 ///
@@ -27,8 +27,10 @@ pub struct GraphicsContext {
 impl GraphicsContext {
     /// Initializes wgpu and a first surface, selecting a compatible adapter.
     ///
-    /// Width and height are physical pixels. A zero dimension creates a suspended
-    /// target. Window creation and event handling remain application-owned.
+    /// Options select physical dimensions and the initial sample count. A zero
+    /// dimension creates a suspended target. Window creation and event handling
+    /// remain application-owned. Target creation validates MSAA and caches usable
+    /// counts before returning; unsupported requests do not fall back implicitly.
     /// Passing an owned handle such as `Arc<Window>` allows a `'static` target;
     /// passing a borrowed window ties the target's lifetime to that borrow.
     ///
@@ -36,17 +38,17 @@ impl GraphicsContext {
     ///
     /// Returns an error if surface creation, adapter selection, device creation, or
     /// target configuration fails. Dimensions must fit the device's texture limit.
+    /// Unsupported MSAA returns [`Error::UnsupportedSampleCount`].
     pub async fn with_surface<'window>(
         window: impl Into<wgpu::SurfaceTarget<'window>>,
-        width: u32,
-        height: u32,
+        options: SurfaceOptions,
     ) -> Result<(Self, RenderTarget<'window>), Error> {
         let instance = wgpu::Instance::default();
         let surface = instance
             .create_surface(window)
             .map_err(Error::CreateSurface)?;
         let graphics = Self::request(&instance, Some(&surface)).await?;
-        let target = RenderTarget::surface(&graphics, surface, width, height)?;
+        let target = RenderTarget::surface(&graphics, surface, options)?;
         Ok((graphics, target))
     }
 
@@ -67,26 +69,27 @@ impl GraphicsContext {
     /// Creates and configures another surface using this context's device.
     ///
     /// Targets have independent sizes and presentation state. A single renderer
-    /// can render to any of them, reusing meshes and cached pipelines. Width and
-    /// height are physical pixels; a zero dimension suspends the target.
+    /// can render to any of them, reusing meshes and cached pipelines. Options use
+    /// physical pixels; a zero dimension suspends the target. The initial sample
+    /// count is validated for this surface's format and usable counts are cached.
     /// The returned target borrows only a borrowed window, not the context.
     ///
     /// # Errors
     ///
     /// Returns [`Error::CreateSurface`] if wgpu cannot create the surface,
     /// [`Error::UnsupportedSurface`] if this adapter cannot present to it, or
-    /// [`Error::InvalidTargetSize`] if the dimensions exceed the device limit.
+    /// [`Error::InvalidTargetSize`] if the dimensions exceed the device limit, or
+    /// [`Error::UnsupportedSampleCount`] if the initial MSAA request is unsupported.
     pub fn create_surface<'window>(
         &self,
         window: impl Into<wgpu::SurfaceTarget<'window>>,
-        width: u32,
-        height: u32,
+        options: SurfaceOptions,
     ) -> Result<RenderTarget<'window>, Error> {
         let surface = self
             .instance
             .create_surface(window)
             .map_err(Error::CreateSurface)?;
-        RenderTarget::surface(self, surface, width, height)
+        RenderTarget::surface(self, surface, options)
     }
 
     /// Validates and uploads an immutable indexed triangle mesh on this device.
@@ -101,6 +104,17 @@ impl GraphicsContext {
     /// nonfinite vertex components, and data exceeding the device's buffer limits.
     pub fn create_mesh(&self, vertices: &[Vertex], indices: &[u32]) -> Result<Mesh, Error> {
         Mesh::upload(self, vertices, indices)
+    }
+
+    /// Creates a reusable offscreen color framebuffer with optional MSAA.
+    ///
+    /// Validates dimensions, enabled format features, output usages, and sample
+    /// counts before allocating. Zero dimensions create a suspended resource.
+    /// Defaults allow rendering and shader sampling; add `COPY_SRC` for readback.
+    /// Usable sample counts are cached at creation. Unsupported requests return
+    /// an error without choosing a fallback or creating GPU attachments.
+    pub fn create_framebuffer(&self, options: FramebufferOptions) -> Result<Framebuffer, Error> {
+        Framebuffer::create(self, options)
     }
 
     /// Requests a device from an application-created wgpu instance.
