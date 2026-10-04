@@ -192,7 +192,10 @@
 //!
 //! # Solid 2D primitives
 //!
-//! [`ShapeRenderer`] fills rectangles, uniformly rounded rectangles, and ellipses.
+//! [`ShapeRenderer`] fills and outlines rectangles, uniformly rounded rectangles,
+//! and ellipses. [`ShapeDraw::stroke`] selects a [`Stroke`] with centered, inside,
+//! or outside placement. Width transforms with geometry; a collapsed interior
+//! becomes solid. Fills and outlines share ordered instance batches and pipelines.
 //! [`LineRenderer`] draws independent segments with width and end caps. Geometry
 //! uses [`DrawSpace`] and [`Transform2D`], relative to the current viewport. Input
 //! colors are linear straight RGBA; shader output is premultiplied source-over.
@@ -214,8 +217,8 @@
 //!
 //! Both renderers support explicit ordered batches and scoped draws. Pass access
 //! inside a scope permits clipping/custom rendering; the next primitive restores
-//! its pipeline and wrapped raster state. Paths, connected joins, and shape outlines
-//! are not part of these initial primitives. Renderer internals share frame uploads
+//! its pipeline and wrapped raster state. Paths and connected joins
+//! are not part of these primitives. Renderer internals share frame uploads
 //! with images, using appropriate per-allocation alignment for mixed instance strides.
 //!
 //! # Scoped repeated drawing
@@ -269,10 +272,12 @@
 //! permits custom rendering in place without flushing or finishing the session.
 //!
 //! ```no_run
-//! use astrelis::{Error, LineCap, LineDraw, Painter, Rect, RenderPass, Transform2D};
+//! use astrelis::{Error, LineCap, LineDraw, Painter, Rect, RenderPass, Stroke, Transform2D};
 //! fn paint(pass: &mut RenderPass<'_>, painter: &mut Painter) -> Result<(), Error> {
 //!     let mut paint = painter.begin(pass)?;
 //!     paint.fill_rounded_rect(Rect::new(20., 20., 120., 60.), 12., [0.1, 0.3, 0.6, 1.])?;
+//!     paint.stroke_rounded_rect(Rect::new(20., 20., 120., 60.), 12.,
+//!         Stroke::new(2.).inside(), [0.3, 0.6, 0.9, 1.])?;
 //!     {
 //!         let mut local = paint.transformed(Transform2D::translation(30., 30.))?;
 //!         local.draw_line(LineDraw::new([0., 0.], [80., 0.], [1.; 4])
@@ -348,7 +353,8 @@ pub use attachments::{
 };
 pub use context::GraphicsContext;
 pub use drawing::{
-    DrawSpace, EdgeAntialiasing, LineCap, LineDraw, Rect, Shape, ShapeDraw, Transform2D,
+    DrawSpace, EdgeAntialiasing, LineCap, LineDraw, Rect, Shape, ShapeDraw, Stroke,
+    StrokePlacement, Transform2D,
 };
 pub use error::Error;
 pub use frame::{Frame, FrameError};

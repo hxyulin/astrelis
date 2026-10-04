@@ -214,8 +214,9 @@ transformed whole batches atomically, and check warmed scratch/buffer reuse. The
 primitive shader now bounds analytic edge coverage by a filtered local box so
 opposing fringes do not make subpixel lines/rectangles excessively opaque. Quarter-
 pixel geometry and an underflowed half-width have explicit pixel regression checks.
-Coverage remains an approximation, especially under rotation/shear. Shape outlines,
-paths, connected joins, text, and arbitrary clipping remain future capabilities.
+Coverage remains an approximation, especially under rotation/shear. At this stage
+shape outlines, paths, connected joins, text, and arbitrary clipping remained future
+capabilities; the following section records the subsequent outline implementation.
 
 Three final benchmark runs use the same 64×64 setup, paired alternating order,
 8 warm-up pairs, 40 measured pairs, and counts 100/1,000/10,000. All 24 comparisons
@@ -252,3 +253,75 @@ warnings denied, formatting, diff checks, and documentation generation pass.
 CPU comparisons against direct Astrelis renderers do not establish the original
 percentage gate against direct wgpu. GPU timing, multiple frames in flight, memory
 profiling, and non-Metal backends remain unmeasured.
+
+## Shape outline acceptance
+
+`ShapeDraw::stroke(Stroke)` changes a fill to an outline. Width uses the draw's
+units before its affine transform. Placement is centered by default; `inside()`
+and `outside()` place the whole width on one side of the original boundary.
+Painter exposes `stroke_rect`, `stroke_rounded_rect`, and `stroke_ellipse` on the
+existing session, and explicit batches can mix fills and outlines in call order.
+Zero widths/extents and singular transforms produce no area. Invalid widths and
+overflowing expanded bounds reject the draw; batch validation remains atomic.
+
+Rectangle outlines preserve sharp corners. Rounded rectangles offset the corner
+radius and clamp a collapsed inner radius to zero; a zero original radius behaves
+as a sharp rectangle. A stroke consuming the interior becomes solid. Ellipse
+outlines use a signed closest-point distance to the original curve rather than an
+inner ellipse with reduced axes. The shader normalizes by the major radius and
+uses a bounded 24-step root solve with circle/axis cases and a tight near-axis
+bracket. The mathematical basis is the point-to-ellipse closest-point formulation
+in [Eberly's distance notes](https://www.geometrictools.com/Documentation/DistancePointEllipseEllipsoid.pdf).
+Distance computations have finite float precision; derivative-based edge coverage
+is still approximate, especially with nonuniform transforms or very small geometry.
+
+Both boundaries are filtered and their coverage is subtracted within one primitive,
+so thin borders retain fractional coverage and translucent corners do not blend
+multiple overlapping segments. Outline parameters use the existing 80-byte record;
+fills and outlines share the same shader, prepared pipeline variants, upload pages,
+and ordered batching. There are no SDF textures, tessellation caches, or new GPU
+resources per outline. Shader work increases, particularly for noncircular ellipse
+outlines, and a large hollow shape still shades its bounding quad.
+
+GPU tests cover all three placements, quarter-pixel widths, translucent corners,
+collapsed interiors, zero-radius equivalence, invalid/zero/overflowing inputs,
+normalized coordinates, affine Painter scopes, clipping, MSAA, and read-only
+depth/stencil. An independent dense-boundary geometric oracle checks hard ellipse
+outlines over full pixel grids, including swapped axes, eccentricity, axis pixels,
+and circles. Batches match individual output and retain warmed CPU scratch,
+upload buffers, and pipeline identity. The library passes 53 unit/GPU tests and
+14 doctests, all-target Clippy with warnings denied, formatting, diff checks, and
+documentation generation. A one-off copy of the updated standalone Painter
+example presents eight frames, resizes to 640×480, toggles MSAA twice, and verifies
+zero-size suspension/restoration; its image/primitive/custom-mesh output was
+visually inspected. Instrumentation remains outside the repository.
+
+The primitive harness now adds three mixed-fill/outline cases: scoped drawing and
+explicit batches against individual ShapeRenderer calls, and Painter batches
+against matching ShapeRenderer batches. Geometry cycles among rectangles, rounded
+rectangles, and ellipses; placement cycles among inside/center/outside; groups
+alternate between fills and 0.75-pixel outlines. The existing eight cases remain.
+Three runs use counts 100/1,000/10,000, 8 warm-up pairs, 40 measured pairs, and
+alternating paired order on Apple M3 Pro/Metal. All 33 pixel comparisons pass in
+each run (99 total). Session transforms are identity in these timed cases.
+
+Medians of three run medians, in microseconds. Small or negative differences are
+measurement variation, not an acceleration claim for Painter.
+
+| Workload | Items | Reference record | Variant record | Reference CPU total | Variant CPU total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Fill/outline scope vs individual | 1,000 | 91.12 | 46.75 | 230.88 | 185.65 |
+| Fill/outline batch vs individual | 1,000 | 91.02 | 23.56 | 229.94 | 56.83 |
+| Painter batch vs direct batch | 1,000 | 23.15 | 21.46 | 56.65 | 57.67 |
+| Fill/outline scope vs individual | 10,000 | 883.35 | 451.11 | 2130.23 | 1685.88 |
+| Fill/outline batch vs individual | 10,000 | 885.58 | 209.56 | 2133.75 | 394.65 |
+| Painter batch vs direct batch | 10,000 | 206.77 | 207.40 | 381.58 | 382.50 |
+
+Evidence: [run 1](performance/outlines-metal-m3-pro-run-1.csv),
+[run 2](performance/outlines-metal-m3-pro-run-2.csv),
+[run 3](performance/outlines-metal-m3-pro-run-3.csv), and
+[settings, logs, source hashes](performance/outlines-metal-m3-pro-metadata.txt).
+These are CPU recording/submission comparisons against Astrelis renderers, with
+GPU completion between samples excluded from the totals. They establish neither
+GPU execution cost nor the original direct-wgpu overhead gate. General paths,
+connected joins, text, and arbitrary clipping remain separate future work.

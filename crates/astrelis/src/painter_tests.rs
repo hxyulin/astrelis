@@ -164,7 +164,7 @@ fn transformed_batches_match_individual_painting_and_reuse_scratch() {
             .unwrap();
         let shapes = [
             ShapeDraw::rect(Rect::new(0., 0., 8., 8.), RED),
-            ShapeDraw::ellipse(Rect::new(8., 0., 8., 8.), GREEN),
+            ShapeDraw::ellipse(Rect::new(8., 0., 8., 8.), GREEN).stroke(Stroke::new(1.).inside()),
         ];
         let lines = [LineDraw::new([0., 12.], [16., 12.], BLUE).width(2.)];
         let images = [
@@ -224,6 +224,55 @@ fn transformed_batches_match_individual_painting_and_reuse_scratch() {
                 .iter()
                 .all(|(b, _)| buffers.contains(b))
         );
+    });
+}
+
+#[test]
+fn painter_outline_helpers_match_direct_shapes_under_affine_transforms() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g);
+        let mut painter = Painter::new(&g);
+        let mut shapes = ShapeRenderer::new(&g);
+        let transform = Transform2D([1.2, 0.2, 0.3, 0.8, 4., 6.]);
+        let rect = Rect::new(2., 2., 18., 14.);
+        let rounded = Rect::new(22., 2., 16., 16.);
+        let ellipse = Rect::new(8., 26., 28., 14.);
+        let direct = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            shapes
+                .draw_many(
+                    &mut p,
+                    &[
+                        ShapeDraw::rect(rect, RED)
+                            .stroke(Stroke::new(2.).inside())
+                            .transform(transform),
+                        ShapeDraw::rounded_rect(rounded, 5., GREEN)
+                            .stroke(Stroke::new(2.))
+                            .transform(transform),
+                        ShapeDraw::ellipse(ellipse, BLUE)
+                            .stroke(Stroke::new(2.).outside())
+                            .transform(transform),
+                    ],
+                )
+                .unwrap();
+        });
+        let painted = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            let mut paint = painter.begin(&mut p).unwrap();
+            let mut local = paint.transformed(transform).unwrap();
+            local
+                .stroke_rect(rect, Stroke::new(2.).inside(), RED)
+                .unwrap();
+            local
+                .stroke_rounded_rect(rounded, 5., Stroke::new(2.), GREEN)
+                .unwrap();
+            local
+                .stroke_ellipse(ellipse, Stroke::new(2.).outside(), BLUE)
+                .unwrap();
+        });
+        assert_eq!(direct, painted);
+        assert!(painted.iter().any(|&byte| byte != 0));
     });
 }
 #[test]

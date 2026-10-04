@@ -1,6 +1,6 @@
 use crate::{
     Error, GraphicsContext, LineDraw, LineRenderer, Rect, RenderFormat, RenderPass, ShapeDraw,
-    ShapeRenderer, TextureBinding, TextureBindingOptions, TextureDraw, TextureRenderer,
+    ShapeRenderer, Stroke, TextureBinding, TextureBindingOptions, TextureDraw, TextureRenderer,
     Transform2D,
 };
 
@@ -181,6 +181,37 @@ impl<'frame> PaintSession<'_, 'frame> {
     #[inline]
     pub fn fill_ellipse(&mut self, rect: Rect, color: [f32; 4]) -> Result<(), Error> {
         self.draw_shape(ShapeDraw::ellipse(rect, color))
+    }
+    /// Records a sharp-corner rectangle outline in pixels. Width transforms with geometry.
+    #[inline]
+    pub fn stroke_rect(
+        &mut self,
+        rect: Rect,
+        stroke: Stroke,
+        color: [f32; 4],
+    ) -> Result<(), Error> {
+        self.draw_shape(ShapeDraw::rect(rect, color).stroke(stroke))
+    }
+    /// Records a rounded rectangle outline with an offset, uniformly rounded boundary.
+    #[inline]
+    pub fn stroke_rounded_rect(
+        &mut self,
+        rect: Rect,
+        radius: f32,
+        stroke: Stroke,
+        color: [f32; 4],
+    ) -> Result<(), Error> {
+        self.draw_shape(ShapeDraw::rounded_rect(rect, radius, color).stroke(stroke))
+    }
+    /// Records an ellipse outline using a distance offset of the original curve.
+    #[inline]
+    pub fn stroke_ellipse(
+        &mut self,
+        rect: Rect,
+        stroke: Stroke,
+        color: [f32; 4],
+    ) -> Result<(), Error> {
+        self.draw_shape(ShapeDraw::ellipse(rect, color).stroke(stroke))
     }
     /// Records explicit primitive geometry/space/coverage and its per-draw transform.
     #[inline]

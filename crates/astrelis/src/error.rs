@@ -50,7 +50,7 @@ pub enum Error {
     InvalidTextureDraw,
     /// An affine transform or its composition contains nonfinite values.
     InvalidTransform2D,
-    /// Solid shape geometry, color, transform, or transformed bounds are invalid.
+    /// Solid shape geometry, stroke, color, transform, or transformed bounds are invalid.
     InvalidShapeDraw,
     /// Line endpoints, width, color, transform, or transformed bounds are invalid.
     InvalidLineDraw,
@@ -192,7 +192,7 @@ impl fmt::Display for Error {
             Self::InvalidTextureSource { format } => write!(f, "{format:?} requires single-sampled float color storage with compatible sampling usages/filtering"),
             Self::InvalidTextureDraw => f.write_str("texture rectangles/tint must be finite, extents nonnegative, and opacity in 0..=1"),
             Self::InvalidTransform2D => f.write_str("2D transforms and their composition must be finite"),
-            Self::InvalidShapeDraw => f.write_str("shape geometry/color/transform must be finite, extents/radius nonnegative, alpha in 0..=1"),
+            Self::InvalidShapeDraw => f.write_str("shape geometry/stroke/color/transform must be finite, extents/radius/stroke width nonnegative, alpha in 0..=1"),
             Self::InvalidLineDraw => f.write_str("line geometry/color/transform must be finite, width nonnegative, alpha in 0..=1"),
             Self::TextureFeedback => f.write_str("cannot sample an active color or resolve attachment"),
             Self::CreateSurface(error) => write!(f, "could not create a GPU surface: {error}"),

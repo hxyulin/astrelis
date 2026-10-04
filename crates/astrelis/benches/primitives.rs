@@ -2,8 +2,8 @@
 //! References use direct Astrelis renderer calls; this is not a direct-wgpu benchmark.
 use astrelis::{
     Frame, Framebuffer, FramebufferOptions, GraphicsContext, LineCap, LineDraw, LineRenderer, Mesh,
-    MeshRenderer, Painter, Rect, ShapeDraw, ShapeRenderer, TextureBinding, TextureBindingOptions,
-    TextureDraw, TextureOptions, TextureRenderer, Vertex, wgpu,
+    MeshRenderer, Painter, Rect, ShapeDraw, ShapeRenderer, Stroke, TextureBinding,
+    TextureBindingOptions, TextureDraw, TextureOptions, TextureRenderer, Vertex, wgpu,
 };
 use std::{
     error::Error as StdError,
@@ -27,9 +27,13 @@ enum Mode {
     PainterMixed,
     PainterShapesBatch,
     PainterLinesBatch,
+    Outlines,
+    OutlinesScoped,
+    OutlinesBatch,
+    PainterOutlinesBatch,
 }
 impl Mode {
-    const CASES: [Self; 8] = [
+    const CASES: [Self; 11] = [
         Self::ShapesScoped,
         Self::ShapesBatch,
         Self::LinesScoped,
@@ -38,6 +42,9 @@ impl Mode {
         Self::PainterMixed,
         Self::PainterShapesBatch,
         Self::PainterLinesBatch,
+        Self::OutlinesScoped,
+        Self::OutlinesBatch,
+        Self::PainterOutlinesBatch,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -52,6 +59,10 @@ impl Mode {
             Self::PainterMixed => "painter_mixed",
             Self::PainterShapesBatch => "painter_shapes_batch",
             Self::PainterLinesBatch => "painter_lines_batch",
+            Self::Outlines => "fills_outlines_individual",
+            Self::OutlinesScoped => "fills_outlines_scoped",
+            Self::OutlinesBatch => "fills_outlines_batch",
+            Self::PainterOutlinesBatch => "painter_fills_outlines_batch",
         }
     }
     fn reference(self) -> Self {
@@ -60,6 +71,8 @@ impl Mode {
             Self::LinesScoped | Self::LinesBatch => Self::Lines,
             Self::PainterShapesBatch => Self::ShapesBatch,
             Self::PainterLinesBatch => Self::LinesBatch,
+            Self::OutlinesScoped | Self::OutlinesBatch => Self::Outlines,
+            Self::PainterOutlinesBatch => Self::OutlinesBatch,
             _ => Self::Mixed,
         }
     }
@@ -76,6 +89,7 @@ struct Work {
     segments: Vec<LineDraw>,
     placements: Vec<TextureDraw>,
     markers: Vec<ShapeDraw>,
+    outlines: Vec<ShapeDraw>,
 }
 impl Work {
     fn new(g: &GraphicsContext, target: &Framebuffer, count: usize) -> Result<Self> {
@@ -105,6 +119,7 @@ impl Work {
         let mut segments = Vec::with_capacity(count);
         let mut placements = Vec::with_capacity(count);
         let mut markers = Vec::with_capacity(count);
+        let mut outlines = Vec::with_capacity(count);
         for i in 0..count {
             let x = (i % 8) as f32 * 8.;
             let y = ((i / 8) % 8) as f32 * 8.;
@@ -125,6 +140,23 @@ impl Work {
                 Rect::new(x + 3., y + 2., 4., 4.),
                 [0.9, 0.2, 0.3, 0.4],
             ));
+            let rect = Rect::new(x + 1.5, y + 1.5, 5., 4.);
+            let color = [0.3, 0.6, 0.9, 0.5];
+            let draw = match i % 3 {
+                0 => ShapeDraw::rect(rect, color),
+                1 => ShapeDraw::rounded_rect(rect, 1.5, color),
+                _ => ShapeDraw::ellipse(rect, color),
+            };
+            let stroke = match (i / 3) % 3 {
+                0 => Stroke::new(0.75).inside(),
+                1 => Stroke::new(0.75),
+                _ => Stroke::new(0.75).outside(),
+            };
+            outlines.push(if (i / 9) % 2 == 0 {
+                draw.stroke(stroke)
+            } else {
+                draw
+            });
         }
         Ok(Self {
             painter,
@@ -138,6 +170,7 @@ impl Work {
             segments,
             placements,
             markers,
+            outlines,
         })
     }
     fn record(&mut self, mode: Mode, frame: &mut Frame<'_, '_>) -> Result<f64> {
@@ -216,6 +249,22 @@ impl Work {
                     }
                 }
             }
+            Mode::Outlines => {
+                for &d in &self.outlines {
+                    self.shapes.draw(&mut p, black_box(d))?;
+                }
+            }
+            Mode::OutlinesScoped => {
+                let mut s = self.shapes.bind(&mut p)?;
+                for &d in &self.outlines {
+                    s.draw(black_box(d))?;
+                }
+            }
+            Mode::OutlinesBatch => self.shapes.draw_many(&mut p, black_box(&self.outlines))?,
+            Mode::PainterOutlinesBatch => self
+                .painter
+                .begin(&mut p)?
+                .draw_shapes(black_box(&self.outlines))?,
         }
         Ok(start.elapsed().as_secs_f64() * 1e6)
     }

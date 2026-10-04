@@ -27,22 +27,47 @@ impl PrimitiveData for ShapeDraw {
             width,
             height,
         } = self.rect;
-        if width == 0. || height == 0. {
+        if width == 0. || height == 0. || self.stroke.is_some_and(|s| s.width == 0.) {
             return Ok(Parameters::zeroed());
         }
-        let (kind, radius) = match self.shape {
+        let (mut kind, mut radius) = match self.shape {
             Shape::Rectangle => (0., 0.),
-            Shape::RoundedRectangle { radius } => (1., radius.min(width.min(height) * 0.5)),
+            Shape::RoundedRectangle { radius } => {
+                let radius = radius.min(width.min(height) * 0.5);
+                (if radius == 0. { 0. } else { 1. }, radius)
+            }
             Shape::Ellipse => (2., 0.),
         };
+        let half_size = [width * 0.5, height * 0.5];
+        let mut bounds = half_size;
+        let mut geometry = half_size;
+        let mut stroke_width = 0.;
+        if let Some(stroke) = self.stroke {
+            let (_, outset) = stroke.offsets();
+            bounds = [half_size[0] + outset, half_size[1] + outset];
+            if matches!(self.shape, Shape::Ellipse) {
+                // Ellipses use a distance band around the original curve.
+                radius = outset;
+            } else {
+                // Rectangle contours remain rectangles; rounded corner radii
+                // grow/shrink with the contour, clamping the inner radius to zero.
+                geometry = bounds;
+                if kind == 1. {
+                    radius += outset;
+                }
+            }
+            kind += 6.;
+            stroke_width = stroke.width;
+        }
         pack(
             [x + width * 0.5, y + height * 0.5],
             [1., 0.],
             [0., 1.],
-            [width * 0.5, height * 0.5],
-            [width * 0.5, height * 0.5],
+            bounds,
+            geometry,
             kind,
             radius,
+            stroke_width,
             self.color,
             self.space,
             self.transform,
@@ -89,6 +114,7 @@ impl PrimitiveData for LineDraw {
             [length * 0.5, half_width],
             kind,
             0.,
+            0.,
             self.color,
             self.space,
             self.transform,
@@ -110,6 +136,7 @@ fn pack(
     geometry: [f32; 2],
     kind: f32,
     radius: f32,
+    stroke_width: f32,
     color: [f32; 4],
     space: DrawSpace,
     t: Transform2D,
@@ -168,7 +195,7 @@ fn pack(
         geometry: [
             geometry[0],
             geometry[1],
-            0.,
+            stroke_width,
             if aa == EdgeAntialiasing::Coverage {
                 1.
             } else {
@@ -312,7 +339,7 @@ fn record(pass: &mut RenderPass<'_>, parameters: &[Parameters]) {
     }
 }
 
-/// Independent renderer for filled rectangles, rounded rectangles, and ellipses.
+/// Independent renderer for filled/outlined rectangles, rounded rectangles, and ellipses.
 ///
 /// Owns shaders, pipeline variants, and reusable CPU scratch, but no windows or
 /// frames. Colors are linear straight RGBA; output uses premultiplied source-over.

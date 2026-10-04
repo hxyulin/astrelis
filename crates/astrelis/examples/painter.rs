@@ -18,8 +18,8 @@ use winit::{
 
 use astrelis::{
     Error, Frame, FrameError, Framebuffer, FramebufferOptions, GraphicsContext, LineCap, LineDraw,
-    Mesh, MeshRenderer, Painter, Rect, RenderTarget, ShapeDraw, SurfaceOptions, TextureBinding,
-    TextureBindingOptions, TextureDraw, TextureOptions, Transform2D, Vertex, wgpu,
+    Mesh, MeshRenderer, Painter, Rect, RenderTarget, ShapeDraw, Stroke, SurfaceOptions,
+    TextureBinding, TextureBindingOptions, TextureDraw, TextureOptions, Transform2D, Vertex, wgpu,
 };
 
 struct State {
@@ -162,6 +162,12 @@ impl CanvasLayer {
                     [0.08, 0.18, 0.3, 1.],
                 ),
             ])?;
+            paint.stroke_rounded_rect(
+                Rect::new(w * 0.03, h * 0.03, w * 0.94, h * 0.94),
+                h * 0.025,
+                Stroke::new(2.).inside(),
+                [0.15, 0.28, 0.42, 1.],
+            )?;
             // Capped segments and a rotated ellipse use the same coordinate semantics.
             for (column, cap) in [LineCap::Butt, LineCap::Square, LineCap::Round]
                 .into_iter()
@@ -195,6 +201,12 @@ impl CanvasLayer {
                         h * 0.012,
                         [0.08, 0.15, 0.24, 1.],
                     ))?;
+                    paint.stroke_rounded_rect(
+                        Rect::new(x, y, w * 0.13, h * 0.11),
+                        h * 0.012,
+                        Stroke::new(1.5).inside(),
+                        [0.25, 0.5, 0.7, 0.65],
+                    )?;
                     paint.draw_image(
                         &self.checker,
                         TextureDraw::new(Rect::new(
@@ -213,6 +225,11 @@ impl CanvasLayer {
                         marker.fill_ellipse(
                             Rect::new(-w * 0.02, -h * 0.017, w * 0.04, h * 0.034),
                             [0.9, 0.4, 0.15, 0.7],
+                        )?;
+                        marker.stroke_ellipse(
+                            Rect::new(-w * 0.02, -h * 0.017, w * 0.04, h * 0.034),
+                            Stroke::new(1.5).outside(),
+                            [1., 0.7, 0.3, 0.8],
                         )?;
                     }
                     paint.draw_line(

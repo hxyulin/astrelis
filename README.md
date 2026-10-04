@@ -138,12 +138,19 @@ axis by the viewport size. Applications apply DPI scaling explicitly. Transforms
 act in the selected units before viewport conversion; `a.then(b)` applies `a`,
 then `b`. `TextureDraw::space` and `transform_2d` use these same conventions.
 
-`ShapeDraw` describes filled rectangles, uniformly rounded rectangles, and ellipses.
+`ShapeDraw` describes filled or outlined rectangles, uniformly rounded rectangles,
+and ellipses. `.stroke(Stroke::new(width))` selects a centered outline; `.inside()`
+and `.outside()` place all of its width on the chosen side of the boundary.
+Rectangle outlines have sharp corners; rounded rectangles offset their corner
+radii, clamping collapsed inner radii to zero. Ellipse outlines use a distance
+offset of the original curve, with finite-precision shader calculations.
+Width uses the selected draw units and transforms with geometry. A stroke that
+consumes the interior becomes solid; zero width or zero extents draw nothing.
 `LineDraw` describes independent segments with width and butt, square, or round caps.
 Widths/radii transform with geometry. Inputs use finite linear, straight RGBA
 colors with alpha in `0..=1`; rendering outputs premultiplied source-over color.
-Zero-area geometry draws nothing. Paths, connected stroke joins, and shape outlines
-are outside these initial primitive types. Shader edge coverage is independent of
+Zero-area geometry draws nothing. Paths and connected stroke joins
+are outside these primitive types. Shader edge coverage is independent of
 attachment MSAA, selected with `EdgeAntialiasing`.
 
 `ShapeRenderer` and `LineRenderer` record these primitives directly into existing
@@ -185,6 +192,8 @@ let mut frame = target.begin_frame()?;
     let mut pass = frame.render_pass().begin()?;
     let mut paint = painter.begin(&mut pass)?;
     paint.fill_rounded_rect(Rect::new(20., 20., 120., 60.), 12., [0.1, 0.3, 0.6, 1.])?;
+    paint.stroke_rounded_rect(Rect::new(20., 20., 120., 60.), 12.,
+        Stroke::new(2.).inside(), [0.3, 0.6, 0.9, 1.])?;
     {
         let mut local = paint.transformed(Transform2D::translation(30., 30.))?;
         local.draw_line(LineDraw::new([0., 0.], [80., 0.], [1.; 4])
@@ -199,7 +208,9 @@ frame.finish()?;
 Image bindings use `create_image_binding` or `create_sampled_binding`, with
 `prepare_image` for the binding/attachment variant. A session offers `draw_image`,
 `draw_shapes`, `draw_lines`, and `draw_images`. Transformed batches reuse CPU scratch;
-identity-transform batches delegate directly. `shapes()`, `lines()`, and `textures()`
+identity-transform batches delegate directly. `stroke_rect`, `stroke_rounded_rect`,
+and `stroke_ellipse` provide outline conveniences; fills and outlines can share
+one explicit `draw_shapes` batch. `shapes()`, `lines()`, and `textures()`
 expose the owned renderers outside an active session for direct scopes, preparation,
 custom image materials/samplers, and immutable prepared image data. Painter owns no
 window, frame, scene, or UI layout. There is no session flush or finish operation.

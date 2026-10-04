@@ -1,7 +1,7 @@
 use super::*;
 use crate::framebuffer::tests::pixels;
 use crate::{
-    Framebuffer, FramebufferOptions, MeshRenderer, TextureBindingOptions, TextureDraw,
+    Framebuffer, FramebufferOptions, MeshRenderer, Stroke, TextureBindingOptions, TextureDraw,
     TextureOptions, TextureRenderer, Vertex,
 };
 
@@ -423,5 +423,270 @@ fn subpixel_geometry_does_not_become_a_half_opaque_pixel() {
         near(pixel(&bytes, 8, 8), [64, 0, 0, 64]);
         near(pixel(&bytes, 20, 20), [0, 64, 0, 64]);
         assert_eq!(pixel(&bytes, 8, 32), [0; 4]);
+    });
+}
+
+#[test]
+fn outlines_place_width_and_preserve_translucent_corners() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g, 1, false);
+        let mut shapes = ShapeRenderer::new(&g);
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            shapes
+                .draw_many(
+                    &mut p,
+                    &[
+                        ShapeDraw::rect(Rect::new(6., 6., 12., 12.), RED)
+                            .stroke(Stroke::new(2.).inside()),
+                        ShapeDraw::rect(Rect::new(26., 6., 12., 12.), GREEN)
+                            .stroke(Stroke::new(2.)),
+                        ShapeDraw::rect(Rect::new(46., 6., 12., 12.), BLUE)
+                            .stroke(Stroke::new(2.).outside()),
+                        ShapeDraw::rect(Rect::new(6., 26., 12., 12.), [1., 0., 0., 0.5])
+                            .stroke(Stroke::new(3.).inside()),
+                        ShapeDraw::rounded_rect(Rect::new(26., 26., 16., 16.), 6., GREEN)
+                            .stroke(Stroke::new(3.).inside()),
+                        ShapeDraw::rect(Rect::new(48., 28., 8., 8.), BLUE)
+                            .stroke(Stroke::new(20.).inside()),
+                        ShapeDraw::rect(Rect::new(4., 50.5, 12., 8.), RED)
+                            .stroke(Stroke::new(0.25).inside()),
+                        ShapeDraw::rect(Rect::new(24., 50.5, 12., 8.), GREEN)
+                            .stroke(Stroke::new(0.25)),
+                        ShapeDraw::rect(Rect::new(44., 50.5, 12., 8.), BLUE)
+                            .stroke(Stroke::new(0.25).outside()),
+                    ],
+                )
+                .unwrap();
+        });
+        assert_eq!(pixel(&bytes, 5, 12), [0; 4]);
+        assert_eq!(pixel(&bytes, 6, 12), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 8, 12), [0; 4]);
+        assert_eq!(pixel(&bytes, 25, 12), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 26, 12), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 27, 12), [0; 4]);
+        assert_eq!(pixel(&bytes, 44, 12), [0, 0, 255, 255]);
+        assert_eq!(pixel(&bytes, 45, 12), [0, 0, 255, 255]);
+        assert_eq!(pixel(&bytes, 46, 12), [0; 4]);
+        near(pixel(&bytes, 6, 26), [128, 0, 0, 128]);
+        near(pixel(&bytes, 7, 27), [128, 0, 0, 128]);
+        assert_eq!(pixel(&bytes, 12, 32), [0; 4]);
+        assert_eq!(pixel(&bytes, 26, 26), [0; 4]);
+        assert_eq!(pixel(&bytes, 34, 26), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 34, 34), [0; 4]);
+        assert_eq!(pixel(&bytes, 52, 32), [0, 0, 255, 255]);
+        near(pixel(&bytes, 10, 50), [64, 0, 0, 64]);
+        near(pixel(&bytes, 30, 50), [0, 64, 0, 64]);
+        near(pixel(&bytes, 50, 50), [0, 0, 64, 64]);
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+// Independent geometric oracle: dense boundary samples, rather than the shader's
+// root solver. Hard-edge comparisons omit samples close to either stroke boundary.
+fn ellipse_reference_distance(point: [f64; 2], axes: [f64; 2]) -> f64 {
+    let distance = (0..4096)
+        .map(|i| {
+            let angle = i as f64 * std::f64::consts::TAU / 4096.;
+            (point[0] - axes[0] * angle.cos()).hypot(point[1] - axes[1] * angle.sin())
+        })
+        .fold(f64::INFINITY, f64::min);
+    if (point[0] / axes[0]).powi(2) + (point[1] / axes[1]).powi(2) <= 1. {
+        -distance
+    } else {
+        distance
+    }
+}
+
+#[test]
+fn ellipse_outlines_offset_by_distance_including_axis_points_and_eccentricity() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1, false);
+        let mut shapes = ShapeRenderer::new(&g);
+        for axes in [[20., 8.], [8., 20.], [20., 1.], [12., 12.]] {
+            for stroke in [
+                Stroke::new(3.).inside(),
+                Stroke::new(3.),
+                Stroke::new(3.).outside(),
+                Stroke::new(40.).inside(),
+            ] {
+                // Half-pixel center deliberately exercises the solver's axis cases.
+                let bytes = pixels(&g, &mut t, |f| {
+                    shapes
+                        .draw(
+                            &mut f.render_pass().begin().unwrap(),
+                            ShapeDraw::ellipse(
+                                Rect::new(
+                                    32.5 - axes[0],
+                                    32.5 - axes[1],
+                                    axes[0] * 2.,
+                                    axes[1] * 2.,
+                                ),
+                                RED,
+                            )
+                            .stroke(stroke)
+                            .antialiasing(EdgeAntialiasing::None),
+                        )
+                        .unwrap();
+                });
+                let (inset, outset) = stroke.offsets();
+                for y in 0..64 {
+                    for x in 0..64 {
+                        let d = ellipse_reference_distance(
+                            [x as f64 - 32., y as f64 - 32.],
+                            axes.map(f64::from),
+                        );
+                        if (d + f64::from(inset)).abs() < 0.06
+                            || (d - f64::from(outset)).abs() < 0.06
+                        {
+                            continue;
+                        }
+                        let expected = if d > -f64::from(inset) && d < f64::from(outset) {
+                            [255, 0, 0, 255]
+                        } else {
+                            [0; 4]
+                        };
+                        assert_eq!(
+                            pixel(&bytes, x, y),
+                            expected,
+                            "axes={axes:?} stroke={stroke:?} pixel=({x},{y}) distance={d}"
+                        );
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn mixed_fill_outline_batches_are_atomic_reuse_storage_and_match_single_draws() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 4, true);
+        let mut shapes = ShapeRenderer::new(&g);
+        shapes.prepare(&t.render_format()).unwrap();
+        let pipeline = shapes.inner.pipeline(&t.render_format()).unwrap();
+        let draws = [
+            ShapeDraw::rect(Rect::new(2., 2., 60., 60.), BLUE),
+            ShapeDraw::rounded_rect(Rect::new(8., 8., 40., 40.), 7., [1., 0., 0., 0.5])
+                .stroke(Stroke::new(2.5)),
+            ShapeDraw::ellipse(Rect::new(16., 16., 32., 20.), [0., 1., 0., 0.5])
+                .stroke(Stroke::new(4.).outside()),
+            ShapeDraw::rect(Rect::new(0.1, 0.2, 0.3, 0.2), RED)
+                .stroke(Stroke::new(0.02).inside())
+                .space(DrawSpace::Normalized)
+                .transform(Transform2D::translation(0.1, 0.1)),
+        ];
+        let render = |f: &mut crate::Frame<'_, '_>, s: &mut ShapeRenderer, batch: bool| {
+            drop(f.render_pass().begin().unwrap());
+            let mut p = f
+                .render_pass()
+                .load_all()
+                .depth_ops(None)
+                .stencil_ops(None)
+                .begin()
+                .unwrap();
+            p.set_scissor_rect(6, 6, 52, 52).unwrap();
+            if batch {
+                s.draw_many(&mut p, &draws).unwrap();
+            } else {
+                for d in draws {
+                    s.draw(&mut p, d).unwrap();
+                }
+            }
+        };
+        let single = pixels(&g, &mut t, |f| render(f, &mut shapes, false));
+        let batch = pixels(&g, &mut t, |f| render(f, &mut shapes, true));
+        assert_eq!(single, batch);
+        let capacity = shapes.inner.parameters.capacity();
+        let buffers: Vec<_> = g
+            .upload_pool
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(b, _)| b.clone())
+            .collect();
+        pixels(&g, &mut t, |f| render(f, &mut shapes, true));
+        assert_eq!(shapes.inner.parameters.capacity(), capacity);
+        assert_eq!(shapes.inner.pipeline(&t.render_format()).unwrap(), pipeline);
+        assert!(
+            g.upload_pool
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|(b, _)| buffers.contains(b))
+        );
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            for width in [-1., f32::NAN, f32::INFINITY] {
+                let bad =
+                    ShapeDraw::rect(Rect::new(0., 0., 64., 64.), RED).stroke(Stroke::new(width));
+                assert!(matches!(
+                    shapes.draw_many(&mut p, &[draws[0], bad]),
+                    Err(Error::InvalidShapeDraw)
+                ));
+            }
+            let overflow = ShapeDraw::rect(Rect::new(0., 0., f32::MAX, f32::MAX), RED)
+                .stroke(Stroke::new(f32::MAX).outside());
+            assert!(matches!(
+                shapes.draw(&mut p, overflow),
+                Err(Error::InvalidShapeDraw)
+            ));
+            for d in [
+                ShapeDraw::rect(Rect::new(0., 0., 64., 64.), RED).stroke(Stroke::new(0.)),
+                ShapeDraw::ellipse(Rect::new(0., 0., 0., 64.), RED)
+                    .stroke(Stroke::new(4.).outside()),
+                ShapeDraw::rounded_rect(Rect::new(0., 0., 64., 64.), 8., RED)
+                    .stroke(Stroke::new(4.))
+                    .transform(Transform2D::scale(0., 1.)),
+            ] {
+                shapes.draw(&mut p, d).unwrap();
+            }
+            shapes
+                .draw(
+                    &mut p,
+                    ShapeDraw::rect(Rect::new(48., 48., 8., 8.), GREEN)
+                        .stroke(Stroke::new(2.).inside()),
+                )
+                .unwrap();
+        });
+        assert_eq!(pixel(&bytes, 32, 32), [0; 4]);
+        assert_eq!(pixel(&bytes, 48, 52), [0, 255, 0, 255]);
+    });
+}
+
+#[test]
+fn zero_corner_radius_matches_sharp_rectangles_for_every_stroke_placement() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1, false);
+        let mut shapes = ShapeRenderer::new(&g);
+        for stroke in [
+            Stroke::new(3.).inside(),
+            Stroke::new(3.),
+            Stroke::new(3.).outside(),
+        ] {
+            let rect = Rect::new(8.5, 8.5, 40., 32.);
+            let sharp = pixels(&g, &mut t, |f| {
+                shapes
+                    .draw(
+                        &mut f.render_pass().begin().unwrap(),
+                        ShapeDraw::rect(rect, RED).stroke(stroke),
+                    )
+                    .unwrap();
+            });
+            let zero_radius = pixels(&g, &mut t, |f| {
+                shapes
+                    .draw(
+                        &mut f.render_pass().begin().unwrap(),
+                        ShapeDraw::rounded_rect(rect, 0., RED).stroke(stroke),
+                    )
+                    .unwrap();
+            });
+            assert_eq!(sharp, zero_radius);
+        }
     });
 }

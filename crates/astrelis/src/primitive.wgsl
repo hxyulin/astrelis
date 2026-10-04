@@ -25,11 +25,70 @@ fn box_distance(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
     let q = abs(p) - half_size;
     return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0);
 }
+// Closest-point distance to an ellipse, normalized by its major radius.
+// Solve the monotone Lagrange-multiplier equation with a bounded bisection.
+// See https://www.geometrictools.com/Documentation/DistancePointEllipseEllipsoid.pdf
+// Axis/circle cases avoid the singular root. Used only for ellipse outlines:
+// an implicit ellipse equation is not a distance and gives uneven stroke widths.
+fn ellipse_distance(point: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    if half_size.x == half_size.y { return length(point) - half_size.x; }
+    let swap = half_size.y > half_size.x;
+    let axes = select(half_size, half_size.yx, swap);
+    let p = abs(select(point, point.yx, swap)) / axes.x;
+    let b = axes.y / axes.x;
+    // A radius ratio below float representability approaches a segment.
+    if b == 0.0 {
+        return length(vec2(max(p.x - 1.0, 0.0), p.y)) * axes.x;
+    }
+    let b2 = b * b;
+    var closest = vec2(0.0, b);
+    if p.y == 0.0 {
+        let denominator = 1.0 - b2;
+        if p.x < denominator {
+            let x = p.x / denominator;
+            closest = vec2(x, b * sqrt(max(1.0 - x * x, 0.0)));
+        } else {
+            closest = vec2(1.0, 0.0);
+        }
+    } else if p.x > 0.0 {
+        let inside = length(vec2(p.x, p.y / b)) < 1.0;
+        // u = multiplier + b^2 avoids subtracting nearly equal numbers
+        // near the minor-axis singularity. b*p.y is a valid lower bound.
+        var lo = b * p.y;
+        var hi = select(length(vec2(p.x, b * p.y)) + b2, b2, inside);
+        // Near the major axis the root approaches zero. A tight upper bound
+        // retains relative precision despite interpolated coordinates being
+        // only approximately zero at an axis pixel.
+        if inside && p.x < 1.0 - b2 {
+            let major_ratio = p.x / (1.0 - b2);
+            hi = min(hi, b * p.y / sqrt(max(1.0 - major_ratio * major_ratio, 0.0000001)));
+        }
+        for (var i = 0u; i < 24u; i += 1u) {
+            let u = (lo + hi) * 0.5;
+            let ratios = vec2(p.x / (1.0 - b2 + u), b * p.y / u);
+            if dot(ratios, ratios) > 1.0 { lo = u; } else { hi = u; }
+        }
+        let u = (lo + hi) * 0.5;
+        closest = vec2(p.x / (1.0 - b2 + u), b2 * p.y / u);
+    }
+    let distance = length(p - closest) * axes.x;
+    return select(distance, -distance, length(vec2(p.x, p.y / b)) <= 1.0);
+}
+fn filtered_box(p: vec2<f32>, bounds: vec2<f32>, footprint: vec2<f32>) -> f32 {
+    let positive = clamp((bounds - p) / footprint + vec2(0.5), vec2(0.0), vec2(1.0));
+    let negative = clamp((-bounds - p) / footprint + vec2(0.5), vec2(0.0), vec2(1.0));
+    let coverage = positive - negative;
+    return coverage.x * coverage.y;
+}
 @fragment fn fragment_main(input: Output) -> @location(0) vec4<f32> {
     let half_size = input.geometry.xy;
     let kind = u32(input.style.x);
     let radius = input.style.y;
     var distance = box_distance(input.local, half_size);
+    var inner_distance = 1.0;
+    var bounds = half_size;
+    var inner_bounds = vec2(0.0);
+    var has_inner = false;
     if kind == 1u {
         distance = box_distance(input.local, half_size - vec2(radius)) - radius;
     } else if kind == 2u {
@@ -38,21 +97,41 @@ fn box_distance(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
         distance = box_distance(input.local, vec2(half_size.x + half_size.y, half_size.y));
     } else if kind == 5u {
         distance = length(vec2(max(abs(input.local.x) - half_size.x, 0.0), input.local.y)) - half_size.y;
+    } else if kind == 6u || kind == 7u {
+        let width = input.geometry.z;
+        inner_bounds = max(half_size - vec2(width), vec2(0.0));
+        has_inner = all(inner_bounds > vec2(0.0));
+        inner_distance = box_distance(input.local, inner_bounds);
+        if kind == 7u {
+            distance = box_distance(input.local, half_size - vec2(radius)) - radius;
+            let inner_radius = min(max(radius - width, 0.0), min(inner_bounds.x, inner_bounds.y));
+            inner_distance = box_distance(input.local, inner_bounds - vec2(inner_radius)) - inner_radius;
+        }
+    } else if kind == 8u {
+        let base_distance = ellipse_distance(input.local, half_size);
+        let inset = input.geometry.z - radius;
+        distance = base_distance - radius;
+        inner_distance = base_distance + inset;
+        bounds += vec2(radius);
+        inner_bounds = max(half_size - vec2(inset), vec2(0.0));
+        has_inner = all(inner_bounds > vec2(0.0));
     }
     // Derivatives run outside primitive-dependent control flow. Geometry's final
     // component selects analytic coverage independently of attachment MSAA.
     let edge_width = max(fwidth(distance), 0.000001);
+    let inner_edge_width = max(fwidth(inner_distance), 0.000001);
     // Bound coverage by the filtered local box. Opposing fringes overlap for
     // subpixel geometry; a single distance threshold otherwise makes thin lines
     // too opaque. The box filter is approximate under rotation/shear, like fwidth.
     let footprint = max(fwidth(input.local), vec2(0.000001));
-    var bounds = half_size;
     if kind == 4u || kind == 5u { bounds.x += half_size.y; }
-    let positive = clamp((bounds - input.local) / footprint + vec2(0.5), vec2(0.0), vec2(1.0));
-    let negative = clamp((-bounds - input.local) / footprint + vec2(0.5), vec2(0.0), vec2(1.0));
-    let box_coverage = positive - negative;
-    let analytic = min(clamp(0.5 - distance / edge_width, 0.0, 1.0), box_coverage.x * box_coverage.y);
-    let coverage = select(select(0.0, 1.0, distance <= 0.0), analytic, input.geometry.w > 0.0);
+    let analytic = min(clamp(0.5 - distance / edge_width, 0.0, 1.0), filtered_box(input.local, bounds, footprint));
+    let inner_analytic = min(clamp(0.5 - inner_distance / inner_edge_width, 0.0, 1.0), filtered_box(input.local, inner_bounds, footprint));
+    let inner_coverage = select(0.0, inner_analytic, has_inner);
+    let outlined = kind >= 6u;
+    let hard = select(0.0, 1.0, distance <= 0.0 && !(outlined && has_inner && inner_distance <= 0.0));
+    let filtered = max(analytic - select(0.0, inner_coverage, outlined), 0.0);
+    let coverage = select(hard, filtered, input.geometry.w > 0.0);
     let alpha = input.color.a * coverage;
     return vec4(input.color.rgb * alpha, alpha);
 }

@@ -118,12 +118,13 @@ pub enum EdgeAntialiasing {
     None,
 }
 
-/// Filled primitive geometry. Paths and shape outlines are separate future capabilities.
+/// Primitive geometry for fills and outlines. Paths remain a separate capability.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Shape {
     /// Axis-aligned rectangle before transformation.
     Rectangle,
     /// Uniform circular corners, clamped to half the shorter rectangle dimension.
+    /// A zero radius behaves as [`Self::Rectangle`], including sharp outline corners.
     RoundedRectangle {
         /// Nonnegative radius in the draw's units, before transformation.
         radius: f32,
@@ -132,7 +133,71 @@ pub enum Shape {
     Ellipse,
 }
 
-/// One filled solid primitive, independent of GPU resources.
+/// Placement of a shape's stroke relative to its original boundary.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StrokePlacement {
+    /// Half the width on either side of the boundary, the default.
+    #[default]
+    Center,
+    /// All of the width inside the boundary; useful for UI borders.
+    Inside,
+    /// All of the width outside the boundary.
+    Outside,
+}
+
+/// Shape outline width and placement, independent of color and GPU resources.
+///
+/// Width uses the draw's units before transformation, just like [`LineDraw::width`].
+/// An affine transform scales the outline with its shape; nonuniform scaling does
+/// not preserve a uniform screen-space width. Rectangle outlines have sharp
+/// corners. Rounded rectangles offset circular corners and clamp a collapsed
+/// inner radius to zero. Ellipse outlines offset the original curve by distance,
+/// rather than subtracting another ellipse with smaller axes. Distance/coverage
+/// calculations use finite-precision shader arithmetic and approximate edge filtering.
+/// A width which consumes the interior leaves a solid shape; zero width draws nothing.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stroke {
+    /// Finite, nonnegative outline width in the draw's units.
+    pub width: f32,
+    /// Placement relative to the original boundary.
+    pub placement: StrokePlacement,
+}
+impl Stroke {
+    /// Creates a centered outline; drawing validates the width.
+    pub const fn new(width: f32) -> Self {
+        Self {
+            width,
+            placement: StrokePlacement::Center,
+        }
+    }
+    /// Places the full width inside the boundary.
+    pub const fn inside(mut self) -> Self {
+        self.placement = StrokePlacement::Inside;
+        self
+    }
+    /// Places half the width on either side of the boundary.
+    pub const fn centered(mut self) -> Self {
+        self.placement = StrokePlacement::Center;
+        self
+    }
+    /// Places the full width outside the boundary.
+    pub const fn outside(mut self) -> Self {
+        self.placement = StrokePlacement::Outside;
+        self
+    }
+    pub(crate) fn offsets(self) -> (f32, f32) {
+        match self.placement {
+            StrokePlacement::Inside => (self.width, 0.),
+            StrokePlacement::Center => (self.width * 0.5, self.width * 0.5),
+            StrokePlacement::Outside => (0., self.width),
+        }
+    }
+    pub(crate) fn valid(self) -> bool {
+        self.width.is_finite() && self.width >= 0.
+    }
+}
+
+/// One filled or outlined solid primitive, independent of GPU resources.
 ///
 /// Color is **linear, straight RGBA**: RGB is finite (HDR values are allowed),
 /// alpha is in `0..=1`. Renderers output premultiplied color and use source-over
@@ -140,10 +205,13 @@ pub enum Shape {
 /// is explicit; batching preserves input order and does not sort by primitive.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShapeDraw {
-    /// Bounding rectangle before transformation.
+    /// Original geometry bounds before transformation. Centered/outside strokes
+    /// extend beyond this rectangle; inside strokes stay within it.
     pub rect: Rect,
-    /// Filled geometry.
+    /// Geometry whose boundary is used for filling or stroking.
     pub shape: Shape,
+    /// `None` fills the shape; `Some` draws only its outline.
+    pub stroke: Option<Stroke>,
     /// Linear, straight RGBA.
     pub color: [f32; 4],
     /// Geometry units.
@@ -159,6 +227,7 @@ impl ShapeDraw {
         Self {
             rect,
             shape: Shape::Rectangle,
+            stroke: None,
             color,
             space: DrawSpace::Pixels,
             transform: Transform2D::IDENTITY,
@@ -178,6 +247,17 @@ impl ShapeDraw {
             shape: Shape::Ellipse,
             ..Self::rect(rect, color)
         }
+    }
+    /// Draws an outline instead of a fill, preserving geometry/color/space/transform.
+    /// Zero extents still draw nothing, including for outside strokes.
+    pub const fn stroke(mut self, stroke: Stroke) -> Self {
+        self.stroke = Some(stroke);
+        self
+    }
+    /// Draws a fill instead of an outline.
+    pub const fn filled(mut self) -> Self {
+        self.stroke = None;
+        self
     }
     /// Selects viewport fractions or pixels for geometry and transform.
     pub const fn space(mut self, space: DrawSpace) -> Self {
@@ -200,6 +280,7 @@ impl ShapeDraw {
         if !self.rect.valid()
             || !color_valid(self.color)
             || !self.transform.valid()
+            || self.stroke.is_some_and(|stroke| !stroke.valid())
             || matches!(self.shape, Shape::RoundedRectangle { radius } if !radius.is_finite() || radius < 0.)
         {
             return Err(Error::InvalidShapeDraw);
