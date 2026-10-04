@@ -138,3 +138,55 @@ percentages near the timer/noise scale. Changing ranges/data still needs validat
 A Vulkan or DX12 baseline and reliable real-scene GPU measurements are still needed
 before making portability or GPU-performance claims. Collect those on available
 hardware rather than inferring them from a Metal run.
+
+## Solid primitives and mixed rendering
+
+`mixed_2d` is a standalone consumer of `ShapeRenderer`, `LineRenderer`, images,
+mesh viewports, clipping, and offscreen compositing. Primitive defaults disable
+depth/stencil tests and writes; custom stencil-tested geometry remains expressible
+through mesh materials. Native acceptance copies presented eight frames, resized
+to 640×480, changed MSAA twice, and suspended/restored a zero-sized target. Visual
+readback confirmed the mixed layer. Instrumentation lives outside the examples.
+
+The primitive harness uses a 64×64 RGBA8 target and compares against **individual
+Astrelis calls**, rather than direct wgpu. The same inputs/shaders and ordered pixels
+are checked first. Scopes preserve GPU draw count; explicit batching reduces it to
+page-sized instance batches. No automatic reordering occurs. At count 1,000, the
+mixed workload emits 4,063 draws: two shapes, one image, and one line per item, plus
+one mesh per 16 items. Clipping changes and frequent pipeline switches are intentional.
+
+Three runs use 8 warm-up pairs and 40 measured pairs, alternating reference/variant
+order, at 100, 1,000, and 10,000 items. All 15 pixel comparisons passed in every run.
+CPU recording includes validation, packing, and scope construction; total includes
+frame/pass setup, uploads, encoder finishing, and submission. Submission completion
+between samples is excluded from CPU total. This isolates CPU costs, not GPU timing,
+presentation, or frames-in-flight throughput.
+
+Medians of three run medians at 1,000 items, in microseconds:
+
+| Workload | Individual record | Variant record | Individual CPU total | Variant CPU total |
+| --- | ---: | ---: | ---: | ---: |
+| Scoped shapes | 89.38 | 46.17 | 240.50 | 190.29 |
+| Batched shapes | 89.40 | 21.86 | 232.29 | 57.52 |
+| Scoped lines | 92.27 | 56.27 | 238.73 | 198.81 |
+| Batched lines | 90.48 | 25.29 | 231.31 | 61.48 |
+| Scoped mixed sequence | 385.54 | 322.10 | 1624.94 | 1542.04 |
+
+At 10,000 mixed items (40,625 draws), median recording is 4.36 ms individually and
+3.65 ms with a shape scope; total CPU cost is 17.40 ms and 16.65 ms. A scope does not
+remove GPU commands or wgpu command-validation/submission costs. Explicit batching
+is substantially more effective when ordering permits it. These measurements do
+not establish the original overhead gate against direct wgpu for the new primitives.
+
+Evidence: [run 1](performance/primitive-metal-m3-pro-run-1.csv),
+[run 2](performance/primitive-metal-m3-pro-run-2.csv),
+[run 3](performance/primitive-metal-m3-pro-run-3.csv), and
+[settings, logs, source hashes](performance/primitive-metal-m3-pro-metadata.txt).
+A [foundation regression run](performance/primitive-foundation-regression.csv)
+also passed all 27 mesh/image pixel checks after adding per-allocation alignment
+for mixed instance strides. This one regression run is not a repeated timing study.
+
+The library has 43 unit/GPU tests and 12 doctests at this stage, including primitive
+coverage/caps, fractional edges, transforms, clipping, atomic invalid batches,
+page splitting, upload/pipeline reuse, and mixed raw/mesh/image access with MSAA and
+read-only depth/stencil. Vulkan/DX12 and reliable GPU timing remain follow-up work.

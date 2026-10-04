@@ -23,3 +23,7 @@ workspace = true
 [[bench]]
 name = "rendering"
 harness = false
+
+[[bench]]
+name = "primitives"
+harness = false

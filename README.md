@@ -296,6 +296,7 @@ cargo run -p astrelis --example compositing
 cargo run -p astrelis --example multi_window
 cargo run -p astrelis --example ui_workload
 cargo run -p astrelis --example scene_3d
+cargo run -p astrelis --example mixed_2d
 ```
 
 Every example is one copyable file with its own windows, event handling, resize,
@@ -308,6 +309,16 @@ scope's pass access. The UI workload combines batched cards with scoped controls
 Compositing follows framebuffer replacement without explicit rebinding; passes
 demonstrates a managed custom surface pass with a final resolve and discarded MSAA
 samples.
+
+`mixed_2d` combines filled primitives, line caps, transformed ellipses, translucent
+images, clipping, and custom mesh viewports in one offscreen pass, then composites
+its live output. Space changes layer MSAA and P pauses animation. The primitive
+benchmark compares individual, scoped, and explicit batch APIs and checks ordered
+mixed-renderer output before timing:
+
+```sh
+cargo bench -p astrelis --bench primitives -- --counts 100,1000,10000 --samples 40 --warmup 8
+```
 
 ```sh
 cargo fmt --all --check
