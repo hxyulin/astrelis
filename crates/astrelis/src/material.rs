@@ -14,8 +14,8 @@ use crate::GraphicsContext;
 /// Defaults use `vertex_main` / `fragment_main`, premultiplied alpha blending,
 /// all color channels, counterclockwise front faces, and no face culling.
 /// Premultiplied blending requires the shader to output premultiplied colors.
-/// Depth testing and alternative vertex layouts are outside this mesh API.
-#[derive(Clone, Copy, Debug)]
+/// Depth/stencil settings are optional; alternative vertex layouts remain outside this mesh API.
+#[derive(Clone, Debug)]
 #[must_use = "pass these options to GraphicsContext::create_material"]
 pub struct MaterialOptions<'a> {
     /// Application-created shader module, on the context's device.
@@ -34,6 +34,9 @@ pub struct MaterialOptions<'a> {
     pub front_face: wgpu::FrontFace,
     /// Faces discarded before fragment shading; `None` draws both sides.
     pub cull_mode: Option<wgpu::Face>,
+    /// Optional explicit depth/stencil tests, writes, masks, operations, and bias.
+    /// The format must match the pass attachment. `None` disables all tests/writes.
+    pub depth_stencil: Option<wgpu::DepthStencilState>,
 }
 
 impl<'a> MaterialOptions<'a> {
@@ -48,7 +51,19 @@ impl<'a> MaterialOptions<'a> {
             write_mask: wgpu::ColorWrites::ALL,
             front_face: wgpu::FrontFace::Ccw,
             cull_mode: None,
+            depth_stencil: None,
         }
+    }
+
+    /// Selects explicit depth/stencil state, or `None` to disable tests and writes.
+    ///
+    /// Attachment allocation belongs to target creation. This only configures the
+    /// mesh pipeline; formats must match. Dynamic stencil references belong to
+    /// the pass. With `None`, meshes can still draw over depth-enabled scenes
+    /// without testing or modifying the depth/stencil attachment.
+    pub fn depth_stencil(mut self, state: Option<wgpu::DepthStencilState>) -> Self {
+        self.depth_stencil = state;
+        self
     }
 
     /// Selects vertex and fragment entry points in the shader module.
@@ -118,6 +133,7 @@ pub struct Material {
     pub(crate) write_mask: wgpu::ColorWrites,
     pub(crate) front_face: wgpu::FrontFace,
     pub(crate) cull_mode: Option<wgpu::Face>,
+    pub(crate) depth_stencil: Option<wgpu::DepthStencilState>,
 }
 
 impl Material {
@@ -144,7 +160,13 @@ impl Material {
             write_mask: options.write_mask,
             front_face: options.front_face,
             cull_mode: options.cull_mode,
+            depth_stencil: options.depth_stencil,
         }
+    }
+
+    /// Returns the material's explicit depth/stencil state, if testing is enabled.
+    pub fn depth_stencil(&self) -> Option<&wgpu::DepthStencilState> {
+        self.depth_stencil.as_ref()
     }
 
     /// Returns the retained application shader module.

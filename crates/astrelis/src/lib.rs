@@ -1,6 +1,6 @@
 //! Indexed triangle-mesh rendering with custom materials, built directly on wgpu.
 //!
-//! Astrelis handles GPU initialization, mesh uploads, surfaces, offscreen framebuffers, and
+//! Astrelis handles GPU initialization, meshes, materials, surfaces, offscreen framebuffers, and
 //! frame submission. The application owns its windows, event loop, redraw schedule,
 //! and rendering order. The library has no windowing-framework dependency.
 //!
@@ -12,7 +12,7 @@
 //! [`GraphicsContext::create_surface`]; each surface must support the same adapter.
 //! [`SurfaceOptions`] selects the initial physical size and sample count; its
 //! constructor defaults to one sample per pixel. Creation validates options and
-//! caches the usable sample counts for the selected surface format and device.
+//! caches usable sample counts for all selected color/depth/stencil attachments.
 //! Cloning shares existing GPU handles. [`GraphicsContext::headless`] initializes
 //! without a window for custom GPU work.
 //!
@@ -258,7 +258,8 @@
 //! and recreates the attachment only if the count changes. Neither capability
 //! lookup nor attachment allocation occurs during ordinary frame/pass recording.
 //!
-//! [`MeshRenderer`] automatically caches pipelines by format and sample count.
+//! [`MeshRenderer`] caches pipelines by material, color format, sample count, and
+//! optional depth/stencil format.
 //! Different targets can use different counts with the same renderer. Custom
 //! renderers must match [`RenderPass::sample_count`] in their pipeline's
 //! [`wgpu::MultisampleState`]. MSAA cannot change within a frame.
@@ -276,10 +277,89 @@
 //! Default shading interprets positions as clip-space X/Y in `[-1, 1]`, Z in
 //! `[0, 1]`, and colors as linear, straight-alpha RGBA. Its fragment shader
 //! interpolates vertex color and premultiplies it for alpha blending. Indices are
-//! `u32` triangle lists. Draws execute in recording order without depth testing;
-//! default shading does not cull faces. A custom material can transform positions,
+//! `u32` triangle lists. Draws execute in recording order; depth testing is optional.
+//! Default shading does not test depth/stencil or cull faces. Materials can transform positions,
 //! define color conventions, and select face culling. The vertex layout remains
 //! fixed; this API has no scene or display-list layer.
+//!
+//! # Depth and stencil attachments
+//!
+//! Enable storage at target creation with [`SurfaceOptions::depth_stencil`] or
+//! [`FramebufferOptions::depth_stencil`]. `Depth24Plus` is depth-only,
+//! `Stencil8` is stencil-only, and `Depth24PlusStencil8` combines both. Formats
+//! requiring optional features are rejected unless enabled on the device.
+//! Creation caches the intersection of color render/resolve and depth/stencil
+//! sample support; depth/stencil is stored at the target's sample count without
+//! resolving. It follows resize/MSAA changes and releases storage at zero size.
+//! Disabled depth/stencil allocates no attachment.
+//!
+//! ```no_run
+//! use astrelis::{GraphicsContext, MaterialOptions, Mesh, MeshRenderer, RenderTarget, wgpu};
+//! fn draw_with_depth(graphics: &GraphicsContext, target: &mut RenderTarget<'_>, mesh: &Mesh)
+//!     -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create the target earlier with .depth_stencil(wgpu::TextureFormat::Depth24Plus).
+//!     let mut renderer = MeshRenderer::new(graphics);
+//!     let material = graphics.create_material(
+//!         MaterialOptions::new(renderer.default_material().shader())
+//!             .blend(None)
+//!             .depth_stencil(Some(wgpu::DepthStencilState {
+//!                 format: wgpu::TextureFormat::Depth24Plus,
+//!                 depth_write_enabled: Some(true),
+//!                 depth_compare: Some(wgpu::CompareFunction::Less),
+//!                 stencil: Default::default(), bias: Default::default(),
+//!             })),
+//!     );
+//!     renderer.prepare_material_for_target(&material, target)?;
+//!     // Keep these resources in application state; this part runs per frame.
+//!     let mut frame = target.begin_frame()?;
+//!     {
+//!         let mut pass = frame.render_pass().clear_depth(1.0).begin()?;
+//!         renderer.draw_with_material(&mut pass, mesh, &material)?;
+//!     }
+//!     frame.finish()?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! A material's optional [`wgpu::DepthStencilState`] selects depth comparison and
+//! writes, stencil front/back tests and operations, read/write masks, and depth bias.
+//! Its explicit format must match the pass attachment. Disabled material tests
+//! use an inert compatible state so overlays can share a depth-enabled pass.
+//! Reuse the default renderer shader through [`MeshRenderer::default_material`].
+//! For pipeline warmup, `prepare_for_target` and `prepare_material_for_target`
+//! account for the target's complete attachment configuration. Scalar `prepare`
+//! assumes no depth/stencil, while `prepare_material` uses the material's explicit
+//! format. Shader validation continues to use wgpu's error reporting.
+//!
+//! Each pass clears depth to 1.0 and stencil to 0 by default, storing both.
+//! Color, depth, and stencil operations are independent: `.load()` preserves only
+//! color; select `.load_depth()` and/or `.load_stencil()` to preserve other aspects.
+//! `clear_depth`, `clear_stencil`, `depth_ops`, and `stencil_ops` override defaults.
+//! `None` operations make that aspect read-only; the material must not write it.
+//! Load/read-only access requires a stored clear, either earlier in this frame or
+//! in a submitted recording. Discard makes later loads unavailable; a clear/store
+//! initializes the aspect again. Initialization changes commit only at finish.
+//! Dropped frames or a rejected `finish()` preserve submitted contents and markers.
+//! Resize/MSAA replacement creates fresh initialization for every aspect.
+//! Make resource changes and submissions in order between recordings; initialization
+//! tracking does not coordinate independently recorded frames sharing an attachment.
+//!
+//! Stencil is an 8-bit mask per sample. Draw a mask with color writes disabled
+//! and stencil `Replace`, then draw content with stencil comparison `Equal`.
+//! Read/write masks can reserve independent bits for different clipping flags.
+//! [`RenderPassBuilder::stencil_reference`] starts the pass reference;
+//! [`RenderPass::set_stencil_reference`] changes it for subsequent draws without
+//! creating another pipeline. Mesh renderers restore the wrapped reference along
+//! with viewport/scissor after raw state changes. The `stencil` example clips
+//! colored content to a diamond; `depth` demonstrates overlapping triangles.
+//!
+//! Targets expose `depth_stencil_format`, `depth_stencil_texture`, and
+//! `depth_stencil_view`. Storage defaults to rendering usages only; select
+//! `depth_stencil_usage` at creation for supported sampling/copies. Sampling
+//! combined formats needs an aspect-compatible view; multisampled depth has no
+//! resolved output. Enabled suspended attachments return `TargetSuspended`, and
+//! disabled attachments return `None`. Resize/MSAA invalidates old bindings.
+//! Raw writes never update managed initialization tracking.
 //!
 //! # Materials and custom mesh shaders
 //!
@@ -314,7 +394,7 @@
 //! color; unused inputs can be omitted. The vertex shader may transform positions.
 //! Fragment output at location 0 must match the attachment format. Premultiplied
 //! alpha blending is the material default; custom shaders must premultiply their
-//! output or select a different blend state. No depth attachment is used.
+//! output or select a different blend state. Depth/stencil testing is opt-in.
 //!
 //! Supply explicit bind-group layouts with [`MaterialOptions::bind_group_layouts`].
 //! The application owns buffers, textures, groups, and their updates, and binds
@@ -322,7 +402,8 @@
 //! per-draw binding changes work as in wgpu. They do not create new materials or
 //! pipelines. The standalone `materials` example updates a tint uniform on Space.
 //!
-//! Pipelines are cached per renderer by material identity, format, and sample count.
+//! Pipelines are cached by material identity, color format, sample count, and optional
+//! depth/stencil format.
 //! Cloned materials reuse entries; new materials have independent entries, even
 //! when their settings are identical. Cached pipelines live until the renderer is
 //! dropped. Prepare before rendering with [`MeshRenderer::prepare`] for default
@@ -378,8 +459,9 @@
 //! }
 //! ```
 //!
-//! Wrapped passes currently have one color attachment and no depth/stencil,
-//! multiple render targets, or custom mip/layer selection. Raw encoder access
+//! Wrapped passes have one color attachment and optional target-owned depth/stencil.
+//! They do not yet support multiple color outputs, imported attachments, colorless
+//! depth-only passes, or custom mip/layer selection. Raw encoder access
 //! supports those passes with application-owned attachments. It does not expose
 //! the acquired surface image or managed MSAA view; render more elaborate scenes
 //! offscreen and composite into a wrapped surface pass. Raw framebuffer writes
@@ -394,6 +476,7 @@
 //! not wait for GPU completion; surface reconfiguration may synchronize with GPU work.
 
 mod context;
+mod depth_stencil;
 mod error;
 mod frame;
 mod framebuffer;

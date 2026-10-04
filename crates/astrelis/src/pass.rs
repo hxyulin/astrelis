@@ -1,14 +1,11 @@
 use std::sync::{Arc, atomic::AtomicBool};
 
-use crate::{Error, Framebuffer, frame::FramebufferWrites};
+use crate::{Error, Framebuffer, depth_stencil::DepthStencilAttachment, frame::AttachmentWrites};
 
 #[derive(Debug)]
 enum Initialization<'frame> {
     Surface(&'frame mut bool),
-    Framebuffer {
-        state: &'frame Arc<AtomicBool>,
-        writes: &'frame mut FramebufferWrites,
-    },
+    Framebuffer(&'frame Arc<AtomicBool>),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -26,6 +23,12 @@ pub(crate) struct PassOptions<'label> {
     pub(crate) load: wgpu::LoadOp<wgpu::Color>,
     viewport: Option<[f32; 6]>,
     scissor: Option<[u32; 4]>,
+    depth_stencil: Option<&'label DepthStencilAttachment>,
+    depth_ops: Option<wgpu::Operations<f32>>,
+    stencil_ops: Option<wgpu::Operations<u32>>,
+    depth_requested: bool,
+    stencil_requested: bool,
+    stencil_reference: u32,
 }
 
 impl Default for PassOptions<'_> {
@@ -35,6 +38,18 @@ impl Default for PassOptions<'_> {
             load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
             viewport: None,
             scissor: None,
+            depth_stencil: None,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(0),
+                store: wgpu::StoreOp::Store,
+            }),
+            depth_requested: false,
+            stencil_requested: false,
+            stencil_reference: 0,
         }
     }
 }
@@ -44,6 +59,8 @@ impl Default for PassOptions<'_> {
 /// Created by [`crate::Frame::render_pass`] or [`crate::Frame::render_to`]. Defaults clear to transparent black,
 /// store the results, and use the full attachment for viewport and scissor. These
 /// defaults are the same for every pass; use [`Self::load`] to preserve earlier work.
+/// Attached depth defaults to clear 1.0 and stencil to clear 0, both stored.
+/// Their load/store operations are independent of color and each other.
 /// No GPU commands are recorded until [`Self::begin`]. Dropping the builder leaves
 /// the frame unchanged. Configuration borrows the frame and requires no heap allocation.
 #[derive(Debug)]
@@ -54,6 +71,7 @@ pub struct RenderPassBuilder<'frame> {
     device: &'frame wgpu::Device,
     initialization: Initialization<'frame>,
     options: PassOptions<'frame>,
+    writes: Option<&'frame mut AttachmentWrites>,
 }
 
 impl<'frame> RenderPassBuilder<'frame> {
@@ -69,6 +87,7 @@ impl<'frame> RenderPassBuilder<'frame> {
             device,
             initialization: Initialization::Surface(initialized),
             options: PassOptions::default(),
+            writes: None,
         }
     }
 
@@ -76,7 +95,7 @@ impl<'frame> RenderPassBuilder<'frame> {
         encoder: &'frame mut wgpu::CommandEncoder,
         device: &'frame wgpu::Device,
         framebuffer: &'frame Framebuffer,
-        writes: &'frame mut FramebufferWrites,
+        writes: &'frame mut AttachmentWrites,
     ) -> Self {
         let attachment = if device != framebuffer.graphics.device() {
             Err(Error::DeviceMismatch)
@@ -87,12 +106,96 @@ impl<'frame> RenderPassBuilder<'frame> {
             encoder,
             attachment,
             device,
-            initialization: Initialization::Framebuffer {
-                state: &framebuffer.initialized,
-                writes,
+            initialization: Initialization::Framebuffer(&framebuffer.initialized),
+            options: PassOptions {
+                depth_stencil: framebuffer.depth_stencil.as_ref(),
+                ..Default::default()
             },
-            options: PassOptions::default(),
+            writes: Some(writes),
         }
+    }
+
+    pub(crate) fn with_depth_stencil(
+        mut self,
+        attachment: Option<&'frame DepthStencilAttachment>,
+        writes: &'frame mut AttachmentWrites,
+    ) -> Self {
+        self.options.depth_stencil = attachment;
+        self.writes = Some(writes);
+        self
+    }
+
+    /// Clears depth to a finite value in zero to one and stores it for later passes.
+    ///
+    /// Defaults to 1.0 for conventional `Less` depth testing. Reversed-Z shaders
+    /// can clear to 0.0 and use `Greater`. Requires an attachment with depth.
+    pub fn clear_depth(mut self, depth: f32) -> Self {
+        self.options.depth_requested = true;
+        self.options.depth_ops = Some(wgpu::Operations {
+            load: wgpu::LoadOp::Clear(depth),
+            store: wgpu::StoreOp::Store,
+        });
+        self
+    }
+
+    /// Loads and stores initialized depth, independently of the color load operation.
+    pub fn load_depth(mut self) -> Self {
+        self.options.depth_requested = true;
+        self.options.depth_ops = Some(wgpu::Operations {
+            load: wgpu::LoadOp::Load,
+            store: wgpu::StoreOp::Store,
+        });
+        self
+    }
+
+    /// Clears stencil to an integer mask and stores it. Defaults to zero.
+    pub fn clear_stencil(mut self, stencil: u32) -> Self {
+        self.options.stencil_requested = true;
+        self.options.stencil_ops = Some(wgpu::Operations {
+            load: wgpu::LoadOp::Clear(stencil),
+            store: wgpu::StoreOp::Store,
+        });
+        self
+    }
+
+    /// Loads and stores initialized stencil, independently of color and depth.
+    pub fn load_stencil(mut self) -> Self {
+        self.options.stencil_requested = true;
+        self.options.stencil_ops = Some(wgpu::Operations {
+            load: wgpu::LoadOp::Load,
+            store: wgpu::StoreOp::Store,
+        });
+        self
+    }
+
+    /// Sets raw depth load/store operations; `None` makes depth read-only.
+    ///
+    /// Loading or read-only access requires a stored clear in an earlier submitted
+    /// recording or this frame. `Discard` invalidates depth for later wrapped loads.
+    /// Materials in read-only passes must disable depth writes.
+    pub fn depth_ops(mut self, ops: Option<wgpu::Operations<f32>>) -> Self {
+        self.options.depth_requested = true;
+        self.options.depth_ops = ops;
+        self
+    }
+
+    /// Sets raw stencil load/store operations; `None` makes stencil read-only.
+    ///
+    /// Loading/read-only access requires initialized contents. `Discard` invalidates
+    /// subsequent wrapped loads. Materials must not write a read-only stencil aspect.
+    pub fn stencil_ops(mut self, ops: Option<wgpu::Operations<u32>>) -> Self {
+        self.options.stencil_requested = true;
+        self.options.stencil_ops = ops;
+        self
+    }
+
+    /// Sets the reference used by stencil comparisons and `Replace` operations.
+    ///
+    /// Defaults to zero. This is per-pass dynamic state, not part of a material or
+    /// pipeline cache key. Use the pass setter to change it between draws.
+    pub fn stencil_reference(mut self, reference: u32) -> Self {
+        self.options.stencil_reference = reference;
+        self
     }
 
     /// Sets a debug label for the pass.
@@ -157,24 +260,69 @@ impl<'frame> RenderPassBuilder<'frame> {
     /// [`Error::InvalidClearColor`] for nonfinite clear components,
     /// [`Error::InvalidViewport`] for invalid viewport values, or
     /// [`Error::InvalidScissorRect`] for a rectangle outside the attachment.
+    /// Depth/stencil configuration can return [`Error::MissingDepthAttachment`],
+    /// [`Error::MissingStencilAttachment`], [`Error::InvalidClearDepth`],
+    /// [`Error::UninitializedDepth`], or [`Error::UninitializedStencil`].
     /// Rejected configuration records no commands and leaves the frame unchanged.
-    pub fn begin(self) -> Result<RenderPass<'frame>, Error> {
+    pub fn begin(mut self) -> Result<RenderPass<'frame>, Error> {
         let attachment = self.attachment?;
+        validate_depth_stencil_options(&self.options)?;
         if matches!(self.options.load, wgpu::LoadOp::Load) {
             match &self.initialization {
                 Initialization::Surface(initialized) if !**initialized => {
                     return Err(Error::UninitializedFrame);
                 }
-                Initialization::Framebuffer { state, writes } if !writes.is_initialized(state) => {
+                Initialization::Framebuffer(state)
+                    if !self.writes.as_ref().unwrap().is_initialized(state) =>
+                {
                     return Err(Error::UninitializedFramebuffer);
                 }
                 _ => {}
             }
         }
+        if let Some(depth_stencil) = self.options.depth_stencil {
+            let writes = self.writes.as_ref().unwrap();
+            let format = depth_stencil.texture.format();
+            if format.has_depth_aspect()
+                && needs_initialized(self.options.depth_ops)
+                && !writes.is_initialized(&depth_stencil.depth_initialized)
+            {
+                return Err(Error::UninitializedDepth);
+            }
+            if format.has_stencil_aspect()
+                && needs_initialized(self.options.stencil_ops)
+                && !writes.is_initialized(&depth_stencil.stencil_initialized)
+            {
+                return Err(Error::UninitializedStencil);
+            }
+        }
+        let depth_stencil = self.options.depth_stencil;
+        let depth_ops = self.options.depth_ops;
+        let stencil_ops = self.options.stencil_ops;
         let pass = RenderPass::new(self.encoder, self.device, attachment, self.options)?;
         match self.initialization {
             Initialization::Surface(initialized) => *initialized = true,
-            Initialization::Framebuffer { state, writes } => writes.record(state),
+            Initialization::Framebuffer(state) => self.writes.as_mut().unwrap().record(state, true),
+        }
+        if let Some(attachment) = depth_stencil {
+            let writes = self.writes.as_mut().unwrap();
+            let format = attachment.texture.format();
+            if format.has_depth_aspect()
+                && let Some(ops) = depth_ops
+            {
+                writes.record(
+                    &attachment.depth_initialized,
+                    ops.store == wgpu::StoreOp::Store,
+                );
+            }
+            if format.has_stencil_aspect()
+                && let Some(ops) = stencil_ops
+            {
+                writes.record(
+                    &attachment.stencil_initialized,
+                    ops.store == wgpu::StoreOp::Store,
+                );
+            }
         }
         Ok(pass)
     }
@@ -185,7 +333,8 @@ impl<'frame> RenderPassBuilder<'frame> {
 /// Created by [`RenderPassBuilder::begin`]. Dropping the pass ends command recording
 /// for that pass; submission and presentation remain the frame's responsibility.
 /// The pass borrows the frame, preventing another pass or encoder access until it ends.
-/// Viewport and scissor settings belong to this pass and persist across mesh draws.
+/// Viewport, scissor, and dynamic stencil reference belong to this pass and
+/// persist across mesh draws. Depth/stencil tests and writes belong to materials.
 #[derive(Debug)]
 #[must_use = "keep the pass in scope while recording draws"]
 pub struct RenderPass<'frame> {
@@ -196,6 +345,10 @@ pub struct RenderPass<'frame> {
     sample_count: u32,
     viewport: [f32; 6],
     scissor: [u32; 4],
+    depth_stencil_format: Option<wgpu::TextureFormat>,
+    depth_read_only: bool,
+    stencil_read_only: bool,
+    stencil_reference: u32,
 }
 
 impl<'frame> RenderPass<'frame> {
@@ -205,6 +358,7 @@ impl<'frame> RenderPass<'frame> {
         attachment: ColorAttachment<'_>,
         options: PassOptions<'_>,
     ) -> Result<Self, Error> {
+        validate_depth_stencil_options(&options)?;
         let ColorAttachment {
             view,
             resolve_target,
@@ -235,9 +389,25 @@ impl<'frame> RenderPass<'frame> {
                 store: wgpu::StoreOp::Store,
             },
         })];
+        let depth_stencil_format = options
+            .depth_stencil
+            .map(|attachment| attachment.texture.format());
+        let depth_stencil_attachment =
+            options
+                .depth_stencil
+                .map(|attachment| wgpu::RenderPassDepthStencilAttachment {
+                    view: &attachment.view,
+                    depth_ops: depth_stencil_format
+                        .filter(|format| format.has_depth_aspect())
+                        .and(options.depth_ops),
+                    stencil_ops: depth_stencil_format
+                        .filter(|format| format.has_stencil_aspect())
+                        .and(options.stencil_ops),
+                });
         let inner = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: options.label,
             color_attachments: &attachments,
+            depth_stencil_attachment,
             ..Default::default()
         });
         let mut pass = Self {
@@ -248,6 +418,10 @@ impl<'frame> RenderPass<'frame> {
             sample_count,
             viewport,
             scissor,
+            depth_stencil_format,
+            depth_read_only: options.depth_ops.is_none(),
+            stencil_read_only: options.stencil_ops.is_none(),
+            stencil_reference: options.stencil_reference,
         };
         pass.apply_raster_state();
         Ok(pass)
@@ -300,6 +474,39 @@ impl<'frame> RenderPass<'frame> {
         Ok(())
     }
 
+    /// Changes stencil comparisons and replacement values for subsequent draws.
+    ///
+    /// Mesh renderers restore this wrapped state on every draw, along with viewport
+    /// and scissor. Changing the reference creates no pipeline or GPU resource.
+    pub fn set_stencil_reference(&mut self, reference: u32) {
+        self.stencil_reference = reference;
+        if self
+            .depth_stencil_format
+            .is_some_and(|format| format.has_stencil_aspect())
+        {
+            self.inner.set_stencil_reference(reference);
+        }
+    }
+
+    /// Returns the optional depth/stencil format required by compatible pipelines.
+    pub fn depth_stencil_format(&self) -> Option<wgpu::TextureFormat> {
+        self.depth_stencil_format
+    }
+
+    /// Reports whether an attached depth aspect is read-only in this pass.
+    pub fn depth_read_only(&self) -> bool {
+        self.depth_stencil_format
+            .is_some_and(|format| format.has_depth_aspect())
+            && self.depth_read_only
+    }
+
+    /// Reports whether an attached stencil aspect is read-only in this pass.
+    pub fn stencil_read_only(&self) -> bool {
+        self.depth_stencil_format
+            .is_some_and(|format| format.has_stencil_aspect())
+            && self.stencil_read_only
+    }
+
     /// Returns the color attachment format used to select compatible pipelines.
     pub fn format(&self) -> wgpu::TextureFormat {
         self.format
@@ -325,11 +532,14 @@ impl<'frame> RenderPass<'frame> {
 
     /// Borrows the underlying wgpu pass for application-defined rendering.
     ///
-    /// Use pipelines matching [`Self::format`] and [`Self::sample_count`], and
+    /// Use pipelines matching [`Self::format`], [`Self::sample_count`],
+    /// [`Self::depth_stencil_format`], and aspect read-only flags, and
     /// resources from [`Self::device`]. Raw changes
-    /// persist in wgpu's state but do not update this wrapper's viewport or scissor.
+    /// persist in wgpu's state but do not update this wrapper's viewport, scissor,
+    /// or stencil reference.
     /// [`crate::MeshRenderer`] reapplies the wrapper's chosen viewport and scissor
-    /// before each draw. Use the wrapped setters to control mesh rasterization.
+    /// and stencil reference before each draw. Use the wrapped setters to control
+    /// mesh rasterization and stencil comparisons.
     /// Custom renderers are responsible for the GPU state their draws need.
     pub fn as_wgpu(&mut self) -> &mut wgpu::RenderPass<'frame> {
         &mut self.inner
@@ -341,6 +551,12 @@ impl<'frame> RenderPass<'frame> {
             .set_viewport(x, y, width, height, min_depth, max_depth);
         let [x, y, width, height] = self.scissor;
         self.inner.set_scissor_rect(x, y, width, height);
+        if self
+            .depth_stencil_format
+            .is_some_and(|format| format.has_stencil_aspect())
+        {
+            self.inner.set_stencil_reference(self.stencil_reference);
+        }
     }
 }
 
@@ -372,6 +588,32 @@ fn validate_scissor(size: [u32; 2], scissor: [u32; 4]) -> Result<(), Error> {
         || y.checked_add(height).is_none_or(|bottom| bottom > size[1])
     {
         return Err(Error::InvalidScissorRect);
+    }
+    Ok(())
+}
+
+fn needs_initialized<T>(ops: Option<wgpu::Operations<T>>) -> bool {
+    ops.is_none_or(|ops| matches!(ops.load, wgpu::LoadOp::Load))
+}
+
+fn validate_depth_stencil_options(options: &PassOptions<'_>) -> Result<(), Error> {
+    let format = options
+        .depth_stencil
+        .map(|attachment| attachment.texture.format());
+    if options.depth_requested && !format.is_some_and(|format| format.has_depth_aspect()) {
+        return Err(Error::MissingDepthAttachment);
+    }
+    if options.stencil_requested && !format.is_some_and(|format| format.has_stencil_aspect()) {
+        return Err(Error::MissingStencilAttachment);
+    }
+    if format.is_some_and(|format| format.has_depth_aspect())
+        && let Some(wgpu::Operations {
+            load: wgpu::LoadOp::Clear(depth),
+            ..
+        }) = options.depth_ops
+        && (!depth.is_finite() || !(0.0..=1.0).contains(&depth))
+    {
+        return Err(Error::InvalidClearDepth);
     }
     Ok(())
 }

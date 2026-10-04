@@ -13,7 +13,7 @@ fn options(count: u32) -> FramebufferOptions {
     )
 }
 
-fn pixels(
+pub(crate) fn pixels(
     graphics: &GraphicsContext,
     target: &mut Framebuffer,
     record: impl FnOnce(&mut Frame<'_, '_>),

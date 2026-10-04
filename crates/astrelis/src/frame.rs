@@ -39,22 +39,34 @@ impl std::fmt::Display for FrameError {
 impl std::error::Error for FrameError {}
 
 #[derive(Debug, Default)]
-pub(crate) struct FramebufferWrites(Vec<Arc<AtomicBool>>);
+pub(crate) struct AttachmentWrites(Vec<(Arc<AtomicBool>, bool)>);
 
-impl FramebufferWrites {
+impl AttachmentWrites {
     pub(crate) fn is_initialized(&self, state: &Arc<AtomicBool>) -> bool {
-        state.load(Ordering::Acquire) || self.0.iter().any(|pending| Arc::ptr_eq(pending, state))
+        self.0
+            .iter()
+            .find(|(pending, _)| Arc::ptr_eq(pending, state))
+            .map_or_else(
+                || state.load(Ordering::Acquire),
+                |(_, initialized)| *initialized,
+            )
     }
 
-    pub(crate) fn record(&mut self, state: &Arc<AtomicBool>) {
-        if !self.is_initialized(state) {
-            self.0.push(Arc::clone(state));
+    pub(crate) fn record(&mut self, state: &Arc<AtomicBool>, initialized: bool) {
+        if let Some((_, pending)) = self
+            .0
+            .iter_mut()
+            .find(|(pending, _)| Arc::ptr_eq(pending, state))
+        {
+            *pending = initialized;
+        } else if state.load(Ordering::Acquire) != initialized {
+            self.0.push((Arc::clone(state), initialized));
         }
     }
 
     fn commit(self) {
-        for state in self.0 {
-            state.store(true, Ordering::Release);
+        for (state, initialized) in self.0 {
+            state.store(initialized, Ordering::Release);
         }
     }
 }
@@ -121,7 +133,7 @@ pub struct Frame<'target, 'window> {
     encoder: wgpu::CommandEncoder,
     target: FrameTarget<'target, 'window>,
     initialized: bool,
-    writes: FramebufferWrites,
+    writes: AttachmentWrites,
 }
 
 impl<'target, 'window> Frame<'target, 'window> {
@@ -141,7 +153,7 @@ impl<'target, 'window> Frame<'target, 'window> {
                 suboptimal,
             },
             initialized: false,
-            writes: FramebufferWrites::default(),
+            writes: AttachmentWrites::default(),
         }
     }
 
@@ -151,7 +163,7 @@ impl<'target, 'window> Frame<'target, 'window> {
             encoder,
             target: FrameTarget::Framebuffer(target),
             initialized: false,
-            writes: FramebufferWrites::default(),
+            writes: AttachmentWrites::default(),
         }
     }
 
@@ -174,7 +186,8 @@ impl<'target, 'window> Frame<'target, 'window> {
                     sample_count: target.sample_count,
                 },
                 &mut self.initialized,
-            ),
+            )
+            .with_depth_stencil(target.depth_stencil.as_ref(), &mut self.writes),
             FrameTarget::Framebuffer(target) => RenderPassBuilder::for_framebuffer(
                 &mut self.encoder,
                 target.graphics.device(),
@@ -250,6 +263,14 @@ impl<'target, 'window> Frame<'target, 'window> {
         match &self.target {
             FrameTarget::Surface { target, .. } => target.configuration.format,
             FrameTarget::Framebuffer(target) => target.format(),
+        }
+    }
+
+    /// Returns the default destination's optional depth/stencil format.
+    pub fn depth_stencil_format(&self) -> Option<wgpu::TextureFormat> {
+        match &self.target {
+            FrameTarget::Surface { target, .. } => target.depth_stencil_format,
+            FrameTarget::Framebuffer(target) => target.depth_stencil_format(),
         }
     }
 

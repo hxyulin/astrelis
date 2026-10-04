@@ -7,6 +7,7 @@ use crate::{Error, Frame, FrameError, GraphicsContext, pass::ColorAttachment, ta
 /// Pass to [`GraphicsContext::create_framebuffer`]. Options default to a
 /// single-sampled, linear RGBA8 texture usable for rendering and shader sampling.
 /// Include [`wgpu::TextureUsages::COPY_SRC`] to enable GPU copies or readback.
+/// Depth/stencil storage is disabled by default; enable it with [`Self::depth_stencil`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[must_use = "pass these options to create_framebuffer"]
 pub struct FramebufferOptions {
@@ -16,6 +17,11 @@ pub struct FramebufferOptions {
     pub format: wgpu::TextureFormat,
     /// Color samples per pixel; one disables MSAA.
     pub sample_count: u32,
+    /// Optional depth-only, stencil-only, or combined attachment format.
+    pub depth_stencil_format: Option<wgpu::TextureFormat>,
+    /// Usages of depth/stencil storage, independent of color usages.
+    /// Must include rendering; sampling or copies can be enabled when supported.
+    pub depth_stencil_usage: wgpu::TextureUsages,
     /// Usages of the single-sampled output. Must include `RENDER_ATTACHMENT`.
     pub usage: wgpu::TextureUsages,
 }
@@ -27,6 +33,8 @@ impl FramebufferOptions {
             size: [width, height],
             format: wgpu::TextureFormat::Rgba8Unorm,
             sample_count: 1,
+            depth_stencil_format: None,
+            depth_stencil_usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 .union(wgpu::TextureUsages::TEXTURE_BINDING),
         }
@@ -35,6 +43,22 @@ impl FramebufferOptions {
     /// Selects the color format. Validation occurs during creation.
     pub const fn format(mut self, format: wgpu::TextureFormat) -> Self {
         self.format = format;
+        self
+    }
+
+    /// Enables a target-owned depth/stencil attachment with rendering usages.
+    ///
+    /// Creation validates the format and intersects color and depth/stencil sample
+    /// support. Storage automatically follows target size and MSAA changes.
+    /// No depth/stencil texture is allocated when this option is absent.
+    pub const fn depth_stencil(mut self, format: wgpu::TextureFormat) -> Self {
+        self.depth_stencil_format = Some(format);
+        self
+    }
+
+    /// Replaces depth/stencil usages. Include rendering and desired sampling/copy usages.
+    pub const fn depth_stencil_usage(mut self, usage: wgpu::TextureUsages) -> Self {
+        self.depth_stencil_usage = usage;
         self
     }
 
@@ -65,7 +89,8 @@ struct Attachments {
 /// Create through [`GraphicsContext::create_framebuffer`]. Render independently
 /// with [`Self::begin_frame`], or in another frame with [`Frame::render_to`]. All
 /// passes use the same renderer API as surfaces. The resolved output stays
-/// single-sampled, even with MSAA enabled.
+/// single-sampled, even with MSAA enabled. Optional depth/stencil storage has
+/// the same dimensions and sample count as the render attachment and is not resolved.
 ///
 /// Contents persist after submission. The first managed pass must clear; later
 /// load passes may preserve earlier drawing, including across recordings. Dropping
@@ -82,6 +107,7 @@ pub struct Framebuffer {
     attachments: Option<Attachments>,
     supported_sample_counts: Vec<u32>,
     pub(crate) initialized: Arc<AtomicBool>,
+    pub(crate) depth_stencil: Option<crate::depth_stencil::DepthStencilAttachment>,
 }
 
 impl Framebuffer {
@@ -117,7 +143,13 @@ impl Framebuffer {
                 usage: options.usage,
             });
         }
-        let supported_sample_counts = target::sample_counts(features);
+        let mut supported_sample_counts = target::sample_counts(features);
+        crate::depth_stencil::restrict_counts(
+            graphics,
+            &mut supported_sample_counts,
+            options.depth_stencil_format,
+            options.depth_stencil_usage,
+        )?;
         target::validate_sample_count(format, options.sample_count, &supported_sample_counts)?;
         Ok(Self {
             graphics: graphics.clone(),
@@ -125,6 +157,13 @@ impl Framebuffer {
             options,
             supported_sample_counts,
             initialized: Arc::new(AtomicBool::new(false)),
+            depth_stencil: crate::depth_stencil::allocate(
+                graphics,
+                options.size,
+                options.sample_count,
+                options.depth_stencil_format,
+                options.depth_stencil_usage,
+            ),
         })
     }
 
@@ -202,6 +241,51 @@ impl Framebuffer {
         self.options.usage
     }
 
+    /// Returns the optional depth/stencil format, including while suspended.
+    pub fn depth_stencil_format(&self) -> Option<wgpu::TextureFormat> {
+        self.options.depth_stencil_format
+    }
+
+    /// Returns depth/stencil usages, or `None` when this attachment is disabled.
+    pub fn depth_stencil_usage(&self) -> Option<wgpu::TextureUsages> {
+        self.options
+            .depth_stencil_format
+            .map(|_| self.options.depth_stencil_usage)
+    }
+
+    /// Borrows depth/stencil storage; disabled attachments return `None`.
+    ///
+    /// Returns `TargetSuspended` when enabled at zero size. Sampling/copies require
+    /// matching creation usages and aspect-compatible views. Storage has the target's
+    /// sample count and is never resolved. Raw writes do not mark managed contents
+    /// initialized. Resize/MSAA replaces storage and invalidates old bindings.
+    pub fn depth_stencil_texture(&self) -> Result<Option<&wgpu::Texture>, Error> {
+        if self.options.depth_stencil_format.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(
+            &self
+                .depth_stencil
+                .as_ref()
+                .ok_or(Error::TargetSuspended)?
+                .texture,
+        ))
+    }
+
+    /// Borrows the attachment view, with the same rules as its texture.
+    pub fn depth_stencil_view(&self) -> Result<Option<&wgpu::TextureView>, Error> {
+        if self.options.depth_stencil_format.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(
+            &self
+                .depth_stencil
+                .as_ref()
+                .ok_or(Error::TargetSuspended)?
+                .view,
+        ))
+    }
+
     /// Borrows the resolved single-sampled texture for copies and low-level integration.
     ///
     /// Returns [`Error::TargetSuspended`] at zero size. Raw writes do not update
@@ -246,6 +330,13 @@ impl Framebuffer {
 
     fn replace(&mut self, options: FramebufferOptions) {
         self.attachments = allocate(&self.graphics, options);
+        self.depth_stencil = crate::depth_stencil::allocate(
+            &self.graphics,
+            options.size,
+            options.sample_count,
+            options.depth_stencil_format,
+            options.depth_stencil_usage,
+        );
         self.options = options;
         // Pending recordings retain the old generation's marker, never this one.
         self.initialized = Arc::new(AtomicBool::new(false));
@@ -291,4 +382,4 @@ fn allocate(graphics: &GraphicsContext, options: FramebufferOptions) -> Option<A
 
 #[cfg(test)]
 #[path = "framebuffer_tests.rs"]
-mod tests;
+pub(crate) mod tests;

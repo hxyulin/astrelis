@@ -33,7 +33,40 @@ pub enum Error {
         /// Pass format incompatible with the material's blend settings.
         format: wgpu::TextureFormat,
     },
-    /// A zero-sized framebuffer has no color attachment.
+    /// The format is not an available depth/stencil attachment on this device.
+    UnsupportedDepthStencilFormat {
+        /// Requested attachment format.
+        format: wgpu::TextureFormat,
+    },
+    /// Depth/stencil usages omit rendering, request transient storage, or exceed support.
+    InvalidDepthStencilUsage {
+        /// Requested attachment format.
+        format: wgpu::TextureFormat,
+        /// Requested texture usages.
+        usage: wgpu::TextureUsages,
+    },
+    /// A depth operation was selected without an attachment containing depth.
+    MissingDepthAttachment,
+    /// A stencil operation was selected without an attachment containing stencil.
+    MissingStencilAttachment,
+    /// Depth clear values must be finite and in zero to one.
+    InvalidClearDepth,
+    /// A depth load or read-only pass needs initialized, stored depth contents.
+    UninitializedDepth,
+    /// A stencil load or read-only pass needs initialized, stored stencil contents.
+    UninitializedStencil,
+    /// The material's explicit depth/stencil format does not match the pass.
+    DepthStencilMismatch {
+        /// Depth/stencil format required by the material.
+        material: wgpu::TextureFormat,
+        /// Depth/stencil format present in the pass, if any.
+        pass: Option<wgpu::TextureFormat>,
+    },
+    /// The material writes depth in a pass whose depth aspect is read-only.
+    ReadOnlyDepth,
+    /// The material writes stencil in a pass whose stencil aspect is read-only.
+    ReadOnlyStencil,
+    /// A zero-sized target has no allocated attachment.
     TargetSuspended,
     /// A framebuffer load requires a submitted clear or an earlier clear in this recording.
     UninitializedFramebuffer,
@@ -97,7 +130,17 @@ impl fmt::Display for Error {
             Self::InvalidFramebufferUsage { format, usage } => write!(f, "invalid framebuffer usage {usage:?} for {format:?}"),
             Self::UnsupportedMeshFormat { format } => write!(f, "the mesh renderer requires a blendable floating-point output, got {format:?}"),
             Self::UnsupportedMaterialFormat { format } => write!(f, "material blending is unsupported for {format:?}"),
-            Self::TargetSuspended => f.write_str("a zero-sized framebuffer has no attachment"),
+            Self::UnsupportedDepthStencilFormat { format } => write!(f, "{format:?} is not an available depth/stencil attachment"),
+            Self::InvalidDepthStencilUsage { format, usage } => write!(f, "invalid depth/stencil usage {usage:?} for {format:?}"),
+            Self::MissingDepthAttachment => f.write_str("the pass has no depth aspect"),
+            Self::MissingStencilAttachment => f.write_str("the pass has no stencil aspect"),
+            Self::InvalidClearDepth => f.write_str("depth clear must be finite and in 0..=1"),
+            Self::UninitializedDepth => f.write_str("depth must be cleared and stored before loading or read-only use"),
+            Self::UninitializedStencil => f.write_str("stencil must be cleared and stored before loading or read-only use"),
+            Self::DepthStencilMismatch { material, pass } => write!(f, "material depth/stencil format {material:?} does not match pass {pass:?}"),
+            Self::ReadOnlyDepth => f.write_str("the material writes to read-only depth"),
+            Self::ReadOnlyStencil => f.write_str("the material writes to read-only stencil"),
+            Self::TargetSuspended => f.write_str("a zero-sized target has no attachment"),
             Self::UninitializedFramebuffer => f.write_str("a framebuffer must have a submitted clear or an earlier clear in this recording before loading"),
             Self::UnsupportedSampleCount { format, count } => {
                 write!(f, "sample count {count} is unsupported for {format:?} on this device")

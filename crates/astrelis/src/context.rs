@@ -109,7 +109,7 @@ impl GraphicsContext {
         Mesh::upload(self, vertices, indices)
     }
 
-    /// Creates a reusable offscreen color framebuffer with optional MSAA.
+    /// Creates a reusable offscreen framebuffer with optional MSAA and depth/stencil.
     ///
     /// Validates dimensions, enabled format features, output usages, and sample
     /// counts before allocating. Zero dimensions create a suspended resource.

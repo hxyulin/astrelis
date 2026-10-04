@@ -1,6 +1,6 @@
 use crate::{Error, Frame, FrameError, Framebuffer, GraphicsContext};
 
-/// Initial physical size and color sample count for a window surface target.
+/// Initial physical size, MSAA, and optional depth/stencil for a window surface.
 ///
 /// Pass to [`GraphicsContext::with_surface`], [`GraphicsContext::create_surface`],
 /// or [`RenderTarget::surface`]. Constructing options performs no GPU work;
@@ -13,6 +13,11 @@ pub struct SurfaceOptions {
     pub size: [u32; 2],
     /// Color samples per pixel. One disables MSAA; unsupported counts are rejected.
     pub sample_count: u32,
+    /// Optional depth-only, stencil-only, or combined attachment format.
+    pub depth_stencil_format: Option<wgpu::TextureFormat>,
+    /// Usages of depth/stencil storage, independent of color usages.
+    /// Must include rendering; sampling or copies can be enabled when supported.
+    pub depth_stencil_usage: wgpu::TextureUsages,
 }
 
 impl SurfaceOptions {
@@ -21,7 +26,25 @@ impl SurfaceOptions {
         Self {
             size: [width, height],
             sample_count: 1,
+            depth_stencil_format: None,
+            depth_stencil_usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
         }
+    }
+
+    /// Enables a target-owned depth/stencil attachment with rendering usages.
+    ///
+    /// Creation validates the format and intersects color and depth/stencil sample
+    /// support. Storage automatically follows target size and MSAA changes.
+    /// No depth/stencil texture is allocated when this option is absent.
+    pub const fn depth_stencil(mut self, format: wgpu::TextureFormat) -> Self {
+        self.depth_stencil_format = Some(format);
+        self
+    }
+
+    /// Replaces depth/stencil usages. Include rendering and desired sampling/copy usages.
+    pub const fn depth_stencil_usage(mut self, usage: wgpu::TextureUsages) -> Self {
+        self.depth_stencil_usage = usage;
+        self
     }
 
     /// Selects the initial number of color samples per pixel.
@@ -59,6 +82,9 @@ pub struct SurfaceTarget<'window> {
     pub(crate) sample_count: u32,
     pub(crate) multisample_view: Option<wgpu::TextureView>,
     supported_sample_counts: Vec<u32>,
+    pub(crate) depth_stencil_format: Option<wgpu::TextureFormat>,
+    depth_stencil_usage: wgpu::TextureUsages,
+    pub(crate) depth_stencil: Option<crate::depth_stencil::DepthStencilAttachment>,
 }
 
 impl<'window> RenderTarget<'window> {
@@ -86,6 +112,8 @@ impl<'window> RenderTarget<'window> {
         let SurfaceOptions {
             size: [width, height],
             sample_count,
+            depth_stencil_format,
+            depth_stencil_usage,
         } = options;
         validate_size(graphics, width, height)?;
         if !graphics.adapter().is_surface_supported(&surface) {
@@ -105,7 +133,13 @@ impl<'window> RenderTarget<'window> {
             configuration.format = *format;
         }
         configuration.present_mode = wgpu::PresentMode::Fifo;
-        let supported_sample_counts = supported_sample_counts(graphics, configuration.format);
+        let mut supported_sample_counts = supported_sample_counts(graphics, configuration.format);
+        crate::depth_stencil::restrict_counts(
+            graphics,
+            &mut supported_sample_counts,
+            depth_stencil_format,
+            depth_stencil_usage,
+        )?;
         validate_sample_count(configuration.format, sample_count, &supported_sample_counts)?;
         let multisample_view = create_multisample_view(
             graphics,
@@ -121,6 +155,15 @@ impl<'window> RenderTarget<'window> {
             sample_count,
             multisample_view,
             supported_sample_counts,
+            depth_stencil_format,
+            depth_stencil_usage,
+            depth_stencil: crate::depth_stencil::allocate(
+                graphics,
+                [width, height],
+                sample_count,
+                depth_stencil_format,
+                depth_stencil_usage,
+            ),
         };
         if width != 0 && height != 0 {
             target.configure();
@@ -167,7 +210,10 @@ impl<'window> RenderTarget<'window> {
         Ok(Frame::new(target, image, suboptimal))
     }
 
-    /// Updates the physical size, configuring only nonzero, changed dimensions.
+    /// Updates physical size, replacing optional depth/stencil and MSAA storage.
+    ///
+    /// Unchanged dimensions reuse attachments. Changed sizes discard contents;
+    /// depth/stencil loads require a new clear. Only nonzero surfaces are configured.
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), Error> {
         let target = match self {
             Self::Surface(target) => target,
@@ -184,12 +230,26 @@ impl<'window> RenderTarget<'window> {
             target.size,
             target.sample_count,
         );
+        target.depth_stencil = crate::depth_stencil::allocate(
+            &target.graphics,
+            target.size,
+            target.sample_count,
+            target.depth_stencil_format,
+            target.depth_stencil_usage,
+        );
         if width != 0 && height != 0 {
             target.configuration.width = width;
             target.configuration.height = height;
             target.configure();
         }
         Ok(())
+    }
+
+    pub(crate) fn device(&self) -> &wgpu::Device {
+        match self {
+            Self::Surface(target) => target.graphics.device(),
+            Self::Framebuffer(target) => target.graphics.device(),
+        }
     }
 
     /// Returns the current physical dimensions, including zero while suspended.
@@ -208,10 +268,11 @@ impl<'window> RenderTarget<'window> {
         }
     }
 
-    /// Returns sample counts usable for this target's format on its current device.
+    /// Returns sample counts usable by all of this target's attachments.
     ///
     /// Counts are ascending and include one, which disables MSAA. Multisampling
-    /// requires both render-attachment and automatic resolve support. Adapter
+    /// requires color render/resolve support and matching depth/stencil sample
+    /// support when present; depth/stencil is stored without resolving. Adapter
     /// capabilities are restricted by the device's enabled features: native-only
     /// counts may require [`wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES`]
     /// enabled through application-owned device initialization.
@@ -261,8 +322,76 @@ impl<'window> RenderTarget<'window> {
         validate_sample_count(format, count, &target.supported_sample_counts)?;
         target.multisample_view =
             create_multisample_view(&target.graphics, format, target.size, count);
+        target.depth_stencil = crate::depth_stencil::allocate(
+            &target.graphics,
+            target.size,
+            count,
+            target.depth_stencil_format,
+            target.depth_stencil_usage,
+        );
         target.sample_count = count;
         Ok(())
+    }
+
+    /// Returns the optional managed depth/stencil format, including while suspended.
+    pub fn depth_stencil_format(&self) -> Option<wgpu::TextureFormat> {
+        match self {
+            Self::Surface(target) => target.depth_stencil_format,
+            Self::Framebuffer(target) => target.depth_stencil_format(),
+        }
+    }
+
+    /// Returns configured depth/stencil texture usages, or `None` when disabled.
+    pub fn depth_stencil_usage(&self) -> Option<wgpu::TextureUsages> {
+        match self {
+            Self::Surface(target) => target
+                .depth_stencil_format
+                .map(|_| target.depth_stencil_usage),
+            Self::Framebuffer(target) => target.depth_stencil_usage(),
+        }
+    }
+
+    /// Borrows managed depth/stencil storage for raw GPU integration.
+    ///
+    /// Returns `None` when disabled and `TargetSuspended` when enabled at zero size.
+    /// Usages determine whether sampling/copies are permitted. MSAA is never
+    /// resolved for this attachment. Resize/MSAA changes invalidate old handles;
+    /// raw writes do not update wrapped initialization tracking.
+    pub fn depth_stencil_texture(&self) -> Result<Option<&wgpu::Texture>, Error> {
+        match self {
+            Self::Surface(target) => {
+                if target.depth_stencil_format.is_none() {
+                    return Ok(None);
+                }
+                Ok(Some(
+                    &target
+                        .depth_stencil
+                        .as_ref()
+                        .ok_or(Error::TargetSuspended)?
+                        .texture,
+                ))
+            }
+            Self::Framebuffer(target) => target.depth_stencil_texture(),
+        }
+    }
+
+    /// Borrows the depth/stencil attachment view, with the same rules as its texture.
+    pub fn depth_stencil_view(&self) -> Result<Option<&wgpu::TextureView>, Error> {
+        match self {
+            Self::Surface(target) => {
+                if target.depth_stencil_format.is_none() {
+                    return Ok(None);
+                }
+                Ok(Some(
+                    &target
+                        .depth_stencil
+                        .as_ref()
+                        .ok_or(Error::TargetSuspended)?
+                        .view,
+                ))
+            }
+            Self::Framebuffer(target) => target.depth_stencil_view(),
+        }
     }
 
     /// Returns the owned wgpu surface, or `None` for an offscreen destination.
