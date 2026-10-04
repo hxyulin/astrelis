@@ -1,0 +1,94 @@
+recorded_utc: 2026-10-04T09:54:39.671915+00:00
+base_commit: 55cfad211d6229aa8bf5d7df79f59e8edcb24938
+source_state: foundation milestone additions uncommitted at measurement; rendering library matches base commit
+benchmark_sha256: a7a5690507cc3d024efc4f6068a5a4ffa0f74c19114aa0415c49441a1cff67bd
+cargo_lock_sha256: 9b57f7d0560f071311997f18276b96841f76ccf34cc523d51d38cffa4b051ca3
+toolchain: rustc 1.98.1 (48a229cea 2026-09-01)
+os: ProductName:		macOS
+ProductVersion:		27.0.1
+BuildVersion:		26A434
+command: cargo bench -p astrelis --bench rendering --offline -- --counts 100,1000,10000 --samples 40 --warmup 8
+
+--- Run 1 ---
+adapter=AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; os=macos; arch=aarch64; debug_assertions=false; validation=wgpu_defaults
+context_initialization_us=12467.250
+wrapped_resources_us=616.084
+wrapped_mesh_pipeline_prepare_us=267.417
+wrapped_texture_pipeline_prepare_us=205.584
+raw_mesh_pipeline_prepare_us=61.625
+raw_texture_resources_and_pipeline_us=156.542; preparation_times_are_single_observations=true
+counts=[100, 1000, 10000]; samples=40; warmup=8; gpu_execution_timing=not_measured
+data_preparation_us count=100: 54.583
+checked and measured mesh_same count=100
+checked and measured mesh_alternating count=100
+checked and measured texture_prepared count=100
+checked and measured texture_dynamic count=100
+checked and measured texture_batch count=100
+data_preparation_us count=1000: 36.208
+checked and measured mesh_same count=1000
+checked and measured mesh_alternating count=1000
+checked and measured texture_prepared count=1000
+checked and measured texture_dynamic count=1000
+checked and measured texture_batch count=1000
+data_preparation_us count=10000: 117.083
+checked and measured mesh_same count=10000
+checked and measured mesh_alternating count=10000
+checked and measured texture_prepared count=10000
+checked and measured texture_dynamic count=10000
+checked and measured texture_batch count=10000
+
+--- Run 2 ---
+adapter=AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; os=macos; arch=aarch64; debug_assertions=false; validation=wgpu_defaults
+context_initialization_us=10363.541
+wrapped_resources_us=309.041
+wrapped_mesh_pipeline_prepare_us=228.125
+wrapped_texture_pipeline_prepare_us=183.625
+raw_mesh_pipeline_prepare_us=54.167
+raw_texture_resources_and_pipeline_us=159.709; preparation_times_are_single_observations=true
+counts=[100, 1000, 10000]; samples=40; warmup=8; gpu_execution_timing=not_measured
+data_preparation_us count=100: 55.875
+checked and measured mesh_same count=100
+checked and measured mesh_alternating count=100
+checked and measured texture_prepared count=100
+checked and measured texture_dynamic count=100
+checked and measured texture_batch count=100
+data_preparation_us count=1000: 35.916
+checked and measured mesh_same count=1000
+checked and measured mesh_alternating count=1000
+checked and measured texture_prepared count=1000
+checked and measured texture_dynamic count=1000
+checked and measured texture_batch count=1000
+data_preparation_us count=10000: 114.417
+checked and measured mesh_same count=10000
+checked and measured mesh_alternating count=10000
+checked and measured texture_prepared count=10000
+checked and measured texture_dynamic count=10000
+checked and measured texture_batch count=10000
+
+--- Run 3 ---
+adapter=AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; os=macos; arch=aarch64; debug_assertions=false; validation=wgpu_defaults
+context_initialization_us=10724.042
+wrapped_resources_us=317.791
+wrapped_mesh_pipeline_prepare_us=225.083
+wrapped_texture_pipeline_prepare_us=204.084
+raw_mesh_pipeline_prepare_us=53.834
+raw_texture_resources_and_pipeline_us=153.125; preparation_times_are_single_observations=true
+counts=[100, 1000, 10000]; samples=40; warmup=8; gpu_execution_timing=not_measured
+data_preparation_us count=100: 51.833
+checked and measured mesh_same count=100
+checked and measured mesh_alternating count=100
+checked and measured texture_prepared count=100
+checked and measured texture_dynamic count=100
+checked and measured texture_batch count=100
+data_preparation_us count=1000: 33.791
+checked and measured mesh_same count=1000
+checked and measured mesh_alternating count=1000
+checked and measured texture_prepared count=1000
+checked and measured texture_dynamic count=1000
+checked and measured texture_batch count=1000
+data_preparation_us count=10000: 135.333
+checked and measured mesh_same count=10000
+checked and measured mesh_alternating count=10000
+checked and measured texture_prepared count=10000
+checked and measured texture_dynamic count=10000
+checked and measured texture_batch count=10000

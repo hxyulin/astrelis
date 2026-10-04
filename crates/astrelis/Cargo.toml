@@ -19,3 +19,7 @@ winit.workspace = true
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "rendering"
+harness = false

@@ -225,6 +225,8 @@ cargo run -p astrelis --example passes
 cargo run -p astrelis --example textures
 cargo run -p astrelis --example compositing
 cargo run -p astrelis --example multi_window
+cargo run -p astrelis --example ui_workload
+cargo run -p astrelis --example scene_3d
 ```
 
 Every example is one copyable file with its own windows, event handling, resize,
@@ -246,5 +248,24 @@ custom geometry, updates, source replacement, and distinct parameters across
 independent recordings. Regression tests cover submission order, abandonment,
 load dependencies, custom attachment tracking, and failed shader preparation.
 Documentation includes borrowing examples and compile-fail lifetime checks.
+
+The foundation acceptance examples exercise animated clipped layer compositing and
+indexed, instanced 3D with camera uniforms and depth. Both own their complete window
+lifecycle. Space toggles supported MSAA and P pauses animation.
+
+The [foundation acceptance criteria](docs/foundation.md) describe the API and
+performance gate, measurement boundaries, and remaining work. Run the independent
+headless benchmark with:
+
+```sh
+cargo bench -p astrelis --bench rendering -- \
+  --counts 100,1000,10000 --samples 40 --warmup 8 \
+  > rendering.csv 2> rendering.log
+```
+
+The benchmark compares equivalent direct-wgpu and Astrelis workloads, checks pixel
+output before timing, and emits median/p95 CPU metrics. It has no window or example
+smoke-test mode. Completion waits are reported separately from CPU work and are not
+GPU execution measurements. See the [recorded baseline](docs/performance/baseline.md).
 
 MIT. See [LICENSE-MIT](LICENSE-MIT).

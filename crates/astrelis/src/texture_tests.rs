@@ -568,3 +568,73 @@ fn prepared_draws_reuse_static_instance_storage_and_validate_pixel_viewports() {
         assert!(scope.pop().await.is_none());
     });
 }
+
+#[test]
+fn fixed_workload_reuses_upload_pages_and_prepared_pipeline_after_warmup() {
+    pollster::block_on(async {
+        let graphics = GraphicsContext::headless().await.unwrap();
+        let scope = graphics
+            .device()
+            .push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut target = graphics
+            .create_framebuffer(FramebufferOptions::new(64, 64))
+            .unwrap();
+        let image = graphics.create_texture(TextureOptions::new(1, 1)).unwrap();
+        image.write(&[255; 4]).unwrap();
+        let mut renderer = TextureRenderer::new(&graphics);
+        let binding = renderer
+            .create_binding(image.view(), TextureBindingOptions::new())
+            .unwrap();
+        renderer.prepare(&binding, &target.render_format()).unwrap();
+        let pipeline = renderer.pipelines.values().next().unwrap().clone();
+        let draws = vec![TextureDraw::default(); 2050]; // Three 64 KiB pages.
+        {
+            let mut frame = target.begin_frame().unwrap();
+            {
+                let mut pass = frame.render_pass().begin().unwrap();
+                renderer.draw_many(&mut pass, &binding, &draws).unwrap();
+            }
+            frame.finish().unwrap();
+        }
+        let pages: Vec<_> = graphics
+            .upload_pool
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(buffer, bytes)| (buffer.clone(), bytes.capacity()))
+            .collect();
+        assert_eq!(pages.len(), 3);
+        let scratch_capacity = renderer.parameters.capacity();
+        for iteration in 0..16 {
+            if iteration % 4 == 0 {
+                let size = if iteration % 8 == 0 { 32 } else { 64 };
+                target.resize(size, size).unwrap();
+            }
+            let mut frame = target.begin_frame().unwrap();
+            {
+                let mut pass = frame.render_pass().begin().unwrap();
+                renderer.draw_many(&mut pass, &binding, &draws).unwrap();
+            }
+            if iteration % 2 == 0 {
+                frame.finish().unwrap();
+            } else {
+                drop(frame);
+            } // Abandonment also returns leased pages.
+            let pool = graphics.upload_pool.lock().unwrap();
+            assert_eq!(pool.len(), pages.len());
+            for (buffer, bytes) in pool.iter() {
+                let original = pages.iter().find(|(old, _)| old == buffer).unwrap();
+                assert_eq!(bytes.capacity(), original.1);
+                assert_eq!(buffer.size(), 64 * 1024);
+            }
+            assert_eq!(renderer.parameters.capacity(), scratch_capacity);
+            assert_eq!(renderer.pipelines.len(), 1);
+            assert_eq!(renderer.pipelines.values().next().unwrap(), &pipeline);
+        }
+        graphics
+            .device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
+        assert!(scope.pop().await.is_none());
+    });
+}
