@@ -14,7 +14,8 @@
 //! without a window for custom GPU work.
 //!
 //! Each [`RenderTarget`] owns presentation state and acquires frames. A [`Frame`]
-//! exclusively borrows its target and creates scoped [`RenderPass`] values. A pass
+//! exclusively borrows its target and configures scoped [`RenderPass`] values
+//! through [`RenderPassBuilder`]. A pass
 //! accepts drawing from any number of renderers on that device. A [`MeshRenderer`]
 //! caches its mesh pipelines, while a [`Mesh`] owns uploaded geometry. Neither is
 //! tied to a particular window; resources from different devices cannot be mixed.
@@ -59,7 +60,7 @@
 //!         Err(error) => return Err(error.into()),
 //!     };
 //!     {
-//!         let mut pass = frame.begin_pass(wgpu::LoadOp::Clear(wgpu::Color::BLACK))?;
+//!         let mut pass = frame.render_pass().clear_color(wgpu::Color::BLACK).begin()?;
 //!         renderer.draw(&mut pass, &triangle)?;
 //!     } // Ends the pass without submitting.
 //!     let _submission = frame.present()?;
@@ -85,7 +86,7 @@
 //!     // This helper propagates acquisition failures for its caller to handle.
 //!     let mut frame = target.begin_frame()?;
 //!     {
-//!         let mut pass = frame.begin_pass(wgpu::LoadOp::Clear(wgpu::Color::BLACK))?;
+//!         let mut pass = frame.render_pass().clear_color(wgpu::Color::BLACK).begin()?;
 //!         background_renderer.draw(&mut pass, background)?;
 //!         overlay_renderer.draw(&mut pass, overlay)?;
 //!     }
@@ -100,9 +101,38 @@
 //!
 //! # Passes and presentation
 //!
-//! The first pass must use [`wgpu::LoadOp::Clear`]. Later passes may use
-//! [`wgpu::LoadOp::Load`] to preserve earlier drawing or clear again deliberately.
-//! All passes store their results. A clear-only pass with no draws is valid.
+//! `frame.render_pass().begin()?` clears transparent black, stores the results,
+//! and uses the full viewport and scissor rectangle. Configure the builder before
+//! recording with `label`, `clear_color`, `load`, `viewport`, or `scissor_rect`.
+//! The last clear/load selection wins. Every pass has the same defaults; use
+//! [`RenderPassBuilder::load`] explicitly to preserve earlier drawing.
+//! Dropping a builder records nothing. Rejected configuration leaves the frame
+//! unchanged, so it can be corrected and retried.
+//!
+//! ```no_run
+//! use astrelis::{Error, Frame, Mesh, MeshRenderer, wgpu};
+//! fn draw_clipped(
+//!     frame: &mut Frame<'_, '_>,
+//!     renderer: &mut MeshRenderer,
+//!     mesh: &Mesh,
+//! ) -> Result<(), Error> {
+//!     let mut pass = frame.render_pass()
+//!         .label("clipped meshes")
+//!         .clear_color(wgpu::Color::BLACK)
+//!         .scissor_rect(0, 0, 100, 100)
+//!         .begin()?;
+//!     renderer.draw(&mut pass, mesh)?;
+//!     // Change clipping for subsequent draws, independently of the renderer.
+//!     pass.set_scissor_rect(10, 10, 80, 80)?;
+//!     renderer.draw(&mut pass, mesh)?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! Viewports use physical pixels and a depth range; scissor rectangles must fit
+//! the attachment, and zero dimensions clip all drawing. The active pass exposes
+//! [`RenderPass::set_viewport`] and [`RenderPass::set_scissor_rect`]. Mesh renderers
+//! respect these choices across draws. An empty clear pass is valid.
 //! [`Frame::present`] consumes the frame, submits its commands, and requests
 //! presentation once, returning a submission index rather than waiting for GPU
 //! completion. Dropping a frame discards recorded work without submission or
@@ -130,7 +160,28 @@
 //! raw handles, and meshes expose vertex and index buffers. [`RenderPass::as_wgpu`]
 //! allows custom renderers to record into the same pass. Each renderer must establish
 //! the GPU state it needs; the built-in renderer restores its pipeline, geometry
-//! bindings, full viewport, and full scissor rectangle on each draw.
+//! bindings, and the pass's selected viewport and scissor on each draw. Raw viewport
+//! and scissor changes do not update the wrapper's state; use the wrapped setters
+//! to control mesh rendering. [`Frame::encoder`] provides raw command recording
+//! before, between, and after passes. It is unavailable while a pass is in use.
+//!
+//! ```no_run
+//! use astrelis::{Error, Frame, wgpu};
+//! fn copy_around_drawing(
+//!     mut frame: Frame<'_, '_>,
+//!     source: &wgpu::Buffer,
+//!     destination: &wgpu::Buffer,
+//! ) -> Result<wgpu::SubmissionIndex, Error> {
+//!     // Buffers must have the matching copy usages and belong to the frame's device.
+//!     frame.encoder().copy_buffer_to_buffer(source, 0, destination, 0, 4);
+//!     {
+//!         let _pass = frame.render_pass().begin()?;
+//!     }
+//!     frame.encoder().copy_buffer_to_buffer(source, 0, destination, 4, 4);
+//!     frame.present()
+//! }
+//! ```
+//!
 //! [`GraphicsContext::request`] accepts a custom instance;
 //! [`GraphicsContext::from_wgpu`] adopts an application-configured device and queue.
 //! Default initialization requires no optional features. Normal rendering does
@@ -149,7 +200,7 @@ pub use error::Error;
 pub use frame::{Frame, FrameError};
 pub use mesh::{Mesh, Vertex};
 pub use mesh_renderer::MeshRenderer;
-pub use pass::RenderPass;
+pub use pass::{RenderPass, RenderPassBuilder};
 pub use target::{RenderTarget, SurfaceTarget};
 
 /// The exact wgpu version used by Astrelis, available for GPU interoperability.

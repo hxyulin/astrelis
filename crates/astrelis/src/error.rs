@@ -45,6 +45,10 @@ pub enum Error {
     DeviceMismatch,
     /// The clear color contains a nonfinite component.
     InvalidClearColor,
+    /// Viewport values are nonfinite or exceed device bounds or depth constraints.
+    InvalidViewport,
+    /// The scissor rectangle does not fit the pass attachment.
+    InvalidScissorRect,
     /// A first pass tried to load contents, or presentation had no clear pass.
     UninitializedFrame,
 }
@@ -82,6 +86,8 @@ impl fmt::Display for Error {
             Self::MeshTooLarge => f.write_str("mesh data exceeds device or draw-count limits"),
             Self::DeviceMismatch => f.write_str("resources belong to different GPU devices"),
             Self::InvalidClearColor => f.write_str("clear color must contain finite components"),
+            Self::InvalidViewport => f.write_str("viewport must be finite and within device bounds with an ordered depth range in 0..=1"),
+            Self::InvalidScissorRect => f.write_str("scissor rectangle must fit the pass attachment"),
             Self::UninitializedFrame => {
                 f.write_str("a frame must start with a clear pass before presentation")
             }

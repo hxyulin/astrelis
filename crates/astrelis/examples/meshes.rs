@@ -103,7 +103,11 @@ impl App {
             Err(error) => return Err(error.into()),
         };
         {
-            let mut pass = frame.begin_pass(wgpu::LoadOp::Clear(wgpu::Color::BLACK))?;
+            let mut pass = frame
+                .render_pass()
+                .label("background and overlay")
+                .clear_color(wgpu::Color::BLACK)
+                .begin()?;
             state
                 .background_renderer
                 .draw(&mut pass, &state.background)?;

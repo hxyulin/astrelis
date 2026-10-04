@@ -41,7 +41,7 @@ async fn example(window: std::sync::Arc<winit::window::Window>) -> Result<(), Bo
         Err(error) => return Err(error.into()),
     };
     {
-        let mut pass = frame.begin_pass(wgpu::LoadOp::Clear(wgpu::Color::BLACK))?;
+        let mut pass = frame.render_pass().clear_color(wgpu::Color::BLACK).begin()?;
         renderer.draw(&mut pass, &triangle)?;
     }
     frame.present()?;
@@ -55,9 +55,30 @@ Meshes draw in submission order without depth testing or face culling. Indices
 are `u32`; a clear pass with no draws is valid.
 
 `target.begin_frame()` returns `Result<Frame, FrameError>` independently of any
-renderer. Multiple renderers on the same device can draw into its passes. The first
-pass uses
-`wgpu::LoadOp::Clear`; subsequent passes can use `Load` to preserve earlier work.
+renderer. Multiple renderers on the same device can draw into its passes.
+`frame.render_pass().begin()?` defaults to clearing transparent black, storing the
+result, and using the full viewport and scissor. Each pass has the same defaults;
+use `.load()` to preserve earlier drawing. Builders support `.label(...)`,
+`.clear_color(...)`, `.load()`, `.viewport(...)`, and `.scissor_rect(...)`. The last
+clear/load selection wins. Dropping a builder records nothing; invalid configuration
+leaves the frame usable.
+
+```rust
+let mut pass = frame.render_pass()
+    .label("scene")
+    .clear_color(wgpu::Color::BLACK)
+    .scissor_rect(0, 0, width, height)
+    .begin()?;
+renderer.draw(&mut pass, &mesh)?;
+pass.set_scissor_rect(10, 10, 100, 100)?;
+renderer.draw(&mut pass, &overlay)?;
+```
+
+The builder and active pass use physical pixel dimensions. Viewport methods also
+take a depth range, following wgpu. Scissor rectangles must fit the attachment;
+zero dimensions clip all drawing. `MeshRenderer` uses the pass's selected viewport
+and scissor instead of forcing full-target drawing.
+
 Passes end when dropped. `frame.present()` consumes the frame, submits once, and
 presents, returning a wgpu submission index. Dropping a frame releases its acquired
 image and discards recorded commands without submitting or presenting. Presentation
@@ -71,9 +92,17 @@ resizing during recording or presenting while a pass is active. Outdated surface
 are reconfigured once; a lost surface must be recreated by the application. The
 examples show this lifecycle and sleep while idle.
 
-`pass.as_wgpu()` supports custom drawing within the same pass. Custom renderers must
-set the GPU state they rely on. The built-in mesh renderer restores its pipeline,
-geometry bindings, full viewport, and full scissor rectangle for every draw.
+`pass.as_wgpu()` supports custom drawing within the same pass. Custom renderers
+must set the GPU state they rely on. The built-in mesh renderer restores its
+pipeline, geometry bindings, and the pass's chosen viewport and scissor for every
+draw. Raw viewport/scissor changes do not update the wrapper's settings; use the
+wrapped setters to control mesh drawing.
+
+`frame.encoder()` permits copies, compute, and custom commands before, between,
+and after passes, using resources from the same device. Commands are submitted
+with the frame or discarded when the frame is dropped. The frame owns submission
+and encoder lifetime. A wrapped clear pass is still required to initialize the
+surface for presentation. Frame borrows prevent encoder access while a pass is in use.
 
 A context owns one wgpu instance, adapter, device, and queue. Use
 `graphics.create_surface(window, width, height)` for additional windows; each target
@@ -121,7 +150,8 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 The GPU test reads pixels back to verify multiple renderers sharing a pass, indexed
 drawing, draw order, alpha blending, sequential load/clear passes, restored GPU
-state, device validation, and resource reuse. Compile-fail documentation tests
+state, default builder behavior, initial and dynamic viewport/scissor settings,
+configuration validation, device validation, and resource reuse. Compile-fail documentation tests
 verify the frame/pass lifetime constraints. The GPU test fails when no adapter is
 available. It uses an internal offscreen attachment; the public target API remains
 surface-only.

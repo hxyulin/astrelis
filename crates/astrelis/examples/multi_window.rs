@@ -7,9 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use astrelis::{
-    Error, FrameError, GraphicsContext, Mesh, MeshRenderer, RenderTarget, Vertex, wgpu,
-};
+use astrelis::{Error, FrameError, GraphicsContext, Mesh, MeshRenderer, RenderTarget, Vertex};
 use winit::{
     application::ApplicationHandler,
     dpi::{PhysicalPosition, PhysicalSize},
@@ -120,7 +118,7 @@ impl App {
             Err(error) => return Err(error.into()),
         };
         {
-            let mut pass = frame.begin_pass(wgpu::LoadOp::Clear(wgpu::Color::BLACK))?;
+            let mut pass = frame.render_pass().begin()?;
             state.renderer.draw(&mut pass, &state.mesh)?;
         }
         frame.present()?;

@@ -48,8 +48,9 @@ impl MeshRenderer {
     /// This method does not acquire, clear, submit, or present. Any number of
     /// renderers sharing the pass's device can contribute draws in application order.
     /// Pipelines are cached by attachment format, and mesh data is not reuploaded.
-    /// Each draw restores the mesh pipeline, vertex/index bindings, full viewport,
-    /// and full scissor rectangle, so previous rendering cannot change those states.
+    /// Each draw restores the mesh pipeline and vertex/index bindings and applies
+    /// the pass's chosen viewport and scissor rectangle. Application clipping and
+    /// viewport settings persist across draws and independent mesh renderers.
     ///
     /// # Errors
     ///
@@ -88,11 +89,8 @@ impl MeshRenderer {
                     cache: None,
                 })
         });
-        let [width, height] = pass.size();
+        pass.apply_raster_state();
         pass.inner.set_pipeline(pipeline);
-        pass.inner
-            .set_viewport(0.0, 0.0, width as f32, height as f32, 0.0, 1.0);
-        pass.inner.set_scissor_rect(0, 0, width, height);
         pass.inner
             .set_vertex_buffer(0, mesh.vertex_buffer().slice(..));
         pass.inner

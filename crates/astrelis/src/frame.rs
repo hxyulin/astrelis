@@ -1,4 +1,4 @@
-use crate::{Error, RenderPass, target::SurfaceTarget};
+use crate::{Error, RenderPassBuilder, target::SurfaceTarget};
 
 /// A reason a [`crate::RenderTarget`] could not provide a frame.
 ///
@@ -55,9 +55,9 @@ impl std::error::Error for FrameError {}
 /// End the pass before consuming its frame:
 ///
 /// ```compile_fail
-/// use astrelis::{Error, Frame, wgpu};
+/// use astrelis::{Error, Frame};
 /// fn present_during_pass(mut frame: Frame<'_, '_>) -> Result<(), Error> {
-///     let pass = frame.begin_pass(wgpu::LoadOp::Clear(wgpu::Color::BLACK))?;
+///     let pass = frame.render_pass().begin()?;
 ///     frame.present()?;
 ///     drop(pass);
 ///     Ok(())
@@ -99,30 +99,44 @@ impl<'target, 'window> Frame<'target, 'window> {
         }
     }
 
-    /// Begins a color pass, ending it automatically when the returned scope drops.
+    /// Configures a color pass targeting this frame's acquired image.
     ///
-    /// Use [`wgpu::LoadOp::Clear`] for the first pass and [`wgpu::LoadOp::Load`] to
-    /// preserve previous passes. Colors are linear. Every pass stores its results.
-    /// An empty clear pass is valid; no mesh draws are required.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::InvalidClearColor`] for nonfinite clear components or
-    /// [`Error::UninitializedFrame`] if the first pass attempts to load contents.
-    pub fn begin_pass(&mut self, load: wgpu::LoadOp<wgpu::Color>) -> Result<RenderPass<'_>, Error> {
-        if !self.initialized && matches!(load, wgpu::LoadOp::Load) {
-            return Err(Error::UninitializedFrame);
-        }
-        let pass = RenderPass::new(
+    /// The builder defaults to clearing transparent black, storing results, and
+    /// using the full viewport and scissor rectangle. Call `begin()` to record.
+    /// Defaults are consistent for each pass; call `load()` on later passes to
+    /// preserve earlier drawing. Dropping a builder records nothing.
+    pub fn render_pass(&mut self) -> RenderPassBuilder<'_> {
+        RenderPassBuilder::new(
             &mut self.encoder,
             &self.view,
             self.target.graphics.device(),
             self.target.configuration.format,
             self.target.size,
-            load,
-        )?;
-        self.initialized = true;
-        Ok(pass)
+            &mut self.initialized,
+        )
+    }
+
+    /// Borrows the command encoder for copies, compute, and custom GPU recording.
+    ///
+    /// Available before, between, and after scoped passes. Commands remain part of
+    /// this frame: `present()` submits them, while dropping the frame discards them.
+    /// Use resources from the context's device and leave encoder ownership with the
+    /// frame. Raw commands do not initialize the managed surface attachment; record
+    /// a wrapped clear pass before presentation.
+    ///
+    /// Encoder access is rejected while a pass is active:
+    ///
+    /// ```compile_fail
+    /// use astrelis::{Error, Frame};
+    /// fn encode_during_pass(mut frame: Frame<'_, '_>) -> Result<(), Error> {
+    ///     let pass = frame.render_pass().begin()?;
+    ///     frame.encoder().insert_debug_marker("cannot encode during a pass");
+    ///     drop(pass);
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn encoder(&mut self) -> &mut wgpu::CommandEncoder {
+        &mut self.encoder
     }
 
     /// Returns the frame's physical pixel dimensions, fixed at acquisition.

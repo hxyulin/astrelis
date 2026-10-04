@@ -88,13 +88,31 @@ fn pass<'encoder>(
     view: &wgpu::TextureView,
     load: wgpu::LoadOp<wgpu::Color>,
 ) -> Result<RenderPass<'encoder>, Error> {
+    let mut options = crate::pass::PassOptions::default();
+    options.load = load;
     RenderPass::new(
         encoder,
         view,
         graphics.device(),
         wgpu::TextureFormat::Rgba8Unorm,
         [64, 64],
-        load,
+        options,
+    )
+}
+
+fn builder<'frame>(
+    graphics: &'frame GraphicsContext,
+    encoder: &'frame mut wgpu::CommandEncoder,
+    view: &'frame wgpu::TextureView,
+    initialized: &'frame mut bool,
+) -> crate::RenderPassBuilder<'frame> {
+    crate::RenderPassBuilder::new(
+        encoder,
+        view,
+        graphics.device(),
+        wgpu::TextureFormat::Rgba8Unorm,
+        [64, 64],
+        initialized,
     )
 }
 
@@ -205,6 +223,145 @@ fn renderers_share_passes_preserve_order_and_validate_devices() {
             &restored[center..center + 4],
             &[255, 0, 0, 255],
             "restore draw state after custom rendering"
+        );
+        // Invalid or abandoned builders must not initialize the frame or poison recording.
+        let defaults = pixels(&graphics, |encoder, view| {
+            let mut initialized = false;
+            drop(builder(&graphics, encoder, view, &mut initialized).clear_color(wgpu::Color::RED));
+            let invalid_clear = wgpu::Color {
+                r: f64::NAN,
+                ..wgpu::Color::BLACK
+            };
+            assert!(matches!(
+                builder(&graphics, encoder, view, &mut initialized)
+                    .clear_color(invalid_clear)
+                    .begin(),
+                Err(Error::InvalidClearColor)
+            ));
+            assert!(matches!(
+                builder(&graphics, encoder, view, &mut initialized)
+                    .viewport(0.0, 0.0, -1.0, 64.0, 0.0, 1.0)
+                    .begin(),
+                Err(Error::InvalidViewport)
+            ));
+            assert!(matches!(
+                builder(&graphics, encoder, view, &mut initialized)
+                    .scissor_rect(1, 0, u32::MAX, 64)
+                    .begin(),
+                Err(Error::InvalidScissorRect)
+            ));
+            assert!(matches!(
+                builder(&graphics, encoder, view, &mut initialized)
+                    .load()
+                    .begin(),
+                Err(Error::UninitializedFrame)
+            ));
+            drop(
+                builder(&graphics, encoder, view, &mut initialized)
+                    .begin()
+                    .unwrap(),
+            );
+        });
+        assert!(
+            defaults.iter().all(|component| *component == 0),
+            "default pass clears transparent black"
+        );
+
+        let selected = pixels(&graphics, |encoder, view| {
+            let mut initialized = false;
+            drop(
+                builder(&graphics, encoder, view, &mut initialized)
+                    .load()
+                    .clear_color(wgpu::Color::GREEN)
+                    .begin()
+                    .unwrap(),
+            );
+            drop(
+                builder(&graphics, encoder, view, &mut initialized)
+                    .clear_color(wgpu::Color::RED)
+                    .load()
+                    .begin()
+                    .unwrap(),
+            );
+        });
+        assert!(
+            selected
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel == &[0, 255, 0, 255]),
+            "the last clear/load selection wins"
+        );
+
+        let pixel_at = |x: usize, y: usize| y * 256 + x * 4;
+        let clipped = pixels(&graphics, |encoder, view| {
+            let mut initialized = false;
+            let mut pass = builder(&graphics, encoder, view, &mut initialized)
+                .label("viewport and scissor")
+                .clear_color(wgpu::Color::BLACK)
+                .viewport(0.0, 0.0, 32.0, 64.0, 0.0, 1.0)
+                .scissor_rect(16, 0, 16, 64)
+                .begin()
+                .unwrap();
+            // Raw changes cannot replace the viewport/scissor selected through the wrapper.
+            pass.as_wgpu().set_viewport(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
+            pass.as_wgpu().set_scissor_rect(0, 0, 1, 1);
+            first.draw(&mut pass, &red).unwrap();
+        });
+        assert_eq!(
+            &clipped[pixel_at(20, 32)..pixel_at(20, 32) + 4],
+            &[255, 0, 0, 255]
+        );
+        for x in [8, 40] {
+            assert_eq!(
+                &clipped[pixel_at(x, 32)..pixel_at(x, 32) + 4],
+                &[0, 0, 0, 255]
+            );
+        }
+        let opaque_blue = quad(&graphics, [0.0, 0.0, 1.0, 1.0]);
+        let dynamic = pixels(&graphics, |encoder, view| {
+            let mut initialized = false;
+            let mut pass = builder(&graphics, encoder, view, &mut initialized)
+                .clear_color(wgpu::Color::BLACK)
+                .begin()
+                .unwrap();
+            pass.set_viewport(0.0, 0.0, 32.0, 64.0, 0.0, 1.0).unwrap();
+            first.draw(&mut pass, &red).unwrap();
+            pass.set_viewport(0.0, 0.0, 64.0, 64.0, 0.0, 1.0).unwrap();
+            pass.set_scissor_rect(32, 0, 32, 64).unwrap();
+            assert!(matches!(
+                pass.set_viewport(0.0, 0.0, 64.0, 64.0, 1.0, 0.0),
+                Err(Error::InvalidViewport)
+            ));
+            assert!(matches!(
+                pass.set_scissor_rect(1, 0, u32::MAX, 64),
+                Err(Error::InvalidScissorRect)
+            ));
+            second.draw(&mut pass, &opaque_blue).unwrap();
+        });
+        assert_eq!(
+            &dynamic[pixel_at(16, 32)..pixel_at(16, 32) + 4],
+            &[255, 0, 0, 255]
+        );
+        assert_eq!(
+            &dynamic[pixel_at(48, 32)..pixel_at(48, 32) + 4],
+            &[0, 0, 255, 255]
+        );
+        let empty_clip = pixels(&graphics, |encoder, view| {
+            let mut initialized = false;
+            let mut pass = builder(&graphics, encoder, view, &mut initialized)
+                .clear_color(wgpu::Color::BLACK)
+                .scissor_rect(0, 0, 0, 64)
+                .begin()
+                .unwrap();
+            first.draw(&mut pass, &red).unwrap();
+        });
+        assert!(
+            empty_clip
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| pixel == &[0, 0, 0, 255])
         );
         assert_eq!(first.pipelines.len(), 1, "reuse the same format pipeline");
         assert_eq!(second.pipelines.len(), 1);
