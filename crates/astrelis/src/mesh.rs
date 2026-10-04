@@ -532,7 +532,14 @@ impl Mesh {
             && m.strip_index_format != Some(self.index_format))
             || self.topology != m.topology
             || !self.vertex_layouts().eq(m.vertex_layouts.iter())
-            || d.range.start > d.range.end
+        {
+            return Err(Error::InvalidGeometry);
+        }
+        self.validate_range(d)
+    }
+
+    pub(crate) fn validate_range(&self, d: &MeshDraw) -> Result<(), Error> {
+        if d.range.start > d.range.end
             || d.range.end
                 > if self.indexed {
                     self.index_count
@@ -547,6 +554,10 @@ impl Mesh {
         Ok(())
     }
     pub(crate) fn record(&self, pass: &mut crate::RenderPass<'_>, d: &MeshDraw) {
+        self.bind(pass);
+        self.record_draw(pass, d);
+    }
+    pub(crate) fn bind(&self, pass: &mut crate::RenderPass<'_>) {
         for (slot, s) in self.streams.iter().enumerate() {
             pass.set_vertex_buffer(slot as u32, &s.buffer, s.range.clone());
         }
@@ -556,6 +567,11 @@ impl Mesh {
                 self.index_range.clone(),
                 self.index_format,
             );
+        }
+    }
+    #[inline]
+    pub(crate) fn record_draw(&self, pass: &mut crate::RenderPass<'_>, d: &MeshDraw) {
+        if self.indexed {
             pass.inner
                 .draw_indexed(d.range.clone(), d.base_vertex, d.instances.clone());
         } else {

@@ -76,8 +76,10 @@ both outputs with the commit/toolchain/OS. Compare like hardware, backend, build
 profile, validation configuration, and workload. There is no universal CI timing
 threshold yet.
 
-The five workloads cover repeated mesh draws, alternating mesh buffers, prepared
-texture draws, individual dynamic texture draws, and batched dynamic textures.
+The five original workloads cover repeated mesh draws, alternating mesh buffers,
+prepared texture draws, individual dynamic texture draws, and batched dynamic
+textures. Four additional variants measure scoped mesh, prepared texture, dynamic
+texture, and batched texture drawing; scope setup remains inside the recording timer.
 Both sides use the same device, shaders, formats, geometry, instance data, blend
 state, scissor/viewport, and store operations. Direct wgpu binds unchanged state
 once and changes vertex/index buffers only when necessary. Both dynamic paths
@@ -116,17 +118,22 @@ live source replacement. These are targeted structural checks, not a full memory
 
 ## Gate status and follow-up
 
-The initial baseline is linked from [the performance results](performance/baseline.md).
-The examples establish that the current API can express the two consumer workflows.
-The direct-wgpu comparison exposes substantial recording overhead in individual
-calls; the initial percentage target is **not met**. Keep that visible before
-expanding the core feature set.
+The [initial baseline](performance/baseline.md) established substantial recording
+cost in individual calls. The [scoped drawing experiment](performance/scoped-drawing.md)
+amortizes immutable checks and pipeline selection without removing the convenience
+API. Prepared scopes approach direct-wgpu recording cost; dynamic validation and
+individual convenience calls still have measurable overhead. See the measured
+ranges and outliers before treating the percentage target as universally passed.
 
-Next, profile the measured per-draw paths and evaluate ways to amortize repeated
-compatibility checks and pipeline selection over a sequence of draws. Preserve
-useful errors, explicit draw order, mixed renderer support, and state restoration
-after raw access. Any optimization or additional prepared/batch API must run the
-same equivalence suite and report both recording and total CPU costs.
+The API checks now include restoration after raw/other renderer access, renderer
+reuse through mesh/prepared scopes, pixel viewport revalidation, custom geometry
+and application bindings, invalid batch rejection, and live-source snapshots.
+Scope methods do not merge or reorder draws automatically. Existing instancing
+and `draw_many` remain the way to reduce GPU command count when compatible.
+
+Future changes should preserve these checks and run the same reference workloads.
+Record both CPU recording and total CPU cost, and use absolute differences alongside
+percentages near the timer/noise scale. Changing ranges/data still needs validation.
 
 A Vulkan or DX12 baseline and reliable real-scene GPU measurements are still needed
 before making portability or GPU-performance claims. Collect those on available

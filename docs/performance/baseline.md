@@ -1,6 +1,8 @@
 # Foundation baseline: Apple M3 Pro / Metal
 
-These measurements establish a repeatable initial baseline. **The proposed
+These measurements establish a repeatable initial baseline. The subsequent
+[scoped drawing experiment](scoped-drawing.md) records the performance/API changes
+that followed; the evidence below remains the original baseline. **The proposed
 10–15% recording-overhead target is not met.** The consumer examples work through
 the public API, but the performance gate remains open.
 

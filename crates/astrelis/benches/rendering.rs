@@ -80,14 +80,22 @@ enum Workload {
     TexturePrepared,
     TextureDynamic,
     TextureBatch,
+    MeshScoped,
+    TexturePreparedScoped,
+    TextureDynamicScoped,
+    TextureBatchScoped,
 }
 impl Workload {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 9] = [
         Self::Mesh,
         Self::MeshAlternating,
         Self::TexturePrepared,
         Self::TextureDynamic,
         Self::TextureBatch,
+        Self::MeshScoped,
+        Self::TexturePreparedScoped,
+        Self::TextureDynamicScoped,
+        Self::TextureBatchScoped,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -96,13 +104,23 @@ impl Workload {
             Self::TexturePrepared => "texture_prepared",
             Self::TextureDynamic => "texture_dynamic",
             Self::TextureBatch => "texture_batch",
+            Self::MeshScoped => "mesh_scoped",
+            Self::TexturePreparedScoped => "texture_prepared_scoped",
+            Self::TextureDynamicScoped => "texture_dynamic_scoped",
+            Self::TextureBatchScoped => "texture_batch_scoped",
         }
     }
     fn dynamic(self) -> bool {
-        matches!(self, Self::TextureDynamic | Self::TextureBatch)
+        matches!(
+            self,
+            Self::TextureDynamic
+                | Self::TextureBatch
+                | Self::TextureDynamicScoped
+                | Self::TextureBatchScoped
+        )
     }
     fn mesh(self) -> bool {
-        matches!(self, Self::Mesh | Self::MeshAlternating)
+        matches!(self, Self::Mesh | Self::MeshAlternating | Self::MeshScoped)
     }
 }
 
@@ -353,7 +371,30 @@ impl Rig {
         let mut pass = frame.render_pass().begin()?;
         let begin = start.elapsed();
         let start = Instant::now();
-        if workload.mesh() {
+        if workload == Workload::MeshScoped {
+            let mut draws = self.meshes_renderer.bind(&mut pass, &self.meshes[0])?;
+            for _ in 0..data.inputs.len() {
+                draws.draw();
+            }
+        } else if workload == Workload::TexturePreparedScoped {
+            let mut draws =
+                self.textures
+                    .bind_prepared(&mut pass, &self.binding, &data.prepared)?;
+            for _ in 0..data.inputs.len() {
+                draws.draw()?;
+            }
+        } else if workload == Workload::TextureDynamicScoped
+            || workload == Workload::TextureBatchScoped
+        {
+            let mut draws = self.textures.bind(&mut pass, &self.binding)?;
+            if workload == Workload::TextureBatchScoped {
+                draws.draw_many(black_box(&data.draws))?;
+            } else {
+                for draw in &data.draws {
+                    draws.draw(black_box(*draw))?;
+                }
+            }
+        } else if workload.mesh() {
             for i in 0..data.inputs.len() {
                 let slot = if workload == Workload::MeshAlternating {
                     i % 2
@@ -434,7 +475,10 @@ impl Rig {
         } else {
             pass.set_pipeline(&self.texture_pipeline);
             pass.set_bind_group(0, &self.group, &[]);
-            if workload == Workload::TexturePrepared {
+            if matches!(
+                workload,
+                Workload::TexturePrepared | Workload::TexturePreparedScoped
+            ) {
                 pass.set_vertex_buffer(0, data.static_buffer.slice(..));
                 for _ in 0..data.inputs.len() {
                     pass.draw(0..6, 0..1);
@@ -447,7 +491,10 @@ impl Rig {
                 }
                 for (page_index, chunk) in data.packed.chunks(PAGE_INSTANCES).enumerate() {
                     pass.set_vertex_buffer(0, data.pages[page_index].slice(..));
-                    if workload == Workload::TextureBatch {
+                    if matches!(
+                        workload,
+                        Workload::TextureBatch | Workload::TextureBatchScoped
+                    ) {
                         pass.draw(0..6, 0..chunk.len() as u32);
                     } else {
                         for i in 0..chunk.len() as u32 {

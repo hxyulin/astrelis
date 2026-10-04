@@ -1,4 +1,4 @@
-//! Upload an sRGB checker image, then crop, filter, and alpha-composite prepared rectangles.
+//! Upload an sRGB checker image, then combine prepared and scoped draws with cropping and filtering.
 //! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
 
 use std::{
@@ -8,8 +8,8 @@ use std::{
 };
 
 use astrelis::{
-    Error, FrameError, GraphicsContext, Rect, RenderTarget, SurfaceOptions, Texture,
-    TextureBinding, TextureBindingOptions, TextureDraw, TextureFilter, TextureOptions,
+    Error, FrameError, GraphicsContext, PreparedTextureDraw, Rect, RenderTarget, SurfaceOptions,
+    Texture, TextureBinding, TextureBindingOptions, TextureDraw, TextureFilter, TextureOptions,
     TextureRenderer, UvRect, wgpu,
 };
 use winit::{
@@ -27,8 +27,8 @@ struct State {
     renderer: TextureRenderer,
     _texture: Texture,
     nearest: TextureBinding,
+    nearest_draw: PreparedTextureDraw,
     linear: TextureBinding,
-    crop: TextureBinding,
 }
 
 impl State {
@@ -69,8 +69,12 @@ impl State {
             TextureBindingOptions::new().filter(TextureFilter::Nearest),
         )?;
         let linear = renderer.create_binding(texture.view(), TextureBindingOptions::new())?;
-        let crop = linear.clone(); // Reuse image/sampler resources for another placement.
-        for binding in [&nearest, &linear, &crop] {
+        // Upload static placement once. Normalized coordinates adapt to window resizes.
+        let nearest_draw = renderer.prepare_draws(
+            &[TextureDraw::normalized(Rect::new(0.06, 0.12, 0.40, 0.76))],
+            [size.width as f32, size.height as f32],
+        )?;
+        for binding in [&nearest, &linear] {
             renderer.prepare_for_target(binding, &target)?;
         }
         window.request_redraw();
@@ -81,8 +85,8 @@ impl State {
             renderer,
             _texture: texture,
             nearest,
+            nearest_draw,
             linear,
-            crop,
         })
     }
 }
@@ -126,19 +130,17 @@ impl App {
                     a: 1.0,
                 })
                 .begin()?;
-            state.renderer.draw(
-                &mut pass,
-                &state.nearest,
-                TextureDraw::normalized(Rect::new(0.06, 0.12, 0.40, 0.76)),
-            )?;
-            state.renderer.draw(
-                &mut pass,
-                &state.linear,
-                TextureDraw::normalized(Rect::new(0.54, 0.12, 0.40, 0.76)),
-            )?;
-            state.renderer.draw(
-                &mut pass,
-                &state.crop,
+            {
+                let mut nearest =
+                    state
+                        .renderer
+                        .bind_prepared(&mut pass, &state.nearest, &state.nearest_draw)?;
+                nearest.draw()?;
+            }
+            // Both placements share the image, sampler, and material checks in this scope.
+            let mut linear = state.renderer.bind(&mut pass, &state.linear)?;
+            linear.draw(TextureDraw::normalized(Rect::new(0.54, 0.12, 0.40, 0.76)))?;
+            linear.draw(
                 TextureDraw::normalized(Rect::new(0.32, 0.34, 0.36, 0.32))
                     .uv(UvRect::new(0., 0., 0.5, 0.5))
                     .tint([0.65, 1., 0.8, 0.65]),
@@ -159,7 +161,7 @@ impl App {
             state.window.clone(),
             SurfaceOptions::new(size.width, size.height).sample_count(count),
         )?;
-        for binding in [&state.nearest, &state.linear, &state.crop] {
+        for binding in [&state.nearest, &state.linear] {
             state.renderer.prepare_for_target(binding, &state.target)?;
         }
         state.window.request_redraw();

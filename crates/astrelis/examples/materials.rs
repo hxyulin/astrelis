@@ -172,10 +172,13 @@ impl App {
                 0.0,
                 1.0,
             )?;
-            pass.as_wgpu().set_bind_group(0, &state.tint_group, &[]);
-            state
-                .renderer
-                .draw_with_material(&mut pass, &state.mesh, &state.material)?;
+            let mut tinted =
+                state
+                    .renderer
+                    .bind_with_material(&mut pass, &state.mesh, &state.material)?;
+            // Application-owned resource groups remain under the caller's control.
+            tinted.pass().set_bind_group(0, &state.tint_group, &[]);
+            tinted.draw();
         }
         frame.finish()?;
         self.retry_at = None;

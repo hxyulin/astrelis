@@ -145,12 +145,11 @@ impl App {
         };
         {
             let mut pass = frame.render_pass().begin()?;
-            state.renderer.draw_range_with_material(
-                &mut pass,
-                &state.mesh,
-                &state.material,
-                &state.mesh.full_draw().instances(0..2),
-            )?;
+            let mut quads =
+                state
+                    .renderer
+                    .bind_with_material(&mut pass, &state.mesh, &state.material)?;
+            quads.draw_range(&state.mesh.full_draw().instances(0..2))?;
         }
         frame.finish()?;
         self.retry_at = None;

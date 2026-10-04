@@ -179,15 +179,12 @@ impl UiLayer {
             pass.set_scissor_rect(x, y, (width - x * 2).max(1), (height * 3 / 5).max(1))?;
             textures.draw_many(&mut pass, checker, cards)?;
             pass.set_scissor_rect(0, 0, width, height)?;
-            textures.draw(
-                &mut pass,
-                white,
+            let mut controls = textures.bind(&mut pass, white)?;
+            controls.draw(
                 TextureDraw::normalized(Rect::new(0.05, 0.06, 0.90, 0.11))
                     .tint([0.10, 0.22, 0.36, 1.]),
             )?;
-            textures.draw(
-                &mut pass,
-                white,
+            controls.draw(
                 TextureDraw::normalized(Rect::new(
                     0.07,
                     0.86,

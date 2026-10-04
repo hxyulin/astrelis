@@ -212,6 +212,84 @@ impl MeshRenderer {
         Ok(())
     }
 
+    /// Binds one mesh and default material for repeated drawing within this pass.
+    ///
+    /// Device/layout checks, pipeline selection, and resource binding happen once.
+    /// The scope borrows the mesh and pass, retains a pipeline handle, and creates no GPU resources
+    /// when the pipeline is prepared. Use [`MeshDrawSession::pass`] for clipping,
+    /// application bindings, or other renderers; the next scoped draw restores its
+    /// pipeline and geometry. The renderer can be reused through the scoped pass.
+    /// Dropping the scope leaves the pass open.
+    pub fn bind<'draw, 'frame>(
+        &mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        mesh: &'draw Mesh,
+    ) -> Result<MeshDrawSession<'draw, 'frame>, Error> {
+        self.validate_devices(pass, mesh)?;
+        let full_draw = mesh.full_draw();
+        mesh.validate_draw(&self.material, &full_draw)?;
+        let pipeline = pipeline(
+            &self.graphics,
+            &mut self.pipelines,
+            &self.material,
+            pass.single_color_format()?,
+            pass.sample_count(),
+            pass.depth_stencil_format(),
+            true,
+        )?;
+        pass.apply_raster_state();
+        pass.set_pipeline(pipeline);
+        mesh.bind(pass);
+        Ok(MeshDrawSession {
+            pass,
+            mesh,
+            pipeline: pipeline.clone(),
+            full_draw,
+            dirty: false,
+        })
+    }
+
+    /// Binds a mesh and explicit material for repeated scoped drawing.
+    ///
+    /// Errors match [`Self::draw_with_material`]. Application bind groups remain
+    /// under caller control. Immutable compatibility is checked at binding; each
+    /// [`MeshDrawSession::draw_range`] still validates its changing ranges.
+    pub fn bind_with_material<'draw, 'frame>(
+        &mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        mesh: &'draw Mesh,
+        material: &Material,
+    ) -> Result<MeshDrawSession<'draw, 'frame>, Error> {
+        self.validate_devices(pass, mesh)?;
+        if &material.device != self.graphics.device()
+            || &material.instance != self.graphics.instance()
+        {
+            return Err(Error::DeviceMismatch);
+        }
+        let full_draw = mesh.full_draw();
+        mesh.validate_draw(material, &full_draw)?;
+        validate_aspects(pass, material)?;
+        let pipeline = pipeline(
+            &self.graphics,
+            &mut self.pipelines,
+            material,
+            pass.single_color_format()?,
+            pass.sample_count(),
+            pass.depth_stencil_format(),
+            false,
+        )?;
+        pass.apply_raster_state();
+        pass.set_pipeline(pipeline);
+        mesh.bind(pass);
+        Ok(MeshDrawSession {
+            pass,
+            mesh,
+            pipeline: pipeline.clone(),
+            full_draw,
+            dirty: false,
+        })
+    }
+
     /// Records one mesh draw using an application-created material.
     ///
     /// Bind this material's resource groups through [`RenderPass::set_bind_group`]
@@ -257,14 +335,7 @@ impl MeshRenderer {
             return Err(Error::DeviceMismatch);
         }
         mesh.validate_draw(material, draw)?;
-        if let Some(state) = &material.depth_stencil {
-            if pass.depth_read_only() && !state.is_depth_read_only() {
-                return Err(Error::ReadOnlyDepth);
-            }
-            if pass.stencil_read_only() && !state.is_stencil_read_only(material.cull_mode) {
-                return Err(Error::ReadOnlyStencil);
-            }
-        }
+        validate_aspects(pass, material)?;
         let pipeline = pipeline(
             &self.graphics,
             &mut self.pipelines,
@@ -359,6 +430,74 @@ impl MeshRenderer {
         }
         Ok(())
     }
+}
+
+/// A scoped mesh binding with immutable compatibility validated once.
+///
+/// Obtain through [`MeshRenderer::bind`] or [`MeshRenderer::bind_with_material`].
+/// Full draws emit commands directly; selected ranges retain bounds validation.
+/// Pass access invalidates the scope's binding assumption, so subsequent draws
+/// restore renderer-owned state. Application-owned bind groups are not restored.
+/// The exclusive pass borrow prevents simultaneous direct use of the pass:
+///
+/// ```compile_fail
+/// use astrelis::{Error, Mesh, MeshRenderer, RenderPass};
+/// fn overlap(renderer: &mut MeshRenderer, pass: &mut RenderPass<'_>, mesh: &Mesh) -> Result<(), Error> {
+///     let mut draws = renderer.bind(pass, mesh)?;
+///     pass.set_stencil_reference(1);
+///     draws.draw();
+///     Ok(())
+/// }
+/// ```
+#[derive(Debug)]
+pub struct MeshDrawSession<'draw, 'frame> {
+    pass: &'draw mut RenderPass<'frame>,
+    mesh: &'draw Mesh,
+    pipeline: wgpu::RenderPipeline,
+    full_draw: crate::MeshDraw,
+    dirty: bool,
+}
+impl<'draw, 'frame> MeshDrawSession<'draw, 'frame> {
+    /// Draws the entire bound mesh with one instance, without repeating compatibility checks.
+    #[inline]
+    pub fn draw(&mut self) {
+        self.restore();
+        self.mesh.record_draw(self.pass, &self.full_draw);
+    }
+    /// Draws selected geometry/instances, checking bounds before recording a draw.
+    /// Empty ranges follow the same semantics as [`MeshRenderer::draw_range`].
+    pub fn draw_range(&mut self, draw: &crate::MeshDraw) -> Result<(), Error> {
+        self.mesh.validate_range(draw)?;
+        self.restore();
+        self.mesh.record_draw(self.pass, draw);
+        Ok(())
+    }
+    /// Borrows the pass for clipping, bindings, raw access, or another renderer.
+    /// The next scoped draw restores its own pipeline/geometry and wrapped raster state.
+    pub fn pass(&mut self) -> &mut RenderPass<'frame> {
+        self.dirty = true;
+        self.pass
+    }
+    #[inline]
+    fn restore(&mut self) {
+        if self.dirty {
+            self.pass.apply_raster_state();
+            self.pass.set_pipeline(&self.pipeline);
+            self.mesh.bind(self.pass);
+            self.dirty = false;
+        }
+    }
+}
+fn validate_aspects(pass: &RenderPass<'_>, material: &Material) -> Result<(), Error> {
+    if let Some(state) = &material.depth_stencil {
+        if pass.depth_read_only() && !state.is_depth_read_only() {
+            return Err(Error::ReadOnlyDepth);
+        }
+        if pass.stencil_read_only() && !state.is_stencil_read_only(material.cull_mode) {
+            return Err(Error::ReadOnlyStencil);
+        }
+    }
+    Ok(())
 }
 
 fn pipeline<'cache>(

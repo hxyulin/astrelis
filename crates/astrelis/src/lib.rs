@@ -190,6 +190,49 @@
 //! not at their source-code position between draws. Use encoder copies or custom
 //! commands when updates must occur at a precise point in the command sequence.
 //!
+//! # Scoped repeated drawing
+//!
+//! Individual draw calls remain useful for simple and mixed rendering. When a
+//! sequence keeps one mesh/material or image/material, bind a scoped session to
+//! check immutable compatibility and select the pipeline once. Sessions borrow
+//! the pass; dynamic texture scopes also borrow renderer scratch storage. Mesh and
+//! prepared texture scopes allow renderer reuse through their pass access. Dropping
+//! a session leaves the pass open. Changing
+//! geometry ranges or texture parameters still gets bounds/data validation.
+//!
+//! ```no_run
+//! use astrelis::{Error, Mesh, MeshRenderer, RenderPass};
+//! fn meshes(pass: &mut RenderPass<'_>, renderer: &mut MeshRenderer, mesh: &Mesh)
+//!     -> Result<(), Error> {
+//!     let mut draws = renderer.bind(pass, mesh)?;
+//!     draws.draw();
+//!     let [width, height] = draws.pass().size();
+//!     draws.pass().set_scissor_rect(0, 0, width / 2, height)?;
+//!     draws.draw();
+//!     Ok(())
+//! }
+//! ```
+//!
+//! [`TextureRenderer::bind`] scopes changing rectangles, while
+//! [`TextureRenderer::bind_prepared`] fixes immutable instance data as well:
+//!
+//! ```no_run
+//! use astrelis::{Error, PreparedTextureDraw, RenderPass, TextureBinding, TextureRenderer};
+//! fn images(pass: &mut RenderPass<'_>, renderer: &mut TextureRenderer,
+//!     image: &TextureBinding, data: &PreparedTextureDraw) -> Result<(), Error> {
+//!     let mut draws = renderer.bind_prepared(pass, image, data)?;
+//!     draws.draw()?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! A session's `pass()` permits clipping, application bindings, other renderers,
+//! and raw access. The next scoped draw restores renderer-owned state. Prepared
+//! pixel-space data is rechecked after pass access; changing to an incompatible
+//! viewport returns an error before drawing. Application-owned groups remain
+//! caller-controlled. Texture sessions snapshot a live framebuffer image for the
+//! scope's duration; begin a new scope to follow later storage replacement.
+//!
 //! # Custom passes and renderers
 //!
 //! [`Frame::begin_render_pass`] accepts [`RenderPassDescriptor`] with depth-only
@@ -258,14 +301,14 @@ pub use mesh::{
     Mesh, MeshDraw, MeshIndexBuffer, MeshIndices, MeshOptions, MeshVertexBuffer, Vertex,
     VertexLayout, VertexStream,
 };
-pub use mesh_renderer::MeshRenderer;
+pub use mesh_renderer::{MeshDrawSession, MeshRenderer};
 pub use pass::{RenderPass, RenderPassBuilder};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{
-    PreparedTextureDraw, Rect, SampledColor, TextureAlpha, TextureBinding, TextureBindingOptions,
-    TextureBlend, TextureDraw, TextureFilter, TextureMaterial, TextureMaterialOptions,
-    TextureRenderer, UvRect,
+    PreparedTextureDraw, PreparedTextureDrawSession, Rect, SampledColor, TextureAlpha,
+    TextureBinding, TextureBindingOptions, TextureBlend, TextureDraw, TextureDrawSession,
+    TextureFilter, TextureMaterial, TextureMaterialOptions, TextureRenderer, UvRect,
 };
 
 /// The exact wgpu version used by Astrelis, available for GPU interoperability.

@@ -130,6 +130,38 @@ settings, allowing textured stencil clips. Create one through
 `draw_with_material` or `draw_many_with_material`. Additional shader resource groups
 can be bound with `pass.set_bind_group(...)`.
 
+## Scoped drawing
+
+For consecutive draws that keep the same mesh/material or image/material, bind a
+scope to amortize immutable compatibility checks and pipeline selection:
+
+```rust
+let mut draws = meshes.bind(&mut pass, &mesh)?;
+draws.draw();
+draws.pass().set_scissor_rect(x, y, width, height)?;
+draws.draw_range(&mesh.full_draw().instances(0..instance_count))?;
+```
+
+Texture scopes support changing rectangles with `textures.bind(&mut pass, &image)?`
+and `.draw(draw)` / `.draw_many(draws)`. For immutable instance data:
+
+```rust
+let mut draws = textures.bind_prepared(&mut pass, &image, &prepared)?;
+draws.draw()?;
+```
+
+Scopes keep the pass open and preserve explicit draw order. `pass()` gives access
+to clipping, application bindings, other renderers, and raw wgpu operations; the
+next scoped draw restores renderer-owned state. Prepared pixel-space data is
+revalidated after pass access if the viewport changes. Application-owned bind
+groups remain caller-controlled.
+
+Mesh and directly prepared texture scopes retain pipeline handles, so the same
+renderer can be reused through their pass access. Dynamic texture scopes borrow
+renderer scratch storage for batches. Live framebuffer images are snapshots within
+a scope; a new scope follows later storage replacement. Individual draw methods
+remain available for simple and mixed rendering.
+
 ## Framebuffers and live sampling
 
 ```rust
@@ -232,10 +264,13 @@ cargo run -p astrelis --example scene_3d
 Every example is one copyable file with its own windows, event handling, resize,
 redraw scheduling, and surface-loss recovery. There is no support module or smoke
 test mode. `winit` and `pollster` are development dependencies. The texture example
-reuses image bindings across placements; compositing follows framebuffer replacement
-without explicit rebinding. The geometry example demonstrates custom streams,
-Uint16 indices, and instancing; passes demonstrates a managed custom surface pass
-with a final resolve and discarded MSAA samples.
+combines immutable prepared placement with a shared image scope for cropping and
+filtering. Geometry and the 3D scene use scoped mesh draws with custom streams,
+Uint16 indices, and instancing; materials shows application bindings through the
+scope's pass access. The UI workload combines batched cards with scoped controls.
+Compositing follows framebuffer replacement without explicit rebinding; passes
+demonstrates a managed custom surface pass with a final resolve and discarded MSAA
+samples.
 
 ```sh
 cargo fmt --all --check
@@ -266,6 +301,7 @@ cargo bench -p astrelis --bench rendering -- \
 The benchmark compares equivalent direct-wgpu and Astrelis workloads, checks pixel
 output before timing, and emits median/p95 CPU metrics. It has no window or example
 smoke-test mode. Completion waits are reported separately from CPU work and are not
-GPU execution measurements. See the [recorded baseline](docs/performance/baseline.md).
+GPU execution measurements. See the [initial baseline](docs/performance/baseline.md)
+and [scoped drawing results](docs/performance/scoped-drawing.md).
 
 MIT. See [LICENSE-MIT](LICENSE-MIT).

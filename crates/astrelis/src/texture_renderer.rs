@@ -197,6 +197,143 @@ struct Parameters {
     source: [f32; 4],
     tint: [f32; 4],
 }
+/// One image/material bound to a pass, with reusable scratch storage for dynamic draws.
+///
+/// Created by [`TextureRenderer::bind`]. Changing rectangles retain data validation;
+/// fixed image compatibility and pipeline selection are amortized over the scope.
+/// A managed source is a snapshot for the scope's duration. [`Self::pass`] supports
+/// clipping, application bindings, and other renderers with automatic restoration
+/// of this scope's pipeline/image before its next draw.
+#[derive(Debug)]
+pub struct TextureDrawSession<'draw, 'frame> {
+    pass: &'draw mut RenderPass<'frame>,
+    pipeline: wgpu::RenderPipeline,
+    group: wgpu::BindGroup,
+    parameters: &'draw mut Vec<Parameters>,
+    dirty: bool,
+}
+impl<'draw, 'frame> TextureDrawSession<'draw, 'frame> {
+    /// Validates and records one changing rectangle through reusable upload pages.
+    pub fn draw(&mut self, draw: TextureDraw) -> Result<(), Error> {
+        let parameters = draw.parameters(self.pass.viewport_size())?;
+        self.restore();
+        record_parameters(self.pass, std::slice::from_ref(&parameters));
+        Ok(())
+    }
+    /// Validates an entire slice before recording instanced batches in input order.
+    /// Large slices split at the same upload-page boundaries as [`TextureRenderer::draw_many`].
+    pub fn draw_many(&mut self, draws: &[TextureDraw]) -> Result<(), Error> {
+        self.parameters.clear();
+        let viewport = self.pass.viewport_size();
+        for draw in draws {
+            self.parameters.push(draw.parameters(viewport)?);
+        }
+        if self.parameters.is_empty() {
+            return Ok(());
+        }
+        self.restore();
+        record_parameters(self.pass, self.parameters);
+        Ok(())
+    }
+    /// Binds immutable instance data for repeated draws without uploads or per-draw resource checks.
+    /// Pixel-space data must match the current viewport. Normalized data adapts to it.
+    /// The child scope borrows this image scope; dropping it returns control here.
+    pub fn bind_prepared<'prepared>(
+        &'prepared mut self,
+        draws: &'prepared PreparedTextureDraw,
+    ) -> Result<PreparedTextureDrawSession<'prepared, 'frame>, Error> {
+        if !self.pass.same_device(&draws.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        validate_prepared_viewport(self.pass, draws)?;
+        self.restore();
+        self.pass
+            .set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
+        // Child pass access can change resources/raster state, so restore on return.
+        self.dirty = true;
+        Ok(PreparedTextureDrawSession {
+            pass: self.pass,
+            pipeline: self.pipeline.clone(),
+            group: self.group.clone(),
+            draws,
+            dirty: false,
+        })
+    }
+    /// Borrows the pass for clipping, bindings, raw access, or another renderer.
+    /// The next scoped draw restores the bound pipeline/image and wrapped raster state.
+    pub fn pass(&mut self) -> &mut RenderPass<'frame> {
+        self.dirty = true;
+        self.pass
+    }
+    fn restore(&mut self) {
+        if self.dirty {
+            self.pass.apply_raster_state();
+            self.pass.set_pipeline(&self.pipeline);
+            self.pass.set_bind_group(0, &self.group, &[]);
+            self.dirty = false;
+        }
+    }
+}
+
+/// An image/material and immutable instance data bound for repeated draws.
+///
+/// Prepared binding validates the device and viewport once. Repeated draws emit
+/// commands directly. Accessing the pass requires viewport revalidation and state
+/// restoration before the next draw. Obtain directly with [`TextureRenderer::bind_prepared`]
+/// or borrow a child scope through [`TextureDrawSession::bind_prepared`].
+#[derive(Debug)]
+pub struct PreparedTextureDrawSession<'draw, 'frame> {
+    pass: &'draw mut RenderPass<'frame>,
+    pipeline: wgpu::RenderPipeline,
+    group: wgpu::BindGroup,
+    draws: &'draw PreparedTextureDraw,
+    dirty: bool,
+}
+impl<'draw, 'frame> PreparedTextureDrawSession<'draw, 'frame> {
+    /// Records the bound instances without recurring uploads or pipeline lookup.
+    /// Returns [`Error::InvalidTextureDraw`] if pass access changed a pixel-space
+    /// viewport incompatibly; no draw is recorded and the scope remains usable.
+    #[inline]
+    pub fn draw(&mut self) -> Result<(), Error> {
+        if self.dirty {
+            validate_prepared_viewport(self.pass, self.draws)?;
+            self.pass.apply_raster_state();
+            self.pass.set_pipeline(&self.pipeline);
+            self.pass.set_bind_group(0, &self.group, &[]);
+            self.pass
+                .set_vertex_buffer(0, &self.draws.buffer, 0..self.draws.buffer.size());
+            self.dirty = false;
+        }
+        self.pass.inner.draw(0..6, 0..self.draws.count);
+        Ok(())
+    }
+    /// Borrows the pass, invalidating binding assumptions until the next draw.
+    /// Clipping and other renderer/raw operations remain available. Pixel-space
+    /// prepared data is checked again if the viewport changes.
+    pub fn pass(&mut self) -> &mut RenderPass<'frame> {
+        self.dirty = true;
+        self.pass
+    }
+}
+#[inline]
+fn validate_prepared_viewport(
+    pass: &RenderPass<'_>,
+    draws: &PreparedTextureDraw,
+) -> Result<(), Error> {
+    if draws.viewport.is_some_and(|v| v != pass.viewport_size()) {
+        return Err(Error::InvalidTextureDraw);
+    }
+    Ok(())
+}
+fn record_parameters(pass: &mut RenderPass<'_>, parameters: &[Parameters]) {
+    for chunk in parameters.chunks(1024) {
+        let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk));
+        pass.set_vertex_buffer(0, &buffer, 0..buffer.size());
+        let first = (range.start / 64) as u32;
+        pass.inner.draw(0..6, first..first + chunk.len() as u32);
+    }
+}
+
 fn parameter_layout() -> wgpu::VertexBufferLayout<'static> {
     const ATTRIBUTES: [wgpu::VertexAttribute; 4] =
         wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4];
@@ -635,13 +772,85 @@ impl TextureRenderer {
         if !draws.graphics.same_device(&self.graphics) {
             return Err(Error::DeviceMismatch);
         }
-        if draws.viewport.is_some_and(|v| v != pass.viewport_size()) {
-            return Err(Error::InvalidTextureDraw);
-        }
+        validate_prepared_viewport(pass, draws)?;
         self.setup_draw(pass, binding, material)?;
         pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
         pass.inner.draw(0..6, 0..draws.count);
         Ok(())
+    }
+
+    /// Binds one image and default material for repeated dynamic or prepared draws.
+    ///
+    /// Device, feedback, and material checks and pipeline selection happen once.
+    /// A live framebuffer source is snapshotted for this scope: begin a new scope
+    /// to follow later storage replacement. Dynamic draw data still gets validated
+    /// and uploaded through frame-owned pages. The scope borrows the renderer's
+    /// reusable CPU scratch storage and the pass; it does not submit or end a pass.
+    pub fn bind<'draw, 'frame>(
+        &'draw mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        binding: &TextureBinding,
+    ) -> Result<TextureDrawSession<'draw, 'frame>, Error> {
+        let material = self.material.clone();
+        self.bind_with_material(pass, binding, &material)
+    }
+
+    /// Binds one image and explicit material for scoped drawing.
+    /// Errors match [`Self::draw_with_material`]; prepared pipeline hits allocate
+    /// no GPU resources. Application groups beyond the image group remain caller-owned.
+    pub fn bind_with_material<'draw, 'frame>(
+        &'draw mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        binding: &TextureBinding,
+        material: &TextureMaterial,
+    ) -> Result<TextureDrawSession<'draw, 'frame>, Error> {
+        let (pipeline, group) = self.bind_resources(pass, binding, material)?;
+        Ok(TextureDrawSession {
+            pass,
+            pipeline,
+            group,
+            parameters: &mut self.parameters,
+            dirty: false,
+        })
+    }
+
+    /// Binds an image and immutable instance data for repeated drawing in one scope.
+    ///
+    /// This is the direct route to [`PreparedTextureDrawSession`]; it does not
+    /// require a parent image scope or keep the renderer borrowed. Fixed resources and pixel viewport compatibility
+    /// are validated at binding. Subsequent pass access triggers revalidation and
+    /// restoration before drawing. A live image source is snapshotted for the scope.
+    pub fn bind_prepared<'draw, 'frame>(
+        &mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        binding: &TextureBinding,
+        draws: &'draw PreparedTextureDraw,
+    ) -> Result<PreparedTextureDrawSession<'draw, 'frame>, Error> {
+        let material = self.material.clone();
+        self.bind_prepared_with_material(pass, binding, &material, draws)
+    }
+    /// Binds an image, explicit material, and immutable instance data for scoped drawing.
+    /// Errors match [`Self::draw_prepared_with_material`]. This performs no recurring uploads.
+    pub fn bind_prepared_with_material<'draw, 'frame>(
+        &mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        binding: &TextureBinding,
+        material: &TextureMaterial,
+        draws: &'draw PreparedTextureDraw,
+    ) -> Result<PreparedTextureDrawSession<'draw, 'frame>, Error> {
+        if !draws.graphics.same_device(&self.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        validate_prepared_viewport(pass, draws)?;
+        let (pipeline, group) = self.bind_resources(pass, binding, material)?;
+        pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
+        Ok(PreparedTextureDrawSession {
+            pass,
+            pipeline,
+            group,
+            draws,
+            dirty: false,
+        })
     }
 
     /// Draws one rectangle using default premultiplied shading.
@@ -694,14 +903,29 @@ impl TextureRenderer {
             return Ok(());
         }
         self.setup_draw(pass, b, m)?;
-        for chunk in self.parameters.chunks(1024) {
-            let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk));
-            // Instance ranges select a page region without rebinding the buffer per draw.
-            pass.set_vertex_buffer(0, &buffer, 0..buffer.size());
-            let first = (range.start / 64) as u32;
-            pass.inner.draw(0..6, first..first + chunk.len() as u32);
-        }
+        record_parameters(pass, &self.parameters);
         Ok(())
+    }
+    fn bind_resources(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        binding: &TextureBinding,
+        material: &TextureMaterial,
+    ) -> Result<(wgpu::RenderPipeline, wgpu::BindGroup), Error> {
+        let group = self.validate_binding(pass, binding, material)?.into_owned();
+        let pipeline = self
+            .pipeline(
+                binding,
+                material,
+                pass.single_color_format()?,
+                pass.sample_count(),
+                pass.depth_stencil_format(),
+            )?
+            .clone();
+        pass.apply_raster_state();
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        Ok((pipeline, group))
     }
     fn setup_draw(
         &mut self,
@@ -709,6 +933,26 @@ impl TextureRenderer {
         b: &TextureBinding,
         m: &TextureMaterial,
     ) -> Result<(), Error> {
+        let group = self.validate_binding(pass, b, m)?;
+        let pipeline = self.pipeline(
+            b,
+            m,
+            pass.single_color_format()?,
+            pass.sample_count(),
+            pass.depth_stencil_format(),
+        )?;
+        pass.apply_raster_state();
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        Ok(())
+    }
+
+    fn validate_binding<'binding>(
+        &self,
+        pass: &RenderPass<'_>,
+        b: &'binding TextureBinding,
+        m: &TextureMaterial,
+    ) -> Result<Cow<'binding, wgpu::BindGroup>, Error> {
         if !pass.same_device(&self.graphics)
             || !b.graphics.same_device(&self.graphics)
             || !m.graphics.same_device(&self.graphics)
@@ -745,17 +989,7 @@ impl TextureRenderer {
                 return Err(Error::ReadOnlyStencil);
             }
         }
-        let pipeline = self.pipeline(
-            b,
-            m,
-            pass.single_color_format()?,
-            pass.sample_count(),
-            pass.depth_stencil_format(),
-        )?;
-        pass.apply_raster_state();
-        pass.set_pipeline(pipeline);
-        pass.set_bind_group(0, &group, &[]);
-        Ok(())
+        Ok(group)
     }
 
     fn validate_source(

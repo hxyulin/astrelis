@@ -279,13 +279,12 @@ impl App {
                     a: 1.,
                 })
                 .begin()?;
-            pass.set_bind_group(0, &state.camera_group, &[]);
-            state.renderer.draw_range_with_material(
-                &mut pass,
-                &state.mesh,
-                &state.material,
-                &state.mesh.full_draw().instances(0..9),
-            )?;
+            let mut cubes =
+                state
+                    .renderer
+                    .bind_with_material(&mut pass, &state.mesh, &state.material)?;
+            cubes.pass().set_bind_group(0, &state.camera_group, &[]);
+            cubes.draw_range(&state.mesh.full_draw().instances(0..9))?;
         }
         frame.finish()?;
         self.retry_at = (!state.paused).then(|| Instant::now() + Duration::from_millis(16));
