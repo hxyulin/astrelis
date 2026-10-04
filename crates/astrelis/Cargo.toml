@@ -11,6 +11,7 @@ readme = "../../README.md"
 
 [dependencies]
 bytemuck.workspace = true
+cosmic-text.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
@@ -26,4 +27,8 @@ harness = false
 
 [[bench]]
 name = "primitives"
+harness = false
+
+[[bench]]
+name = "text"
 harness = false

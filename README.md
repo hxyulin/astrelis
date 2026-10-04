@@ -327,7 +327,35 @@ validated pipelines. Raw shader-module/layout creation still uses wgpu error sco
 Convenience preparation/drawing can create pipelines lazily. Prepared cache hits
 create no pipelines and perform no format capability queries.
 
+## CPU text layout
+
+`TextSystem` owns fonts and shaping caches independently of a graphics context.
+Font loading and system-font discovery are explicit. `TextBuffer` retains text,
+style, width, wrapping, and alignment; evaluation returns an immutable
+`Arc<TextLayout>` with local-unit measurement, positioned glyphs, whole-buffer UTF-8
+clusters, bidi levels, line boxes, selected fonts, and missing-glyph ranges.
+
+```rust
+let mut text = TextSystem::new();
+text.load_font(include_bytes!("fonts/MyFont.ttf"))?;
+let mut label = TextBuffer::new();
+label.set_text("Hello, office!", TextStyle::new().family("My Font"))?;
+label.set_width(Some(320.))?;
+let layout = label.layout(&mut text)?;
+let measured_size = layout.size();
+```
+
+Advanced shaping uses cosmic-text with font fallback, kerning, ligatures, and
+complex-script support. Unchanged evaluation reuses its snapshot; width changes
+reuse shaped runs. Snapshots retain text and font data across edits and font loading.
+Measurement requires no window/GPU and does not apply DPI or compute pixel ink bounds.
+This milestone provides one style per buffer; GPU rasterization/atlases, a text
+renderer, rich spans, and text editing/hit testing follow separately. See the
+[text architecture and plan](docs/text.md).
+
 ## Standalone examples and development
+
+The workspace requires Rust 1.98.1.
 
 ```sh
 cargo run -p astrelis --example triangle
@@ -346,9 +374,10 @@ cargo run -p astrelis --example ui_workload
 cargo run -p astrelis --example scene_3d
 cargo run -p astrelis --example mixed_2d
 cargo run -p astrelis --example painter
+cargo run -p astrelis --example text_layout
 ```
 
-Every example is one copyable file with its own windows, event handling, resize,
+Every windowed example is one copyable file with its own windows, event handling, resize,
 redraw scheduling, and surface-loss recovery. There is no support module or smoke
 test mode. `winit` and `pollster` are development dependencies. The texture example
 combines immutable prepared placement with a shared image scope for cropping and
@@ -358,6 +387,11 @@ scope's pass access. The UI workload combines batched cards with scoped controls
 Compositing follows framebuffer replacement without explicit rebinding; passes
 demonstrates a managed custom surface pass with a final resolve and discarded MSAA
 samples.
+
+`text_layout` is a standalone CPU example using bundled licensed fonts, with
+multilingual fallback, glyph/cluster inspection, headless measurement, snapshot
+reuse, and reflow. Run `cargo bench -p astrelis --bench text` to measure CPU stages;
+see the [CPU text baseline](docs/performance/text.md) for results and boundaries.
 
 `mixed_2d` combines filled primitives, line caps, transformed ellipses, translucent
 images, clipping, and custom mesh viewports in one offscreen pass, then composites

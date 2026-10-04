@@ -6,6 +6,12 @@
 //! values record into the same scoped [`RenderPass`]. No windowing dependency is
 //! required by the library, and no scene graph or display list is imposed.
 //!
+//! [`text`] provides font loading, advanced shaping, and retained paragraph layout
+//! independently of a GPU. [`TextSystem`] explicitly loads fonts; [`TextBuffer`]
+//! evaluates into shared [`TextLayout`] snapshots with measurements, glyph origins,
+//! source clusters, bidi levels, and retained font data. Unchanged evaluation reuses
+//! its snapshot. GPU text preparation and drawing are separate future milestones.
+//!
 //! # Context, targets, and frames
 //!
 //! Select an adapter for your first window with [`GraphicsContext::with_surface`].
@@ -352,6 +358,7 @@ pub use attachments::{
     RenderColorAttachment, RenderDepthStencilAttachment, RenderFormat, RenderPassDescriptor,
 };
 pub use context::GraphicsContext;
+pub mod text;
 pub use drawing::{
     DrawSpace, EdgeAntialiasing, LineCap, LineDraw, Rect, Shape, ShapeDraw, Stroke,
     StrokePlacement, Transform2D,
@@ -369,6 +376,10 @@ pub use painter::{PaintSession, Painter};
 pub use pass::{RenderPass, RenderPassBuilder};
 pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
+pub use text::{
+    FontFamily, FontId, FontInfo, FontSlant, FontStretch, TextAlign, TextBuffer, TextError,
+    TextFont, TextGlyph, TextLayout, TextLine, TextStyle, TextSystem, TextWrap,
+};
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{
     PreparedTextureDraw, PreparedTextureDrawSession, SampledColor, TextureAlpha, TextureBinding,

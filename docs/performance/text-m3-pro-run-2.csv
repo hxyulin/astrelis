@@ -1,0 +1,14 @@
+input_scalars,glyphs,stage,median_ns,p95_ns
+0,0,font_load_two_faces,20145.50,26958.00
+100,100,new_buffer_shape_snapshot,38937.50,42584.00
+100,100,unchanged_snapshot,3.83,3.96
+100,100,width_reflow_snapshot,2854.50,3000.00
+100,100,content_reshape_snapshot,37584.00,37958.00
+1000,1000,new_buffer_shape_snapshot,376854.50,461583.00
+1000,1000,unchanged_snapshot,3.79,3.88
+1000,1000,width_reflow_snapshot,25166.50,27042.00
+1000,1000,content_reshape_snapshot,351833.00,374959.00
+10000,10000,new_buffer_shape_snapshot,3710875.00,3862250.00
+10000,10000,unchanged_snapshot,3.79,3.88
+10000,10000,width_reflow_snapshot,246812.50,268750.00
+10000,10000,content_reshape_snapshot,3529646.00,3680125.00
