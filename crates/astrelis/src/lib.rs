@@ -277,6 +277,7 @@
 mod attachments;
 mod context;
 mod depth_stencil;
+mod drawing;
 mod error;
 mod frame;
 mod framebuffer;
@@ -293,6 +294,9 @@ pub use attachments::{
     RenderColorAttachment, RenderDepthStencilAttachment, RenderFormat, RenderPassDescriptor,
 };
 pub use context::GraphicsContext;
+pub use drawing::{
+    DrawSpace, EdgeAntialiasing, LineCap, LineDraw, Rect, Shape, ShapeDraw, Transform2D,
+};
 pub use error::Error;
 pub use frame::{Frame, FrameError};
 pub use framebuffer::{Framebuffer, FramebufferOptions};
@@ -306,9 +310,9 @@ pub use pass::{RenderPass, RenderPassBuilder};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{
-    PreparedTextureDraw, PreparedTextureDrawSession, Rect, SampledColor, TextureAlpha,
-    TextureBinding, TextureBindingOptions, TextureBlend, TextureDraw, TextureDrawSession,
-    TextureFilter, TextureMaterial, TextureMaterialOptions, TextureRenderer, UvRect,
+    PreparedTextureDraw, PreparedTextureDrawSession, SampledColor, TextureAlpha, TextureBinding,
+    TextureBindingOptions, TextureBlend, TextureDraw, TextureDrawSession, TextureFilter,
+    TextureMaterial, TextureMaterialOptions, TextureRenderer, UvRect,
 };
 
 /// The exact wgpu version used by Astrelis, available for GPU interoperability.

@@ -130,6 +130,22 @@ settings, allowing textured stencil clips. Create one through
 `draw_with_material` or `draw_many_with_material`. Additional shader resource groups
 can be bound with `pass.set_bind_group(...)`.
 
+## Shared 2D drawing semantics
+
+`Rect`, `DrawSpace`, and `Transform2D` describe geometry relative to the current
+viewport: X right, Y down, physical pixels by default. Normalized units scale each
+axis by the viewport size. Applications apply DPI scaling explicitly. Transforms
+act in the selected units before viewport conversion; `a.then(b)` applies `a`,
+then `b`. `TextureDraw::space` and `transform_2d` use these same conventions.
+
+`ShapeDraw` describes filled rectangles, uniformly rounded rectangles, and ellipses.
+`LineDraw` describes independent segments with width and butt, square, or round caps.
+Widths/radii transform with geometry. Inputs use finite linear, straight RGBA
+colors with alpha in `0..=1`; rendering outputs premultiplied source-over color.
+Zero-area geometry draws nothing. Paths, connected stroke joins, and shape outlines
+are outside these initial primitive types. Shader edge coverage is independent of
+attachment MSAA, selected with `EdgeAntialiasing`.
+
 ## Scoped drawing
 
 For consecutive draws that keep the same mesh/material or image/material, bind a

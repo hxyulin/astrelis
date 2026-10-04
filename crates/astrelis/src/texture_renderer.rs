@@ -1,4 +1,4 @@
-use crate::{Error, GraphicsContext, RenderPass, RenderTarget};
+use crate::{Error, GraphicsContext, Rect, RenderPass, RenderTarget};
 use bytemuck::{Pod, Zeroable};
 use std::{
     borrow::Cow,
@@ -45,32 +45,6 @@ impl From<TextureBlend> for Option<wgpu::BlendState> {
     }
 }
 
-/// A top-left rectangle in explicitly selected destination units.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Rect {
-    /// Left coordinate.
-    pub x: f32,
-    /// Top coordinate.
-    pub y: f32,
-    /// Nonnegative width.
-    pub width: f32,
-    /// Nonnegative height.
-    pub height: f32,
-}
-impl Rect {
-    /// Creates a rectangle; drawing validates finite coordinates and nonnegative extents.
-    pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-    fn array(self) -> [f32; 4] {
-        [self.x, self.y, self.width, self.height]
-    }
-}
 /// A normalized source rectangle in texture UV coordinates, top-left based.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct UvRect {
@@ -133,6 +107,15 @@ impl TextureDraw {
             normalized: true,
             ..Self::new(destination)
         }
+    }
+    /// Selects pixel or normalized units for placement and its affine transform.
+    pub const fn space(mut self, space: crate::DrawSpace) -> Self {
+        self.normalized = matches!(space, crate::DrawSpace::Normalized);
+        self
+    }
+    /// Selects the shared 2D transform; equivalent to `transform(value.to_array())`.
+    pub const fn transform_2d(self, value: crate::Transform2D) -> Self {
+        self.transform(value.to_array())
     }
     /// Selects normalized source UVs.
     pub const fn uv(mut self, uv: UvRect) -> Self {
