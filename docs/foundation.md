@@ -148,7 +148,8 @@ through mesh materials. Native acceptance copies presented eight frames, resized
 to 640×480, changed MSAA twice, and suspended/restored a zero-sized target. Visual
 readback confirmed the mixed layer. Instrumentation lives outside the examples.
 
-The primitive harness uses a 64×64 RGBA8 target and compares against **individual
+The primitive-stage measurements capture the library at `fc5fb5f`, before Painter
+and the later subpixel coverage correction. The primitive harness uses a 64×64 RGBA8 target and compares against **individual
 Astrelis calls**, rather than direct wgpu. The same inputs/shaders and ordered pixels
 are checked first. Scopes preserve GPU draw count; explicit batching reduces it to
 page-sized instance batches. No automatic reordering occurs. At count 1,000, the
@@ -190,3 +191,64 @@ The library has 43 unit/GPU tests and 12 doctests at this stage, including primi
 coverage/caps, fractional edges, transforms, clipping, atomic invalid batches,
 page splitting, upload/pipeline reuse, and mixed raw/mesh/image access with MSAA and
 read-only depth/stencil. Vulkan/DX12 and reliable GPU timing remain follow-up work.
+
+## Painter acceptance
+
+`Painter` owns independent shape/line/image renderers and lends immediate painting
+sessions on existing passes. It does not own windows, passes, presentation, or a
+command list. Explicit batches preserve order. Borrowed transform scopes apply the
+local transform before the parent transform, leaving the parent's transform intact
+when a child returns. They do not save/restore pass clipping, viewport, or bindings.
+Custom renderer/raw access records in place with no flush boundary. Owned renderer
+accessors remain available outside painting sessions.
+
+The standalone `painter` example expresses the mixed layer through the facade,
+including borrowed transform scopes and custom mesh viewports. Final native copies
+of both examples each presented eight frames, resized to 640×480, changed layer
+MSAA twice, and suspended/restored zero-sized targets. Visual readbacks confirmed
+both layers. Test instrumentation remains outside the repository.
+
+Painter tests compare exact pixels with direct renderer calls, interleave custom
+GPU work, verify nested transformation order and parent preservation, validate
+transformed whole batches atomically, and check warmed scratch/buffer reuse. The
+primitive shader now bounds analytic edge coverage by a filtered local box so
+opposing fringes do not make subpixel lines/rectangles excessively opaque. Quarter-
+pixel geometry and an underflowed half-width have explicit pixel regression checks.
+Coverage remains an approximation, especially under rotation/shear. Shape outlines,
+paths, connected joins, text, and arbitrary clipping remain future capabilities.
+
+Three final benchmark runs use the same 64×64 setup, paired alternating order,
+8 warm-up pairs, 40 measured pairs, and counts 100/1,000/10,000. All 24 comparisons
+passed per run, including three Painter variants. These Painter measurements use
+**identity session transforms**; correctness/reuse tests cover transformed sessions,
+but their CPU cost is not characterized by these rows. Shape/line batch references
+use matching direct batches; the mixed reference uses the same ordered individual
+renderer calls, clipping, mesh draws, shader/data layout, and GPU draw count.
+
+Medians of three run medians, in microseconds. Negative/small differences represent
+measurement variability; they are not claims that wrapping speeds up the same work.
+
+| Painter workload | Items | Direct record | Painter record | Direct CPU total | Painter CPU total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Mixed sequence | 1,000 | 393.60 | 390.50 | 1642.67 | 1646.69 |
+| Shape batch | 1,000 | 21.48 | 20.44 | 68.81 | 70.06 |
+| Line batch | 1,000 | 25.04 | 24.85 | 59.35 | 58.90 |
+| Mixed sequence | 10,000 | 4325.62 | 4329.38 | 16936.33 | 17022.06 |
+| Shape batch | 10,000 | 193.31 | 200.08 | 370.85 | 380.54 |
+| Line batch | 10,000 | 224.67 | 225.77 | 409.25 | 405.73 |
+
+Painter adds little recording cost in these workloads. It deliberately preserves
+individual calls rather than implicitly batching mixed content; it does not solve
+the high submission cost of tens of thousands of individual draws. Explicit batch
+methods remain the efficient route when compatible items are adjacent. The harness
+retains all original primitive cases, p95 observations, and total CPU costs.
+
+Evidence: [run 1](performance/painter-metal-m3-pro-run-1.csv),
+[run 2](performance/painter-metal-m3-pro-run-2.csv),
+[run 3](performance/painter-metal-m3-pro-run-3.csv), and
+[settings, logs, source hashes](performance/painter-metal-m3-pro-metadata.txt).
+The final library passes 48 unit/GPU tests and 14 doctests; all-target Clippy with
+warnings denied, formatting, diff checks, and documentation generation pass.
+CPU comparisons against direct Astrelis renderers do not establish the original
+percentage gate against direct wgpu. GPU timing, multiple frames in flight, memory
+profiling, and non-Metal backends remain unmeasured.

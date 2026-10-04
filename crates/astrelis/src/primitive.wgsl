@@ -42,8 +42,17 @@ fn box_distance(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
     // Derivatives run outside primitive-dependent control flow. Geometry's final
     // component selects analytic coverage independently of attachment MSAA.
     let edge_width = max(fwidth(distance), 0.000001);
-    let coverage = select(select(0.0, 1.0, distance <= 0.0),
-                          clamp(0.5 - distance / edge_width, 0.0, 1.0), input.geometry.w > 0.0);
+    // Bound coverage by the filtered local box. Opposing fringes overlap for
+    // subpixel geometry; a single distance threshold otherwise makes thin lines
+    // too opaque. The box filter is approximate under rotation/shear, like fwidth.
+    let footprint = max(fwidth(input.local), vec2(0.000001));
+    var bounds = half_size;
+    if kind == 4u || kind == 5u { bounds.x += half_size.y; }
+    let positive = clamp((bounds - input.local) / footprint + vec2(0.5), vec2(0.0), vec2(1.0));
+    let negative = clamp((-bounds - input.local) / footprint + vec2(0.5), vec2(0.0), vec2(1.0));
+    let box_coverage = positive - negative;
+    let analytic = min(clamp(0.5 - distance / edge_width, 0.0, 1.0), box_coverage.x * box_coverage.y);
+    let coverage = select(select(0.0, 1.0, distance <= 0.0), analytic, input.geometry.w > 0.0);
     let alpha = input.color.a * coverage;
     return vec4(input.color.rgb * alpha, alpha);
 }

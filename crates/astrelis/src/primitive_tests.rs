@@ -391,3 +391,37 @@ fn mixed_instance_strides() {
         assert_eq!(pixel(&bytes, 4, 4), [255; 4]);
     });
 }
+
+#[test]
+fn subpixel_geometry_does_not_become_a_half_opaque_pixel() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1, false);
+        let mut lines = LineRenderer::new(&g);
+        let mut shapes = ShapeRenderer::new(&g);
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            lines
+                .draw(
+                    &mut p,
+                    LineDraw::new([2., 8.5], [14., 8.5], RED).width(0.25),
+                )
+                .unwrap();
+            shapes
+                .draw(
+                    &mut p,
+                    ShapeDraw::rect(Rect::new(20.375, 16., 0.25, 8.), GREEN),
+                )
+                .unwrap();
+            lines
+                .draw(
+                    &mut p,
+                    LineDraw::new([2., 32.5], [14., 32.5], BLUE).width(f32::from_bits(1)),
+                )
+                .unwrap();
+        });
+        near(pixel(&bytes, 8, 8), [64, 0, 0, 64]);
+        near(pixel(&bytes, 20, 20), [0, 64, 0, 64]);
+        assert_eq!(pixel(&bytes, 8, 32), [0; 4]);
+    });
+}

@@ -48,6 +48,8 @@ pub enum Error {
     },
     /// A prepared texture rectangle/tint is nonfinite, has negative extents, or invalid opacity.
     InvalidTextureDraw,
+    /// An affine transform or its composition contains nonfinite values.
+    InvalidTransform2D,
     /// Solid shape geometry, color, transform, or transformed bounds are invalid.
     InvalidShapeDraw,
     /// Line endpoints, width, color, transform, or transformed bounds are invalid.
@@ -189,6 +191,7 @@ impl fmt::Display for Error {
             Self::InvalidTextureData { expected, actual } => write!(f, "texture upload requires {expected} bytes, got {actual}"),
             Self::InvalidTextureSource { format } => write!(f, "{format:?} requires single-sampled float color storage with compatible sampling usages/filtering"),
             Self::InvalidTextureDraw => f.write_str("texture rectangles/tint must be finite, extents nonnegative, and opacity in 0..=1"),
+            Self::InvalidTransform2D => f.write_str("2D transforms and their composition must be finite"),
             Self::InvalidShapeDraw => f.write_str("shape geometry/color/transform must be finite, extents/radius nonnegative, alpha in 0..=1"),
             Self::InvalidLineDraw => f.write_str("line geometry/color/transform must be finite, width nonnegative, alpha in 0..=1"),
             Self::TextureFeedback => f.write_str("cannot sample an active color or resolve attachment"),

@@ -261,6 +261,29 @@
 //! caller-controlled. Texture sessions snapshot a live framebuffer image for the
 //! scope's duration; begin a new scope to follow later storage replacement.
 //!
+//! # Painter convenience
+//!
+//! [`Painter`] composes independent 2D renderers and lends a [`PaintSession`] on
+//! an existing pass. Calls record immediately; explicit batches preserve order.
+//! Borrowed transform scopes leave their parent transform unchanged. Pass access
+//! permits custom rendering in place without flushing or finishing the session.
+//!
+//! ```no_run
+//! use astrelis::{Error, LineCap, LineDraw, Painter, Rect, RenderPass, Transform2D};
+//! fn paint(pass: &mut RenderPass<'_>, painter: &mut Painter) -> Result<(), Error> {
+//!     let mut paint = painter.begin(pass)?;
+//!     paint.fill_rounded_rect(Rect::new(20., 20., 120., 60.), 12., [0.1, 0.3, 0.6, 1.])?;
+//!     {
+//!         let mut local = paint.transformed(Transform2D::translation(30., 30.))?;
+//!         local.draw_line(LineDraw::new([0., 0.], [80., 0.], [1.; 4])
+//!             .width(3.).cap(LineCap::Round))?;
+//!     }
+//!     paint.pass().set_scissor_rect(0, 0, 100, 100)?;
+//!     paint.fill_ellipse(Rect::new(20., 20., 40., 40.), [1., 0., 0., 0.5])?;
+//!     Ok(())
+//! }
+//! ```
+//!
 //! # Custom passes and renderers
 //!
 //! [`Frame::begin_render_pass`] accepts [`RenderPassDescriptor`] with depth-only
@@ -312,6 +335,7 @@ mod framebuffer;
 mod material;
 mod mesh;
 mod mesh_renderer;
+mod painter;
 mod pass;
 mod primitive;
 mod target;
@@ -335,6 +359,7 @@ pub use mesh::{
     VertexLayout, VertexStream,
 };
 pub use mesh_renderer::{MeshDrawSession, MeshRenderer};
+pub use painter::{PaintSession, Painter};
 pub use pass::{RenderPass, RenderPassBuilder};
 pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};

@@ -1,0 +1,132 @@
+recorded_utc: 2026-10-04T11:54:20.409404+00:00
+base_commit: bf845d78ec742e332b894406dbe2f7eb4be63f20
+source_state: Painter facade, benchmark extensions, and subpixel coverage correction uncommitted at measurement
+os: macos 27.0.1
+arch: arm64
+toolchain: rustc 1.98.1 (48a229cea 2026-09-01)
+command: cargo bench -p astrelis --bench primitives --offline -- --counts 100,1000,10000 --samples 40 --warmup 8
+native_acceptance: one-off mixed_2d and painter copies each presented eight frames, resized to 640x480, changed layer MSAA twice, and suspended/restored a zero-sized target
+checks: 48 unit/GPU tests, 14 doctests, all-target clippy with warnings denied, formatting, documentation generation
+sha256 Cargo.toml: bd02a0b13259ab96244156e26f83ba4a062f4894f9631ef36423b1b5a8a421cb
+sha256 Cargo.lock: 9b57f7d0560f071311997f18276b96841f76ccf34cc523d51d38cffa4b051ca3
+sha256 crates/astrelis/Cargo.toml: 2e750e12eb96beb9abbd8bccc480ee5b3fdf96c2e44ac7f10307ab05b9b182e3
+sha256 crates/astrelis/benches/primitives.rs: 51db7ac9a3262267f76a54ff0a28611df3f2f6ce47e43f5ec9e67d800cfb8c85
+sha256 crates/astrelis/src/api_tests.rs: 6396833c22269744359c13f34568de102880f2d36b4ecb1a134bf63d0249dced
+sha256 crates/astrelis/src/attachments.rs: c4a0e9ec3f17943817c89d4fbf14ed74001e55c83f2267a041a29685088d9ae0
+sha256 crates/astrelis/src/context.rs: 26ec9563c4528b41193564f6fb144c9b7461acedddb166e468d0008394ac2c24
+sha256 crates/astrelis/src/depth_stencil.rs: 3b2d259252ea4c49bcbafefdd4d03a99e5dfe9775161f72482dfc7e9cde97509
+sha256 crates/astrelis/src/depth_stencil_tests.rs: ea5e5cff8cd4e125e9cb590778873272bcf8814e563f701ff1fb7b03a50c90dd
+sha256 crates/astrelis/src/drawing.rs: b829d3a4864576d14872c6494c271f3b3d09057aa9753f07e505bcd7cc69d85f
+sha256 crates/astrelis/src/error.rs: 59c5e28fd61ffd374ec99ae4576a7980a2ae8853260c147a40499e9e9b2551dc
+sha256 crates/astrelis/src/frame.rs: 68dacdcc0bf1a16dc553aeccf091b1c2c1f110da1fbff42f110852f63564268e
+sha256 crates/astrelis/src/framebuffer.rs: db2e347f14de7d0a6294f7811b18b0bee0faf6bcd22ed8653da6b4afc72de9df
+sha256 crates/astrelis/src/framebuffer_tests.rs: 0cf349cb6e6cd795ea3523b6bef8f73f158865c9e5add6d6009ec13d0bc7e406
+sha256 crates/astrelis/src/lib.rs: b582e108a9afa347d73227530e1844c3ece0ff84aa0ad2e8cbbac4c6500523dc
+sha256 crates/astrelis/src/material.rs: c45de39d6a62988bb3305b78ac67ccac36ab08f42344809a865d77f6b40455c1
+sha256 crates/astrelis/src/material_tests.rs: 7c6d6e4ad990833ea384cf9478b12d241a7e7d46e8662345c5eecb052063a8f5
+sha256 crates/astrelis/src/mesh.rs: 5ae760f2bfe0ac44c287a5dda3d2de8b1f7d803bb37de8676d64f4e5ba5aeca0
+sha256 crates/astrelis/src/mesh_renderer.rs: fab3c321e8fbec768abf1d4488b0a80f9dccb107a9890bdf23e11fe6f515bfba
+sha256 crates/astrelis/src/mesh_renderer_tests.rs: 1140c6e70bc8671a4b7f5565d78fcad43713e6aeda2ca94d13565d63367ca538
+sha256 crates/astrelis/src/painter.rs: 59019a5ec275e81acdb37a884c04b701f7acbf3283b3157ae553dac4df29006f
+sha256 crates/astrelis/src/painter_tests.rs: 915d3c3c27063d618eaeea6a1db63a96361cd912693faf8bfabc4bff5196952b
+sha256 crates/astrelis/src/pass.rs: 86873429908af339d3236c630331b9b1e1ffa27d3392fb9eef09844454a5e90c
+sha256 crates/astrelis/src/primitive.rs: cdd54c136e78225fdf25fd72745b39fc0849c0ff78316d32817d2b186c6cb056
+sha256 crates/astrelis/src/primitive_tests.rs: 006ff675653abbc2bfcbd4940f0b415040f7b25c5fe692abaf8b5d5f58f9b985
+sha256 crates/astrelis/src/target.rs: 4382c68a1244b440b692b6685c68cc5a419077c271601787107f196bf7c505c3
+sha256 crates/astrelis/src/texture.rs: e218312644b5327a36e267725b9c95e0c538b5b597390f1840f6d24b91219282
+sha256 crates/astrelis/src/texture_renderer.rs: e8f90126c6506af2128163a078aee82bb8663c3fedbf835f39787482cd332ca1
+sha256 crates/astrelis/src/texture_tests.rs: 9a66fbc0958e732ddedb6efa8da703aae2c888be7deff5115f0572d43545b2e8
+sha256 crates/astrelis/src/uploads.rs: b0d76b7e7e6aebeacad2043c2bb0ced5e78ea5acaa3eecd8a058a1f2f78a004a
+sha256 crates/astrelis/src/mesh.wgsl: 13de0c9d000c19b4c93e54868b1d76e3d90fa281e26d20845d5ebb8caf0b1ed2
+sha256 crates/astrelis/src/primitive.wgsl: cb21602ef74a3018faf4de5be9dfca9719dace1cb70d20f7b276b2c500251ada
+sha256 crates/astrelis/src/texture.wgsl: 769eeae7945184c744ced21fb7f00f74f8493d99b36553b4c93918dfef772cf3
+
+--- Painter run 1 ---
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/dev/projects/astrelis/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 2.08s
+     Running benches/primitives.rs (target/release/deps/primitives-6644da9a4983411d)
+adapter=AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; samples=40; warmup=8; counts=[100, 1000, 10000]; gpu_execution_timing=not_measured; reference=direct_astrelis_renderers
+pixel equivalence passed: shapes_scoped count=100
+pixel equivalence passed: shapes_batch count=100
+pixel equivalence passed: lines_scoped count=100
+pixel equivalence passed: lines_batch count=100
+pixel equivalence passed: mixed_scoped count=100
+pixel equivalence passed: painter_mixed count=100
+pixel equivalence passed: painter_shapes_batch count=100
+pixel equivalence passed: painter_lines_batch count=100
+pixel equivalence passed: shapes_scoped count=1000
+pixel equivalence passed: shapes_batch count=1000
+pixel equivalence passed: lines_scoped count=1000
+pixel equivalence passed: lines_batch count=1000
+pixel equivalence passed: mixed_scoped count=1000
+pixel equivalence passed: painter_mixed count=1000
+pixel equivalence passed: painter_shapes_batch count=1000
+pixel equivalence passed: painter_lines_batch count=1000
+pixel equivalence passed: shapes_scoped count=10000
+pixel equivalence passed: shapes_batch count=10000
+pixel equivalence passed: lines_scoped count=10000
+pixel equivalence passed: lines_batch count=10000
+pixel equivalence passed: mixed_scoped count=10000
+pixel equivalence passed: painter_mixed count=10000
+pixel equivalence passed: painter_shapes_batch count=10000
+pixel equivalence passed: painter_lines_batch count=10000
+
+
+--- Painter run 2 ---
+    Finished `bench` profile [optimized] target(s) in 0.06s
+     Running benches/primitives.rs (target/release/deps/primitives-6644da9a4983411d)
+adapter=AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; samples=40; warmup=8; counts=[100, 1000, 10000]; gpu_execution_timing=not_measured; reference=direct_astrelis_renderers
+pixel equivalence passed: shapes_scoped count=100
+pixel equivalence passed: shapes_batch count=100
+pixel equivalence passed: lines_scoped count=100
+pixel equivalence passed: lines_batch count=100
+pixel equivalence passed: mixed_scoped count=100
+pixel equivalence passed: painter_mixed count=100
+pixel equivalence passed: painter_shapes_batch count=100
+pixel equivalence passed: painter_lines_batch count=100
+pixel equivalence passed: shapes_scoped count=1000
+pixel equivalence passed: shapes_batch count=1000
+pixel equivalence passed: lines_scoped count=1000
+pixel equivalence passed: lines_batch count=1000
+pixel equivalence passed: mixed_scoped count=1000
+pixel equivalence passed: painter_mixed count=1000
+pixel equivalence passed: painter_shapes_batch count=1000
+pixel equivalence passed: painter_lines_batch count=1000
+pixel equivalence passed: shapes_scoped count=10000
+pixel equivalence passed: shapes_batch count=10000
+pixel equivalence passed: lines_scoped count=10000
+pixel equivalence passed: lines_batch count=10000
+pixel equivalence passed: mixed_scoped count=10000
+pixel equivalence passed: painter_mixed count=10000
+pixel equivalence passed: painter_shapes_batch count=10000
+pixel equivalence passed: painter_lines_batch count=10000
+
+
+--- Painter run 3 ---
+    Finished `bench` profile [optimized] target(s) in 0.06s
+     Running benches/primitives.rs (target/release/deps/primitives-6644da9a4983411d)
+adapter=AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; samples=40; warmup=8; counts=[100, 1000, 10000]; gpu_execution_timing=not_measured; reference=direct_astrelis_renderers
+pixel equivalence passed: shapes_scoped count=100
+pixel equivalence passed: shapes_batch count=100
+pixel equivalence passed: lines_scoped count=100
+pixel equivalence passed: lines_batch count=100
+pixel equivalence passed: mixed_scoped count=100
+pixel equivalence passed: painter_mixed count=100
+pixel equivalence passed: painter_shapes_batch count=100
+pixel equivalence passed: painter_lines_batch count=100
+pixel equivalence passed: shapes_scoped count=1000
+pixel equivalence passed: shapes_batch count=1000
+pixel equivalence passed: lines_scoped count=1000
+pixel equivalence passed: lines_batch count=1000
+pixel equivalence passed: mixed_scoped count=1000
+pixel equivalence passed: painter_mixed count=1000
+pixel equivalence passed: painter_shapes_batch count=1000
+pixel equivalence passed: painter_lines_batch count=1000
+pixel equivalence passed: shapes_scoped count=10000
+pixel equivalence passed: shapes_batch count=10000
+pixel equivalence passed: lines_scoped count=10000
+pixel equivalence passed: lines_batch count=10000
+pixel equivalence passed: mixed_scoped count=10000
+pixel equivalence passed: painter_mixed count=10000
+pixel equivalence passed: painter_shapes_batch count=10000
+pixel equivalence passed: painter_lines_batch count=10000

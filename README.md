@@ -167,6 +167,43 @@ strokes.draw(LineDraw::new([30., 50.], [130., 50.], [1.; 4])
     .width(3.).cap(LineCap::Round))?;
 ```
 
+## Painter
+
+`Painter` retains a shape, line, and image renderer and lends an immediate painting
+session on an existing pass. It preserves call order and exposes explicit batches;
+it does not buffer a display list. Borrowed transform scopes apply local geometry
+transforms without changing the parent's transform. They leave viewport, clipping,
+and application bindings under pass control. Colors and coordinate units are the
+same as the lower-level draw types.
+
+```rust
+let mut painter = Painter::new(&graphics);
+painter.prepare(&target.render_format())?;
+
+let mut frame = target.begin_frame()?;
+{
+    let mut pass = frame.render_pass().begin()?;
+    let mut paint = painter.begin(&mut pass)?;
+    paint.fill_rounded_rect(Rect::new(20., 20., 120., 60.), 12., [0.1, 0.3, 0.6, 1.])?;
+    {
+        let mut local = paint.transformed(Transform2D::translation(30., 30.))?;
+        local.draw_line(LineDraw::new([0., 0.], [80., 0.], [1.; 4])
+            .width(3.).cap(LineCap::Round))?;
+    }
+    // Interleave custom renderer calls through paint.pass() in this same pass.
+    paint.fill_ellipse(Rect::new(20., 20., 40., 40.), [1., 0., 0., 0.5])?;
+}
+frame.finish()?;
+```
+
+Image bindings use `create_image_binding` or `create_sampled_binding`, with
+`prepare_image` for the binding/attachment variant. A session offers `draw_image`,
+`draw_shapes`, `draw_lines`, and `draw_images`. Transformed batches reuse CPU scratch;
+identity-transform batches delegate directly. `shapes()`, `lines()`, and `textures()`
+expose the owned renderers outside an active session for direct scopes, preparation,
+custom image materials/samplers, and immutable prepared image data. Painter owns no
+window, frame, scene, or UI layout. There is no session flush or finish operation.
+
 ## Scoped drawing
 
 For consecutive draws that keep the same mesh/material or image/material, bind a
@@ -297,6 +334,7 @@ cargo run -p astrelis --example multi_window
 cargo run -p astrelis --example ui_workload
 cargo run -p astrelis --example scene_3d
 cargo run -p astrelis --example mixed_2d
+cargo run -p astrelis --example painter
 ```
 
 Every example is one copyable file with its own windows, event handling, resize,
@@ -314,7 +352,9 @@ samples.
 images, clipping, and custom mesh viewports in one offscreen pass, then composites
 its live output. Space changes layer MSAA and P pauses animation. The primitive
 benchmark compares individual, scoped, and explicit batch APIs and checks ordered
-mixed-renderer output before timing:
+mixed-renderer output before timing. `painter` expresses the same layer through the
+facade, including borrowed transform scopes and custom mesh interleaving. Painter
+benchmark variants compare against equivalent direct renderer calls and batches:
 
 ```sh
 cargo bench -p astrelis --bench primitives -- --counts 100,1000,10000 --samples 40 --warmup 8

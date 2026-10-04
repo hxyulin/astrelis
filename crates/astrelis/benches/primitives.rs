@@ -1,8 +1,8 @@
 //! CPU recording experiments for primitives and an ordered mixed-renderer workload.
-//! References use individual Astrelis draws; this is not a direct-wgpu benchmark.
+//! References use direct Astrelis renderer calls; this is not a direct-wgpu benchmark.
 use astrelis::{
     Frame, Framebuffer, FramebufferOptions, GraphicsContext, LineCap, LineDraw, LineRenderer, Mesh,
-    MeshRenderer, Rect, ShapeDraw, ShapeRenderer, TextureBinding, TextureBindingOptions,
+    MeshRenderer, Painter, Rect, ShapeDraw, ShapeRenderer, TextureBinding, TextureBindingOptions,
     TextureDraw, TextureOptions, TextureRenderer, Vertex, wgpu,
 };
 use std::{
@@ -24,14 +24,20 @@ enum Mode {
     LinesBatch,
     Mixed,
     MixedScoped,
+    PainterMixed,
+    PainterShapesBatch,
+    PainterLinesBatch,
 }
 impl Mode {
-    const CASES: [Self; 5] = [
+    const CASES: [Self; 8] = [
         Self::ShapesScoped,
         Self::ShapesBatch,
         Self::LinesScoped,
         Self::LinesBatch,
         Self::MixedScoped,
+        Self::PainterMixed,
+        Self::PainterShapesBatch,
+        Self::PainterLinesBatch,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -43,17 +49,23 @@ impl Mode {
             Self::LinesBatch => "lines_batch",
             Self::Mixed => "mixed_individual",
             Self::MixedScoped => "mixed_scoped",
+            Self::PainterMixed => "painter_mixed",
+            Self::PainterShapesBatch => "painter_shapes_batch",
+            Self::PainterLinesBatch => "painter_lines_batch",
         }
     }
     fn reference(self) -> Self {
         match self {
             Self::ShapesScoped | Self::ShapesBatch => Self::Shapes,
             Self::LinesScoped | Self::LinesBatch => Self::Lines,
+            Self::PainterShapesBatch => Self::ShapesBatch,
+            Self::PainterLinesBatch => Self::LinesBatch,
             _ => Self::Mixed,
         }
     }
 }
 struct Work {
+    painter: Painter,
     shapes: ShapeRenderer,
     lines: LineRenderer,
     textures: TextureRenderer,
@@ -71,6 +83,8 @@ impl Work {
         let mut lines = LineRenderer::new(g);
         let mut textures = TextureRenderer::new(g);
         let mut meshes = MeshRenderer::new(g);
+        let mut painter = Painter::new(g);
+        painter.prepare(&target.render_format())?;
         shapes.prepare(&target.render_format())?;
         lines.prepare(&target.render_format())?;
         meshes.prepare(target.format(), target.sample_count())?;
@@ -78,6 +92,7 @@ impl Work {
         texture.write(&[255; 4])?;
         let image = textures.create_binding(texture.view(), TextureBindingOptions::new())?;
         textures.prepare(&image, &target.render_format())?;
+        painter.prepare_image(&image, &target.render_format())?;
         let mesh = g.create_mesh(
             &[
                 Vertex::new([-0.95, 0.95, 0.], [0.4, 0.9, 0.7, 0.1]),
@@ -112,6 +127,7 @@ impl Work {
             ));
         }
         Ok(Self {
+            painter,
             shapes,
             lines,
             textures,
@@ -176,6 +192,27 @@ impl Work {
                     self.lines.draw(s.pass(), self.segments[i])?;
                     if i % 16 == 0 {
                         self.meshes.draw(s.pass(), &self.mesh)?;
+                    }
+                }
+            }
+            Mode::PainterShapesBatch => self
+                .painter
+                .begin(&mut p)?
+                .draw_shapes(black_box(&self.rectangles))?,
+            Mode::PainterLinesBatch => self
+                .painter
+                .begin(&mut p)?
+                .draw_lines(black_box(&self.segments))?,
+            Mode::PainterMixed => {
+                let mut paint = self.painter.begin(&mut p)?;
+                for i in 0..self.rectangles.len() {
+                    paint.pass().set_scissor_rect(4, 4, 56, 56)?;
+                    paint.draw_shape(self.rectangles[i])?;
+                    paint.draw_image(&self.image, self.placements[i])?;
+                    paint.draw_shape(self.markers[i])?;
+                    paint.draw_line(self.segments[i])?;
+                    if i % 16 == 0 {
+                        self.meshes.draw(paint.pass(), &self.mesh)?;
                     }
                 }
             }
@@ -271,7 +308,7 @@ fn main() -> Result<()> {
             "--bench" => {}
             "--help" | "-h" => {
                 println!(
-                    "cargo bench -p astrelis --bench primitives -- [--counts 100,1000,10000] [--samples 40] [--warmup 8]\nCPU record and total, no completion waits/presentation/GPU timing. Alternating paired samples.\nReferences are individual Astrelis draws. Batches reduce GPU draw count; scopes retain it."
+                    "cargo bench -p astrelis --bench primitives -- [--counts 100,1000,10000] [--samples 40] [--warmup 8]\nCPU record and total, no completion waits/presentation/GPU timing. Alternating paired samples.\nPrimitive references use individual Astrelis draws; Painter references use matching direct renderer calls. Batches reduce GPU draw count; scopes retain it."
                 );
                 return Ok(());
             }
@@ -300,7 +337,7 @@ fn main() -> Result<()> {
     }
     let g = pollster::block_on(GraphicsContext::headless())?;
     eprintln!(
-        "adapter={:?}; samples={samples}; warmup={warmup}; counts={counts:?}; gpu_execution_timing=not_measured; reference=individual_astrelis",
+        "adapter={:?}; samples={samples}; warmup={warmup}; counts={counts:?}; gpu_execution_timing=not_measured; reference=direct_astrelis_renderers",
         g.adapter().get_info()
     );
     let mut target = g.create_framebuffer(
