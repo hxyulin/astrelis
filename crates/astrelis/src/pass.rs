@@ -794,6 +794,15 @@ impl<'frame> RenderPass<'frame> {
     pub(crate) fn viewport_size(&self) -> [f32; 2] {
         [self.viewport[2], self.viewport[3]]
     }
+    pub(crate) fn retain_resource(
+        &mut self,
+        resource: std::sync::Arc<dyn crate::uploads::ResourceLease>,
+    ) {
+        self.uploads
+            .as_mut()
+            .expect("resource leases require a frame-owned pass")
+            .retain(resource);
+    }
 
     /// Binds application resources without invalidating tracked raster state.
     /// Dynamic offsets follow wgpu alignment and layout validation.

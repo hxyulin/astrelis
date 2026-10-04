@@ -1,0 +1,80 @@
+{
+  "date": "2026-10-05",
+  "base_commit": "34fb850f0c0f358c9c71fc9ce2cb46763a5d4e53",
+  "working_tree": "GPU coverage/color text milestone, uncommitted",
+  "command": "cargo bench -p astrelis --bench text_rendering",
+  "compiler": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434",
+  "cpu": "Apple M3 Pro",
+  "samples": 40,
+  "warmup": 8,
+  "runs": 3,
+  "conditions": "Three sequential release runs after native verification; example closed. Standard laptop scheduler/thermal noise may remain.",
+  "scope": "CPU raster/atlas/geometry preparation, warmed image cache with new geometry, prepared recording, frame CPU total. Shaping and GPU completion waits excluded; no GPU execution timing or color atlas workload.",
+  "source_sha256": {
+    "Cargo.toml": "e45fb186e45baa373a78a9c70a16e017f1daf4dd565fc1a41349271ee1280820",
+    "Cargo.lock": "93645e4dd824950c8e94904f38304391b6164f884afcba219fdefb823714fc25",
+    "crates/astrelis/Cargo.toml": "7d50af5924ed35828011e6d5f715729edfa76b8a34a50c32ce007f9e88f7f19d",
+    "crates/astrelis/benches/text_rendering.rs": "d6f64d94e055c993c07b3356e12ab323c44233aeffd6d2f970105feb05229151",
+    "crates/astrelis/src/frame.rs": "4496805987834bbffc47b2e14d2364826a254a91d7ebeef3da3a7f159fda7c33",
+    "crates/astrelis/src/pass.rs": "90438a87b70b9d4276e52404fa5080e01fba91db01559c85c793e51a4eb492a7",
+    "crates/astrelis/src/uploads.rs": "7cfef3870eb9ad696a9c1deeba3fc92815684eed852acb7e5de33fb45070c826",
+    "crates/astrelis/src/text/buffer.rs": "5c1933988d23fd601f01229db294943b967056ee884e3cfaf8ece900c47e374a",
+    "crates/astrelis/src/text/layout.rs": "dc7261bd49fa0cbdcae57607b24c130700602f547a64b493e0c7ca421273bd05",
+    "crates/astrelis/src/text/mod.rs": "29870f3611ace562e6e4b77220f6c99d0ea88326c79e528506bcc4318706eaad",
+    "crates/astrelis/src/text/render_tests.rs": "175e2e92748f7f03624464be6b9c38ecb42b7e19f404417c96177f18a5313057",
+    "crates/astrelis/src/text/renderer.rs": "9c716c3dc3f2e449e835c141bf667a80dd8506c257e257b12a3e2fd5b22985d0",
+    "crates/astrelis/src/text/style.rs": "448346fcbdeadcd42a2d8db04ebf064ea5e23b904f8a0b62885abd2bb4af59b8",
+    "crates/astrelis/src/text/system.rs": "7a5259026ada4e24fcc4abaad2a3ef7499d8f799c917df4cdd446c2fb281cf6f",
+    "crates/astrelis/src/text/tests.rs": "f1c33f7ce17710862a38cb558a1665cff31a745757770eeeb7913e16076381a7",
+    "crates/astrelis/src/text/text.wgsl": "a0312f264b0834b252e63885cf289648a321d3ce02ad55255fb0ff6610df7969"
+  },
+  "run_logs": [
+    "   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/dev/projects/astrelis/crates/astrelis)\n    Finished `bench` profile [optimized] target(s) in 2.50s\n     Running benches/text_rendering.rs (target/release/deps/text_rendering-88386aba43c8aed3)\nadapter=AdapterInfo { name: \"Apple M3 Pro\", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"\", driver_info: \"\", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; samples=40; warmup=8; gpu_execution=not_measured; layout_shaping=outside_timing; completion_wait=outside_timing\ninput_scalars=100; drawable_glyphs=84; stats=TextRendererStats { cache_hits: 8212, cache_misses: 1488, uploaded_bytes: 142512, geometry_bytes: 391104, parameter_bytes: 2304, draw_calls: 48, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 31 }\ninput_scalars=1000; drawable_glyphs=851; stats=TextRendererStats { cache_hits: 104306, cache_misses: 2976, uploaded_bytes: 285696, geometry_bytes: 4353360, parameter_bytes: 4608, draw_calls: 96, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 31 }\ninput_scalars=10000; drawable_glyphs=8537; stats=TextRendererStats { cache_hits: 1080820, cache_misses: 4416, uploaded_bytes: 419088, geometry_bytes: 44101632, parameter_bytes: 6912, draw_calls: 144, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 30 }\n",
+    "    Finished `bench` profile [optimized] target(s) in 0.06s\n     Running benches/text_rendering.rs (target/release/deps/text_rendering-88386aba43c8aed3)\nadapter=AdapterInfo { name: \"Apple M3 Pro\", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"\", driver_info: \"\", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; samples=40; warmup=8; gpu_execution=not_measured; layout_shaping=outside_timing; completion_wait=outside_timing\ninput_scalars=100; drawable_glyphs=84; stats=TextRendererStats { cache_hits: 8212, cache_misses: 1488, uploaded_bytes: 142512, geometry_bytes: 391104, parameter_bytes: 2304, draw_calls: 48, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 31 }\ninput_scalars=1000; drawable_glyphs=851; stats=TextRendererStats { cache_hits: 104306, cache_misses: 2976, uploaded_bytes: 285696, geometry_bytes: 4353360, parameter_bytes: 4608, draw_calls: 96, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 31 }\ninput_scalars=10000; drawable_glyphs=8537; stats=TextRendererStats { cache_hits: 1080820, cache_misses: 4416, uploaded_bytes: 419088, geometry_bytes: 44101632, parameter_bytes: 6912, draw_calls: 144, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 30 }\n",
+    "    Finished `bench` profile [optimized] target(s) in 0.06s\n     Running benches/text_rendering.rs (target/release/deps/text_rendering-88386aba43c8aed3)\nadapter=AdapterInfo { name: \"Apple M3 Pro\", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: \"\", driver: \"\", driver_info: \"\", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; samples=40; warmup=8; gpu_execution=not_measured; layout_shaping=outside_timing; completion_wait=outside_timing\ninput_scalars=100; drawable_glyphs=84; stats=TextRendererStats { cache_hits: 8212, cache_misses: 1488, uploaded_bytes: 142512, geometry_bytes: 391104, parameter_bytes: 2304, draw_calls: 48, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 31 }\ninput_scalars=1000; drawable_glyphs=851; stats=TextRendererStats { cache_hits: 104306, cache_misses: 2976, uploaded_bytes: 285696, geometry_bytes: 4353360, parameter_bytes: 4608, draw_calls: 96, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 31 }\ninput_scalars=10000; drawable_glyphs=8537; stats=TextRendererStats { cache_hits: 1080820, cache_misses: 4416, uploaded_bytes: 419088, geometry_bytes: 44101632, parameter_bytes: 6912, draw_calls: 144, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 30 }\n"
+  ],
+  "fonts": [
+    {
+      "file": "SourceSans3-Regular.otf",
+      "repository": "https://github.com/adobe-fonts/source-sans",
+      "path": "OTF/SourceSans3-Regular.otf",
+      "revision": "7c691c2772570a0d3a9e1bffe8a9d6074257d985",
+      "bytes": 334924,
+      "sha256": "08df266400933d3178d081a45f94a08814c3e55b4b7dd2e0ff69cb1329f13ab6"
+    },
+    {
+      "file": "SourceSans3-OFL.md",
+      "repository": "https://github.com/adobe-fonts/source-sans",
+      "path": "LICENSE.md",
+      "revision": "ca29c267aed34e82052d7ca5e027cf0e714c0f11",
+      "bytes": 4486,
+      "sha256": "56af9b9c6715597e458284a474dc118a50a4150e9d547c70f7b4a33c3e6a9328"
+    },
+    {
+      "file": "NotoSansArabic.ttf",
+      "repository": "https://github.com/google/fonts",
+      "path": "ofl/notosansarabic/NotoSansArabic[wdth,wght].ttf",
+      "revision": "e5ee31305efa101c2cae65f44d9642df2c8f0b4d",
+      "bytes": 844676,
+      "sha256": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e"
+    },
+    {
+      "file": "NotoSansArabic-OFL.txt",
+      "repository": "https://github.com/google/fonts",
+      "path": "ofl/notosansarabic/OFL.txt",
+      "revision": "e5ee31305efa101c2cae65f44d9642df2c8f0b4d",
+      "bytes": 4382,
+      "sha256": "07fc70bfeb985cc1a87a8587d0a0c80bab11c86c9dc3fd95b6f0cb332f983e96"
+    },
+    {
+      "file": "TestColor.ttf",
+      "source": "generate_color.py",
+      "generator": "fonttools 4.60.2",
+      "license": "MIT (repository license)",
+      "bytes": 1340,
+      "sha256": "89bb0f29171dcfedd6fe3fdca39dc84cf6d4116676df80ce078966b49a4b1225",
+      "generator_sha256": "b51991fb48d6aab476aeaa4138581714c6063a1a5b9d3f4173396005c058d5b5"
+    }
+  ]
+}

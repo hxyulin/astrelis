@@ -1,4 +1,4 @@
-//! GPU-independent font loading, advanced shaping, and retained paragraph layout.
+//! Font loading, advanced CPU shaping/layout, and explicit GPU coverage/color text.
 //!
 //! Keep one [`TextSystem`] per application and one [`TextBuffer`] per retained text
 //! item. Font discovery is explicit. [`TextBuffer::layout`] evaluates dirty state
@@ -30,17 +30,49 @@
 //! The CPU backend is re-exported as [`cosmic`] for font inspection/custom consumers.
 //! [`TextSystem::as_cosmic`] and [`TextFont::as_cosmic`] expose read-only backend
 //! access. Buffer mutation goes through validated setters to preserve invalidation.
-//! GPU text preparation, coverage/color atlases, and distance-field rendering are
-//! separate milestones; this module does not introduce placeholder GPU APIs.
+//! [`TextRenderer::prepare_text`] rasterizes a retained layout into immutable
+//! [`PreparedText`] geometry and atlas leases. [`TextRenderer::draw`] records those
+//! batches into existing frame-owned passes, without shaping/rasterizing. Raster
+//! scale is explicit; mask colors are linear, while color glyph RGB is intrinsic.
+//! Cache budgets include prepared texts, recordings, and GPU completion leases.
+//! Painter text integration and distance fields remain separate milestones.
+//!
+//! ```no_run
+//! use astrelis::{GraphicsContext, FramebufferOptions, TextSystem, TextBuffer,
+//!     TextStyle, TextRenderer, TextRasterOptions, TextDraw};
+//! # fn draw() -> Result<(), Box<dyn std::error::Error>> {
+//! let graphics = pollster::block_on(GraphicsContext::headless())?;
+//! let mut target = graphics.create_framebuffer(FramebufferOptions::new(320, 100))?;
+//! let mut fonts = TextSystem::new();
+//! fonts.load_font(include_bytes!("../../tests/fonts/SourceSans3-Regular.otf"))?;
+//! let mut label = TextBuffer::new();
+//! label.set_text("Hello, office!", TextStyle::new().family("Source Sans 3"))?;
+//! let layout = label.layout(&mut fonts)?;
+//! let mut renderer = TextRenderer::new(&graphics);
+//! renderer.prepare(&target.render_format())?;
+//! let prepared = renderer.prepare_text(&layout, TextRasterOptions::new())?;
+//! let mut frame = target.begin_frame()?;
+//! {
+//!     let mut pass = frame.render_pass().begin()?;
+//!     renderer.draw(&mut pass, &prepared, TextDraw::new([20., 20.]))?;
+//! }
+//! frame.finish()?;
+//! # Ok(()) }
+//! ```
 
 mod buffer;
 mod layout;
+mod renderer;
 mod style;
 mod system;
 
 pub use buffer::TextBuffer;
 pub use cosmic_text as cosmic;
 pub use layout::{TextFont, TextGlyph, TextLayout, TextLine};
+pub use renderer::{
+    PreparedText, TextDraw, TextRasterOptions, TextRenderError, TextRenderer, TextRendererOptions,
+    TextRendererStats,
+};
 pub use style::{FontFamily, FontSlant, FontStretch, TextAlign, TextStyle, TextWrap};
 pub use system::{FontId, FontInfo, TextSystem};
 

@@ -1,0 +1,13 @@
+input_scalars,stage,median_us,p95_us
+100,cold_raster_atlas_geometry,232.812,277.875
+100,cached_atlas_new_geometry,26.875,31.458
+100,prepared_record,0.730,1.708
+100,prepared_frame_cpu_total,33.855,45.833
+1000,cold_raster_atlas_geometry,269.042,309.042
+1000,cached_atlas_new_geometry,61.812,68.083
+1000,prepared_record,0.584,0.750
+1000,prepared_frame_cpu_total,31.855,39.542
+10000,cold_raster_atlas_geometry,625.354,696.417
+10000,cached_atlas_new_geometry,427.646,466.291
+10000,prepared_record,0.688,1.334
+10000,prepared_frame_cpu_total,35.771,45.666

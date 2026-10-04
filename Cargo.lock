@@ -105,6 +105,7 @@ dependencies = [
  "bytemuck",
  "cosmic-text",
  "pollster",
+ "swash",
  "wgpu",
  "winit",
 ]

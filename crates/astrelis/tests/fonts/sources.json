@@ -30,5 +30,14 @@
     "revision": "e5ee31305efa101c2cae65f44d9642df2c8f0b4d",
     "bytes": 4382,
     "sha256": "07fc70bfeb985cc1a87a8587d0a0c80bab11c86c9dc3fd95b6f0cb332f983e96"
+  },
+  {
+    "file": "TestColor.ttf",
+    "source": "generate_color.py",
+    "generator": "fonttools 4.60.2",
+    "license": "MIT (repository license)",
+    "bytes": 1340,
+    "sha256": "89bb0f29171dcfedd6fe3fdca39dc84cf6d4116676df80ce078966b49a4b1225",
+    "generator_sha256": "b51991fb48d6aab476aeaa4138581714c6063a1a5b9d3f4173396005c058d5b5"
   }
 ]

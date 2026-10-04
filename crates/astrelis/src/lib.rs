@@ -10,7 +10,8 @@
 //! independently of a GPU. [`TextSystem`] explicitly loads fonts; [`TextBuffer`]
 //! evaluates into shared [`TextLayout`] snapshots with measurements, glyph origins,
 //! source clusters, bidi levels, and retained font data. Unchanged evaluation reuses
-//! its snapshot. GPU text preparation and drawing are separate future milestones.
+//! its snapshot. [`TextRenderer`] explicitly prepares coverage/color glyph atlases
+//! and immutable [`PreparedText`] geometry, then draws into the same scoped passes.
 //!
 //! # Context, targets, and frames
 //!
@@ -377,8 +378,10 @@ pub use pass::{RenderPass, RenderPassBuilder};
 pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use text::{
-    FontFamily, FontId, FontInfo, FontSlant, FontStretch, TextAlign, TextBuffer, TextError,
-    TextFont, TextGlyph, TextLayout, TextLine, TextStyle, TextSystem, TextWrap,
+    FontFamily, FontId, FontInfo, FontSlant, FontStretch, PreparedText, TextAlign, TextBuffer,
+    TextDraw, TextError, TextFont, TextGlyph, TextLayout, TextLine, TextRasterOptions,
+    TextRenderError, TextRenderer, TextRendererOptions, TextRendererStats, TextStyle, TextSystem,
+    TextWrap,
 };
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{

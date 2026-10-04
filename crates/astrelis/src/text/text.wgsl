@@ -1,0 +1,32 @@
+@group(0) @binding(0) var atlas: texture_2d<f32>;
+@group(0) @binding(1) var atlas_sampler: sampler;
+struct Output {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) @interpolate(flat) kind: f32,
+};
+@vertex fn vertex_main(@builtin(vertex_index) index: u32,
+    @location(0) rect: vec4<f32>, @location(1) uv: vec4<f32>, @location(2) kind: vec4<f32>,
+    @location(3) origin_axis_x: vec4<f32>, @location(4) axis_y: vec4<f32>, @location(5) color: vec4<f32>) -> Output {
+    let corners = array(vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 0.0),
+                        vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0));
+    let corner = corners[index];
+    let local = rect.xy + corner * rect.zw;
+    let destination = origin_axis_x.xy + local.x * origin_axis_x.zw + local.y * axis_y.xy;
+    var output: Output;
+    output.position = vec4(destination * vec2(2.0, -2.0) + vec2(-1.0, 1.0), 0.0, 1.0);
+    output.uv = uv.xy + corner * uv.zw;
+    output.color = color;
+    output.kind = kind.x;
+    return output;
+}
+@fragment fn fragment_main(input: Output) -> @location(0) vec4<f32> {
+    let texel = textureSample(atlas, atlas_sampler, input.uv);
+    if input.kind == 0.0 {
+        let alpha = texel.r * input.color.a;
+        return vec4(input.color.rgb * alpha, alpha);
+    }
+    // Color atlas stores linear, premultiplied RGBA. Draw RGB colors masks only.
+    return texel * input.color.a;
+}

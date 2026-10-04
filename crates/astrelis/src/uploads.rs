@@ -22,8 +22,23 @@ impl Drop for Page {
 #[derive(Debug, Default)]
 pub(crate) struct DrawUploads {
     pages: Vec<Page>,
+    leases: Vec<Arc<dyn ResourceLease>>,
 }
+pub(crate) trait ResourceLease: std::fmt::Debug + Send + Sync {}
+impl<T: std::fmt::Debug + Send + Sync> ResourceLease for T {}
 impl DrawUploads {
+    pub(crate) fn retain(&mut self, resource: Arc<dyn ResourceLease>) {
+        // Repeated draws of the same prepared data need only one recording lease.
+        if !self.leases.iter().any(|r| Arc::ptr_eq(r, &resource)) {
+            self.leases.push(resource);
+        }
+    }
+    pub(crate) fn retain_until_complete(&mut self, queue: &wgpu::Queue) {
+        if !self.leases.is_empty() {
+            let leases = std::mem::take(&mut self.leases);
+            queue.on_submitted_work_done(move || drop(leases));
+        }
+    }
     pub(crate) fn append(
         &mut self,
         graphics: &crate::GraphicsContext,

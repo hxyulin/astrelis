@@ -349,9 +349,30 @@ Advanced shaping uses cosmic-text with font fallback, kerning, ligatures, and
 complex-script support. Unchanged evaluation reuses its snapshot; width changes
 reuse shaped runs. Snapshots retain text and font data across edits and font loading.
 Measurement requires no window/GPU and does not apply DPI or compute pixel ink bounds.
-This milestone provides one style per buffer; GPU rasterization/atlases, a text
-renderer, rich spans, and text editing/hit testing follow separately. See the
+This milestone provides one style per buffer; rich spans and text editing/hit testing
+follow separately. See the
 [text architecture and plan](docs/text.md).
+
+`TextRenderer` explicitly prepares coverage/color glyphs and immutable geometry:
+
+```rust
+let mut renderer = TextRenderer::new(&graphics);
+renderer.prepare(&target.render_format())?;
+let prepared = renderer.prepare_text(&layout,
+    TextRasterOptions::new().scale_factor(dpi_scale))?;
+// Reuse prepared text across frames; origin, color and opacity remain per draw.
+renderer.draw(&mut pass, &prepared,
+    TextDraw::new([20., 30.]).color([0.8, 0.9, 1., 1.]))?;
+```
+
+Raster scale applies DPI once to glyphs and layout positions. Draw placement uses
+viewport-relative physical pixels. Coverage is colored with linear RGBA; intrinsic
+color glyphs retain their RGB and receive draw opacity. Batches preserve layout
+order and current clipping. A draw uploads 48 bytes of placement/color parameters,
+with no shaping, rasterization, or recurring glyph-geometry upload. Atlas budgets
+include prepared texts, recordings, and GPU completion leases. Cache exhaustion
+returns `AtlasFull`; callers control resource release and polling. Painter text
+integration and distance fields are the next separate milestones.
 
 ## Standalone examples and development
 
@@ -375,6 +396,7 @@ cargo run -p astrelis --example scene_3d
 cargo run -p astrelis --example mixed_2d
 cargo run -p astrelis --example painter
 cargo run -p astrelis --example text_layout
+cargo run -p astrelis --example text
 ```
 
 Every windowed example is one copyable file with its own windows, event handling, resize,
@@ -392,6 +414,10 @@ samples.
 multilingual fallback, glyph/cluster inspection, headless measurement, snapshot
 reuse, and reflow. Run `cargo bench -p astrelis --bench text` to measure CPU stages;
 see the [CPU text baseline](docs/performance/text.md) for results and boundaries.
+`text` adds a standalone window with DPI preparation, clipping, multilingual fallback,
+COLR/PNG color glyph fixtures, resizing/reflow, and Space-controlled MSAA. The
+`text_rendering` benchmark separates GPU-text CPU stages, with completion outside timing;
+see the [GPU-text CPU baseline](docs/performance/text-rendering.md).
 
 `mixed_2d` combines filled primitives, line caps, transformed ellipses, translucent
 images, clipping, and custom mesh viewports in one offscreen pass, then composites

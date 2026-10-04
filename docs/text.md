@@ -1,8 +1,8 @@
 # Text architecture and implementation plan
 
-Status: the CPU font/shaping/layout milestone is implemented in `astrelis::text`.
-GPU text preparation, TextRenderer, Painter text integration, and distance fields
-remain planned. Their signatures below are proposals, not existing public APIs.
+Status: CPU font/shaping/layout and explicit coverage/color GPU preparation/drawing
+are implemented in `astrelis::text`. Painter text integration and distance fields
+remain planned.
 
 Build the CPU font/shaping/layout layer first. Use cosmic-text as its implementation
 and keep GPU preparation independent. Start GPU rendering with grayscale coverage
@@ -36,7 +36,8 @@ uploads and pass state restoration.
 
 The workspace now declares Rust 1.98.1, matching the installed compiler. The CPU
 dependency is pinned to cosmic-text 0.19.0 with `std` only. Its optional Swash
-rasterizer and optional backend shaped-string cache are disabled in this milestone.
+rasterizer and optional backend shaped-string cache are disabled in cosmic-text.
+The GPU renderer uses Swash 0.2.10 directly against retained font bytes.
 Shaped runs are retained per TextBuffer. This keeps font-generation invalidation
 under Astrelis's control without accumulating an additional shared string cache.
 
@@ -56,7 +57,8 @@ for multiple windows/devices; each GPU renderer prepares its own representation.
 Embedded fonts and system font discovery are separate explicit operations. Font
 handles carry source identity, so equal numeric backend IDs from different systems
 cannot be confused. Layout snapshots retain the font sources they require. GPU
-preparation using a different TextSystem must reject incompatible source identity.
+preparation consumes the retained fonts directly without a TextSystem borrow.
+Layouts from multiple systems are safe because glyph cache keys include scoped font IDs.
 
 TextBuffer retains backend shaping/layout state so changing wrapping constraints
 can reuse shaped runs. Setters mark the appropriate work dirty. Layout evaluation
@@ -93,14 +95,14 @@ let measured = layout.size();
 assert!(std::sync::Arc::ptr_eq(&layout, &paragraph.layout(&mut text)?));
 ```
 
-Proposed GPU API for a later milestone:
+Implemented GPU API:
 
 ```rust,ignore
-// A later milestone adds GPU preparation, outside active render passes.
+// Prepare outside active render passes; retain PreparedText for unchanged content.
 let mut renderer = TextRenderer::new(&graphics);
 renderer.prepare(&target.render_format())?;
 let prepared = renderer.prepare_text(
-    &mut text, &layout, TextRasterOptions::new().scale_factor(dpi_scale),
+    &layout, TextRasterOptions::new().scale_factor(dpi_scale),
 )?;
 let mut pass = frame.render_pass().begin()?;
 renderer.draw(&mut pass, &prepared,
@@ -113,7 +115,7 @@ physical pixels with the existing Y-down affine convention; the renderer convert
 prepared geometry to physical size once. DPI must not be applied implicitly again
 by Painter or a window. Draw transforms also transform glyph quads. Magnifying a
 coverage image resamples it; callers can prepare at a suitable raster size instead.
-Choose a documented local raster/subpixel phase for prepared data. Fractional
+The coverage renderer uses zero local raster phase. Fractional
 movement filters that data; it must not secretly rasterize during draw.
 
 ## Glyph representations
@@ -184,8 +186,8 @@ An immutable prepared path should also avoid re-uploading all glyph instances.
    layout unchanged, test corners/thin strokes under magnification/transforms, and
    compare quality, generation cost, atlas memory and GPU execution where measurable.
 
-CPU-first acceptance is a font/shaping/layout milestone, not a completed GPU TextRenderer.
-No particular GPU speedup or universal Unicode/font-format coverage is assumed.
+The first GPU implementation covers coverage images, COLR outline layers and supported
+bitmap sources through Swash. No universal Unicode/font-format coverage is assumed.
 
 ## CPU contracts and verification
 
@@ -231,3 +233,70 @@ source hashes and measurement boundaries. Pinned OFL fixtures and licenses live
 in `crates/astrelis/tests/fonts`; tests cover
 OTF/TTF/collections, shaping, bidi, fallback, metrics, invalidation, missing glyphs,
 and ownership without requiring a window, device, or installed font.
+
+## GPU contracts and verification
+
+`TextRenderer::new(&graphics)` uses default bounded atlas settings;
+`with_options(&graphics, TextRendererOptions)` validates custom page/budget/raster
+limits. `prepare(&RenderFormat)` creates pipeline variants, and
+`prepare_text(&TextLayout, TextRasterOptions)` rasterizes cache misses and creates
+an immutable glyph buffer. It requires only the retained layout's font data.
+`draw(&mut RenderPass, &PreparedText, TextDraw)` preserves current viewport/scissor
+and uploads a 48-byte placement/color record. It restores owned state after other
+renderers. Depth/stencil tests and writes are disabled, including in depth-enabled
+or read-only passes. Pipeline preparation remains explicit for predictable first use.
+
+Prepared geometry contains physical pixel positions: raster scale multiplies font
+size and layout placement once. Draw origin and affine transforms are physical
+pixels relative to the viewport. Magnification filters the prepared images; choose
+a larger raster scale for additional resolution. `size()` measures scaled advances
+and line boxes; `ink_bounds()` bounds image quads, not an exact nonzero-pixel outline.
+No-image glyph indexes are reported by `skipped_glyphs()`, including blank spaces
+and sources Swash cannot render. `.notdef` images remain drawable.
+
+Coverage pages use R8; color pages use linear premultiplied RGBA8. Swash's color
+outline blits are premultiplied sRGB and PNG bitmap results are straight sRGB;
+preparation normalizes both before filtered sampling and source-over blending.
+Draw RGB colors masks only; draw alpha/opacity affects both representations.
+One transparent texel surrounds every allocation. Only consecutive glyphs on the
+same atlas page are batched; mask/color transitions and drawing order are preserved.
+
+Pages are append-only. Eviction discards whole unleased pages and creates new
+textures, preserving retained UVs and already-recorded commands. Default settings
+allow eight 1024² pages, 16,384 cached glyph keys, and a 512-pixel physical font-size
+limit. The page budget counts retained prepared texts, active recordings, and
+submitted work through completion callbacks. `clear_cache()` releases cache ownership
+but cannot release those leases. `AtlasFull` never waits: drop obsolete texts and
+drive queue/device progress, or configure a larger budget, before retrying.
+Preparation failures may populate caches but never invalidate earlier prepared text.
+
+Glyph images are not retained in a CPU image cache. Swash uses an eight-entry
+scaler cache plus reusable decode/outline scratch; the font-key table is limited
+to 64 entries. Outline extents are checked before raster output allocation. Bitmap
+dimensions are checked after decode, so backend temporary decode scratch is outside
+the atlas budget. Prepared geometry allocations are caller-owned and limited by the
+device buffer limit, separate from atlas bytes. Repeated preparation creates a new
+geometry buffer even when all glyph images hit; retain PreparedText to avoid that work.
+
+`stats()` exposes hits/misses, atlas uploads, prepared geometry bytes, parameter
+bytes, recorded draw counts, live pages, logical atlas bytes, and cached key count.
+Pixel tests cover intrinsic color/opacity, linear compositing, DPI, clipping, MSAA,
+renderer interleaving, multiple prepared texts and source identities, overlapping
+recordings, cache clearing/eviction, exhaustion, abandonment and completion recovery.
+The original geometric `TestColor.ttf` fixture contains coverage, COLR v0 layers,
+and a PNG sbix glyph; its generator is committed alongside the font.
+
+```sh
+cargo run -p astrelis --example text
+cargo bench -p astrelis --bench text_rendering
+```
+
+The window example owns its event loop, surface recovery, DPI preparation and width
+reflow. Space toggles MSAA. The benchmark separates cold raster/atlas/geometry
+preparation, cached-atlas preparation with new geometry, prepared draw recording,
+and frame CPU total. Shaping and GPU completion waits are outside those intervals;
+GPU execution and color-atlas workloads are not measured by this initial benchmark.
+See the [GPU-text CPU baseline](performance/text-rendering.md) for three recorded runs
+and exact measurement boundaries. COLR currently uses palette zero and the rasterizer's
+default foreground; custom palettes/foreground, rich spans, LCD rendering, and
+distance fields remain future work.
