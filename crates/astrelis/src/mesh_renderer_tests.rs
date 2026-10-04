@@ -2,7 +2,7 @@ use std::{sync::mpsc, time::Duration};
 
 use super::*;
 
-fn quad(graphics: &GraphicsContext, color: [f32; 4]) -> Mesh {
+pub(super) fn quad(graphics: &GraphicsContext, color: [f32; 4]) -> Mesh {
     graphics
         .create_mesh(
             &[
@@ -16,7 +16,7 @@ fn quad(graphics: &GraphicsContext, color: [f32; 4]) -> Mesh {
         .unwrap()
 }
 
-fn pixels(
+pub(super) fn pixels(
     graphics: &GraphicsContext,
     record: impl FnOnce(&mut wgpu::CommandEncoder, &wgpu::TextureView),
 ) -> Vec<u8> {
@@ -82,7 +82,7 @@ fn pixels(
     result
 }
 
-fn pass<'encoder>(
+pub(super) fn pass<'encoder>(
     graphics: &'encoder GraphicsContext,
     encoder: &'encoder mut wgpu::CommandEncoder,
     view: &wgpu::TextureView,

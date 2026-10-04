@@ -1,4 +1,4 @@
-//! Indexed, colored triangle-mesh rendering built directly on wgpu.
+//! Indexed triangle-mesh rendering with custom materials, built directly on wgpu.
 //!
 //! Astrelis handles GPU initialization, mesh uploads, surfaces, offscreen framebuffers, and
 //! frame submission. The application owns its windows, event loop, redraw schedule,
@@ -217,8 +217,10 @@
 //! handles continue to reference previous attachment generations.
 //!
 //! A framebuffer can also be owned by [`RenderTarget::Framebuffer`] for generic
-//! destination handling. Integer formats support custom shaders; [`MeshRenderer`]
-//! rejects formats incompatible with its floating-point output and alpha blending.
+//! destination handling. Integer formats support custom shaders; the default
+//! [`MeshRenderer::draw`] rejects formats incompatible with floating-point output
+//! and alpha blending. [`MeshRenderer::draw_with_material`] can use an integer
+//! fragment output with a matching format and blending disabled.
 //! Framebuffer contents require sampling usages to be bound as a shader texture;
 //! avoid reading from and writing to the same framebuffer in one pass.
 //!
@@ -271,11 +273,82 @@
 //!
 //! # Coordinates and colors
 //!
-//! Vertices use clip-space X/Y in `[-1, 1]`, Z in `[0, 1]`, and linear,
-//! straight-alpha RGBA colors. Indices are `u32` triangle lists. The fragment shader
-//! interpolates vertex color and premultiplies it for alpha blending. Draws execute
-//! in recording order without depth testing or face culling. This initial API has
-//! a fixed vertex-color pipeline and no material, scene, or display-list layer.
+//! Default shading interprets positions as clip-space X/Y in `[-1, 1]`, Z in
+//! `[0, 1]`, and colors as linear, straight-alpha RGBA. Its fragment shader
+//! interpolates vertex color and premultiplies it for alpha blending. Indices are
+//! `u32` triangle lists. Draws execute in recording order without depth testing;
+//! default shading does not cull faces. A custom material can transform positions,
+//! define color conventions, and select face culling. The vertex layout remains
+//! fixed; this API has no scene or display-list layer.
+//!
+//! # Materials and custom mesh shaders
+//!
+//! A [`Material`] retains an application-created [`wgpu::ShaderModule`], explicit
+//! binding layouts, entry-point names, blending, write masks, and face culling.
+//! Create one with [`GraphicsContext::create_material`] and [`MaterialOptions`].
+//! Resources stay on the context's device; materials and meshes can be reused
+//! with independent renderers and compatible targets. Shader modules use wgpu
+//! directly so source loading and compilation diagnostics remain application-owned.
+//!
+//! ```no_run
+//! use astrelis::{GraphicsContext, Material, MaterialOptions, wgpu};
+//! fn material(graphics: &GraphicsContext) -> Material {
+//!     let shader = graphics.device().create_shader_module(wgpu::ShaderModuleDescriptor {
+//!         label: Some("application mesh shader"),
+//!         source: wgpu::ShaderSource::Wgsl(r#"
+//!             @vertex fn vertex_main(@location(0) position: vec3<f32>)
+//!                 -> @builtin(position) vec4<f32> { return vec4(position, 1.0); }
+//!             @fragment fn fragment_main() -> @location(0) vec4<f32> {
+//!                 return vec4(0.2, 0.6, 1.0, 1.0);
+//!             }
+//!         "#.into()),
+//!     });
+//!     graphics.create_material(MaterialOptions::new(&shader).blend(None))
+//! }
+//! ```
+//!
+//! `renderer.draw(pass, mesh)` uses the default vertex-color material.
+//! `renderer.draw_with_material(pass, mesh, material)` selects custom shading;
+//! both use the same fixed vertex layout and pass viewport/scissor settings.
+//! Shader inputs are location 0 `vec3<f32>` position and location 1 `vec4<f32>`
+//! color; unused inputs can be omitted. The vertex shader may transform positions.
+//! Fragment output at location 0 must match the attachment format. Premultiplied
+//! alpha blending is the material default; custom shaders must premultiply their
+//! output or select a different blend state. No depth attachment is used.
+//!
+//! Supply explicit bind-group layouts with [`MaterialOptions::bind_group_layouts`].
+//! The application owns buffers, textures, groups, and their updates, and binds
+//! groups through [`RenderPass::as_wgpu`] before drawing. Dynamic offsets and
+//! per-draw binding changes work as in wgpu. They do not create new materials or
+//! pipelines. The standalone `materials` example updates a tint uniform on Space.
+//!
+//! Pipelines are cached per renderer by material identity, format, and sample count.
+//! Cloned materials reuse entries; new materials have independent entries, even
+//! when their settings are identical. Cached pipelines live until the renderer is
+//! dropped. Prepare before rendering with [`MeshRenderer::prepare`] for default
+//! shading or [`MeshRenderer::prepare_material`] for custom shading, passing the
+//! target's format and count. Cache hits perform no capability queries, allocation,
+//! or pipeline creation. Preparation does not submit or wait for GPU completion
+//! and cannot guarantee that a driver defers no work until the first draw.
+//!
+//! Astrelis returns device/format/sample-count errors directly. Raw shader,
+//! layout, interface, and bind-group validation follows wgpu's error scopes and
+//! uncaptured error handler; a successful preparation `Result` alone does not
+//! certify shader validity. A validation scope can check preparation before use:
+//!
+//! ```no_run
+//! use astrelis::{Error, Material, MeshRenderer, wgpu};
+//! async fn prepare_checked(device: &wgpu::Device, renderer: &mut MeshRenderer,
+//!     material: &Material, format: wgpu::TextureFormat, samples: u32,
+//! ) -> Result<(), Box<dyn std::error::Error>> {
+//!     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+//!     let prepared: Result<(), Error> = renderer.prepare_material(material, format, samples);
+//!     let validation_error = scope.pop().await;
+//!     prepared?;
+//!     if let Some(error) = validation_error { return Err(error.into()); }
+//!     Ok(())
+//! }
+//! ```
 //!
 //! # wgpu interoperability
 //!
@@ -305,6 +378,16 @@
 //! }
 //! ```
 //!
+//! Wrapped passes currently have one color attachment and no depth/stencil,
+//! multiple render targets, or custom mip/layer selection. Raw encoder access
+//! supports those passes with application-owned attachments. It does not expose
+//! the acquired surface image or managed MSAA view; render more elaborate scenes
+//! offscreen and composite into a wrapped surface pass. Raw framebuffer writes
+//! do not establish the initialization tracked by wrapped `load()` passes. Stay
+//! with raw passes for those writes, or initialize through a wrapped clear first.
+//! Surface frame submission and presentation are owned together by `finish()`;
+//! externally batching multiple frames' command buffers is outside this API.
+//!
 //! [`GraphicsContext::request`] accepts a custom instance;
 //! [`GraphicsContext::from_wgpu`] adopts an application-configured device and queue.
 //! Default initialization requires no optional features. Normal rendering does
@@ -314,6 +397,7 @@ mod context;
 mod error;
 mod frame;
 mod framebuffer;
+mod material;
 mod mesh;
 mod mesh_renderer;
 mod pass;
@@ -323,6 +407,7 @@ pub use context::GraphicsContext;
 pub use error::Error;
 pub use frame::{Frame, FrameError};
 pub use framebuffer::{Framebuffer, FramebufferOptions};
+pub use material::{Material, MaterialOptions};
 pub use mesh::{Mesh, Vertex};
 pub use mesh_renderer::MeshRenderer;
 pub use pass::{RenderPass, RenderPassBuilder};

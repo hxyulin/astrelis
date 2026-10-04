@@ -153,6 +153,66 @@ context and mesh expose their wgpu resources for custom GPU work. The context
 requests no timestamp features. Normal frames do not wait for GPU completion;
 resizing or recovering an outdated surface may synchronize with the GPU.
 
+## Materials and custom mesh shaders
+
+The default `renderer.draw(&mut pass, &mesh)` still interpolates vertex color.
+Choose custom shading with a material built from an application-created wgpu
+shader module:
+
+```rust
+let shader = graphics.device().create_shader_module(wgpu::ShaderModuleDescriptor {
+    label: Some("Application mesh shader"),
+    source: wgpu::ShaderSource::Wgsl(source.into()),
+});
+let material = graphics.create_material(
+    MaterialOptions::new(&shader)
+        .bind_group_layouts(&[Some(&uniform_layout)])
+        .blend(Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
+);
+
+// Optional: create this target's pipeline during loading, before the first draw.
+renderer.prepare_material(&material, target.format(), target.sample_count())?;
+
+let mut frame = target.begin_frame()?;
+{
+    let mut pass = frame.render_pass().begin()?;
+    pass.as_wgpu().set_bind_group(0, &uniform_group, &[dynamic_offset]);
+    renderer.draw_with_material(&mut pass, &mesh, &material)?;
+}
+frame.finish()?;
+```
+
+The vertex shader accepts position at location 0 (`vec3<f32>`) and color at
+location 1 (`vec4<f32>`); unused attributes can be omitted. It can transform
+positions using application-owned uniforms or storage resources. Fragment output
+at location 0 must match the destination format. Default entry points are
+`vertex_main` / `fragment_main`; `.entry_points(vertex, fragment)` overrides them.
+Materials select blending, color write masks, front-face winding, and face culling.
+Default blending requires premultiplied shader output; `.blend(None)` selects
+replacement writes and allows matching integer outputs on integer framebuffers.
+There is no depth testing in these passes.
+
+Materials are immutable GPU resources. Buffers, textures, and bind groups remain
+application-owned; updates and per-draw dynamic offsets do not require a new
+material. Rebind the required groups when switching resource bindings. The renderer
+restores the material pipeline, mesh buffers, and the wrapped pass's raster settings.
+One material can be used by independent renderers and compatible targets.
+
+Each renderer caches pipelines by material identity, format, and sample count.
+Cloned materials reuse entries; creating another material produces another identity.
+The cache lasts for the renderer's lifetime. `prepare(format, samples)` prebuilds
+the default material's pipeline, and `prepare_material(material, format, samples)`
+prebuilds a custom material's pipeline. Cache hits do not create pipelines or query
+capabilities. Preparation records/submits no commands and waits for no GPU work;
+GPU drivers may still defer some compilation work until use.
+
+Astrelis returns device, target-format, and sample-count compatibility errors.
+Shader compilation, entry points, interfaces, and raw binding layouts use wgpu's
+error scopes or uncaptured error handler. A successful preparation `Result` alone
+does not certify shader validity. The crate documentation shows checking a wgpu
+validation scope around preparation; after a shader failure, discard that material
+and create a corrected one.
+
 ## Offscreen framebuffers
 
 ```rust
@@ -199,14 +259,16 @@ Old cloned views and pending GPU commands continue to reference old textures.
 
 This implementation has one color attachment with optional MSAA. Depth/stencil,
 multiple color attachments, and imported attachments remain future work. Integer
-color formats can be used with custom shaders; the built-in floating-point mesh
-renderer returns `Error::UnsupportedMeshFormat` for incompatible formats.
+color formats can be used with custom shaders; the default floating-point mesh
+material returns `Error::UnsupportedMeshFormat` for incompatible formats. A custom
+material can write matching integer outputs with blending disabled.
 
 ## Examples
 
 ```sh
 cargo run -p astrelis --example triangle
 cargo run -p astrelis --example meshes
+cargo run -p astrelis --example materials
 cargo run -p astrelis --example msaa
 cargo run -p astrelis --example framebuffer
 cargo run -p astrelis --example multi_window
@@ -215,6 +277,9 @@ cargo run -p astrelis --example multi_window
 The triangle demonstrates interpolated vertex color. The meshes example draws
 overlapping opaque and translucent quads through two independent renderers sharing
 one pass, each mesh using a vertex and index buffer.
+The materials example compares default shading with a custom mesh shader; press
+Space to change an application-owned tint uniform without rebuilding the material
+or pipeline. Both draws share a pass.
 The MSAA example creates its target with 4x MSAA; press Space to cycle usable counts.
 The framebuffer example renders a 4x MSAA triangle offscreen, then samples its
 resolved texture into the window through an application-defined shader that swaps
@@ -252,8 +317,21 @@ available. Public framebuffer tests verify persisted contents, abandoned recordi
 attachment replacement, suspended destinations, validation, and resolving/sampling
 across multiple targets in one submission.
 
-This version deliberately starts with a fixed mesh pipeline. Canvas recording,
-materials, cameras, scene APIs, and UI integration will be designed in later slices.
+Material GPU tests verify custom vertex/fragment entry points, dynamic uniform
+offsets, updates without pipeline recreation, default/custom switching, MSAA,
+cloned material reuse, independent renderers, culling, color masks, integer output,
+device rejection, and wgpu validation diagnostics.
+
+Wrapped passes currently provide one color attachment. Custom renderers can use
+raw pass access for instancing or indirect draws, and encoder access for compute,
+copies, or more elaborate passes on application-owned textures. Acquired surface
+attachments remain private, and raw writes do not update wrapped initialization
+tracking. Depth/stencil, multiple color attachments, custom vertex layouts, and
+externally batched frame submission are future extensions. Complex passes can
+render offscreen and composite into the surface today.
+
+Canvas recording, cameras, scene APIs, and UI integration will be designed in
+later slices.
 
 ## License
 

@@ -28,6 +28,11 @@ pub enum Error {
         /// Pass format incompatible with the built-in mesh renderer.
         format: wgpu::TextureFormat,
     },
+    /// A material requests blending on a color format that does not support it.
+    UnsupportedMaterialFormat {
+        /// Pass format incompatible with the material's blend settings.
+        format: wgpu::TextureFormat,
+    },
     /// A zero-sized framebuffer has no color attachment.
     TargetSuspended,
     /// A framebuffer load requires a submitted clear or an earlier clear in this recording.
@@ -91,6 +96,7 @@ impl fmt::Display for Error {
             Self::UnsupportedColorFormat { format } => write!(f, "{format:?} cannot be a color attachment on this device"),
             Self::InvalidFramebufferUsage { format, usage } => write!(f, "invalid framebuffer usage {usage:?} for {format:?}"),
             Self::UnsupportedMeshFormat { format } => write!(f, "the mesh renderer requires a blendable floating-point output, got {format:?}"),
+            Self::UnsupportedMaterialFormat { format } => write!(f, "material blending is unsupported for {format:?}"),
             Self::TargetSuspended => f.write_str("a zero-sized framebuffer has no attachment"),
             Self::UninitializedFramebuffer => f.write_str("a framebuffer must have a submitted clear or an earlier clear in this recording before loading"),
             Self::UnsupportedSampleCount { format, count } => {

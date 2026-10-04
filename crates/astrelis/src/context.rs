@@ -1,4 +1,7 @@
-use crate::{Error, Framebuffer, FramebufferOptions, Mesh, RenderTarget, SurfaceOptions, Vertex};
+use crate::{
+    Error, Framebuffer, FramebufferOptions, Material, MaterialOptions, Mesh, RenderTarget,
+    SurfaceOptions, Vertex,
+};
 
 /// Shared wgpu initialization and GPU resources for one or more render targets.
 ///
@@ -115,6 +118,21 @@ impl GraphicsContext {
     /// an error without choosing a fallback or creating GPU attachments.
     pub fn create_framebuffer(&self, options: FramebufferOptions) -> Result<Framebuffer, Error> {
         Framebuffer::create(self, options)
+    }
+
+    /// Creates an immutable mesh material from an application-created shader.
+    ///
+    /// The shader and binding layouts must belong to this device. The material
+    /// retains their GPU handles and owns its entry-point names and render state.
+    /// Uniform buffers, textures, bind groups, and their updates remain owned by
+    /// the application. Shaders use the fixed [`Vertex`] attribute layout.
+    ///
+    /// As with raw wgpu resource creation, invalid layouts use wgpu's error
+    /// reporting. Shader interfaces are validated when a renderer first creates
+    /// a pipeline; use [`crate::MeshRenderer::prepare_material`] to do that before
+    /// rendering. This factory does not record, submit, or wait for GPU work.
+    pub fn create_material(&self, options: MaterialOptions<'_>) -> Material {
+        Material::create(self, options)
     }
 
     /// Requests a device from an application-created wgpu instance.

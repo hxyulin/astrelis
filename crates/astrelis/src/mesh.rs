@@ -7,7 +7,8 @@ use crate::{Error, GraphicsContext};
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Pod, Zeroable)]
 pub struct Vertex {
-    /// Clip-space position: visible X/Y are -1 to 1 and visible Z is 0 to 1.
+    /// Position, interpreted as clip space by default: X/Y -1 to 1 and Z 0 to 1.
+    /// Custom material vertex shaders can transform this into clip space.
     pub position: [f32; 3],
     /// Linear RGB and straight alpha, interpolated across each triangle.
     pub color: [f32; 4],
