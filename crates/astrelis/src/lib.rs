@@ -353,6 +353,7 @@ mod mesh;
 mod mesh_renderer;
 mod painter;
 mod pass;
+mod pipeline_options;
 mod primitive;
 mod target;
 mod texture;
@@ -379,6 +380,7 @@ pub use mesh::{
 pub use mesh_renderer::{MeshDrawSession, MeshRenderer};
 pub use painter::{PaintSession, Painter};
 pub use pass::{RenderPass, RenderPassBuilder};
+pub use pipeline_options::PipelineOptions;
 pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use text::{

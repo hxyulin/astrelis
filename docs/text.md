@@ -102,7 +102,7 @@ Implemented GPU API:
 let mut renderer = TextRenderer::new(&graphics);
 renderer.prepare(&target.render_format())?;
 let prepared = renderer.prepare_text(
-    &layout, TextRasterOptions::new().scale_factor(dpi_scale),
+    &layout, TextRasterOptions::new().raster_scale(dpi_scale),
 )?;
 let mut pass = frame.render_pass().begin()?;
 renderer.draw(&mut pass, &prepared,
@@ -110,13 +110,10 @@ renderer.draw(&mut pass, &prepared,
 ```
 
 Font size, line height, and paragraph width use application-selected local units.
-Preparation receives a raster scale explicitly. Placement is viewport-relative
-physical pixels with the existing Y-down affine convention; the renderer converts
-prepared geometry to physical size once. DPI must not be applied implicitly again
-by Painter or a window. Draw transforms also transform glyph quads. Magnifying a
-coverage image resamples it; callers can prepare at a suitable raster size instead.
-The coverage renderer uses zero local raster phase. Fractional
-movement filters that data; it must not secretly rasterize during draw.
+Preparation receives raster texels per layout unit explicitly. Glyph geometry,
+origins, and measurements retain layout units. Identity drawing treats those units
+as pixels; a draw/session transform converts logical units to physical pixels.
+Raster density never applies another geometry scale.
 
 ## Glyph representations
 
@@ -246,16 +243,13 @@ limits. `prepare(&RenderFormat)` creates pipeline variants, and
 an immutable glyph buffer. It requires only the retained layout's font data.
 `draw(&mut RenderPass, &PreparedText, TextDraw)` preserves current viewport/scissor
 and uploads a 48-byte placement/color record. It restores owned state after other
-renderers. Depth/stencil tests and writes are disabled, including in depth-enabled
-or read-only passes. Pipeline preparation remains explicit for predictable first use.
+renderers. Defaults ignore depth/stencil; `TextRendererOptions::pipeline` selects
+explicit tests/writes. Drawing checks attachment formats and read-only restrictions. Pipeline preparation remains explicit for predictable first use.
 
-Prepared geometry contains physical pixel positions: raster scale multiplies font
-size and layout placement once. Draw origin and affine transforms are physical
-pixels relative to the viewport. Magnification filters the prepared images; choose
-a larger raster scale for additional resolution. `size()` measures scaled advances
-and line boxes; `ink_bounds()` bounds image quads, not an exact nonzero-pixel outline.
-No-image glyph indexes are reported by `skipped_glyphs()`, including blank spaces
-and sources Swash cannot render. `.notdef` images remain drawable.
+Prepared geometry and measurements retain layout units. Raster density multiplies
+only coverage/color font sizes; their raster placement and quad extents are converted
+back into layout units. Draw/session transforms apply geometry scaling once.
+Magnification filters coverage images; prepare higher image density when needed.
 
 Coverage pages use R8; color pages use linear premultiplied RGBA8. Swash's color
 outline blits are premultiplied sRGB and PNG bitmap results are straight sRGB;
@@ -324,16 +318,14 @@ A layout owns its font sources; Painter does not own TextSystem or TextBuffer.
 composes the draw transform with the session transform, including the draw origin,
 then delegates validation, clipping, viewport conversion, batching, and allocation
 leases to TextRenderer. Prepared text from another renderer on the same device is
-usable. Text errors keep TextRenderError; existing primitive, session, and pipeline
-preparation methods retain Error. Attachment pipeline failures include
-`Error::UnsupportedTextFormat` and map to `TextRenderError::UnsupportedFormat` in
-the direct text API.
+usable. Resource preparation returns `TextRenderError` for raster/atlas failures.
+Pipeline preparation and drawing return the common `Error`; failed draws cannot
+report atlas exhaustion or font rasterization failures.
 
-Prepared text is in physical pixels: raster scale already applied DPI. Session
-transforms act on these physical glyphs. Use a physical translation to position
-DPI-prepared text; do not scale it again in a logical-coordinate scope unless an
-additional geometric scale is intended. DPI/content/layout changes require explicit
-preparation; color, opacity, and placement changes reuse the same prepared resource.
+Text retains layout units. Use one session DPI transform for text and other 2D
+geometry. DPI changes can require new coverage/color images for quality; outline
+fields reuse their image keys. Geometry scaling itself remains a draw operation.
+Color, opacity, and placement changes reuse the same prepared resource.
 
 `Painter::text()` exposes cache statistics, clearing, and direct renderer methods
 outside active sessions. Custom budgets can be selected by replacing it with
@@ -412,4 +404,4 @@ size/DPI cache reuse, intrinsic artwork fallback, separate coverage/field shader
 and representation metadata. The
 [distance-field report](performance/text-distance-fields.md) records preparation cost
 and fill comparisons before adding effects. PreparedText::raster_options() is replaced
-by preparation() and scale_factor().
+by preparation() and raster_scale().

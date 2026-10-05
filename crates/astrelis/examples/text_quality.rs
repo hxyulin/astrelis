@@ -49,7 +49,7 @@ fn prepared(
     let layout = buffer.layout(fonts)?;
     Ok(painter.prepare_text(
         &layout,
-        TextRasterOptions::new().scale_factor(dpi).hinting(hinting),
+        TextRasterOptions::new().raster_scale(dpi).hinting(hinting),
     )?)
 }
 fn sample(
@@ -68,13 +68,13 @@ fn sample(
         fonts,
         content,
         size,
-        raster.scale_factor,
+        raster.raster_scale,
         raster.hinting,
     )?;
     Ok(Sample {
         caption,
         text,
-        transform,
+        transform: Transform2D::scale(raster.raster_scale, raster.raster_scale).then(transform),
     })
 }
 fn prepare_scene(
@@ -93,7 +93,7 @@ fn prepare_scene(
                 "AV office e\u{301} 123",
                 size,
                 (
-                    TextRasterOptions::new().scale_factor(dpi),
+                    TextRasterOptions::new().raster_scale(dpi),
                     Transform2D::IDENTITY,
                 ),
                 dpi,
@@ -105,7 +105,7 @@ fn prepare_scene(
                 "AV office e\u{301} 123",
                 size,
                 (
-                    TextRasterOptions::new().scale_factor(dpi),
+                    TextRasterOptions::new().raster_scale(dpi),
                     Transform2D::translation(0.5, 0.5),
                 ),
                 dpi,
@@ -120,7 +120,7 @@ fn prepare_scene(
             "AV office e\u{301} 123",
             12.,
             (
-                TextRasterOptions::new().scale_factor(dpi),
+                TextRasterOptions::new().raster_scale(dpi),
                 Transform2D::IDENTITY,
             ),
             dpi,
@@ -132,7 +132,7 @@ fn prepare_scene(
             "AV office e\u{301} 123",
             12.,
             (
-                TextRasterOptions::new().scale_factor(dpi).hinting(false),
+                TextRasterOptions::new().raster_scale(dpi).hinting(false),
                 Transform2D::IDENTITY,
             ),
             dpi,
@@ -155,7 +155,7 @@ fn prepare_scene(
             "AV office e\u{301}",
             16.,
             (
-                TextRasterOptions::new().scale_factor(dpi),
+                TextRasterOptions::new().raster_scale(dpi),
                 Transform2D::IDENTITY,
             ),
             dpi,
@@ -169,7 +169,7 @@ fn prepare_scene(
             "AV e\u{301}",
             14.,
             (
-                TextRasterOptions::new().scale_factor(dpi),
+                TextRasterOptions::new().raster_scale(dpi),
                 Transform2D::scale(zoom, zoom),
             ),
             dpi,
@@ -181,7 +181,7 @@ fn prepare_scene(
             "AV e\u{301}",
             14.,
             (
-                TextRasterOptions::new().scale_factor(dpi * zoom),
+                TextRasterOptions::new().raster_scale(dpi * zoom),
                 Transform2D::IDENTITY,
             ),
             dpi,
@@ -195,7 +195,7 @@ fn prepare_scene(
             "Native raster, rotated 12 degrees",
             "AV office",
             20.,
-            (TextRasterOptions::new().scale_factor(dpi), rotation),
+            (TextRasterOptions::new().raster_scale(dpi), rotation),
             dpi,
         )?,
         sample(
@@ -205,7 +205,7 @@ fn prepare_scene(
             "AV office",
             20.,
             (
-                TextRasterOptions::new().scale_factor(dpi * 2.),
+                TextRasterOptions::new().raster_scale(dpi * 2.),
                 Transform2D::scale(0.5, 0.5).then(rotation),
             ),
             dpi,
@@ -219,7 +219,7 @@ fn prepare_scene(
             "office e\u{301} العربية 123",
             20.,
             (
-                TextRasterOptions::new().scale_factor(dpi),
+                TextRasterOptions::new().raster_scale(dpi),
                 Transform2D::IDENTITY,
             ),
             dpi,
@@ -231,7 +231,7 @@ fn prepare_scene(
             "office e\u{301} العربية 123",
             20.,
             (
-                TextRasterOptions::new().scale_factor(dpi),
+                TextRasterOptions::new().raster_scale(dpi),
                 Transform2D::translation(0.5, 0.5),
             ),
             dpi,
@@ -245,7 +245,7 @@ fn prepare_scene(
             "M😀M😁M",
             20.,
             (
-                TextRasterOptions::new().scale_factor(dpi),
+                TextRasterOptions::new().raster_scale(dpi),
                 Transform2D::IDENTITY,
             ),
             dpi,
@@ -257,7 +257,7 @@ fn prepare_scene(
             "M😀M😁M",
             20.,
             (
-                TextRasterOptions::new().scale_factor(dpi),
+                TextRasterOptions::new().raster_scale(dpi),
                 Transform2D::scale(3., 3.),
             ),
             dpi,
@@ -291,7 +291,10 @@ fn draw_scene(
     dpi: f32,
 ) -> Result<(), Box<dyn Error>> {
     let mut paint = painter.begin(pass)?;
-    paint.draw_text(&scene.heading, TextDraw::new([24. * dpi, 12. * dpi]))?;
+    paint.draw_text(
+        &scene.heading,
+        TextDraw::new([24., 12.]).transform(Transform2D::scale(dpi, dpi)),
+    )?;
     for (row, samples) in scene.rows.iter().enumerate() {
         for (column, sample) in samples.iter().enumerate() {
             let x = (24. + column as f32 * 548.) * dpi;
@@ -307,11 +310,13 @@ fn draw_scene(
             paint.fill_rect(Rect::new(x, y, width, height), [0.035, 0.035, 0.035, 1.])?;
             paint.draw_text(
                 &sample.caption,
-                TextDraw::new([x + 8. * dpi, y + 4. * dpi]).color([0.4, 0.65, 0.9, 1.]),
+                TextDraw::new([x / dpi + 8., y / dpi + 4.])
+                    .transform(Transform2D::scale(dpi, dpi))
+                    .color([0.4, 0.65, 0.9, 1.]),
             )?;
             paint.draw_text(
                 &sample.text,
-                TextDraw::default().color([0.9, 0.9, 0.9, 1.]).transform_2d(
+                TextDraw::default().color([0.9, 0.9, 0.9, 1.]).transform(
                     sample
                         .transform
                         .then(Transform2D::translation(x + 8. * dpi, y + 20. * dpi)),
@@ -322,7 +327,9 @@ fn draw_scene(
     paint.pass().set_scissor_rect(0, 0, size[0], size[1])?;
     paint.draw_text(
         &scene.footer,
-        TextDraw::new([24. * dpi, 922. * dpi]).color([0.6, 0.6, 0.6, 1.]),
+        TextDraw::new([24., 922.])
+            .transform(Transform2D::scale(dpi, dpi))
+            .color([0.6, 0.6, 0.6, 1.]),
     )?;
     Ok(())
 }

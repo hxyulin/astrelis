@@ -71,7 +71,7 @@ fn depth_tests_occlude_independent_of_order_and_persist_across_passes() {
                 depth_state.depth_compare = Some(wgpu::CompareFunction::Less);
                 let material = material(&graphics, &renderer, depth_state);
                 renderer
-                    .prepare_material(&material, target.format(), count)
+                    .prepare_material(&material, &target.render_format())
                     .unwrap();
                 let cached = renderer.pipelines.clone();
                 let image = pixels(&graphics, &mut target, |frame| {

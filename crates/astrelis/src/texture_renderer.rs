@@ -83,7 +83,7 @@ pub struct TextureDraw {
     pub tint: [f32; 4],
     /// Affine transform `[xx, yx, xy, yy, tx, ty]` in destination units.
     /// Applied before conversion from pixels or normalized viewport coordinates.
-    pub transform: [f32; 6],
+    pub transform: crate::Transform2D,
 }
 impl Default for TextureDraw {
     fn default() -> Self {
@@ -98,7 +98,7 @@ impl TextureDraw {
             normalized: false,
             uv: UvRect::new(0., 0., 1., 1.),
             tint: [1.; 4],
-            transform: [1., 0., 0., 1., 0., 0.],
+            transform: crate::Transform2D::IDENTITY,
         }
     }
     /// Selects a viewport-relative rectangle, where `(1,1)` is its bottom-right.
@@ -113,10 +113,6 @@ impl TextureDraw {
         self.normalized = matches!(space, crate::DrawSpace::Normalized);
         self
     }
-    /// Selects the shared 2D transform; equivalent to `transform(value.to_array())`.
-    pub const fn transform_2d(self, value: crate::Transform2D) -> Self {
-        self.transform(value.to_array())
-    }
     /// Selects normalized source UVs.
     pub const fn uv(mut self, uv: UvRect) -> Self {
         self.uv = uv;
@@ -128,8 +124,8 @@ impl TextureDraw {
         self
     }
     /// Selects an affine destination transform.
-    pub const fn transform(mut self, transform: [f32; 6]) -> Self {
-        self.transform = transform;
+    pub fn transform(mut self, transform: impl Into<crate::Transform2D>) -> Self {
+        self.transform = transform.into();
         self
     }
     fn parameters(self, viewport: [f32; 2]) -> Result<Parameters, Error> {
@@ -139,13 +135,13 @@ impl TextureDraw {
             || !self
                 .tint
                 .iter()
-                .chain(&self.transform)
+                .chain(&self.transform.0)
                 .all(|v| v.is_finite())
             || !(0.0..=1.0).contains(&self.tint[3])
         {
             return Err(Error::InvalidTextureDraw);
         }
-        let [xx, yx, xy, yy, tx, ty] = self.transform;
+        let [xx, yx, xy, yy, tx, ty] = self.transform.0;
         let scale = if self.normalized {
             [1., 1.]
         } else {
@@ -159,7 +155,12 @@ impl TextureDraw {
                 xx * r.width * scale[0],
                 yx * r.width * scale[1],
             ],
-            axis_y: [xy * r.height * scale[0], yy * r.height * scale[1], 0., 0.],
+            axis_y: [
+                xy * r.height * scale[0],
+                yy * r.height * scale[1],
+                f32::from(self.normalized),
+                0.,
+            ],
             source: self.uv.array(),
             tint: self.tint,
         };
@@ -389,6 +390,7 @@ pub struct PreparedTextureDraw {
     buffer: wgpu::Buffer,
     count: u32,
     viewport: Option<[f32; 2]>,
+    bounds: [Option<[f64; 4]>; 2],
 }
 
 type LiveBinding = (
@@ -513,6 +515,7 @@ struct PipelineKey {
     depth_stencil: Option<wgpu::TextureFormat>,
     filter: TextureFilter,
     alpha: TextureAlpha,
+    transformed: bool,
 }
 /// Independent textured-rectangle renderer. Records explicit draw order into
 /// application-owned passes. Instance pages are leased per recording and uploaded
@@ -532,6 +535,11 @@ pub struct TextureRenderer {
 impl TextureRenderer {
     /// Creates built-in shader, layouts, reusable samplers, and an empty pipeline cache.
     pub fn new(g: &GraphicsContext) -> Self {
+        Self::with_options(g, crate::PipelineOptions::default())
+    }
+    /// Creates built-in image shading with immutable blend/write/depth/stencil settings.
+    /// Source bindings remain reusable; custom materials can override this policy.
+    pub fn with_options(g: &GraphicsContext, options: crate::PipelineOptions) -> Self {
         let device = g.device();
         let sampler = |filter| {
             device.create_sampler(&wgpu::SamplerDescriptor {
@@ -550,7 +558,9 @@ impl TextureRenderer {
             linear: binding_layout(device, true),
             nearest_sampler: sampler(wgpu::FilterMode::Nearest),
             linear_sampler: sampler(wgpu::FilterMode::Linear),
-            material: Arc::new(g.create_texture_material(TextureMaterialOptions::new())),
+            material: Arc::new(
+                g.create_texture_material(options.texture(TextureMaterialOptions::new())),
+            ),
             pipelines: HashMap::new(),
             parameters: Vec::new(),
         }
@@ -654,14 +664,32 @@ impl TextureRenderer {
         }
         self.prepare(b, &target.render_format())
     }
-    /// Prepares default shading from a format value, including framebuffer formats.
+    /// Prepares default shading from a complete attachment format.
     pub fn prepare(
         &mut self,
-        b: &TextureBinding,
+        binding: &TextureBinding,
         format: &crate::RenderFormat,
     ) -> Result<(), Error> {
         let material = self.material.clone();
-        self.prepare_material(b, &material, format)
+        self.prepare_material(binding, &material, format)
+    }
+    /// Prepares the built-in variant used by [`Self::draw_prepared_transformed`].
+    /// Ordinary dynamic/identity draws use the separate variant from [`Self::prepare`].
+    pub fn prepare_transformed(
+        &mut self,
+        binding: &TextureBinding,
+        format: &crate::RenderFormat,
+    ) -> Result<(), Error> {
+        let material = self.material.clone();
+        self.pipeline_variant(
+            binding,
+            &material,
+            format.single_color()?,
+            format.sample_count,
+            format.depth_stencil,
+            true,
+        )?;
+        Ok(())
     }
     /// Prepares a material; raw shader diagnostics follow wgpu error reporting.
     pub fn prepare_material(
@@ -717,18 +745,36 @@ impl TextureRenderer {
             return Err(Error::InvalidTextureDraw);
         }
         let parameters: Result<Vec<_>, _> = draws.iter().map(|d| d.parameters(viewport)).collect();
+        let parameters = parameters?;
+        let mut bounds: [Option<[f64; 4]>; 2] = [None, None];
+        for p in &parameters {
+            let index = usize::from(p.axis_y[2] != 0.);
+            for [u, v] in [[0., 0.], [1., 0.], [0., 1.], [1., 1.]] {
+                let x = f64::from(p.origin_axis_x[0])
+                    + u * f64::from(p.origin_axis_x[2])
+                    + v * f64::from(p.axis_y[0]);
+                let y = f64::from(p.origin_axis_x[1])
+                    + u * f64::from(p.origin_axis_x[3])
+                    + v * f64::from(p.axis_y[1]);
+                bounds[index] = Some(match bounds[index] {
+                    None => [x, y, x, y],
+                    Some(b) => [b[0].min(x), b[1].min(y), b[2].max(x), b[3].max(y)],
+                });
+            }
+        }
         let buffer = self
             .graphics
             .device()
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Astrelis static texture draws"),
-                contents: bytemuck::cast_slice(&parameters?),
+                contents: bytemuck::cast_slice(&parameters),
                 usage: wgpu::BufferUsages::VERTEX,
             });
         Ok(PreparedTextureDraw {
             graphics: self.graphics.clone(),
             buffer,
             count: draws.len() as u32,
+            bounds,
             viewport: draws.iter().any(|d| !d.normalized).then_some(viewport),
         })
     }
@@ -742,6 +788,54 @@ impl TextureRenderer {
     ) -> Result<(), Error> {
         let material = self.material.clone();
         self.draw_prepared_with_material(pass, binding, &material, draws)
+    }
+
+    /// Draws retained placements with an additional local transform using built-in shading.
+    ///
+    /// The transform follows each instance's transform in its selected units,
+    /// matching dynamic drawing and Painter scopes. Identity uses the ordinary
+    /// prepared path with no uploads. Other transforms upload only 48 bytes;
+    /// retained instance geometry is never copied or uploaded again. Pixel-space
+    /// data still requires the viewport supplied during preparation.
+    /// Invalid devices, viewports, transforms or bounds record no draw.
+    pub fn draw_prepared_transformed(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        binding: &TextureBinding,
+        draws: &PreparedTextureDraw,
+        transform: impl Into<crate::Transform2D>,
+    ) -> Result<(), Error> {
+        let transform = transform.into();
+        if transform == crate::Transform2D::IDENTITY {
+            return self.draw_prepared(pass, binding, draws);
+        }
+        if !draws.graphics.same_device(&self.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
+        validate_prepared_viewport(pass, draws)?;
+        let parameters = prepared_transform(draws, transform, pass.viewport_size())?;
+        let material = self.material.clone();
+        let group = self
+            .validate_binding(pass, binding, &material)?
+            .into_owned();
+        let pipeline = self
+            .pipeline_variant(
+                binding,
+                &material,
+                pass.single_color_format()?,
+                pass.sample_count(),
+                pass.depth_stencil_format(),
+                true,
+            )?
+            .clone();
+        let (buffer, range) = pass.upload_instances(bytemuck::bytes_of(&parameters), 4);
+        pass.apply_raster_state();
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &group, &[]);
+        pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
+        pass.set_vertex_buffer(1, &buffer, range);
+        pass.inner.draw(0..6, 0..draws.count);
+        Ok(())
     }
 
     /// Draws static prepared parameters with an explicit reusable material.
@@ -1008,6 +1102,18 @@ impl TextureRenderer {
         count: u32,
         depth_stencil: Option<wgpu::TextureFormat>,
     ) -> Result<&wgpu::RenderPipeline, Error> {
+        self.pipeline_variant(b, m, format, count, depth_stencil, false)
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn pipeline_variant(
+        &mut self,
+        b: &TextureBinding,
+        m: &TextureMaterial,
+        format: wgpu::TextureFormat,
+        count: u32,
+        depth_stencil: Option<wgpu::TextureFormat>,
+        transformed: bool,
+    ) -> Result<&wgpu::RenderPipeline, Error> {
         if !b.graphics.same_device(&self.graphics) || !m.graphics.same_device(&self.graphics) {
             return Err(Error::DeviceMismatch);
         }
@@ -1026,6 +1132,7 @@ impl TextureRenderer {
             depth_stencil,
             filter: b.options.filter,
             alpha: b.options.alpha,
+            transformed,
         };
         let entry = match self.pipelines.entry(key) {
             Entry::Occupied(entry) => return Ok(entry.into_mut()),
@@ -1090,9 +1197,16 @@ impl TextureRenderer {
                         layout: Some(&layout),
                         vertex: wgpu::VertexState {
                             module: shader,
-                            entry_point: Some(&m.vertex_entry),
+                            entry_point: Some(if transformed {
+                                "vertex_transformed"
+                            } else {
+                                &m.vertex_entry
+                            }),
                             compilation_options: Default::default(),
-                            buffers: &[Some(parameter_layout())],
+                            buffers: &[
+                                Some(parameter_layout()),
+                                transformed.then(transform_layout),
+                            ],
                         },
                         fragment: Some(wgpu::FragmentState {
                             module: shader,
@@ -1100,6 +1214,22 @@ impl TextureRenderer {
                                 &m.fragment_entry
                             } else {
                                 match b.options.alpha {
+                                    TextureAlpha::Straight
+                                        if m.depth_stencil.as_ref().is_some_and(|state| {
+                                            !state.is_depth_read_only()
+                                                || !state.is_stencil_read_only(m.cull_mode)
+                                        }) =>
+                                    {
+                                        "fragment_straight_covered"
+                                    }
+                                    TextureAlpha::Premultiplied
+                                        if m.depth_stencil.as_ref().is_some_and(|state| {
+                                            !state.is_depth_read_only()
+                                                || !state.is_stencil_read_only(m.cull_mode)
+                                        }) =>
+                                    {
+                                        "fragment_premultiplied_covered"
+                                    }
                                     TextureAlpha::Straight => "fragment_straight",
                                     TextureAlpha::Premultiplied => "fragment_premultiplied",
                                 }
@@ -1136,6 +1266,68 @@ impl TextureRenderer {
         }
     }
 }
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct PreparedTransform {
+    pixels: [f32; 4],
+    normalized: [f32; 4],
+    translations: [f32; 4],
+}
+fn transform_layout() -> wgpu::VertexBufferLayout<'static> {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![4=>Float32x4,5=>Float32x4,6=>Float32x4];
+    wgpu::VertexBufferLayout {
+        array_stride: 0,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &ATTRIBUTES,
+    }
+}
+fn prepared_transform(
+    draws: &PreparedTextureDraw,
+    transform: crate::Transform2D,
+    viewport: [f32; 2],
+) -> Result<PreparedTransform, Error> {
+    if !transform.valid() {
+        return Err(Error::InvalidTransform2D);
+    }
+    let [a, b, c, d, tx, ty] = transform.0.map(f64::from);
+    let [w, h] = viewport.map(|v| if v > 0. { f64::from(v) } else { 1. });
+    let p = PreparedTransform {
+        pixels: [a as f32, (b * w / h) as f32, (c * h / w) as f32, d as f32],
+        normalized: [a as f32, b as f32, c as f32, d as f32],
+        translations: [(tx / w) as f32, (ty / h) as f32, tx as f32, ty as f32],
+    };
+    if bytemuck::cast_slice::<PreparedTransform, f32>(&[p])
+        .iter()
+        .any(|v| !v.is_finite())
+    {
+        return Err(Error::InvalidTransform2D);
+    }
+    for (index, bounds) in draws.bounds.iter().enumerate() {
+        if let Some(bounds) = bounds {
+            let m = if index == 0 { p.pixels } else { p.normalized }.map(f64::from);
+            let offset = if index == 0 {
+                [p.translations[0], p.translations[1]]
+            } else {
+                [p.translations[2], p.translations[3]]
+            }
+            .map(f64::from);
+            for x in [bounds[0], bounds[2]] {
+                for y in [bounds[1], bounds[3]] {
+                    let q = [
+                        m[0] * x + m[2] * y + offset[0],
+                        m[1] * x + m[3] * y + offset[1],
+                    ];
+                    if q.iter().any(|v| !(*v as f32 * 2.).is_finite()) {
+                        return Err(Error::InvalidTextureDraw);
+                    }
+                }
+            }
+        }
+    }
+    Ok(p)
+}
+
 fn binding_layout(device: &wgpu::Device, filtering: bool) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("Astrelis image source"),

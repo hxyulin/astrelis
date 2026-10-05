@@ -105,7 +105,7 @@ impl State {
         // Returned resources share geometry storage, but can be drawn independently.
         self.prepared = self.painter.prepare_texts(
             [layout, caption],
-            TextRasterOptions::new().scale_factor(scale),
+            TextRasterOptions::new().raster_scale(scale),
         )?;
         self.painter.prepare_for_target(&self.target)?;
         self.custom.prepare_for_target(&self.target)?;
@@ -159,41 +159,30 @@ impl State {
                 pass.set_scissor_rect(margin, margin, w - margin * 2, h - margin * 2)?;
                 if let Some(text) = self.prepared.first() {
                     let mut paint = self.painter.begin(&mut pass)?;
-                    let panel = Rect::new(
-                        20. * scale,
-                        20. * scale,
-                        w as f32 - 40. * scale,
-                        h as f32 - 40. * scale,
-                    );
-                    paint.fill_rounded_rect(panel, 12. * scale, [0.025, 0.055, 0.09, 1.])?;
+                    let mut paint = paint.transformed(Transform2D::scale(scale, scale))?;
+                    let panel = Rect::new(20., 20., w as f32 / scale - 40., h as f32 / scale - 40.);
+                    paint.fill_rounded_rect(panel, 12., [0.025, 0.055, 0.09, 1.])?;
                     {
-                        // Prepared glyphs are already physical pixels. Translate by
-                        // a physical margin; do not apply the DPI scale again here.
-                        let mut local = paint
-                            .transformed(Transform2D::translation(24. * scale, 24. * scale))?;
+                        // All geometry uses logical units; the parent applies DPI once.
+                        let mut local = paint.transformed(Transform2D::translation(24., 24.))?;
                         local
                             .draw_text(text, TextDraw::new([0., 0.]).color([0.82, 0.9, 1., 1.]))?;
                         // A later primitive covers part of the text, with no flush.
                         local.draw_line(
-                            LineDraw::new(
-                                [0., 28. * scale],
-                                [250. * scale, 28. * scale],
-                                [0.2, 0.7, 1., 0.8],
-                            )
-                            .width(2. * scale),
+                            LineDraw::new([0., 28.], [250., 28.], [0.2, 0.7, 1., 0.8]).width(2.),
                         )?;
                     }
                     if let Some(caption) = self.prepared.get(1) {
                         paint.draw_text(
                             caption,
-                            TextDraw::new([44. * scale, h as f32 - 48. * scale])
+                            TextDraw::new([44., h as f32 / scale - 48.])
                                 .color([0.45, 0.7, 0.85, 1.]),
                         )?;
                     }
                     paint.stroke_rounded_rect(
                         panel,
-                        12. * scale,
-                        Stroke::new(scale).inside(),
+                        12.,
+                        Stroke::new(1.).inside(),
                         [0.15, 0.4, 0.65, 1.],
                     )?;
                     // This custom mesh uses its own clip-space geometry; Painter

@@ -84,13 +84,19 @@ fn materials_bind_dynamic_uniforms_and_reuse_prepared_pipelines() {
         let green = quad(&graphics, [0.0, 1.0, 0.0, 1.0]);
         let mut renderer = MeshRenderer::new(&graphics);
         let format = wgpu::TextureFormat::Rgba8Unorm;
-        renderer.prepare(format, 1).unwrap();
-        renderer.prepare_material(&material, format, 1).unwrap();
+        renderer
+            .prepare(&crate::RenderFormat::color(format, 1))
+            .unwrap();
+        renderer
+            .prepare_material(&material, &crate::RenderFormat::color(format, 1))
+            .unwrap();
         let cached = renderer.pipelines.clone();
         renderer
-            .prepare_material(&material.clone(), format, 1)
+            .prepare_material(&material.clone(), &crate::RenderFormat::color(format, 1))
             .unwrap();
-        renderer.prepare(format, 1).unwrap();
+        renderer
+            .prepare(&crate::RenderFormat::color(format, 1))
+            .unwrap();
         assert_eq!(
             renderer.pipelines, cached,
             "preparation and clones reuse pipelines"
@@ -148,7 +154,9 @@ fn materials_bind_dynamic_uniforms_and_reuse_prepared_pipelines() {
         assert_eq!(renderer.pipelines, cached);
 
         // The same material works with a separately prepared multisampled pipeline.
-        renderer.prepare_material(&material, format, 4).unwrap();
+        renderer
+            .prepare_material(&material, &crate::RenderFormat::color(format, 4))
+            .unwrap();
         let prepared_msaa = renderer.pipelines.clone();
         let msaa_view =
             crate::target::create_multisample_view(&graphics, format, [64, 64], 4).unwrap();
@@ -267,24 +275,39 @@ fn material_state_validation_and_device_checks_leave_recording_usable() {
         let cached = renderer.pipelines.clone();
         for count in [0, 3, u32::MAX] {
             assert!(matches!(
-                renderer.prepare_material(&masked, wgpu::TextureFormat::Rgba8Unorm, count),
+                renderer.prepare_material(
+                    &masked,
+                    &crate::RenderFormat::color(wgpu::TextureFormat::Rgba8Unorm, count)
+                ),
                 Err(Error::UnsupportedSampleCount { .. })
             ));
             assert!(matches!(
-                renderer.prepare(wgpu::TextureFormat::Rgba8Unorm, count),
+                renderer.prepare(&crate::RenderFormat::color(
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    count
+                )),
                 Err(Error::UnsupportedSampleCount { .. })
             ));
         }
         assert!(matches!(
-            renderer.prepare(wgpu::TextureFormat::Rgba8Uint, 1),
+            renderer.prepare(&crate::RenderFormat::color(
+                wgpu::TextureFormat::Rgba8Uint,
+                1
+            )),
             Err(Error::UnsupportedMeshFormat { .. })
         ));
         assert!(matches!(
-            renderer.prepare_material(&culled, wgpu::TextureFormat::Rgba8Uint, 1),
+            renderer.prepare_material(
+                &culled,
+                &crate::RenderFormat::color(wgpu::TextureFormat::Rgba8Uint, 1)
+            ),
             Err(Error::UnsupportedMaterialFormat { .. })
         ));
         assert!(matches!(
-            renderer.prepare_material(&masked, wgpu::TextureFormat::Depth32Float, 1),
+            renderer.prepare_material(
+                &masked,
+                &crate::RenderFormat::color(wgpu::TextureFormat::Depth32Float, 1)
+            ),
             Err(Error::UnsupportedColorFormat { .. })
         ));
         assert_eq!(
@@ -311,7 +334,10 @@ fn material_state_validation_and_device_checks_leave_recording_usable() {
             });
         let foreign = other.create_material(MaterialOptions::new(&foreign_shader));
         assert!(matches!(
-            renderer.prepare_material(&foreign, wgpu::TextureFormat::Rgba8Unorm, 1),
+            renderer.prepare_material(
+                &foreign,
+                &crate::RenderFormat::color(wgpu::TextureFormat::Rgba8Unorm, 1)
+            ),
             Err(Error::DeviceMismatch)
         ));
         let usable = pixels(&graphics, |encoder, view| {
@@ -340,7 +366,10 @@ fn material_state_validation_and_device_checks_leave_recording_usable() {
             .device()
             .push_error_scope(wgpu::ErrorFilter::Validation);
         renderer
-            .prepare_material(&invalid, wgpu::TextureFormat::Rgba8Unorm, 1)
+            .prepare_material(
+                &invalid,
+                &crate::RenderFormat::color(wgpu::TextureFormat::Rgba8Unorm, 1),
+            )
             .unwrap();
         let error = scope
             .pop()
@@ -382,7 +411,10 @@ fn custom_integer_material_renders_to_integer_framebuffer() {
         });
         let mut renderer = MeshRenderer::new(&graphics);
         renderer
-            .prepare_material(&material, framebuffer.format(), framebuffer.sample_count())
+            .prepare_material(
+                &material,
+                &crate::RenderFormat::color(framebuffer.format(), framebuffer.sample_count()),
+            )
             .unwrap();
         let mesh = quad(&graphics, [1.0; 4]);
         let mut frame = framebuffer.begin_frame().unwrap();

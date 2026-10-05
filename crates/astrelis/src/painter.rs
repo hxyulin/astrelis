@@ -27,13 +27,15 @@ use crate::{
 /// fn prepare(painter: &mut Painter, layout: &TextLayout, dpi: f32)
 ///     -> Result<PreparedText, TextRenderError>
 /// {
-///     painter.prepare_text(layout, TextRasterOptions::new().scale_factor(dpi))
+///     painter.prepare_text(layout, TextRasterOptions::new().raster_scale(dpi))
 /// }
-/// fn paint(painter: &mut Painter, pass: &mut RenderPass<'_>, text: &PreparedText)
+/// fn paint(painter: &mut Painter, pass: &mut RenderPass<'_>, text: &PreparedText, dpi: f32)
 ///     -> Result<(), Box<dyn std::error::Error>>
 /// {
 ///     let mut paint = painter.begin(pass)?;
-///     let mut local = paint.transformed(Transform2D::translation(20., 30.))?;
+///     // A shared geometry transform applies DPI once to every 2D renderer.
+///     let mut logical = paint.transformed(Transform2D::scale(dpi, dpi))?;
+///     let mut local = logical.transformed(Transform2D::translation(20., 30.))?;
 ///     local.draw_text(text, TextDraw::default().color([0.8, 0.9, 1., 1.]))?;
 ///     Ok(())
 /// }
@@ -52,12 +54,26 @@ pub struct Painter {
 impl Painter {
     /// Creates independent shape, line, image, and text renderers with empty pipeline caches.
     pub fn new(graphics: &GraphicsContext) -> Self {
+        Self::with_options(graphics, crate::PipelineOptions::default())
+    }
+    /// Configures the same immutable pipeline policy for shapes, lines, images and text.
+    /// Depth/stencil attachment allocation and dynamic references belong to the pass.
+    /// Text uses default atlas budgets; replace [`Self::text`] to select other budgets,
+    /// preserving its pipeline options when the same clipping policy is wanted.
+    pub fn with_options(graphics: &GraphicsContext, options: crate::PipelineOptions) -> Self {
         Self {
             graphics: graphics.clone(),
-            shapes: ShapeRenderer::new(graphics),
-            lines: LineRenderer::new(graphics),
-            textures: TextureRenderer::new(graphics),
-            text: TextRenderer::new(graphics),
+            shapes: ShapeRenderer::with_options(graphics, options.clone()),
+            lines: LineRenderer::with_options(graphics, options.clone()),
+            textures: TextureRenderer::with_options(graphics, options.clone()),
+            text: TextRenderer::with_options(
+                graphics,
+                crate::TextRendererOptions {
+                    pipeline: options,
+                    ..Default::default()
+                },
+            )
+            .expect("default text atlas settings fit supported wgpu limits"),
             shape_scratch: Vec::new(),
             line_scratch: Vec::new(),
             image_scratch: Vec::new(),
@@ -69,7 +85,7 @@ impl Painter {
     pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), Error> {
         self.shapes.prepare(format)?;
         self.lines.prepare(format)?;
-        self.text.prepare_pipeline(format)
+        self.text.prepare(format)
     }
     /// Prepares primitive and text pipelines for a surface, rejecting a foreign device.
     pub fn prepare_for_target(&mut self, target: &crate::RenderTarget<'_>) -> Result<(), Error> {
@@ -78,13 +94,24 @@ impl Painter {
         }
         self.prepare(&target.render_format())
     }
-    /// Prepares a default image variant for the source's alpha/filtering and target format.
+    /// Prepares ordinary and transformed-retained image variants for this source and format.
     pub fn prepare_image(
         &mut self,
         image: &TextureBinding,
         format: &RenderFormat,
     ) -> Result<(), Error> {
-        self.textures.prepare(image, format)
+        self.textures.prepare(image, format)?;
+        self.textures.prepare_transformed(image, format)
+    }
+    /// Uploads immutable image placements once, outside an active painting session.
+    /// Pixel placements retain the supplied viewport size; normalized placements adapt.
+    /// Each placement keeps its UVs, tint and transform. Image source stays separate.
+    pub fn prepare_images(
+        &self,
+        draws: &[TextureDraw],
+        viewport: [f32; 2],
+    ) -> Result<crate::PreparedTextureDraw, Error> {
+        self.textures.prepare_draws(draws, viewport)
     }
     /// Creates a reusable snapshot image/sampler binding. Placement remains per draw.
     pub fn create_image_binding(
@@ -126,7 +153,7 @@ impl Painter {
     /// Generates missing glyph images and uploads immutable text geometry outside painting.
     /// Pass `TextRasterOptions` for coverage or `MtsdfOptions` for scalable outline fill.
     /// The layout retains its fonts; Painter never borrows or owns a TextSystem.
-    /// Raster scale converts layout units to physical pixels exactly once. Retain the
+    /// Raster scale controls image quality; geometry retains the layout's units. Retain the
     /// result until content, layout, or preparation settings change; placement/color/opacity
     /// remain per draw. Cache pressure and unsupported glyphs follow
     /// [`TextRenderer::prepare_text`]. This does not prepare an attachment pipeline.
@@ -330,26 +357,32 @@ impl<'frame> PaintSession<'_, 'frame> {
         mut draw: TextureDraw,
     ) -> Result<(), Error> {
         if self.transform != Transform2D::IDENTITY {
-            draw.transform = Transform2D::from(draw.transform)
-                .then(self.transform)
-                .to_array();
+            draw.transform = draw.transform.then(self.transform);
         }
         self.painter.textures.draw(self.pass, image, draw)
     }
+    /// Draws retained image placements with this session's transform and clipping.
+    /// Identity sessions need no parameter uploads. Transformed sessions upload
+    /// only 48 bytes, preserving retained geometry and immediate ordering.
+    /// Pixel placements must match the current viewport, as in direct texture drawing.
+    pub fn draw_prepared_images(
+        &mut self,
+        image: &TextureBinding,
+        draws: &crate::PreparedTextureDraw,
+    ) -> Result<(), Error> {
+        self.painter
+            .textures
+            .draw_prepared_transformed(self.pass, image, draws, self.transform)
+    }
     /// Records retained text immediately in caller order with shapes, images, lines,
     /// and custom pass work. No shaping, rasterization, atlas writes, or glyph geometry
-    /// uploads occur here. The draw's origin and transform use physical pixels relative
-    /// to the viewport; the session transform is applied after the draw's transform.
-    /// DPI has already been applied during preparation: scaling a logical-coordinate
-    /// session also scales these physical glyphs. Color tints coverage glyphs; intrinsic
+    /// uploads occur here. The origin and glyph geometry retain layout units.
+    /// The session transform follows the draw transform, consistently with other
+    /// 2D geometry. Raster density controls image quality and never doubles DPI scaling. Color tints coverage glyphs; intrinsic
     /// color glyphs retain their RGB. Color alpha and opacity affect both kinds.
     /// Invalid draws record no text commands and leave the session usable.
     #[inline]
-    pub fn draw_text(
-        &mut self,
-        text: &PreparedText,
-        mut draw: TextDraw,
-    ) -> Result<(), TextRenderError> {
+    pub fn draw_text(&mut self, text: &PreparedText, mut draw: TextDraw) -> Result<(), Error> {
         if self.transform != Transform2D::IDENTITY {
             draw.transform = draw.transform.then(self.transform);
         }
@@ -368,7 +401,7 @@ impl<'frame> PaintSession<'_, 'frame> {
         self.painter.image_scratch.extend(
             draws
                 .iter()
-                .map(|d| d.transform_2d(Transform2D::from(d.transform).then(self.transform))),
+                .map(|d| d.transform(d.transform.then(self.transform))),
         );
         self.painter
             .textures

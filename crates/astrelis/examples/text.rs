@@ -77,7 +77,7 @@ impl State {
         self.prepared = None;
         self.prepared = Some(
             self.renderer
-                .prepare_text(&layout, TextRasterOptions::new().scale_factor(scale))?,
+                .prepare_text(&layout, TextRasterOptions::new().raster_scale(scale))?,
         );
         self.renderer.prepare_for_target(&self.target)?;
         Ok(())
@@ -131,7 +131,9 @@ impl State {
                     self.renderer.draw(
                         &mut pass,
                         text,
-                        TextDraw::new([24. * scale, 24. * scale]).color([0.82, 0.9, 1., 1.]),
+                        TextDraw::new([24., 24.])
+                            .color([0.82, 0.9, 1., 1.])
+                            .transform(astrelis::Transform2D::scale(scale, scale)),
                     )?;
                 }
             }

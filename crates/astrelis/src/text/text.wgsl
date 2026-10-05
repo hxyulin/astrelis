@@ -21,7 +21,7 @@ struct Output {
     output.kind = kind.x;
     return output;
 }
-@fragment fn fragment_main(input: Output) -> @location(0) vec4<f32> {
+fn shade_fragment_main(input: Output) -> vec4<f32> {
     let texel = textureSample(atlas, atlas_sampler, input.uv);
     if input.kind == 0.0 {
         let alpha = texel.r * input.color.a;
@@ -31,7 +31,7 @@ struct Output {
     return texel * input.color.a;
 }
 
-@fragment fn fragment_mtsdf(input: Output) -> @location(0) vec4<f32> {
+fn shade_fragment_mtsdf(input: Output) -> vec4<f32> {
     let texel = textureSample(atlas, atlas_sampler, input.uv);
     let distance = max(min(texel.r, texel.g), min(max(texel.r, texel.g), texel.b)) - 0.5;
     // The gradient of reconstructed distance follows the screen-space edge normal,
@@ -40,4 +40,22 @@ struct Output {
     let coverage = clamp(distance / distance_width + 0.5, 0.0, 1.0);
     let alpha = coverage * input.color.a;
     return vec4(input.color.rgb * alpha, alpha);
+}
+
+@fragment fn fragment_main(input: Output) -> @location(0) vec4<f32> {
+    return shade_fragment_main(input);
+}
+@fragment fn fragment_covered(input: Output) -> @location(0) vec4<f32> {
+    let color = shade_fragment_main(input);
+    if color.a <= 0.0 { discard; }
+    return color;
+}
+
+@fragment fn fragment_mtsdf(input: Output) -> @location(0) vec4<f32> {
+    return shade_fragment_mtsdf(input);
+}
+@fragment fn fragment_mtsdf_covered(input: Output) -> @location(0) vec4<f32> {
+    let color = shade_fragment_mtsdf(input);
+    if color.a <= 0.0 { discard; }
+    return color;
 }

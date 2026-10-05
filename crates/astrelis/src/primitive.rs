@@ -235,7 +235,7 @@ struct PrimitiveRenderer {
     parameters: Vec<Parameters>,
 }
 impl PrimitiveRenderer {
-    fn new(g: &GraphicsContext) -> Self {
+    fn new(g: &GraphicsContext, options: crate::PipelineOptions) -> Self {
         let shader = g
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -246,18 +246,37 @@ impl PrimitiveRenderer {
             attributes:wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4,4=>Float32x4].to_vec()};
         Self {
             graphics: g.clone(),
-            material: g.create_material(MaterialOptions::new(&shader).vertex_layouts(&[layout])),
+            material: g.create_material(
+                options.mesh(
+                    MaterialOptions::new(&shader)
+                        .vertex_layouts(&[layout])
+                        .entry_points(
+                            "vertex_main",
+                            if options.writes_attachment() {
+                                "fragment_covered"
+                            } else {
+                                "fragment_main"
+                            },
+                        ),
+                ),
+            ),
             pipelines: Default::default(),
             parameters: Vec::new(),
         }
     }
     fn pipeline(&mut self, format: &RenderFormat) -> Result<wgpu::RenderPipeline, Error> {
-        let color = if format.colors.len() == 1 {
-            format.colors[0]
-        } else {
-            None
-        }
-        .ok_or(Error::ExpectedSingleColor)?;
+        self.pipeline_for(
+            format.single_color()?,
+            format.sample_count,
+            format.depth_stencil,
+        )
+    }
+    fn pipeline_for(
+        &mut self,
+        color: wgpu::TextureFormat,
+        sample_count: u32,
+        depth_stencil: Option<wgpu::TextureFormat>,
+    ) -> Result<wgpu::RenderPipeline, Error> {
         // Built-in solid shading requires floating-point, blendable color, just as
         // built-in mesh shading does. Inert depth/stencil permits sharing a 3D pass.
         Ok(crate::mesh_renderer::pipeline(
@@ -265,8 +284,8 @@ impl PrimitiveRenderer {
             &mut self.pipelines,
             &self.material,
             color,
-            format.sample_count,
-            format.depth_stencil,
+            sample_count,
+            depth_stencil,
             true,
         )
         .map_err(|error| match error {
@@ -282,7 +301,12 @@ impl PrimitiveRenderer {
         if !pass.same_device(&self.graphics) {
             return Err(Error::DeviceMismatch);
         }
-        let pipeline = self.pipeline(&pass.render_format())?;
+        crate::mesh_renderer::validate_aspects(pass, &self.material)?;
+        let pipeline = self.pipeline_for(
+            pass.single_color_format()?,
+            pass.sample_count(),
+            pass.depth_stencil_format(),
+        )?;
         pass.apply_raster_state();
         pass.set_pipeline(&pipeline);
         Ok(Session {
@@ -343,8 +367,8 @@ fn record(pass: &mut RenderPass<'_>, parameters: &[Parameters]) {
 ///
 /// Owns shaders, pipeline variants, and reusable CPU scratch, but no windows or
 /// frames. Colors are linear straight RGBA; output uses premultiplied source-over.
-/// Draws do not test/write depth or stencil, even when sharing a depth-enabled
-/// pass. Use pass clipping or custom mesh materials for explicit stencil tests.
+/// Default shading ignores depth/stencil. [`Self::with_options`] configures explicit
+/// tests/writes, including stencil masks controlled by the pass reference.
 /// Shader edge coverage works without MSAA. No draw sorting or implicit batching
 /// occurs. Prepare pipelines before rendering to avoid first-use pipeline creation.
 #[derive(Debug)]
@@ -352,10 +376,15 @@ pub struct ShapeRenderer {
     inner: PrimitiveRenderer,
 }
 impl ShapeRenderer {
-    /// Creates shaders and an empty pipeline cache on this context's device.
+    /// Creates built-in shading with default pipeline settings.
     pub fn new(graphics: &GraphicsContext) -> Self {
+        Self::with_options(graphics, crate::PipelineOptions::default())
+    }
+    /// Creates built-in shading with immutable blend/write/depth/stencil settings.
+    /// Compatibility is checked during preparation or drawing, before any draw.
+    pub fn with_options(graphics: &GraphicsContext, options: crate::PipelineOptions) -> Self {
         Self {
-            inner: PrimitiveRenderer::new(graphics),
+            inner: PrimitiveRenderer::new(graphics, options),
         }
     }
     /// Prepares a target's color/sample/depth-stencil variant without drawing.
@@ -425,8 +454,8 @@ impl<'frame> ShapeDrawSession<'_, 'frame> {
 ///
 /// Owns shaders, pipeline variants, and reusable CPU scratch, but no windows or
 /// frames. Colors are linear straight RGBA; output uses premultiplied source-over.
-/// Draws do not test/write depth or stencil, even when sharing a depth-enabled
-/// pass. Use pass clipping or custom mesh materials for explicit stencil tests.
+/// Default shading ignores depth/stencil. [`Self::with_options`] configures explicit
+/// tests/writes, including stencil masks controlled by the pass reference.
 /// Shader edge coverage works without MSAA. No draw sorting or implicit batching
 /// occurs. Prepare pipelines before rendering to avoid first-use pipeline creation.
 #[derive(Debug)]
@@ -434,10 +463,15 @@ pub struct LineRenderer {
     inner: PrimitiveRenderer,
 }
 impl LineRenderer {
-    /// Creates shaders and an empty pipeline cache on this context's device.
+    /// Creates built-in shading with default pipeline settings.
     pub fn new(graphics: &GraphicsContext) -> Self {
+        Self::with_options(graphics, crate::PipelineOptions::default())
+    }
+    /// Creates built-in shading with immutable blend/write/depth/stencil settings.
+    /// Compatibility is checked during preparation or drawing, before any draw.
+    pub fn with_options(graphics: &GraphicsContext, options: crate::PipelineOptions) -> Self {
         Self {
-            inner: PrimitiveRenderer::new(graphics),
+            inner: PrimitiveRenderer::new(graphics, options),
         }
     }
     /// Prepares a target's color/sample/depth-stencil variant without drawing.

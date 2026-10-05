@@ -256,7 +256,7 @@ impl Rig {
         let binding = textures.create_binding(image.view(), TextureBindingOptions::new())?;
         eprintln!("wrapped_resources_us={:.3}", micros(start.elapsed()));
         let start = Instant::now();
-        meshes_renderer.prepare(target.format(), target.sample_count())?;
+        meshes_renderer.prepare(&target.render_format())?;
         eprintln!(
             "wrapped_mesh_pipeline_prepare_us={:.3}",
             micros(start.elapsed())

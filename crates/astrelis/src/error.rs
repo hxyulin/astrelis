@@ -54,6 +54,8 @@ pub enum Error {
     InvalidShapeDraw,
     /// Line endpoints, width, color, transform, or transformed bounds are invalid.
     InvalidLineDraw,
+    /// Text placement, color, opacity, or transformed bounds are invalid.
+    InvalidTextDraw,
     /// Sampling would read from an active color or resolve attachment.
     TextureFeedback,
     /// A window or canvas could not be turned into a wgpu surface.
@@ -198,6 +200,7 @@ impl fmt::Display for Error {
             Self::InvalidTextureDraw => f.write_str("texture rectangles/tint must be finite, extents nonnegative, and opacity in 0..=1"),
             Self::InvalidTransform2D => f.write_str("2D transforms and their composition must be finite"),
             Self::InvalidShapeDraw => f.write_str("shape geometry/stroke/color/transform must be finite, extents/radius/stroke width nonnegative, alpha in 0..=1"),
+            Self::InvalidTextDraw => f.write_str("text placement/color/opacity and transformed bounds must be finite, alpha and opacity in 0..=1"),
             Self::InvalidLineDraw => f.write_str("line geometry/color/transform must be finite, width nonnegative, alpha in 0..=1"),
             Self::TextureFeedback => f.write_str("cannot sample an active color or resolve attachment"),
             Self::CreateSurface(error) => write!(f, "could not create a GPU surface: {error}"),

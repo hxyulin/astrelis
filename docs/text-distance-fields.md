@@ -16,7 +16,7 @@ let prepared = painter.prepare_text(
     MtsdfOptions::new()
         .pixels_per_em(64)
         .range_em(0.25)
-        .scale_factor(dpi_scale),
+        .raster_scale(dpi_scale),
 )?;
 
 // Later, without shaping, field generation, or glyph uploads:
@@ -28,7 +28,7 @@ The enum is `TextPreparation::Coverage(TextRasterOptions)` or
 unhinted selected font outlines. There is no automatic representation selection,
 regeneration on transform changes, or generation in a paint session.
 
-MtsdfOptions defaults to 64 texels/EM, a full range of 0.25 EM, and scale factor 1.
+MtsdfOptions defaults to 64 texels/EM, a full range of 0.25 EM, and raster scale 1.
 Density must be in 16..=256. Full range must be finite, positive, at most 1 EM,
 and span at least two generation texels. A 0.25-EM range encodes distances from
 -0.125 to +0.125 EM. Image padding includes the outside half-range plus one
@@ -36,14 +36,15 @@ filtering texel; atlas allocation adds its existing one-texel gutter. Smaller
 ranges can reduce generation cost and padding. Density 64 is a conservative
 starting point for the tested fonts, not a universal quality optimum.
 
-`scale_factor` converts layout geometry to physical pixels exactly once. It does
-not change field density or cache identity. The same outline fields can serve
-newly prepared geometry at different font sizes or DPI. A layout or geometry scale
-change still creates a new PreparedText. Per-draw transforms can reuse it directly.
+`raster_scale` selects color/bitmap fallback image density. It does not scale
+geometry or change outline generation density/cache identity. Outline fields
+serve different font sizes and draw transforms. Prepared geometry and `size()`
+retain layout units. Apply a draw/session DPI transform consistently with other
+2D content. Pure outline geometry does not need rebuilding solely for DPI;
+color/bitmap fallback may need preparation at a new density.
 
-PreparedText exposes `preparation()` and `scale_factor()`. The old
-`raster_options()` accessor was deliberately replaced: field resources do not have
-coverage hinting settings. `size()` still measures scaled advances/line boxes.
+PreparedText exposes `preparation()` and `raster_scale()`. The representation
+remains explicit, with coverage hinting separate from field density.
 `ink_bounds()` means prepared image-quad bounds, including field padding; it does
 not become an exact outline metric. Unsupported/blank glyphs are reported through
 `skipped_glyphs()`, including blank spaces. Missing characters still use the shaped

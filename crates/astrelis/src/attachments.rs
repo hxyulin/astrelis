@@ -13,6 +13,14 @@ pub struct RenderFormat {
     pub sample_count: u32,
 }
 impl RenderFormat {
+    pub(crate) fn single_color(&self) -> Result<wgpu::TextureFormat, crate::Error> {
+        if self.colors.len() == 1 {
+            self.colors[0].ok_or(crate::Error::ExpectedSingleColor)
+        } else {
+            Err(crate::Error::ExpectedSingleColor)
+        }
+    }
+
     /// Describes a single color output without depth/stencil.
     pub fn color(format: wgpu::TextureFormat, sample_count: u32) -> Self {
         Self {

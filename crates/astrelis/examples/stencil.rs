@@ -1,4 +1,4 @@
-//! A stencil mask clips a colored quad to a diamond without writing mask color.
+//! A diamond stencil mask clips mesh shading and built-in Painter shapes/lines.
 //! Press Space to toggle stencil clipping.
 //! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
 
@@ -9,8 +9,8 @@ use std::{
 };
 
 use astrelis::{
-    Error, FrameError, GraphicsContext, Material, MaterialOptions, Mesh, MeshRenderer,
-    RenderTarget, SurfaceOptions, Vertex, wgpu,
+    Error, FrameError, GraphicsContext, LineDraw, Material, MaterialOptions, Mesh, MeshRenderer,
+    Painter, PipelineOptions, Rect, RenderTarget, SurfaceOptions, Vertex, wgpu,
 };
 use winit::{
     application::ApplicationHandler,
@@ -28,6 +28,7 @@ struct State {
     graphics: GraphicsContext,
     target: RenderTarget<'static>,
     renderer: MeshRenderer,
+    painter: Painter,
     mesh: Mesh,
     mask: Mesh,
     mask_material: Material,
@@ -92,19 +93,24 @@ impl State {
             compare: wgpu::CompareFunction::Equal,
             ..Default::default()
         };
-        let clip_material = graphics.create_material(
-            MaterialOptions::new(renderer.default_material().shader()).depth_stencil(Some(
-                wgpu::DepthStencilState::stencil(
-                    FORMAT,
-                    wgpu::StencilState {
-                        front: equal,
-                        back: equal,
-                        read_mask: 0xff,
-                        write_mask: 0,
-                    },
-                ),
-            )),
+        let clip_state = wgpu::DepthStencilState::stencil(
+            FORMAT,
+            wgpu::StencilState {
+                front: equal,
+                back: equal,
+                read_mask: 0xff,
+                write_mask: 0,
+            },
         );
+        let clip_material = graphics.create_material(
+            MaterialOptions::new(renderer.default_material().shader())
+                .depth_stencil(Some(clip_state.clone())),
+        );
+        let mut painter = Painter::with_options(
+            &graphics,
+            PipelineOptions::new().depth_stencil(Some(clip_state)),
+        );
+        painter.prepare_for_target(&target)?;
         renderer.prepare_for_target(&target)?;
         renderer.prepare_material_for_target(&mask_material, &target)?;
         renderer.prepare_material_for_target(&clip_material, &target)?;
@@ -114,6 +120,7 @@ impl State {
             graphics,
             target,
             renderer,
+            painter,
             mesh,
             mask,
             mask_material,
@@ -166,7 +173,19 @@ impl App {
                     .draw_with_material(&mut pass, &state.mesh, &state.clip_material)?;
             } else {
                 state.renderer.draw(&mut pass, &state.mesh)?;
-            }
+            } // The same mask/reference clips built-in 2D shading and mesh materials.
+            // With clipping disabled the cleared stencil is zero everywhere.
+            pass.set_stencil_reference(u32::from(state.enabled));
+            let [w, h] = pass.size().map(|v| v as f32);
+            let mut paint = state.painter.begin(&mut pass)?;
+            paint.fill_rounded_rect(
+                Rect::new(w * 0.1, h * 0.35, w * 0.8, h * 0.12),
+                h * 0.04,
+                [0.02, 0.03, 0.05, 0.8],
+            )?;
+            paint.draw_line(
+                LineDraw::new([w * 0.1, h * 0.6], [w * 0.9, h * 0.6], [1.; 4]).width(4.),
+            )?;
         }
         frame.finish()?;
         self.retry_at = None;
@@ -186,6 +205,7 @@ impl App {
                 .depth_stencil(FORMAT),
         )?;
         state.renderer.prepare_for_target(&state.target)?;
+        state.painter.prepare_for_target(&state.target)?;
         state
             .renderer
             .prepare_material_for_target(&state.mask_material, &state.target)?;

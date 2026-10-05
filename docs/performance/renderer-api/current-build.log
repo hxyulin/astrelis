@@ -1,0 +1,3 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/dev/projects/astrelis/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 2.43s
+  Executable benches/text_batches.rs (target/release/deps/text_batches-4d9a429162a49dcc)

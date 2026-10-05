@@ -62,7 +62,7 @@ impl State {
             .create_framebuffer(FramebufferOptions::new(size.width, size.height).sample_count(4))?;
         let mut compositor = TextureRenderer::new(&graphics);
         let binding = compositor.create_sampled_binding(&framebuffer.sampled_color())?;
-        renderer.prepare(framebuffer.format(), framebuffer.sample_count())?;
+        renderer.prepare(&framebuffer.render_format())?;
         compositor.prepare_for_target(&binding, &target)?;
         window.request_redraw();
         Ok(Self {
@@ -196,7 +196,7 @@ impl ApplicationHandler for App {
                 if let Err(error) = state
                     .framebuffer
                     .set_sample_count(count)
-                    .and_then(|()| state.renderer.prepare(state.framebuffer.format(), count))
+                    .and_then(|()| state.renderer.prepare(&state.framebuffer.render_format()))
                 {
                     self.fail(event_loop, error);
                     return;

@@ -101,7 +101,7 @@ impl Work {
         painter.prepare(&target.render_format())?;
         shapes.prepare(&target.render_format())?;
         lines.prepare(&target.render_format())?;
-        meshes.prepare(target.format(), target.sample_count())?;
+        meshes.prepare(&target.render_format())?;
         let texture = g.create_texture(TextureOptions::new(1, 1))?;
         texture.write(&[255; 4])?;
         let image = textures.create_binding(texture.view(), TextureBindingOptions::new())?;

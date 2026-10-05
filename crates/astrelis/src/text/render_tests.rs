@@ -111,9 +111,9 @@ fn dpi_clipping_msaa_transforms_and_interleaving_preserve_order() {
         let mut renderer = TextRenderer::new(&g);
         renderer.prepare(&t.render_format()).unwrap();
         let text = renderer
-            .prepare_text(&layout("M"), TextRasterOptions::new().scale_factor(2.))
+            .prepare_text(&layout("M"), TextRasterOptions::new().raster_scale(2.))
             .unwrap();
-        assert_eq!(text.size(), [40., 48.]);
+        assert_eq!(text.size(), [20., 24.]);
         let mut shapes = ShapeRenderer::new(&g);
         shapes.prepare(&t.render_format()).unwrap();
         let before = renderer.stats();
@@ -124,7 +124,9 @@ fn dpi_clipping_msaa_transforms_and_interleaving_preserve_order() {
                 .draw(
                     &mut pass,
                     &text,
-                    TextDraw::new([0., 0.]).color([1., 0., 0., 1.]),
+                    TextDraw::new([0., 0.])
+                        .color([1., 0., 0., 1.])
+                        .transform(Transform2D::scale(2., 2.)),
                 )
                 .unwrap();
             shapes
@@ -140,7 +142,9 @@ fn dpi_clipping_msaa_transforms_and_interleaving_preserve_order() {
                     TextDraw::new([0., 0.])
                         .color([0., 0., 1., 1.])
                         .opacity(0.5)
-                        .transform_2d(Transform2D::translation(2., 0.)),
+                        .transform(
+                            Transform2D::scale(2., 2.).then(Transform2D::translation(2., 0.)),
+                        ),
                 )
                 .unwrap();
         });
@@ -304,7 +308,7 @@ fn invalid_preparation_and_draws_leave_existing_text_and_pass_usable() {
             .unwrap();
         assert!(matches!(
             renderer.prepare(&integer.render_format()),
-            Err(TextRenderError::UnsupportedFormat { .. })
+            Err(Error::UnsupportedTextFormat { .. })
         ));
         let prepared = renderer
             .prepare_text(&cpu, TextRasterOptions::new())
@@ -312,12 +316,12 @@ fn invalid_preparation_and_draws_leave_existing_text_and_pass_usable() {
         assert_eq!(prepared.skipped_glyphs(), [1]);
         for scale in [0., -1., f32::INFINITY, f32::NAN, 1000.] {
             assert!(matches!(
-                renderer.prepare_text(&cpu, TextRasterOptions::new().scale_factor(scale)),
+                renderer.prepare_text(&cpu, TextRasterOptions::new().raster_scale(scale)),
                 Err(TextRenderError::InvalidOptions)
             ));
         }
         assert!(matches!(
-            renderer.prepare_text(&cpu, TextRasterOptions::new().scale_factor(2.)),
+            renderer.prepare_text(&cpu, TextRasterOptions::new().raster_scale(2.)),
             Err(TextRenderError::GlyphTooLarge)
         ));
         assert!(renderer.stats().cached_glyphs <= 2);
@@ -327,7 +331,7 @@ fn invalid_preparation_and_draws_leave_existing_text_and_pass_usable() {
             let mut pass = frame.render_pass().begin().unwrap();
             assert!(matches!(
                 other.draw(&mut pass, &prepared, TextDraw::default()),
-                Err(TextRenderError::Graphics(Error::DeviceMismatch))
+                Err(Error::DeviceMismatch)
             ));
             assert!(
                 renderer
@@ -340,7 +344,7 @@ fn invalid_preparation_and_draws_leave_existing_text_and_pass_usable() {
                         &mut pass,
                         &prepared,
                         TextDraw::new([f32::MAX, f32::MAX])
-                            .transform_2d(Transform2D::scale(f32::MAX, f32::MAX))
+                            .transform(Transform2D::scale(f32::MAX, f32::MAX))
                     )
                     .is_err()
             );
@@ -465,20 +469,17 @@ fn mtsdf_reuses_fields_across_font_sizes_dpi_and_keeps_explicit_metadata() {
         let settings = MtsdfOptions::new();
         let first = renderer.prepare_text(&cpu, settings).unwrap();
         assert_eq!(first.preparation(), TextPreparation::Mtsdf(settings));
-        assert_eq!(first.scale_factor(), 1.);
+        assert_eq!(first.raster_scale(), 1.);
         assert_eq!(first.skipped_glyphs(), [1]);
         assert_eq!(first.data.batches[0].page.kind, Kind::Mtsdf);
         let before = renderer.stats();
         let second = renderer
-            .prepare_text(&cpu, settings.scale_factor(2.))
+            .prepare_text(&cpu, settings.raster_scale(2.))
             .unwrap();
-        assert_eq!(second.size(), first.size().map(|v| v * 2.));
+        assert_eq!(second.size(), first.size());
         let a = first.ink_bounds().unwrap();
         let b = second.ink_bounds().unwrap();
-        assert_eq!(
-            [b.x, b.y, b.width, b.height],
-            [a.x, a.y, a.width, a.height].map(|v| v * 2.)
-        );
+        assert_eq!([b.x, b.y, b.width, b.height], [a.x, a.y, a.width, a.height]);
         buffer
             .set_style(style.font_size(40.).line_height(48.))
             .unwrap();
@@ -499,9 +500,9 @@ fn mtsdf_reuses_fields_across_font_sizes_dpi_and_keeps_explicit_metadata() {
         assert!(changed.ink_bounds().unwrap().width < a.width);
         // Outline geometry does not inherit coverage's physical raster size cap.
         let huge = renderer
-            .prepare_text(&cpu, settings.scale_factor(50.))
+            .prepare_text(&cpu, settings.raster_scale(50.))
             .unwrap();
-        assert_eq!(huge.size(), first.size().map(|v| v * 50.));
+        assert_eq!(huge.size(), first.size());
     });
 }
 
@@ -530,7 +531,7 @@ fn mtsdf_and_intrinsic_artwork_preserve_order_color_opacity_and_msaa() {
             ]
         );
         let mask = renderer
-            .prepare_text(&layout("M"), MtsdfOptions::new().scale_factor(2.))
+            .prepare_text(&layout("M"), MtsdfOptions::new().raster_scale(2.))
             .unwrap();
         let mut shapes = ShapeRenderer::new(&g);
         for samples in [1, 4] {
@@ -565,7 +566,9 @@ fn mtsdf_and_intrinsic_artwork_preserve_order_color_opacity_and_msaa() {
                     .draw(
                         &mut pass,
                         &mask,
-                        TextDraw::default().color([1., 0., 0., 1.]),
+                        TextDraw::default()
+                            .color([1., 0., 0., 1.])
+                            .transform(Transform2D::scale(2., 2.)),
                     )
                     .unwrap();
                 shapes
@@ -581,7 +584,9 @@ fn mtsdf_and_intrinsic_artwork_preserve_order_color_opacity_and_msaa() {
                         TextDraw::default()
                             .color([0., 0., 1., 1.])
                             .opacity(0.5)
-                            .transform_2d(Transform2D::translation(2., 0.)),
+                            .transform(
+                                Transform2D::scale(2., 2.).then(Transform2D::translation(2., 0.)),
+                            ),
                     )
                     .unwrap();
             });
@@ -663,8 +668,8 @@ fn mtsdf_invalid_options_and_page_pressure_leave_retained_resources_usable() {
             options.range_em(f32::NAN),
             options.range_em(1.1),
             options.range_em(0.01),
-            options.scale_factor(0.),
-            options.scale_factor(f32::INFINITY),
+            options.raster_scale(0.),
+            options.raster_scale(f32::INFINITY),
         ] {
             assert!(matches!(
                 renderer.prepare_text(&cpu, invalid),
@@ -763,7 +768,7 @@ fn mtsdf_multilingual_cff_variable_weight_and_italic_match_unhinted_coverage() {
             let coverage = renderer
                 .prepare_text(
                     &cpu,
-                    TextRasterOptions::new().hinting(false).scale_factor(3.),
+                    TextRasterOptions::new().hinting(false).raster_scale(3.),
                 )
                 .unwrap();
             assert_eq!(field.glyph_count(), coverage.glyph_count());
@@ -779,17 +784,12 @@ fn mtsdf_multilingual_cff_variable_weight_and_italic_match_unhinted_coverage() {
                     pixels(&g, t, |frame| {
                         let mut pass = frame.render_pass().begin().unwrap();
                         renderer
-                            .draw(&mut pass, p, TextDraw::default().transform_2d(tr))
+                            .draw(&mut pass, p, TextDraw::default().transform(tr))
                             .unwrap();
                     })
                 };
                 let actual = render(&mut renderer, &mut t, &field, transform);
-                let reference = render(
-                    &mut renderer,
-                    &mut t,
-                    &coverage,
-                    Transform2D::scale(1. / 3., 1. / 3.).then(transform),
-                );
+                let reference = render(&mut renderer, &mut t, &coverage, transform);
                 let area: u64 = reference
                     .as_chunks::<4>()
                     .0
@@ -924,7 +924,7 @@ fn batched_text_matches_individual_metadata_pixels_and_order() {
         ];
         for settings in [
             TextPreparation::from(TextRasterOptions::new()),
-            TextRasterOptions::new().scale_factor(2.).into(),
+            TextRasterOptions::new().raster_scale(2.).into(),
             MtsdfOptions::new().into(),
         ] {
             let mut renderer = TextRenderer::new(&g);
@@ -973,7 +973,7 @@ fn batched_text_matches_individual_metadata_pixels_and_order() {
                                         text,
                                         TextDraw::new([i as f32 * 5., i as f32 * 4.])
                                             .color([0.2, 0.7, 1., 0.6])
-                                            .transform_2d(Transform2D::rotation(0.07)),
+                                            .transform(Transform2D::rotation(0.07)),
                                     )
                                     .unwrap();
                             }
@@ -1103,7 +1103,7 @@ fn failed_and_empty_batches_preserve_existing_resources_and_painter_usage() {
         assert!(matches!(
             painter.prepare_texts(
                 std::iter::empty::<&TextLayout>(),
-                TextRasterOptions::new().scale_factor(0.)
+                TextRasterOptions::new().raster_scale(0.)
             ),
             Err(TextRenderError::InvalidOptions)
         ));

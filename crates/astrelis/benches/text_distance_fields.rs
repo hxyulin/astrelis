@@ -148,12 +148,12 @@ fn main() -> Result<()> {
             assert_eq!(painter.text().stats().cache_misses, after.cache_misses);
             assert_eq!(painter.text().stats().uploaded_bytes, after.uploaded_bytes);
             drop(cached);
-            // DPI change reuses outline image keys; geometry still changes.
+            // Density changes reuse outline images and leave layout-unit geometry unchanged.
             if matches!(settings, TextPreparation::Mtsdf(_)) {
                 let TextPreparation::Mtsdf(options) = settings else {
                     unreachable!()
                 };
-                let changed = painter.prepare_text(layout, options.scale_factor(2.))?;
+                let changed = painter.prepare_text(layout, options.raster_scale(2.))?;
                 assert_eq!(painter.text().stats().cache_misses, after.cache_misses);
                 assert_eq!(painter.text().stats().uploaded_bytes, after.uploaded_bytes);
                 drop(changed);

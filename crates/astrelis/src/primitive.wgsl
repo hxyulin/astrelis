@@ -80,7 +80,7 @@ fn filtered_box(p: vec2<f32>, bounds: vec2<f32>, footprint: vec2<f32>) -> f32 {
     let coverage = positive - negative;
     return coverage.x * coverage.y;
 }
-@fragment fn fragment_main(input: Output) -> @location(0) vec4<f32> {
+fn shade_fragment_main(input: Output) -> vec4<f32> {
     let half_size = input.geometry.xy;
     let kind = u32(input.style.x);
     let radius = input.style.y;
@@ -134,4 +134,13 @@ fn filtered_box(p: vec2<f32>, bounds: vec2<f32>, footprint: vec2<f32>) -> f32 {
     let coverage = select(hard, filtered, input.geometry.w > 0.0);
     let alpha = input.color.a * coverage;
     return vec4(input.color.rgb * alpha, alpha);
+}
+
+@fragment fn fragment_main(input: Output) -> @location(0) vec4<f32> {
+    return shade_fragment_main(input);
+}
+@fragment fn fragment_covered(input: Output) -> @location(0) vec4<f32> {
+    let color = shade_fragment_main(input);
+    if color.a <= 0.0 { discard; }
+    return color;
 }

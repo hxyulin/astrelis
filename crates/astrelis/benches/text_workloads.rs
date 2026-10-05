@@ -473,7 +473,7 @@ fn preparation(g: &GraphicsContext, fonts: &mut TextSystem) -> Result<()> {
                 renderer.clear_cache();
             }
             let before = renderer.stats();
-            let raster = TextRasterOptions::new().scale_factor(if case == "raster_size_pressure" {
+            let raster = TextRasterOptions::new().raster_scale(if case == "raster_size_pressure" {
                 1. + sample as f32 / 16.
             } else {
                 1.

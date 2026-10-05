@@ -115,9 +115,7 @@ impl State {
         let format = self.scene.layer.render_format();
         self.scene.shapes.prepare(&format)?;
         self.scene.lines.prepare(&format)?;
-        self.scene
-            .meshes
-            .prepare(format.colors[0].unwrap(), format.sample_count)?;
+        self.scene.meshes.prepare(&format)?;
         self.scene
             .textures
             .prepare(&self.scene.checker, &self.scene.layer.render_format())?;

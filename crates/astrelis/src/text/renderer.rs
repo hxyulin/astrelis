@@ -20,17 +20,12 @@ use swash::scale::{
     image::{Content, Image},
 };
 
-/// GPU text preparation or drawing failure. Failed draws record no text commands.
+/// GPU text resource preparation failure. Drawing uses [`crate::Error`].
 #[derive(Debug)]
 pub enum TextRenderError {
     /// A device, attachment format, or pipeline error from the rendering layer.
     Graphics(Error),
-    /// Coverage/color shading requires a blendable floating-point color attachment.
-    UnsupportedFormat {
-        /// Incompatible pass color format.
-        format: wgpu::TextureFormat,
-    },
-    /// Invalid atlas size/budget, raster scale/size, geometry, color, or opacity.
+    /// Invalid atlas limits, raster density/size, or prepared geometry.
     InvalidOptions,
     /// A padded glyph image exceeds the configured atlas page size.
     GlyphTooLarge,
@@ -42,21 +37,16 @@ pub enum TextRenderError {
 }
 impl From<Error> for TextRenderError {
     fn from(value: Error) -> Self {
-        match value {
-            Error::UnsupportedTextFormat { format } => Self::UnsupportedFormat { format },
-            other => Self::Graphics(other),
-        }
+        Self::Graphics(value)
     }
 }
 impl std::fmt::Display for TextRenderError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Graphics(e) => e.fmt(f),
-            Self::UnsupportedFormat { format } => write!(
-                f,
-                "text shading requires blendable floating-point color, got {format:?}"
-            ),
-            Self::InvalidOptions => f.write_str("invalid text renderer, raster, or draw options"),
+            Self::InvalidOptions => {
+                f.write_str("invalid text renderer, raster density, or prepared geometry")
+            }
             Self::GlyphTooLarge => f.write_str("glyph image exceeds atlas page size"),
             Self::AtlasFull => f.write_str("text atlas budget is occupied by leased pages"),
             Self::InvalidRaster => f.write_str("invalid retained font or raster image"),
@@ -72,8 +62,10 @@ impl std::error::Error for TextRenderError {
     }
 }
 /// Bounded glyph atlas/cache configuration, selected at renderer creation.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct TextRendererOptions {
+    /// Immutable blend/color-write/depth/stencil settings for coverage, color and MTSDF.
+    pub pipeline: crate::PipelineOptions,
     /// Square page dimension, default 1024. Each glyph has a transparent one-texel gutter.
     pub page_size: u32,
     /// Maximum live pages, including prepared/recording/completion leases; default 8.
@@ -87,6 +79,7 @@ pub struct TextRendererOptions {
 impl Default for TextRendererOptions {
     fn default() -> Self {
         Self {
+            pipeline: crate::PipelineOptions::default(),
             page_size: 1024,
             max_pages: 8,
             max_cached_glyphs: 16_384,
@@ -97,8 +90,9 @@ impl Default for TextRendererOptions {
 /// Explicit raster scale and hinting, independent of shaping and draw placement.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextRasterOptions {
-    /// Positive finite physical pixels per layout unit. Scales glyphs and layout positions once.
-    pub scale_factor: f32,
+    /// Positive finite raster texels per layout unit, default 1.
+    /// Controls image density only; geometry and measurements retain layout units.
+    pub raster_scale: f32,
     /// Rasterizer hinting at the chosen physical size, enabled by default.
     pub hinting: bool,
 }
@@ -111,13 +105,14 @@ impl TextRasterOptions {
     /// Creates 1:1 coverage/color preparation with hinting.
     pub const fn new() -> Self {
         Self {
-            scale_factor: 1.,
+            raster_scale: 1.,
             hinting: true,
         }
     }
-    /// Selects explicit DPI/raster scaling. Draw origin remains in physical pixels.
-    pub const fn scale_factor(mut self, value: f32) -> Self {
-        self.scale_factor = value;
+    /// Selects image density without scaling geometry. Match the intended draw scale
+    /// for sharp hinted coverage; a Painter/session transform applies geometry scaling.
+    pub const fn raster_scale(mut self, value: f32) -> Self {
+        self.raster_scale = value;
         self
     }
     /// Enables or disables hinting.
@@ -140,9 +135,9 @@ pub struct MtsdfOptions {
     /// Must be finite, positive, at most 1 EM, and span at least two generation texels.
     /// The image includes half this range outside the outline plus a filtering guard.
     pub range_em: f32,
-    /// Positive finite physical pixels per layout unit, default 1.
-    /// Scales geometry once and does not change outline generation density or cache identity.
-    pub scale_factor: f32,
+    /// Positive finite raster texels per layout unit for color/bitmap fallback, default 1.
+    /// Outline density comes from pixels_per_em; geometry always retains layout units.
+    pub raster_scale: f32,
 }
 impl Default for MtsdfOptions {
     fn default() -> Self {
@@ -155,7 +150,7 @@ impl MtsdfOptions {
         Self {
             pixels_per_em: 64,
             range_em: 0.25,
-            scale_factor: 1.,
+            raster_scale: 1.,
         }
     }
     /// Selects generation density. Higher values cost more preparation time and atlas space.
@@ -168,9 +163,9 @@ impl MtsdfOptions {
         self.range_em = value;
         self
     }
-    /// Selects physical geometry scaling; draw origin remains in physical pixels.
-    pub const fn scale_factor(mut self, value: f32) -> Self {
-        self.scale_factor = value;
+    /// Selects fallback image density without changing geometry or outline cache keys.
+    pub const fn raster_scale(mut self, value: f32) -> Self {
+        self.raster_scale = value;
         self
     }
 }
@@ -202,15 +197,19 @@ impl From<MtsdfOptions> for TextPreparation {
     }
 }
 impl TextPreparation {
-    /// Physical pixels per layout unit, applied once when creating glyph geometry.
-    pub const fn scale_factor(self) -> f32 {
+    /// Raster texels per layout unit for coverage/color images; geometry is unchanged.
+    pub const fn raster_scale(self) -> f32 {
         match self {
-            Self::Coverage(v) => v.scale_factor,
-            Self::Mtsdf(v) => v.scale_factor,
+            Self::Coverage(v) => v.raster_scale,
+            Self::Mtsdf(v) => v.raster_scale,
         }
     }
 }
-/// Placement and mask color for immutable prepared text in viewport-relative physical pixels.
+/// Placement and mask color for text geometry in its original layout units.
+///
+/// Identity draws interpret these units as viewport-relative pixels. An explicit
+/// draw or Painter transform can convert application logical units to pixels.
+/// Raster density never applies another geometry scale.
 #[derive(Clone, Copy, Debug)]
 pub struct TextDraw {
     /// Origin offset before the affine transform.
@@ -219,7 +218,7 @@ pub struct TextDraw {
     pub color: [f32; 4],
     /// Additional opacity in `0..=1`, applied to monochrome and intrinsic color glyphs.
     pub opacity: f32,
-    /// Transform of prepared pixel geometry and origin; X right/Y down.
+    /// Transform of layout-unit geometry and origin; X right/Y down.
     pub transform: Transform2D,
 }
 impl Default for TextDraw {
@@ -228,7 +227,7 @@ impl Default for TextDraw {
     }
 }
 impl TextDraw {
-    /// Creates white text at the given pixel origin with opacity one.
+    /// Creates white text at the given layout-unit origin with opacity one.
     pub const fn new(origin: [f32; 2]) -> Self {
         Self {
             origin,
@@ -247,9 +246,9 @@ impl TextDraw {
         self.opacity = value;
         self
     }
-    /// Selects an affine pixel transform. Coverage images filter; fields reconstruct outline fill.
-    pub const fn transform_2d(mut self, value: Transform2D) -> Self {
-        self.transform = value;
+    /// Selects an affine geometry transform. Coverage images filter; fields reconstruct fill.
+    pub fn transform(mut self, value: impl Into<Transform2D>) -> Self {
+        self.transform = value.into();
         self
     }
 }
@@ -447,11 +446,12 @@ pub struct PreparedText {
     preparation: TextPreparation,
 }
 impl PreparedText {
-    /// Advance/line-box measurement scaled to physical pixels once.
+    /// Advance/line-box measurement in the original layout units, independent of raster density.
     pub fn size(&self) -> [f32; 2] {
         self.size
     }
-    /// Bounds of prepared image quads in physical pixels, distinct from layout measurement.
+    /// Image-quad bounds in layout units, distinct from advance/line-box measurement.
+    /// Coverage rounding/hinting can change these bounds with raster density.
     /// Distance-field quads include distance-range padding and filtering guards.
     pub fn ink_bounds(&self) -> Option<Rect> {
         self.bounds
@@ -469,9 +469,9 @@ impl PreparedText {
     pub fn preparation(&self) -> TextPreparation {
         self.preparation
     }
-    /// Physical pixels per layout unit used for this resource's geometry.
-    pub fn scale_factor(&self) -> f32 {
-        self.preparation.scale_factor()
+    /// Raster image density selected during preparation, independent of geometry scale.
+    pub fn raster_scale(&self) -> f32 {
+        self.preparation.raster_scale()
     }
 }
 /// Independent coverage/color and outline-distance-field renderer. Preparation generates and uploads before drawing.
@@ -585,15 +585,34 @@ impl TextRenderer {
             },
         ];
         let material = g.create_material(
-            MaterialOptions::new(&shader)
-                .vertex_layouts(&layouts)
-                .bind_group_layouts(&[Some(&layout)]),
+            options.pipeline.mesh(
+                MaterialOptions::new(&shader)
+                    .vertex_layouts(&layouts)
+                    .bind_group_layouts(&[Some(&layout)])
+                    .entry_points(
+                        "vertex_main",
+                        if options.pipeline.writes_attachment() {
+                            "fragment_covered"
+                        } else {
+                            "fragment_main"
+                        },
+                    ),
+            ),
         );
         let field_material = g.create_material(
-            MaterialOptions::new(&shader)
-                .vertex_layouts(&layouts)
-                .bind_group_layouts(&[Some(&layout)])
-                .entry_points("vertex_main", "fragment_mtsdf"),
+            options.pipeline.mesh(
+                MaterialOptions::new(&shader)
+                    .vertex_layouts(&layouts)
+                    .bind_group_layouts(&[Some(&layout)])
+                    .entry_points(
+                        "vertex_main",
+                        if options.pipeline.writes_attachment() {
+                            "fragment_mtsdf_covered"
+                        } else {
+                            "fragment_mtsdf"
+                        },
+                    ),
+            ),
         );
         Ok(Self {
             graphics: g.clone(),
@@ -638,15 +657,11 @@ impl TextRenderer {
     }
     fn pipeline(
         &mut self,
-        format: &RenderFormat,
+        color: wgpu::TextureFormat,
+        sample_count: u32,
+        depth_stencil: Option<wgpu::TextureFormat>,
         field: bool,
     ) -> Result<wgpu::RenderPipeline, Error> {
-        let color = if format.colors.len() == 1 {
-            format.colors[0]
-        } else {
-            None
-        }
-        .ok_or(Error::ExpectedSingleColor)?;
         Ok(crate::mesh_renderer::pipeline(
             &self.graphics,
             &mut self.pipelines,
@@ -656,8 +671,8 @@ impl TextRenderer {
                 &self.material
             },
             color,
-            format.sample_count,
-            format.depth_stencil,
+            sample_count,
+            depth_stencil,
             true,
         )
         .map_err(|error| match error {
@@ -666,24 +681,17 @@ impl TextRenderer {
         })?
         .clone())
     }
-    pub(crate) fn prepare_pipeline(&mut self, format: &RenderFormat) -> Result<(), Error> {
-        self.pipeline(format, false)?;
-        self.pipeline(format, true)?;
+    /// Prepares coverage and MTSDF pipelines without shaping or uploading glyphs.
+    pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), Error> {
+        let color = format.single_color()?;
+        self.pipeline(color, format.sample_count, format.depth_stencil, false)?;
+        self.pipeline(color, format.sample_count, format.depth_stencil, true)?;
         Ok(())
     }
-    /// Prepares the attachment/MSAA/depth variant without rasterizing or drawing.
-    pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), TextRenderError> {
-        self.pipeline(format, false)?;
-        self.pipeline(format, true)?;
-        Ok(())
-    }
-    /// Prepares a compatible surface target's attachment variant.
-    pub fn prepare_for_target(
-        &mut self,
-        target: &crate::RenderTarget<'_>,
-    ) -> Result<(), TextRenderError> {
+    /// Prepares a surface target's attachment variants, checking device identity.
+    pub fn prepare_for_target(&mut self, target: &crate::RenderTarget<'_>) -> Result<(), Error> {
         if !self.graphics.same_device(target.graphics()) {
-            return Err(Error::DeviceMismatch.into());
+            return Err(Error::DeviceMismatch);
         }
         self.prepare(&target.render_format())
     }
@@ -732,7 +740,7 @@ impl TextRenderer {
     /// fn prepare(renderer: &mut TextRenderer, layouts: &[Arc<TextLayout>], dpi: f32)
     ///     -> Result<(), TextRenderError> {
     ///     let texts = renderer.prepare_texts(layouts,
-    ///         TextRasterOptions::new().scale_factor(dpi))?;
+    ///         TextRasterOptions::new().raster_scale(dpi))?;
     ///     assert_eq!(texts.len(), layouts.len());
     ///     // Store these resources; each may be drawn with its own placement/style.
     ///     Ok(())
@@ -794,7 +802,7 @@ impl TextRenderer {
         preparation: TextPreparation,
     ) -> Result<TextDraft, TextRenderError> {
         validate_preparation(preparation)?;
-        let scale = preparation.scale_factor();
+        let scale = preparation.raster_scale();
         if !scale.is_finite()
             || scale <= 0.
             || layout.glyphs().iter().any(|g| {
@@ -807,7 +815,8 @@ impl TextRenderer {
         {
             return Err(TextRenderError::InvalidOptions);
         }
-        let size = layout.size().map(|v| v * scale);
+        let inverse_scale = 1. / scale;
+        let size = layout.size();
         if size.iter().any(|v| !v.is_finite())
             || (layout.glyphs().len() as u64) * 48 > self.graphics.device().limits().max_buffer_size
             || layout.glyphs().len() > u32::MAX as usize
@@ -866,12 +875,12 @@ impl TextRenderer {
             let factor = if let Representation::Mtsdf { pixels_per_em, .. } = key.representation
                 && image.page.kind == Kind::Mtsdf
             {
-                physical_size / pixels_per_em as f32
+                glyph.font_size / pixels_per_em as f32
             } else {
-                1.
+                inverse_scale
             };
-            let x = glyph.position[0] * scale + image.left as f32 * factor;
-            let y = glyph.position[1] * scale - image.top as f32 * factor;
+            let x = glyph.position[0] + image.left as f32 * factor;
+            let y = glyph.position[1] - image.top as f32 * factor;
             let w = image.width as f32 * factor;
             let h = image.height as f32 * factor;
             if [x, y, x + w, y + h].iter().any(|v| !v.is_finite()) {
@@ -971,29 +980,41 @@ impl TextRenderer {
     }
     /// Records ordered prepared batches into a frame-owned pass, honoring its viewport/scissor.
     /// Restores owned pipeline/bindings/raster state each call; never shapes or rasterizes.
-    /// Depth/stencil tests/writes are disabled, allowing overlays in depth-enabled passes.
+    /// Default shading ignores depth/stencil; explicit pipeline options select tests/writes.
+    /// Attachment compatibility and read-only restrictions are checked before drawing.
     pub fn draw(
         &mut self,
         pass: &mut RenderPass<'_>,
         text: &PreparedText,
         draw: TextDraw,
-    ) -> Result<(), TextRenderError> {
+    ) -> Result<(), Error> {
         if !pass.same_device(&self.graphics) || !self.graphics.same_device(&text.graphics) {
-            return Err(Error::DeviceMismatch.into());
+            return Err(Error::DeviceMismatch);
         }
         let parameters = draw_parameters(text.bounds, draw, pass.viewport_size())?;
+        crate::mesh_renderer::validate_aspects(pass, &self.material)?;
         let Some(buffer) = &text.data.buffer else {
             return Ok(());
         };
-        let format = pass.render_format();
+        let color = pass.single_color_format()?;
         // Validate/create every required variant before recording commands.
         let raster_pipeline = if text.data.raster_pipeline {
-            Some(self.pipeline(&format, false)?)
+            Some(self.pipeline(
+                color,
+                pass.sample_count(),
+                pass.depth_stencil_format(),
+                false,
+            )?)
         } else {
             None
         };
         let field_pipeline = if text.data.field_pipeline {
-            Some(self.pipeline(&format, true)?)
+            Some(self.pipeline(
+                color,
+                pass.sample_count(),
+                pass.depth_stencil_format(),
+                true,
+            )?)
         } else {
             None
         };
@@ -1360,7 +1381,7 @@ fn validate_preparation(preparation: TextPreparation) -> Result<(), TextRenderEr
     {
         return Err(TextRenderError::InvalidOptions);
     }
-    let scale = preparation.scale_factor();
+    let scale = preparation.raster_scale();
     if !scale.is_finite() || scale <= 0. {
         return Err(TextRenderError::InvalidOptions);
     }
@@ -1371,7 +1392,7 @@ fn draw_parameters(
     bounds: Option<Rect>,
     draw: TextDraw,
     viewport: [f32; 2],
-) -> Result<DrawData, TextRenderError> {
+) -> Result<DrawData, Error> {
     if draw
         .origin
         .iter()
@@ -1382,7 +1403,7 @@ fn draw_parameters(
         || !(0. ..=1.).contains(&draw.opacity)
         || !draw.transform.valid()
     {
-        return Err(TextRenderError::InvalidOptions);
+        return Err(Error::InvalidTextDraw);
     }
     let [a, b, c, d, tx, ty] = draw.transform.0.map(f64::from);
     let [ox, oy] = draw.origin.map(f64::from);
@@ -1407,7 +1428,7 @@ fn draw_parameters(
         .iter()
         .any(|v| !v.is_finite())
     {
-        return Err(TextRenderError::InvalidOptions);
+        return Err(Error::InvalidTextDraw);
     }
     if let Some(r) = bounds {
         for x in [r.x, r.x + r.width] {
@@ -1415,7 +1436,7 @@ fn draw_parameters(
                 let px = (origin[0] + (a * f64::from(x) + c * f64::from(y)) / vw) as f32;
                 let py = (origin[1] + (b * f64::from(x) + d * f64::from(y)) / vh) as f32;
                 if !(px * 2.).is_finite() || !(py * 2.).is_finite() {
-                    return Err(TextRenderError::InvalidOptions);
+                    return Err(Error::InvalidTextDraw);
                 }
             }
         }

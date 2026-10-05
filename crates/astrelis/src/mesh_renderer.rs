@@ -48,112 +48,55 @@ impl MeshRenderer {
         &self.material
     }
 
-    /// Prepares default shading for a target, including its optional depth/stencil format.
-    ///
-    /// Default shading does not test or write depth/stencil. It uses a compatible
-    /// inert pipeline state when an attachment is present, allowing 2D overlays
-    /// to share a depth-enabled pass. Errors follow [`Self::prepare`].
-    /// A target on another device returns [`Error::DeviceMismatch`].
+    /// Prepares default shading for a target's complete attachment configuration.
+    /// A target from another device returns [`Error::DeviceMismatch`].
     pub fn prepare_for_target(&mut self, target: &crate::RenderTarget<'_>) -> Result<(), Error> {
         if !target.graphics().same_device(&self.graphics) {
             return Err(Error::DeviceMismatch);
         }
-        pipeline(
-            &self.graphics,
-            &mut self.pipelines,
-            &self.material,
-            target.format(),
-            target.sample_count(),
-            target.depth_stencil_format(),
-            true,
-        )?;
-        Ok(())
+        self.prepare(&target.render_format())
     }
 
-    /// Prepares a material against a target's full attachment configuration.
-    ///
-    /// This checks explicit depth/stencil format requirements before creating a
-    /// pipeline, and also supports materials with depth/stencil tests disabled.
-    /// A material or target from another device returns [`Error::DeviceMismatch`].
-    /// An explicit format mismatch returns [`Error::DepthStencilMismatch`].
-    /// Other errors and shader validation follow [`Self::prepare_material`].
+    /// Prepares an explicit material for a target without acquiring a frame.
     pub fn prepare_material_for_target(
         &mut self,
         material: &Material,
         target: &crate::RenderTarget<'_>,
     ) -> Result<(), Error> {
-        if (&material.device != self.graphics.device()
-            || &material.instance != self.graphics.instance())
-            || !target.graphics().same_device(&self.graphics)
-        {
+        if !target.graphics().same_device(&self.graphics) {
             return Err(Error::DeviceMismatch);
         }
-        pipeline(
-            &self.graphics,
-            &mut self.pipelines,
-            material,
-            target.format(),
-            target.sample_count(),
-            target.depth_stencil_format(),
-            false,
-        )?;
-        Ok(())
+        self.prepare_material(material, &target.render_format())
     }
 
-    /// Prepares the default material's pipeline for a target format and MSAA count.
+    /// Creates the default pipeline for color, MSAA, and depth/stencil formats.
     ///
-    /// This prepares a color-only pipeline. Use [`Self::prepare_for_target`] for
-    /// targets with depth/stencil attachments. Call with `target.format()` and
-    /// `target.sample_count()` before rendering,
-    /// or prepare a supported count before changing MSAA. Repeated calls reuse
-    /// the cached pipeline, with no capability queries or GPU resource creation.
-    /// This creates the wgpu pipeline without recording or submitting commands;
-    /// it does not guarantee that the driver performs all work before a draw.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::UnsupportedMeshFormat`] for formats incompatible with
-    /// floating-point output or alpha blending, [`Error::UnsupportedColorFormat`]
-    /// for unavailable color formats, or [`Error::UnsupportedSampleCount`].
-    pub fn prepare(&mut self, format: wgpu::TextureFormat, sample_count: u32) -> Result<(), Error> {
+    /// Repeated calls reuse cached pipelines. This does not record, submit, or
+    /// wait for GPU work. Default shading ignores depth/stencil tests and writes.
+    /// Returns format/sample compatibility errors or [`Error::ExpectedSingleColor`].
+    pub fn prepare(&mut self, format: &crate::RenderFormat) -> Result<(), Error> {
         pipeline(
             &self.graphics,
             &mut self.pipelines,
             &self.material,
-            format,
-            sample_count,
-            None,
+            format.single_color()?,
+            format.sample_count,
+            format.depth_stencil,
             true,
         )?;
         Ok(())
     }
 
-    /// Prepares a custom material's pipeline without acquiring a frame.
+    /// Prepares an immutable material for a complete attachment configuration.
     ///
-    /// Pipelines are cached independently for each immutable material identity,
-    /// color format, sample count, and depth/stencil format. This method uses the
-    /// material's explicit depth/stencil format, or none; use
-    /// [`Self::prepare_material_for_target`] when disabled tests share a target
-    /// that has depth/stencil storage. Cloned materials share entries. Resource
-    /// bindings and their contents are not part of the key; changing a uniform,
-    /// texture, or dynamic offset does not create another pipeline.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::DeviceMismatch`] for a material on another device,
-    /// [`Error::UnsupportedColorFormat`] for an unavailable color attachment,
-    /// [`Error::UnsupportedMaterialFormat`] if the selected blending cannot be
-    /// used with the format, [`Error::UnsupportedDepthStencilFormat`] for invalid
-    /// or unavailable depth/stencil formats, or [`Error::UnsupportedSampleCount`]. Shader entry
-    /// points, vertex/fragment interfaces, and binding layouts are validated by
-    /// wgpu when the pipeline is created, using its error scopes or uncaptured
-    /// error handler. Capture a wgpu validation scope around preparation when
-    /// loading application shaders that may fail validation.
+    /// Binding contents and dynamic offsets do not affect the pipeline cache.
+    /// Returns device, format, depth/stencil mismatch, or sample-count errors.
+    /// Shader diagnostics follow wgpu error reporting; use
+    /// [`Self::try_prepare_material`] to capture pipeline validation errors.
     pub fn prepare_material(
         &mut self,
         material: &Material,
-        format: wgpu::TextureFormat,
-        sample_count: u32,
+        format: &crate::RenderFormat,
     ) -> Result<(), Error> {
         if &material.device != self.graphics.device()
             || &material.instance != self.graphics.instance()
@@ -164,9 +107,9 @@ impl MeshRenderer {
             &self.graphics,
             &mut self.pipelines,
             material,
-            format,
-            sample_count,
-            material.depth_stencil.as_ref().map(|state| state.format),
+            format.single_color()?,
+            format.sample_count,
+            format.depth_stencil,
             false,
         )?;
         Ok(())
@@ -351,35 +294,6 @@ impl MeshRenderer {
         Ok(())
     }
 
-    /// Prepares a material for a complete format value without acquiring a target.
-    pub fn prepare_for_format(
-        &mut self,
-        material: &Material,
-        format: &crate::RenderFormat,
-    ) -> Result<(), Error> {
-        if &material.device != self.graphics.device()
-            || &material.instance != self.graphics.instance()
-        {
-            return Err(Error::DeviceMismatch);
-        }
-        let color = if format.colors.len() == 1 {
-            format.colors[0]
-        } else {
-            None
-        }
-        .ok_or(Error::ExpectedSingleColor)?;
-        pipeline(
-            &self.graphics,
-            &mut self.pipelines,
-            material,
-            color,
-            format.sample_count,
-            format.depth_stencil,
-            false,
-        )?;
-        Ok(())
-    }
-
     /// Captures wgpu validation diagnostics and caches only a successfully prepared pipeline.
     /// Shader modules and layouts can be checked separately with wgpu error scopes.
     pub async fn try_prepare_material(
@@ -488,7 +402,7 @@ impl<'draw, 'frame> MeshDrawSession<'draw, 'frame> {
         }
     }
 }
-fn validate_aspects(pass: &RenderPass<'_>, material: &Material) -> Result<(), Error> {
+pub(crate) fn validate_aspects(pass: &RenderPass<'_>, material: &Material) -> Result<(), Error> {
     if let Some(state) = &material.depth_stencil {
         if pass.depth_read_only() && !state.is_depth_read_only() {
             return Err(Error::ReadOnlyDepth);
@@ -538,9 +452,10 @@ pub(crate) fn pipeline<'cache>(
         && (!matches!(
             format.sample_type(None, Some(graphics.device().features())),
             Some(wgpu::TextureSampleType::Float { .. })
-        ) || !features
-            .flags
-            .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE))
+        ) || (material.blend.is_some()
+            && !features
+                .flags
+                .contains(wgpu::TextureFormatFeatureFlags::BLENDABLE)))
     {
         return Err(Error::UnsupportedMeshFormat { format });
     }

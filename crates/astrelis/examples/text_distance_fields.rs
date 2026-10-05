@@ -59,10 +59,11 @@ fn sample(
                 .family("Source Sans 3")
                 .font_size(12.)
                 .line_height(18.),
-            TextRasterOptions::new().scale_factor(dpi),
+            TextRasterOptions::new().raster_scale(dpi),
         )?,
         text: prepared(painter, fonts, content, style, settings.0)?,
-        transform: settings.1,
+        transform: Transform2D::scale(settings.0.raster_scale(), settings.0.raster_scale())
+            .then(settings.1),
     })
 }
 fn prepare_scene(
@@ -77,12 +78,12 @@ fn prepare_scene(
             .font_size(size)
             .line_height(size * 1.25)
     };
-    let coverage = |scale| TextRasterOptions::new().scale_factor(scale).into();
+    let coverage = |scale| TextRasterOptions::new().raster_scale(scale).into();
     let field = |density, range| {
         MtsdfOptions::new()
             .pixels_per_em(density)
             .range_em(range)
-            .scale_factor(dpi)
+            .raster_scale(dpi)
             .into()
     };
     let identity = Transform2D::IDENTITY;
@@ -258,7 +259,10 @@ fn draw_scene(
     dpi: f32,
 ) -> Result<(), Box<dyn Error>> {
     let mut paint = painter.begin(pass)?;
-    paint.draw_text(&scene.heading, TextDraw::new([24. * dpi, 12. * dpi]))?;
+    paint.draw_text(
+        &scene.heading,
+        TextDraw::new([24., 12.]).transform(Transform2D::scale(dpi, dpi)),
+    )?;
     for (row, samples) in scene.rows.iter().enumerate() {
         for (column, sample) in samples.iter().enumerate() {
             let x = (24. + column as f32 * 548.) * dpi;
@@ -274,11 +278,13 @@ fn draw_scene(
             paint.fill_rect(Rect::new(x, y, width, height), [0.035, 0.035, 0.035, 1.])?;
             paint.draw_text(
                 &sample.caption,
-                TextDraw::new([x + 8. * dpi, y + 4. * dpi]).color([0.4, 0.65, 0.9, 1.]),
+                TextDraw::new([x / dpi + 8., y / dpi + 4.])
+                    .transform(Transform2D::scale(dpi, dpi))
+                    .color([0.4, 0.65, 0.9, 1.]),
             )?;
             paint.draw_text(
                 &sample.text,
-                TextDraw::default().color([0.9, 0.9, 0.9, 1.]).transform_2d(
+                TextDraw::default().color([0.9, 0.9, 0.9, 1.]).transform(
                     sample
                         .transform
                         .then(Transform2D::translation(x + 8. * dpi, y + 20. * dpi)),
@@ -289,7 +295,9 @@ fn draw_scene(
     paint.pass().set_scissor_rect(0, 0, size[0], size[1])?;
     paint.draw_text(
         &scene.footer,
-        TextDraw::new([24. * dpi, 922. * dpi]).color([0.6, 0.6, 0.6, 1.]),
+        TextDraw::new([24., 922.])
+            .transform(Transform2D::scale(dpi, dpi))
+            .color([0.6, 0.6, 0.6, 1.]),
     )?;
     Ok(())
 }

@@ -136,7 +136,7 @@ can be bound with `pass.set_bind_group(...)`.
 viewport: X right, Y down, physical pixels by default. Normalized units scale each
 axis by the viewport size. Applications apply DPI scaling explicitly. Transforms
 act in the selected units before viewport conversion; `a.then(b)` applies `a`,
-then `b`. `TextureDraw::space` and `transform_2d` use these same conventions.
+then `b`. `TextureDraw::space` and `transform` use these same conventions.
 
 `ShapeDraw` describes filled or outlined rectangles, uniformly rounded rectangles,
 and ellipses. `.stroke(Stroke::new(width))` selects a centered outline; `.inside()`
@@ -360,7 +360,7 @@ follow separately. See the
 let mut renderer = TextRenderer::new(&graphics);
 renderer.prepare(&target.render_format())?;
 let prepared = renderer.prepare_text(&layout,
-    TextRasterOptions::new().scale_factor(dpi_scale))?;
+    TextRasterOptions::new().raster_scale(dpi_scale))?;
 // Reuse prepared text across frames; origin, color and opacity remain per draw.
 renderer.draw(&mut pass, &prepared,
     TextDraw::new([20., 30.]).color([0.8, 0.9, 1., 1.]))?;
@@ -374,7 +374,7 @@ of `Arc<TextLayout>`:
 ```rust
 let prepared = painter.prepare_texts(
     &layouts,
-    TextRasterOptions::new().scale_factor(dpi_scale),
+    TextRasterOptions::new().raster_scale(dpi_scale),
 )?;
 // Each text keeps its own position, color, clipping, and atlas-page ownership.
 paint.draw_text(&prepared[0], TextDraw::new([20., 30.]))?;
@@ -386,8 +386,8 @@ device buffer limit. Keeping one text alive keeps its shared geometry buffer ali
 it retains only its own atlas pages. Oversized texts use dedicated buffers. See the
 [batched preparation measurements](docs/performance/text-batches.md).
 
-Raster scale applies DPI once to glyphs and layout positions. Draw placement uses
-viewport-relative physical pixels. Coverage is colored with linear RGBA; intrinsic
+Raster scale selects image density. Glyph geometry, origins, and measurements
+retain layout units; a draw or Painter transform converts them to viewport pixels. Coverage is colored with linear RGBA; intrinsic
 color glyphs retain their RGB and receive draw opacity. Batches preserve layout
 order and current clipping. A draw uploads 48 bytes of placement/color parameters,
 with no shaping, rasterization, or recurring glyph-geometry upload. Atlas budgets
@@ -400,19 +400,31 @@ see the [changing-text performance report](docs/performance/text-updates.md):
 ```rust
 painter.prepare(&target.render_format())?; // Primitive and text pipelines.
 let prepared = painter.prepare_text(&layout,
-    TextRasterOptions::new().scale_factor(dpi_scale))?;
+    TextRasterOptions::new().raster_scale(dpi_scale))?;
 // During a later painting session:
 let mut paint = painter.begin(&mut pass)?;
-let mut local = paint.transformed(Transform2D::translation(20., 30.))?;
+let mut logical = paint.transformed(Transform2D::scale(dpi_scale, dpi_scale))?;
+let mut local = logical.transformed(Transform2D::translation(20., 30.))?;
 local.draw_text(&prepared, TextDraw::default().color([0.8, 0.9, 1., 1.]))?;
 ```
 
-Text origins and session transforms are physical pixels relative to the viewport.
-DPI is already applied during preparation, so a session DPI scale would scale the
-glyphs again. Text preserves call order with shapes, lines, images, and custom work
+One session DPI transform scales text, shapes, lines, and images consistently.
+Raster density affects coverage/color image quality, not geometry scaling. Text preserves call order with shapes, lines, images, and custom work
 through `paint.pass()`. `painter.text()` exposes atlas statistics and cache control;
-replace it with `TextRenderer::with_options(...)` to select custom budgets. Distance
-fields remain a separate milestone.
+replace it with `TextRenderer::with_options(...)` to select custom budgets. MTSDF outline fill is an explicit preparation choice; effects remain separate.
+
+Built-in 2D renderers accept immutable `PipelineOptions` for blending, color writes,
+and depth/stencil tests. `Painter::with_options(&graphics, options)` applies the
+same policy to all its renderers. The application supplies matching attachments
+and controls the stencil reference through the pass. Default pipelines ignore
+depth/stencil. Writers discard fully transparent fragments; stencil coverage is
+binary per sample. Retained image placement is also available through
+`painter.prepare_images(...)` and `paint.draw_prepared_images(...)`: identity
+sessions upload nothing, while transformed sessions upload only 48 bytes and
+reuse the immutable geometry. Pixel placements retain their prepared viewport.
+
+See [renderer API migration and contracts](docs/renderer-api.md) for preparation,
+coordinates, error boundaries, stencil configuration, and retained image drawing.
 
 ## Standalone examples and development
 
@@ -530,7 +542,7 @@ Opt into scalable outline fill using the same retained draw API:
 
 ```rust
 let prepared = painter.prepare_text(&layout,
-    MtsdfOptions::new().pixels_per_em(64).range_em(0.25).scale_factor(dpi_scale))?;
+    MtsdfOptions::new().pixels_per_em(64).range_em(0.25).raster_scale(dpi_scale))?;
 paint.draw_text(&prepared, TextDraw::new([20., 30.]))?;
 ```
 

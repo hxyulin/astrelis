@@ -18,8 +18,9 @@ use winit::{
 
 use astrelis::{
     Error, Frame, FrameError, Framebuffer, FramebufferOptions, GraphicsContext, LineCap, LineDraw,
-    Mesh, MeshRenderer, Painter, Rect, RenderTarget, ShapeDraw, Stroke, SurfaceOptions,
-    TextureBinding, TextureBindingOptions, TextureDraw, TextureOptions, Transform2D, Vertex, wgpu,
+    Mesh, MeshRenderer, Painter, PreparedTextureDraw, Rect, RenderTarget, ShapeDraw, Stroke,
+    SurfaceOptions, TextureBinding, TextureBindingOptions, TextureDraw, TextureOptions,
+    Transform2D, Vertex, wgpu,
 };
 
 struct State {
@@ -36,6 +37,7 @@ struct CanvasLayer {
     layer: Framebuffer,
     painter: Painter,
     checker: TextureBinding,
+    checker_draws: PreparedTextureDraw,
     composite: TextureBinding,
     meshes: MeshRenderer,
     mesh: Mesh,
@@ -75,6 +77,11 @@ impl State {
         let painter = Painter::new(&graphics);
         let checker =
             painter.create_image_binding(checker_image.view(), TextureBindingOptions::new())?;
+        // Retain one unit rectangle; placements use viewport-fraction transforms.
+        let checker_draws = painter.prepare_images(
+            &[TextureDraw::normalized(Rect::new(0., 0., 1., 1.)).tint([0.6, 0.8, 1., 0.8])],
+            [1., 1.],
+        )?;
         let composite = painter.create_sampled_binding(&layer.sampled_color())?;
         let mut state = Self {
             window,
@@ -84,6 +91,7 @@ impl State {
                 layer,
                 painter,
                 checker,
+                checker_draws,
                 composite,
                 meshes: MeshRenderer::new(&graphics),
                 mesh: graphics.create_mesh(
@@ -109,9 +117,7 @@ impl State {
     fn prepare(&mut self) -> Result<(), Error> {
         let format = self.scene.layer.render_format();
         self.scene.painter.prepare(&format)?;
-        self.scene
-            .meshes
-            .prepare(format.colors[0].unwrap(), format.sample_count)?;
+        self.scene.meshes.prepare(&format)?;
         self.scene
             .painter
             .prepare_image(&self.scene.checker, &self.scene.layer.render_format())?;
@@ -207,16 +213,15 @@ impl CanvasLayer {
                         Stroke::new(1.5).inside(),
                         [0.25, 0.5, 0.7, 0.65],
                     )?;
-                    paint.draw_image(
-                        &self.checker,
-                        TextureDraw::new(Rect::new(
-                            x + w * 0.007,
-                            y + h * 0.012,
-                            w * 0.065,
-                            h * 0.08,
-                        ))
-                        .tint([0.6, 0.8, 1., 0.8]),
-                    )?;
+                    {
+                        // Normalized geometry uses viewport fractions for transforms.
+                        let mut placement =
+                            paint
+                                .transformed(Transform2D::scale(0.065, 0.08).then(
+                                    Transform2D::translation(x / w + 0.007, y / h + 0.012),
+                                ))?;
+                        placement.draw_prepared_images(&self.checker, &self.checker_draws)?;
+                    }
                     {
                         let mut marker = paint.transformed(
                             Transform2D::rotation(wave.sin() * 0.6)

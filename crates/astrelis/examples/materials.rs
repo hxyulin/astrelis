@@ -113,8 +113,11 @@ impl State {
         // Use standard byte conversion so this file needs no bytemuck dependency.
         let tint = [1.0_f32, 0.45, 0.2, 1.0].map(f32::to_le_bytes).concat();
         graphics.queue().write_buffer(&tint_buffer, 0, &tint);
-        renderer.prepare(target.format(), target.sample_count())?;
-        renderer.prepare_material(&material, target.format(), target.sample_count())?;
+        renderer.prepare(&target.render_format())?;
+        renderer.prepare_material(
+            &material,
+            &astrelis::RenderFormat::color(target.format(), target.sample_count()),
+        )?;
         window.request_redraw();
         Ok(Self {
             window,
@@ -195,14 +198,10 @@ impl App {
             state.window.clone(),
             SurfaceOptions::new(size.width, size.height).sample_count(count),
         )?;
+        state.renderer.prepare(&state.target.render_format())?;
         state
             .renderer
-            .prepare(state.target.format(), state.target.sample_count())?;
-        state.renderer.prepare_material(
-            &state.material,
-            state.target.format(),
-            state.target.sample_count(),
-        )?;
+            .prepare_material(&state.material, &state.target.render_format())?;
         state.window.request_redraw();
         Ok(())
     }

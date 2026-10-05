@@ -37,7 +37,10 @@
 //! batches into existing frame-owned passes, without shaping/rasterizing.
 //! [`TextRenderer::prepare_texts`] prepares multiple layouts with shared geometry
 //! uploads and returns independently drawable resources in input order. Raster
-//! scale is explicit; mask colors are linear, while color glyph RGB is intrinsic.
+//! density is explicit and never scales layout-unit geometry. Draw/session transforms
+//! apply geometry scaling consistently with other 2D content. Mask colors are linear,
+//! while color glyph RGB is intrinsic. Pipeline preparation and drawing return
+//! [`crate::Error`]; resource preparation returns [`TextRenderError`].
 //! Cache budgets include prepared texts, recordings, and GPU completion leases.
 //! [`crate::Painter`] exposes the same explicit preparation and drawing contract.
 //! Select [`MtsdfOptions`] for scalable outline fill; coverage remains the default.
@@ -70,7 +73,7 @@
 //! fn prepare(painter: &mut Painter, layout: &TextLayout, dpi: f32)
 //!     -> Result<PreparedText, TextRenderError> {
 //!     painter.prepare_text(layout,
-//!         MtsdfOptions::new().pixels_per_em(64).range_em(0.25).scale_factor(dpi))
+//!         MtsdfOptions::new().pixels_per_em(64).range_em(0.25).raster_scale(dpi))
 //! }
 //! ```
 
