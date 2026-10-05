@@ -86,6 +86,11 @@ pub enum Error {
         /// Incompatible pass color format.
         format: wgpu::TextureFormat,
     },
+    /// Coverage/color text requires a blendable floating-point color attachment.
+    UnsupportedTextFormat {
+        /// Incompatible pass color format.
+        format: wgpu::TextureFormat,
+    },
     /// A material requests blending on a color format that does not support it.
     UnsupportedMaterialFormat {
         /// Pass format incompatible with the material's blend settings.
@@ -203,6 +208,7 @@ impl fmt::Display for Error {
             Self::InvalidFramebufferUsage { format, usage } => write!(f, "invalid framebuffer usage {usage:?} for {format:?}"),
             Self::UnsupportedMeshFormat { format } => write!(f, "the mesh renderer requires a blendable floating-point output, got {format:?}"),
             Self::UnsupportedPrimitiveFormat { format } => write!(f, "solid primitives require a blendable floating-point output, got {format:?}"),
+            Self::UnsupportedTextFormat { format } => write!(f, "text shading requires blendable floating-point color, got {format:?}"),
             Self::UnsupportedMaterialFormat { format } => write!(f, "material blending is unsupported for {format:?}"),
             Self::UnsupportedDepthStencilFormat { format } => write!(f, "{format:?} is not an available depth/stencil attachment"),
             Self::InvalidDepthStencilUsage { format, usage } => write!(f, "invalid depth/stencil usage {usage:?} for {format:?}"),

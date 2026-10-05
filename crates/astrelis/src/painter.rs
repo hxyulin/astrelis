@@ -1,10 +1,10 @@
 use crate::{
-    Error, GraphicsContext, LineDraw, LineRenderer, Rect, RenderFormat, RenderPass, ShapeDraw,
-    ShapeRenderer, Stroke, TextureBinding, TextureBindingOptions, TextureDraw, TextureRenderer,
-    Transform2D,
+    Error, GraphicsContext, LineDraw, LineRenderer, PreparedText, Rect, RenderFormat, RenderPass,
+    ShapeDraw, ShapeRenderer, Stroke, TextDraw, TextLayout, TextPreparation, TextRenderError,
+    TextRenderer, TextureBinding, TextureBindingOptions, TextureDraw, TextureRenderer, Transform2D,
 };
 
-/// Reusable 2D drawing resources composed from independent primitive/image renderers.
+/// Reusable 2D drawing resources composed from independent primitive/image/text renderers.
 ///
 /// Create once per device and retain across frames. [`Self::begin`] borrows an
 /// application-owned pass; it never acquires a frame, clears attachments, submits,
@@ -14,39 +14,64 @@ use crate::{
 /// independently usable, and custom GPU work fits through [`PaintSession::pass`].
 ///
 /// Colors, coordinates, transforms, caps, coverage, and errors follow [`ShapeDraw`],
-/// [`LineDraw`], and [`TextureDraw`]. Prepare variants before first use to avoid
-/// pipeline creation while recording. After warm-up, a fixed batch workload reuses
+/// [`LineDraw`], [`TextureDraw`], and [`TextDraw`]. Text shaping and rasterization
+/// are explicit: prepare a [`TextLayout`] before [`Self::prepare_text`], retain the
+/// returned [`PreparedText`], and reuse it across sessions. Prepare variants before
+/// first use to avoid pipeline creation while recording. After warm-up, a fixed batch workload reuses
 /// GPU pages and CPU scratch; transformed batches retain capacity up to their peak.
+///
+/// ```no_run
+/// use astrelis::{Painter, PreparedText, RenderPass, TextDraw, TextLayout,
+///     TextRasterOptions, TextRenderError, Transform2D};
+/// // Call when layout/content/DPI changes, before entering a painting session.
+/// fn prepare(painter: &mut Painter, layout: &TextLayout, dpi: f32)
+///     -> Result<PreparedText, TextRenderError>
+/// {
+///     painter.prepare_text(layout, TextRasterOptions::new().scale_factor(dpi))
+/// }
+/// fn paint(painter: &mut Painter, pass: &mut RenderPass<'_>, text: &PreparedText)
+///     -> Result<(), Box<dyn std::error::Error>>
+/// {
+///     let mut paint = painter.begin(pass)?;
+///     let mut local = paint.transformed(Transform2D::translation(20., 30.))?;
+///     local.draw_text(text, TextDraw::default().color([0.8, 0.9, 1., 1.]))?;
+///     Ok(())
+/// }
+/// ```
 #[derive(Debug)]
 pub struct Painter {
     graphics: GraphicsContext,
     shapes: ShapeRenderer,
     lines: LineRenderer,
     textures: TextureRenderer,
+    text: TextRenderer,
     shape_scratch: Vec<ShapeDraw>,
     line_scratch: Vec<LineDraw>,
     image_scratch: Vec<TextureDraw>,
 }
 impl Painter {
-    /// Creates independent shape, line, and image renderers with empty pipeline caches.
+    /// Creates independent shape, line, image, and text renderers with empty pipeline caches.
     pub fn new(graphics: &GraphicsContext) -> Self {
         Self {
             graphics: graphics.clone(),
             shapes: ShapeRenderer::new(graphics),
             lines: LineRenderer::new(graphics),
             textures: TextureRenderer::new(graphics),
+            text: TextRenderer::new(graphics),
             shape_scratch: Vec::new(),
             line_scratch: Vec::new(),
             image_scratch: Vec::new(),
         }
     }
-    /// Prepares default solid primitive pipelines for this attachment format.
+    /// Prepares default primitive and text pipelines for this attachment format.
+    /// Does not shape text, rasterize glyphs, or upload prepared text geometry.
     /// Image variants also depend on a source binding; use [`Self::prepare_image`].
     pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), Error> {
         self.shapes.prepare(format)?;
-        self.lines.prepare(format)
+        self.lines.prepare(format)?;
+        self.text.prepare_pipeline(format)
     }
-    /// Prepares primitives for a surface, rejecting a foreign device.
+    /// Prepares primitive and text pipelines for a surface, rejecting a foreign device.
     pub fn prepare_for_target(&mut self, target: &crate::RenderTarget<'_>) -> Result<(), Error> {
         if !target.graphics().same_device(&self.graphics) {
             return Err(Error::DeviceMismatch);
@@ -88,6 +113,29 @@ impl Painter {
     /// live sources, direct drawing, or scopes outside an active painting session.
     pub fn textures(&mut self) -> &mut TextureRenderer {
         &mut self.textures
+    }
+    /// Borrows the text renderer for pipeline preparation, cache statistics, cache
+    /// clearing, or direct drawing outside an active painting session. Prepared texts
+    /// from any TextRenderer on this device are also accepted by the session.
+    /// To configure atlas budgets, replace this renderer with
+    /// [`TextRenderer::with_options`] before preparing text; retained resources keep
+    /// their original allocation leases.
+    pub fn text(&mut self) -> &mut TextRenderer {
+        &mut self.text
+    }
+    /// Generates missing glyph images and uploads immutable text geometry outside painting.
+    /// Pass `TextRasterOptions` for coverage or `MtsdfOptions` for scalable outline fill.
+    /// The layout retains its fonts; Painter never borrows or owns a TextSystem.
+    /// Raster scale converts layout units to physical pixels exactly once. Retain the
+    /// result until content, layout, or preparation settings change; placement/color/opacity
+    /// remain per draw. Cache pressure and unsupported glyphs follow
+    /// [`TextRenderer::prepare_text`]. This does not prepare an attachment pipeline.
+    pub fn prepare_text(
+        &mut self,
+        layout: &TextLayout,
+        preparation: impl Into<TextPreparation>,
+    ) -> Result<PreparedText, TextRenderError> {
+        self.text.prepare_text(layout, preparation)
     }
     /// Starts immediate painting with identity transform on an existing color pass.
     /// Device/output checks happen here; individual draws validate geometry and resources.
@@ -276,6 +324,25 @@ impl<'frame> PaintSession<'_, 'frame> {
                 .to_array();
         }
         self.painter.textures.draw(self.pass, image, draw)
+    }
+    /// Records retained text immediately in caller order with shapes, images, lines,
+    /// and custom pass work. No shaping, rasterization, atlas writes, or glyph geometry
+    /// uploads occur here. The draw's origin and transform use physical pixels relative
+    /// to the viewport; the session transform is applied after the draw's transform.
+    /// DPI has already been applied during preparation: scaling a logical-coordinate
+    /// session also scales these physical glyphs. Color tints coverage glyphs; intrinsic
+    /// color glyphs retain their RGB. Color alpha and opacity affect both kinds.
+    /// Invalid draws record no text commands and leave the session usable.
+    #[inline]
+    pub fn draw_text(
+        &mut self,
+        text: &PreparedText,
+        mut draw: TextDraw,
+    ) -> Result<(), TextRenderError> {
+        if self.transform != Transform2D::IDENTITY {
+            draw.transform = draw.transform.then(self.transform);
+        }
+        self.painter.text.draw(self.pass, text, draw)
     }
     /// Validates a whole slice, then instances ordered placements of one image.
     pub fn draw_images(

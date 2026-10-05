@@ -12,6 +12,7 @@ readme = "../../README.md"
 [dependencies]
 bytemuck.workspace = true
 cosmic-text.workspace = true
+bymsdfgen-core.workspace = true
 swash.workspace = true
 wgpu.workspace = true
 
@@ -36,4 +37,16 @@ harness = false
 
 [[bench]]
 name = "text_rendering"
+harness = false
+
+[[bench]]
+name = "painter_text"
+harness = false
+
+[[bench]]
+name = "text_workloads"
+harness = false
+
+[[bench]]
+name = "text_distance_fields"
 harness = false

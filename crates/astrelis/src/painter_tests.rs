@@ -1,4 +1,5 @@
 use super::*;
+use crate::TextRasterOptions;
 use crate::framebuffer::tests::pixels;
 use crate::{
     DrawSpace, Framebuffer, FramebufferOptions, LineCap, MeshRenderer, TextureOptions, Vertex,
@@ -348,5 +349,229 @@ fn invalid_children_batches_devices_and_feedback_leave_session_usable() {
         });
         assert_eq!(pixel(&bytes, 32, 32), [0, 0, 255, 255]);
         assert_eq!(pixel(&bytes, 4, 4), [0, 255, 0, 255]);
+    });
+}
+
+fn text_layout(content: &str) -> std::sync::Arc<TextLayout> {
+    let mut fonts = crate::TextSystem::new();
+    fonts
+        .load_font(include_bytes!("../tests/fonts/TestColor.ttf"))
+        .unwrap();
+    let mut buffer = crate::TextBuffer::new();
+    buffer
+        .set_text(
+            content,
+            crate::TextStyle::new()
+                .family("Astrelis Test Color")
+                .font_size(20.)
+                .line_height(24.),
+        )
+        .unwrap();
+    buffer.layout(&mut fonts).unwrap()
+}
+
+#[test]
+fn painter_text_matches_direct_layers_nested_transforms_and_pass_state() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        for samples in [1, 4] {
+            let mut t = g
+                .create_framebuffer(
+                    FramebufferOptions::new(64, 64)
+                        .sample_count(samples)
+                        .depth_stencil(wgpu::TextureFormat::Depth24PlusStencil8)
+                        .usage(
+                            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                        ),
+                )
+                .unwrap();
+            let mut painter = Painter::new(&g);
+            let mut text = TextRenderer::new(&g);
+            let mut shapes = ShapeRenderer::new(&g);
+            let mut lines = LineRenderer::new(&g);
+            let mut meshes = MeshRenderer::new(&g);
+            let texture = g.create_texture(TextureOptions::new(1, 1)).unwrap();
+            texture.write(&[255; 4]).unwrap();
+            let mut images = TextureRenderer::new(&g);
+            let image = images
+                .create_binding(texture.view(), TextureBindingOptions::new())
+                .unwrap();
+            let mesh = g
+                .create_mesh(
+                    &[
+                        Vertex::new([-1., -1., 0.], BLUE),
+                        Vertex::new([1., -1., 0.], BLUE),
+                        Vertex::new([0., 1., 0.], BLUE),
+                    ],
+                    &[0, 1, 2],
+                )
+                .unwrap();
+            painter.prepare(&t.render_format()).unwrap();
+            painter.prepare_image(&image, &t.render_format()).unwrap();
+            // Two separately prepared resources can be drawn by either renderer.
+            let mask = painter
+                .prepare_text(&text_layout("M"), TextRasterOptions::new().scale_factor(2.))
+                .unwrap();
+            let colored = text
+                .prepare_text(&text_layout("😀😁"), TextRasterOptions::new())
+                .unwrap();
+            let parent = Transform2D::translation(8., 2.);
+            let child = Transform2D::scale(0.75, 0.75);
+            let draw = TextDraw::new([2., 2.])
+                .color([1., 0., 0., 0.8])
+                .opacity(0.8)
+                .transform_2d(Transform2D::translation(1., 0.));
+            let overlay = ShapeDraw::rect(Rect::new(14., 10., 8., 8.), [0., 1., 0., 0.5]);
+            let line = LineDraw::new([0., 20.], [40., 20.], GREEN).width(2.);
+            let direct = pixels(&g, &mut t, |f| {
+                let mut p = f.render_pass().begin().unwrap();
+                p.set_viewport(4., 4., 56., 56., 0., 1.).unwrap();
+                p.set_scissor_rect(4, 4, 50, 50).unwrap();
+                images
+                    .draw(
+                        &mut p,
+                        &image,
+                        TextureDraw::default().tint([0.05, 0.05, 0.05, 1.]),
+                    )
+                    .unwrap();
+                text.draw(
+                    &mut p,
+                    &mask,
+                    TextDraw {
+                        transform: draw.transform.then(child).then(parent),
+                        ..draw
+                    },
+                )
+                .unwrap();
+                shapes.draw(&mut p, overlay).unwrap();
+                meshes.draw(&mut p, &mesh).unwrap();
+                // A raw state mutation must be restored by the following text draw.
+                p.as_wgpu().set_scissor_rect(0, 0, 1, 1);
+                text.draw(
+                    &mut p,
+                    &colored,
+                    TextDraw::new([0., 30.]).opacity(0.7).transform_2d(parent),
+                )
+                .unwrap();
+                lines
+                    .draw(&mut p, line.transform(child.then(parent)))
+                    .unwrap();
+                text.draw(&mut p, &mask, TextDraw::new([44., 0.]).color(GREEN))
+                    .unwrap();
+            });
+            let before = painter.text().stats();
+            let painted = pixels(&g, &mut t, |f| {
+                let mut p = f.render_pass().begin().unwrap();
+                let mut paint = painter.begin(&mut p).unwrap();
+                paint.pass().set_viewport(4., 4., 56., 56., 0., 1.).unwrap();
+                paint.pass().set_scissor_rect(4, 4, 50, 50).unwrap();
+                paint
+                    .draw_image(&image, TextureDraw::default().tint([0.05, 0.05, 0.05, 1.]))
+                    .unwrap();
+                {
+                    let mut local = paint.transformed(parent).unwrap();
+                    {
+                        let mut nested = local.transformed(child).unwrap();
+                        nested.draw_text(&mask, draw).unwrap();
+                    }
+                    // Pass access bypasses the Painter transform, including custom renderers.
+                    shapes.draw(local.pass(), overlay).unwrap();
+                    meshes.draw(local.pass(), &mesh).unwrap();
+                    local.pass().as_wgpu().set_scissor_rect(0, 0, 1, 1);
+                    local
+                        .draw_text(&colored, TextDraw::new([0., 30.]).opacity(0.7))
+                        .unwrap();
+                    local.transformed(child).unwrap().draw_line(line).unwrap();
+                }
+                assert_eq!(paint.transform(), Transform2D::IDENTITY);
+                paint
+                    .draw_text(&mask, TextDraw::new([44., 0.]).color(GREEN))
+                    .unwrap();
+            });
+            assert_eq!(direct, painted);
+            assert_eq!(pixel(&painted, 0, 0), [0; 4]);
+            assert!(
+                painted
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|p| p[0] > 30 && p[0] > p[2])
+            );
+            assert!(
+                painted
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .any(|p| p[1] > 100 && p[1] > p[2])
+            );
+            let after = painter.text().stats();
+            assert_eq!(before.cache_misses, after.cache_misses);
+            assert_eq!(before.uploaded_bytes, after.uploaded_bytes);
+            assert_eq!(before.geometry_bytes, after.geometry_bytes);
+            assert_eq!(after.parameter_bytes - before.parameter_bytes, 3 * 48);
+            assert_eq!(after.draw_calls - before.draw_calls, 3);
+        }
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn rejected_painter_text_draws_leave_session_and_cached_resources_usable() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let foreign = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g);
+        let mut painter = Painter::new(&g);
+        let layout = text_layout("M");
+        let mut other = TextRenderer::new(&foreign);
+        let foreign_text = other
+            .prepare_text(&layout, TextRasterOptions::new())
+            .unwrap();
+        let text = painter
+            .prepare_text(&layout, TextRasterOptions::new())
+            .unwrap();
+        painter.prepare(&t.render_format()).unwrap();
+        painter.text().clear_cache();
+        assert_eq!(painter.text().stats().live_pages, 1);
+        let before = painter.text().stats();
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            let mut paint = painter.begin(&mut p).unwrap();
+            assert!(matches!(
+                paint.draw_text(&foreign_text, TextDraw::default()),
+                Err(TextRenderError::Graphics(Error::DeviceMismatch))
+            ));
+            assert!(matches!(
+                paint.draw_text(&text, TextDraw::default().opacity(2.)),
+                Err(TextRenderError::InvalidOptions)
+            ));
+            {
+                let mut local = paint
+                    .transformed(Transform2D::scale(f32::MAX, f32::MAX))
+                    .unwrap();
+                assert!(matches!(
+                    local.draw_text(
+                        &text,
+                        TextDraw::default().transform_2d(Transform2D::scale(2., 2.))
+                    ),
+                    Err(TextRenderError::InvalidOptions)
+                ));
+            }
+            paint
+                .draw_text(&text, TextDraw::new([24., 0.]).color(GREEN))
+                .unwrap();
+        });
+        assert_eq!(pixel(&bytes, 5, 10), [0; 4]);
+        assert_eq!(pixel(&bytes, 29, 10), [0, 255, 0, 255]);
+        let after = painter.text().stats();
+        assert_eq!(after.parameter_bytes - before.parameter_bytes, 48);
+        assert_eq!(after.draw_calls - before.draw_calls, 1);
+        assert_eq!(after.uploaded_bytes, before.uploaded_bytes);
+        assert_eq!(after.geometry_bytes, before.geometry_bytes);
+        drop(text);
+        assert_eq!(painter.text().stats().live_pages, 0);
+        assert!(errors.pop().await.is_none());
     });
 }

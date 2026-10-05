@@ -176,7 +176,7 @@ strokes.draw(LineDraw::new([30., 50.], [130., 50.], [1.; 4])
 
 ## Painter
 
-`Painter` retains a shape, line, and image renderer and lends an immediate painting
+`Painter` retains a shape, line, image, and text renderer and lends an immediate painting
 session on an existing pass. It preserves call order and exposes explicit batches;
 it does not buffer a display list. Borrowed transform scopes apply local geometry
 transforms without changing the parent's transform. They leave viewport, clipping,
@@ -210,7 +210,7 @@ Image bindings use `create_image_binding` or `create_sampled_binding`, with
 `draw_shapes`, `draw_lines`, and `draw_images`. Transformed batches reuse CPU scratch;
 identity-transform batches delegate directly. `stroke_rect`, `stroke_rounded_rect`,
 and `stroke_ellipse` provide outline conveniences; fills and outlines can share
-one explicit `draw_shapes` batch. `shapes()`, `lines()`, and `textures()`
+one explicit `draw_shapes` batch. `shapes()`, `lines()`, `textures()`, and `text()`
 expose the owned renderers outside an active session for direct scopes, preparation,
 custom image materials/samplers, and immutable prepared image data. Painter owns no
 window, frame, scene, or UI layout. There is no session flush or finish operation.
@@ -353,7 +353,7 @@ This milestone provides one style per buffer; rich spans and text editing/hit te
 follow separately. See the
 [text architecture and plan](docs/text.md).
 
-`TextRenderer` explicitly prepares coverage/color glyphs and immutable geometry:
+`TextRenderer` explicitly prepares coverage/color glyphs or outline distance fields, with immutable geometry:
 
 ```rust
 let mut renderer = TextRenderer::new(&graphics);
@@ -371,8 +371,25 @@ color glyphs retain their RGB and receive draw opacity. Batches preserve layout
 order and current clipping. A draw uploads 48 bytes of placement/color parameters,
 with no shaping, rasterization, or recurring glyph-geometry upload. Atlas budgets
 include prepared texts, recordings, and GPU completion leases. Cache exhaustion
-returns `AtlasFull`; callers control resource release and polling. Painter text
-integration and distance fields are the next separate milestones.
+returns `AtlasFull`; callers control resource release and polling. Painter exposes
+this same explicit preparation and retained drawing:
+
+```rust
+painter.prepare(&target.render_format())?; // Primitive and text pipelines.
+let prepared = painter.prepare_text(&layout,
+    TextRasterOptions::new().scale_factor(dpi_scale))?;
+// During a later painting session:
+let mut paint = painter.begin(&mut pass)?;
+let mut local = paint.transformed(Transform2D::translation(20., 30.))?;
+local.draw_text(&prepared, TextDraw::default().color([0.8, 0.9, 1., 1.]))?;
+```
+
+Text origins and session transforms are physical pixels relative to the viewport.
+DPI is already applied during preparation, so a session DPI scale would scale the
+glyphs again. Text preserves call order with shapes, lines, images, and custom work
+through `paint.pass()`. `painter.text()` exposes atlas statistics and cache control;
+replace it with `TextRenderer::with_options(...)` to select custom budgets. Distance
+fields remain a separate milestone.
 
 ## Standalone examples and development
 
@@ -397,6 +414,8 @@ cargo run -p astrelis --example mixed_2d
 cargo run -p astrelis --example painter
 cargo run -p astrelis --example text_layout
 cargo run -p astrelis --example text
+cargo run -p astrelis --example painter_text
+cargo run -p astrelis --example text_quality
 ```
 
 Every windowed example is one copyable file with its own windows, event handling, resize,
@@ -418,6 +437,10 @@ see the [CPU text baseline](docs/performance/text.md) for results and boundaries
 COLR/PNG color glyph fixtures, resizing/reflow, and Space-controlled MSAA. The
 `text_rendering` benchmark separates GPU-text CPU stages, with completion outside timing;
 see the [GPU-text CPU baseline](docs/performance/text-rendering.md).
+`painter_text` combines retained multilingual text, primitive layers, scoped transforms and pass
+access, DPI-aware resize/reflow, and a custom mesh in a standalone window. Run
+`cargo bench -p astrelis --bench painter_text` for a matched CPU recording comparison
+against direct text rendering; see the [Painter text baseline](docs/performance/painter-text.md).
 
 `mixed_2d` combines filled primitives, line caps, transformed ellipses, translucent
 images, clipping, and custom mesh viewports in one offscreen pass, then composites
@@ -464,3 +487,38 @@ GPU execution measurements. See the [initial baseline](docs/performance/baseline
 and [scoped drawing results](docs/performance/scoped-drawing.md).
 
 MIT. See [LICENSE-MIT](LICENSE-MIT).
+
+`text_quality` compares whole/fractional pixel placement, small sizes, hinting,
+DPI preparation, magnification, rotation, multilingual fallback, and color glyphs.
+Space toggles MSAA; Z toggles 2x/4x magnification. See the
+[quality captures](docs/performance/text-quality.md). The
+[text workload benchmark](docs/performance/text-workloads.md) measures visible
+1920×1080 text, 600 labels, mixed color pages, content updates, many unique glyphs,
+and explicit recovery under a small atlas budget:
+
+```sh
+cargo bench -p astrelis --bench text_workloads
+cargo bench -p astrelis --bench text_workloads -- --no-timestamps
+```
+
+GPU pass timing is optional and withheld when timestamp samples are incomplete.
+Opt into scalable outline fill using the same retained draw API:
+
+```rust
+let prepared = painter.prepare_text(&layout,
+    MtsdfOptions::new().pixels_per_em(64).range_em(0.25).scale_factor(dpi_scale))?;
+paint.draw_text(&prepared, TextDraw::new([20., 30.]))?;
+```
+
+Coverage remains the default; intrinsic color glyphs retain their image path.
+Fields reuse atlas images across font sizes and DPI, but cold generation is
+substantial: prepare ahead of drawing. `PreparedText::preparation()` describes the
+chosen representation and replaces `raster_options()`. See the
+[distance-field API](docs/text-distance-fields.md) and
+[quality/performance report](docs/performance/text-distance-fields.md). Fill is
+implemented; outline/shadow effects remain separate.
+
+```sh
+cargo run -p astrelis --example text_distance_fields
+cargo bench -p astrelis --bench text_distance_fields
+```

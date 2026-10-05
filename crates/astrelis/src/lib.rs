@@ -10,7 +10,7 @@
 //! independently of a GPU. [`TextSystem`] explicitly loads fonts; [`TextBuffer`]
 //! evaluates into shared [`TextLayout`] snapshots with measurements, glyph origins,
 //! source clusters, bidi levels, and retained font data. Unchanged evaluation reuses
-//! its snapshot. [`TextRenderer`] explicitly prepares coverage/color glyph atlases
+//! its snapshot. [`TextRenderer`] explicitly prepares coverage/color or MTSDF glyph atlases
 //! and immutable [`PreparedText`] geometry, then draws into the same scoped passes.
 //!
 //! # Context, targets, and frames
@@ -277,6 +277,10 @@
 //! an existing pass. Calls record immediately; explicit batches preserve order.
 //! Borrowed transform scopes leave their parent transform unchanged. Pass access
 //! permits custom rendering in place without flushing or finishing the session.
+//! [`Painter::prepare_text`] creates retained text outside sessions; use
+//! [`PaintSession::draw_text`] to interleave it with other draws. Text preparation
+//! applies DPI once; origins and session transforms operate on physical glyph pixels.
+//! Painter never owns font discovery, shaping, layout, or window lifecycle.
 //!
 //! ```no_run
 //! use astrelis::{Error, LineCap, LineDraw, Painter, Rect, RenderPass, Stroke, Transform2D};
@@ -378,10 +382,10 @@ pub use pass::{RenderPass, RenderPassBuilder};
 pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use text::{
-    FontFamily, FontId, FontInfo, FontSlant, FontStretch, PreparedText, TextAlign, TextBuffer,
-    TextDraw, TextError, TextFont, TextGlyph, TextLayout, TextLine, TextRasterOptions,
-    TextRenderError, TextRenderer, TextRendererOptions, TextRendererStats, TextStyle, TextSystem,
-    TextWrap,
+    FontFamily, FontId, FontInfo, FontSlant, FontStretch, MtsdfOptions, PreparedText, TextAlign,
+    TextBuffer, TextDraw, TextError, TextFont, TextGlyph, TextLayout, TextLine, TextPreparation,
+    TextRasterOptions, TextRenderError, TextRenderer, TextRendererOptions, TextRendererStats,
+    TextStyle, TextSystem, TextWrap,
 };
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{

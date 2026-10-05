@@ -30,3 +30,14 @@ struct Output {
     // Color atlas stores linear, premultiplied RGBA. Draw RGB colors masks only.
     return texel * input.color.a;
 }
+
+@fragment fn fragment_mtsdf(input: Output) -> @location(0) vec4<f32> {
+    let texel = textureSample(atlas, atlas_sampler, input.uv);
+    let distance = max(min(texel.r, texel.g), min(max(texel.r, texel.g), texel.b)) - 0.5;
+    // The gradient of reconstructed distance follows the screen-space edge normal,
+    // accounting for rotation, reflection, and anisotropic affine scaling.
+    let distance_width = max(length(vec2(dpdx(distance), dpdy(distance))), 0.000001);
+    let coverage = clamp(distance / distance_width + 0.5, 0.0, 1.0);
+    let alpha = coverage * input.color.a;
+    return vec4(input.color.rgb * alpha, alpha);
+}

@@ -1,12 +1,12 @@
 # Text architecture and implementation plan
 
 Status: CPU font/shaping/layout and explicit coverage/color GPU preparation/drawing
-are implemented in `astrelis::text`. Painter text integration and distance fields
-remain planned.
+are implemented in `astrelis::text`, with retained drawing integrated into Painter.
+Explicit MTSDF outline fill is also implemented; text effects remain separate.
 
 Build the CPU font/shaping/layout layer first. Use cosmic-text as its implementation
 and keep GPU preparation independent. Start GPU rendering with grayscale coverage
-and color glyph images; leave a separate distance-field preparation path for later.
+and color glyph images; add distance fields as an explicit preparation choice.
 Both paths consume the same shaped layout. These components can initially live in
 the existing astrelis crate, under a text module.
 
@@ -124,7 +124,7 @@ movement filters that data; it must not secretly rasterize during draw.
 | --- | --- | --- |
 | Grayscale coverage | UI text at an explicitly prepared raster size | First GPU implementation |
 | Color bitmap | Font-provided color glyphs, including supported emoji formats | First GPU implementation |
-| MSDF/MTSDF | Text repeatedly magnified/transformed, scalable labels and effects | Separate later implementation |
+| MTSDF | Text repeatedly magnified/transformed, scalable labels | Explicit fill preparation; effects later |
 
 Swash exposes [Mask, Color and SubpixelMask outputs](https://docs.rs/cosmic-text/latest/cosmic_text/enum.SwashContent.html).
 Use grayscale masks and color images initially. LCD subpixel rendering is a separate
@@ -137,8 +137,8 @@ glyph outline after shaping, using the same glyph IDs and placement. Prefer MSDF
 to a monochrome SDF for preserving sharp glyph corners; the distinction is explained
 by [msdfgen](https://github.com/Chlumsky/msdfgen). SDF generation, atlas storage, and
 reconstruction shaders are separate work from Swash coverage rasterization. Color
-bitmap glyphs still need the color path. Do not add an unimplemented public MSDF
-enum variant or an automatic mode heuristic in the first milestone.
+bitmap glyphs still need the color path. The implemented MTSDF variant is explicit;
+there is no automatic mode heuristic.
 
 ## Preparation, ordering and cache lifetime
 
@@ -299,4 +299,64 @@ GPU execution and color-atlas workloads are not measured by this initial benchma
 See the [GPU-text CPU baseline](performance/text-rendering.md) for three recorded runs
 and exact measurement boundaries. COLR currently uses palette zero and the rasterizer's
 default foreground; custom palettes/foreground, rich spans, LCD rendering, and
-distance fields remain future work.
+text effects remain future work. See the separate distance-field fill contract below.
+
+## Painter integration
+
+Painter owns an independent TextRenderer alongside its shape, line, and image
+renderers. `Painter::prepare(format)` warms the default primitive and text pipeline
+variants without touching glyph caches. Image variants still require a binding and
+`prepare_image`. `Painter::prepare_text(layout, preparation)` forwards explicit atlas and
+geometry preparation, returning the same PreparedText used by direct TextRenderer.
+A layout owns its font sources; Painter does not own TextSystem or TextBuffer.
+
+`PaintSession::draw_text(prepared, draw)` records immediately in caller order. It
+composes the draw transform with the session transform, including the draw origin,
+then delegates validation, clipping, viewport conversion, batching, and allocation
+leases to TextRenderer. Prepared text from another renderer on the same device is
+usable. Text errors keep TextRenderError; existing primitive, session, and pipeline
+preparation methods retain Error. Attachment pipeline failures include
+`Error::UnsupportedTextFormat` and map to `TextRenderError::UnsupportedFormat` in
+the direct text API.
+
+Prepared text is in physical pixels: raster scale already applied DPI. Session
+transforms act on these physical glyphs. Use a physical translation to position
+DPI-prepared text; do not scale it again in a logical-coordinate scope unless an
+additional geometric scale is intended. DPI/content/layout changes require explicit
+preparation; color, opacity, and placement changes reuse the same prepared resource.
+
+`Painter::text()` exposes cache statistics, clearing, and direct renderer methods
+outside active sessions. Custom budgets can be selected by replacing it with
+`TextRenderer::with_options`; previous prepared resources retain their original
+allocation leases. Draw calls perform no shaping, rasterization, atlas writes, or
+static geometry uploads. Draw parameter uploads remain 48 bytes per nonempty text.
+There is no implicit batching across separate text calls or session flush.
+
+Pixel tests compare Painter with direct renderers at 1x and 4x MSAA with depth/stencil
+attachments, nested transforms, 2x raster preparation, coverage and intrinsic color,
+image/primitive/custom mesh ordering, viewports, and clipping after raw pass mutations.
+Rejected foreign-device, opacity, and overflowing-transform draws leave the session
+usable. Counters verify no new preparation work during drawing, including after cache
+clearing. The standalone `painter_text` example owns its complete window lifecycle,
+reflow/DPI preparation, surface recovery, and MSAA changes. The
+[Painter text recording baseline](performance/painter-text.md) compares direct and
+facade calls with matching draw counts; it does not measure GPU execution.
+
+## Quality/workload check and next representation
+
+The [screen-sized workload baseline](performance/text-workloads.md) extends the
+initial repeated-glyph measurements with visible paragraphs, hundreds of labels,
+ordered coverage/color page changes, content updates, 1,822 distinct shaped glyph
+keys, and raster-size churn with explicit AtlasFull recovery. Readbacks verify visible
+output. Optional timestamps are checked for completeness; local Metal results were
+unreliable and are withheld rather than treated as GPU execution measurements.
+The [quality gallery](performance/text-quality.md) captures 1x/2x DPI and 1x/4x MSAA
+from the copyable text_quality example. It compares current rasterization choices,
+not a distance-field implementation. The
+[distance-field API](text-distance-fields.md) now implements explicit MTSDF preparation
+and unchanged retained drawing. It includes selected-instance outline generation,
+size/DPI cache reuse, intrinsic artwork fallback, separate coverage/field shaders,
+and representation metadata. The
+[distance-field report](performance/text-distance-fields.md) records preparation cost
+and fill comparisons before adding effects. PreparedText::raster_options() is replaced
+by preparation() and scale_factor().

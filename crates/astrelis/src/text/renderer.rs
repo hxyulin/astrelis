@@ -39,7 +39,10 @@ pub enum TextRenderError {
 }
 impl From<Error> for TextRenderError {
     fn from(value: Error) -> Self {
-        Self::Graphics(value)
+        match value {
+            Error::UnsupportedTextFormat { format } => Self::UnsupportedFormat { format },
+            other => Self::Graphics(other),
+        }
     }
 }
 impl std::fmt::Display for TextRenderError {
@@ -71,7 +74,7 @@ pub struct TextRendererOptions {
     /// Square page dimension, default 1024. Each glyph has a transparent one-texel gutter.
     pub page_size: u32,
     /// Maximum live pages, including prepared/recording/completion leases; default 8.
-    /// R8 coverage pages cost size² bytes; linear RGBA8 color pages cost size²×4.
+    /// R8 coverage pages cost size² bytes; linear RGBA8 color/field pages cost size²×4.
     pub max_pages: usize,
     /// Maximum cached glyph keys, including blank results; default 16,384.
     pub max_cached_glyphs: usize,
@@ -120,6 +123,90 @@ impl TextRasterOptions {
         self
     }
 }
+/// Outline distance-field preparation, independent of font size and drawing transforms.
+///
+/// Generates an unhinted MTSDF: RGB encodes sharp-corner signed distance and alpha
+/// encodes true signed distance. Fill rendering uses RGB; effects are not implemented.
+/// Color/bitmap glyphs retain their intrinsic artwork, rasterized at the physical
+/// font size with hinting. Keep coverage preparation for small text that needs hinting.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MtsdfOptions {
+    /// Generation density in texels per EM, default 64. Valid range is `16..=256`.
+    pub pixels_per_em: u32,
+    /// Full signed distance range in EM, default 0.25 (distances -0.125 through +0.125).
+    /// Must be finite, positive, at most 1 EM, and span at least two generation texels.
+    /// The image includes half this range outside the outline plus a filtering guard.
+    pub range_em: f32,
+    /// Positive finite physical pixels per layout unit, default 1.
+    /// Scales geometry once and does not change outline generation density or cache identity.
+    pub scale_factor: f32,
+}
+impl Default for MtsdfOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl MtsdfOptions {
+    /// Creates 64-texel/EM fields with a 0.25-EM full distance range and 1:1 geometry.
+    pub const fn new() -> Self {
+        Self {
+            pixels_per_em: 64,
+            range_em: 0.25,
+            scale_factor: 1.,
+        }
+    }
+    /// Selects generation density. Higher values cost more preparation time and atlas space.
+    pub const fn pixels_per_em(mut self, value: u32) -> Self {
+        self.pixels_per_em = value;
+        self
+    }
+    /// Selects the full signed range, split symmetrically around the outline boundary.
+    pub const fn range_em(mut self, value: f32) -> Self {
+        self.range_em = value;
+        self
+    }
+    /// Selects physical geometry scaling; draw origin remains in physical pixels.
+    pub const fn scale_factor(mut self, value: f32) -> Self {
+        self.scale_factor = value;
+        self
+    }
+}
+/// Explicit glyph representation selected before recording draws.
+///
+/// `TextRasterOptions` and `MtsdfOptions` convert into this enum, so callers can
+/// pass either directly to `TextRenderer::prepare_text` or `Painter::prepare_text`.
+/// Default preparation is hinted coverage; no automatic representation switching occurs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TextPreparation {
+    /// Size-dependent coverage images and intrinsic color artwork.
+    Coverage(TextRasterOptions),
+    /// Size-independent outline fields, with size-dependent color/bitmap fallback.
+    Mtsdf(MtsdfOptions),
+}
+impl Default for TextPreparation {
+    fn default() -> Self {
+        TextRasterOptions::new().into()
+    }
+}
+impl From<TextRasterOptions> for TextPreparation {
+    fn from(value: TextRasterOptions) -> Self {
+        Self::Coverage(value)
+    }
+}
+impl From<MtsdfOptions> for TextPreparation {
+    fn from(value: MtsdfOptions) -> Self {
+        Self::Mtsdf(value)
+    }
+}
+impl TextPreparation {
+    /// Physical pixels per layout unit, applied once when creating glyph geometry.
+    pub const fn scale_factor(self) -> f32 {
+        match self {
+            Self::Coverage(v) => v.scale_factor,
+            Self::Mtsdf(v) => v.scale_factor,
+        }
+    }
+}
 /// Placement and mask color for immutable prepared text in viewport-relative physical pixels.
 #[derive(Clone, Copy, Debug)]
 pub struct TextDraw {
@@ -127,7 +214,7 @@ pub struct TextDraw {
     pub origin: [f32; 2],
     /// Linear straight RGBA for coverage glyphs; alpha also affects intrinsic color glyphs.
     pub color: [f32; 4],
-    /// Additional opacity in `0..=1`, applied to mask and intrinsic color glyphs.
+    /// Additional opacity in `0..=1`, applied to monochrome and intrinsic color glyphs.
     pub opacity: f32,
     /// Transform of prepared pixel geometry and origin; X right/Y down.
     pub transform: Transform2D,
@@ -157,7 +244,7 @@ impl TextDraw {
         self.opacity = value;
         self
     }
-    /// Selects an affine pixel transform. Magnification filters prepared coverage images.
+    /// Selects an affine pixel transform. Coverage images filter; fields reconstruct outline fill.
     pub const fn transform_2d(mut self, value: Transform2D) -> Self {
         self.transform = value;
         self
@@ -166,9 +253,9 @@ impl TextDraw {
 /// Cumulative renderer work counters and current atlas/cache occupancy.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TextRendererStats {
-    /// Glyph raster cache hits, including blank entries.
+    /// Glyph preparation cache hits, including blank entries.
     pub cache_hits: u64,
-    /// Glyph raster cache misses.
+    /// Glyph preparation cache misses.
     pub cache_misses: u64,
     /// Atlas upload payload bytes, excluding implicit texture initialization.
     pub uploaded_bytes: u64,
@@ -189,6 +276,7 @@ pub struct TextRendererStats {
 enum Kind {
     Mask,
     Color,
+    Mtsdf,
 }
 impl Kind {
     fn bytes(self) -> usize {
@@ -249,9 +337,20 @@ struct Key {
     font: FontId,
     glyph: u16,
     weight: u16,
-    size: u32,
+    representation: Representation,
     italic: bool,
-    hint: bool,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Representation {
+    Coverage { size: u32, hint: bool },
+    Mtsdf { pixels_per_em: u32, range_em: u32 },
+}
+#[derive(Clone, Debug)]
+enum GlyphSource {
+    Image(GlyphImage),
+    Blank,
+    // Cached outline-source classification; image lookup uses a size-dependent coverage key.
+    RasterFallback,
 }
 #[derive(Clone, Debug)]
 struct GlyphImage {
@@ -264,7 +363,7 @@ struct GlyphImage {
 }
 #[derive(Debug)]
 struct Cached {
-    image: Option<GlyphImage>,
+    source: GlyphSource,
     last: u64,
 }
 #[repr(C)]
@@ -290,6 +389,8 @@ struct Batch {
 struct PreparedData {
     buffer: Option<wgpu::Buffer>,
     batches: Vec<Batch>,
+    raster_pipeline: bool,
+    field_pipeline: bool,
 }
 /// Immutable glyph geometry and atlas leases, independent of later preparation/cache clearing.
 /// Clones share GPU storage. Draws upload only a 48-byte placement/color record, not glyph geometry.
@@ -301,7 +402,7 @@ pub struct PreparedText {
     bounds: Option<Rect>,
     glyph_count: usize,
     skipped: Arc<[usize]>,
-    raster: TextRasterOptions,
+    preparation: TextPreparation,
 }
 impl PreparedText {
     /// Advance/line-box measurement scaled to physical pixels once.
@@ -309,6 +410,7 @@ impl PreparedText {
         self.size
     }
     /// Bounds of prepared image quads in physical pixels, distinct from layout measurement.
+    /// Distance-field quads include distance-range padding and filtering guards.
     pub fn ink_bounds(&self) -> Option<Rect> {
         self.bounds
     }
@@ -320,14 +422,21 @@ impl PreparedText {
     pub fn skipped_glyphs(&self) -> &[usize] {
         &self.skipped
     }
-    /// Raster settings used by this immutable prepared resource.
-    pub fn raster_options(&self) -> TextRasterOptions {
-        self.raster
+    /// Representation and geometry scale selected during preparation. Color glyphs may
+    /// use raster fallback even when this returns `TextPreparation::Mtsdf`.
+    pub fn preparation(&self) -> TextPreparation {
+        self.preparation
+    }
+    /// Physical pixels per layout unit used for this resource's geometry.
+    pub fn scale_factor(&self) -> f32 {
+        self.preparation.scale_factor()
     }
 }
-/// Independent coverage/color renderer. Preparation rasterizes and uploads before drawing.
+/// Independent coverage/color and outline-distance-field renderer. Preparation generates and uploads before drawing.
 ///
-/// Uses R8 coverage and linear premultiplied RGBA8 color pages, with one-texel gutters.
+/// Uses R8 coverage, linear premultiplied RGBA8 color, and linear RGBA8 MTSDF pages.
+/// One-texel gutters separate images; fields include additional distance-range padding.
+/// Coverage/color draws use a separate fragment shader without field reconstruction.
 /// Raster phase is always zero; fractional movement filters existing images without rerasterizing.
 /// Only consecutive glyphs on the same page are instanced together, preserving layout order.
 /// Leased pages are never evicted or overwritten. Budget exhaustion returns `AtlasFull` without
@@ -339,6 +448,7 @@ pub struct TextRenderer {
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     material: Material,
+    field_material: Material,
     pipelines: crate::mesh_renderer::Pipelines,
     scale: ScaleContext,
     fonts: HashMap<FontId, swash::CacheKey>,
@@ -432,12 +542,19 @@ impl TextRenderer {
                 .vertex_layouts(&layouts)
                 .bind_group_layouts(&[Some(&layout)]),
         );
+        let field_material = g.create_material(
+            MaterialOptions::new(&shader)
+                .vertex_layouts(&layouts)
+                .bind_group_layouts(&[Some(&layout)])
+                .entry_points("vertex_main", "fragment_mtsdf"),
+        );
         Ok(Self {
             graphics: g.clone(),
             options,
             layout,
             sampler,
             material,
+            field_material,
             pipelines: Default::default(),
             scale: ScaleContext::new(),
             fonts: HashMap::new(),
@@ -469,7 +586,11 @@ impl TextRenderer {
         self.fonts.clear();
         self.scale = ScaleContext::new();
     }
-    fn pipeline(&mut self, format: &RenderFormat) -> Result<wgpu::RenderPipeline, TextRenderError> {
+    fn pipeline(
+        &mut self,
+        format: &RenderFormat,
+        field: bool,
+    ) -> Result<wgpu::RenderPipeline, Error> {
         let color = if format.colors.len() == 1 {
             format.colors[0]
         } else {
@@ -479,23 +600,31 @@ impl TextRenderer {
         Ok(crate::mesh_renderer::pipeline(
             &self.graphics,
             &mut self.pipelines,
-            &self.material,
+            if field {
+                &self.field_material
+            } else {
+                &self.material
+            },
             color,
             format.sample_count,
             format.depth_stencil,
             true,
         )
         .map_err(|error| match error {
-            Error::UnsupportedMeshFormat { format } => {
-                TextRenderError::UnsupportedFormat { format }
-            }
-            other => TextRenderError::Graphics(other),
+            Error::UnsupportedMeshFormat { format } => Error::UnsupportedTextFormat { format },
+            other => other,
         })?
         .clone())
     }
+    pub(crate) fn prepare_pipeline(&mut self, format: &RenderFormat) -> Result<(), Error> {
+        self.pipeline(format, false)?;
+        self.pipeline(format, true)?;
+        Ok(())
+    }
     /// Prepares the attachment/MSAA/depth variant without rasterizing or drawing.
     pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), TextRenderError> {
-        self.pipeline(format)?;
+        self.pipeline(format, false)?;
+        self.pipeline(format, true)?;
         Ok(())
     }
     /// Prepares a compatible surface target's attachment variant.
@@ -508,22 +637,40 @@ impl TextRenderer {
         }
         self.prepare(&target.render_format())
     }
-    /// Rasterizes missing glyph images and creates immutable geometry. No TextSystem borrow is
+    /// Generates missing glyph images and creates immutable geometry. Coverage is size-dependent;
+    /// MTSDF outlines reuse images across font sizes/DPI while color/bitmap fallback remains
+    /// size-dependent. Pass either `TextRasterOptions` or `MtsdfOptions` directly.
+    /// Cold field generation can be expensive: prepare ahead of drawing or stage groups of labels.
+    /// No TextSystem borrow is
     /// needed: layouts retain font sources. Preparation can populate/evict caches even on failure;
     /// previous prepared texts remain valid. Repeated preparation reuses atlas images but creates
-    /// a new geometry buffer; keep PreparedText for unchanged content. Unsupported/blank raster
-    /// sources are skipped and reported by original glyph index.
+    /// a new geometry buffer; keep PreparedText for unchanged content. Unsupported/blank
+    /// sources are skipped and reported by original glyph index. Physical coverage/color sizes
+    /// must fit `max_raster_size`; pure outline fields instead use bounded generation density.
     pub fn prepare_text(
         &mut self,
         layout: &TextLayout,
-        raster: TextRasterOptions,
+        preparation: impl Into<TextPreparation>,
     ) -> Result<PreparedText, TextRenderError> {
-        let scale = raster.scale_factor;
+        let preparation = preparation.into();
+        if let TextPreparation::Mtsdf(options) = preparation
+            && (!(16..=256).contains(&options.pixels_per_em)
+                || !options.range_em.is_finite()
+                || options.range_em <= 0.
+                || options.range_em > 1.
+                || options.range_em * (options.pixels_per_em as f32) < 2.)
+        {
+            return Err(TextRenderError::InvalidOptions);
+        }
+        let scale = preparation.scale_factor();
         if !scale.is_finite()
             || scale <= 0.
             || layout.glyphs().iter().any(|g| {
                 let size = g.font_size * scale;
-                !size.is_finite() || size <= 0. || size > self.options.max_raster_size
+                !size.is_finite()
+                    || size <= 0.
+                    || (matches!(preparation, TextPreparation::Coverage(_))
+                        && size > self.options.max_raster_size)
             })
         {
             return Err(TextRenderError::InvalidOptions);
@@ -541,24 +688,60 @@ impl TextRenderer {
         let mut bounds: Option<[f32; 4]> = None;
         for (index, glyph) in layout.glyphs().iter().enumerate() {
             let font = &layout.fonts()[glyph.font_index];
+            let physical_size = glyph.font_size * scale;
+            let coverage = match preparation {
+                TextPreparation::Coverage(raster) => Representation::Coverage {
+                    size: physical_size.to_bits(),
+                    hint: raster.hinting,
+                },
+                TextPreparation::Mtsdf(_) => Representation::Coverage {
+                    size: physical_size.to_bits(),
+                    hint: true,
+                },
+            };
             let key = Key {
                 font: font.id(),
                 glyph: glyph.glyph_id,
                 weight: font.weight(),
-                size: (glyph.font_size * scale).to_bits(),
+                representation: match preparation {
+                    TextPreparation::Coverage(_) => coverage,
+                    TextPreparation::Mtsdf(v) => Representation::Mtsdf {
+                        pixels_per_em: v.pixels_per_em,
+                        range_em: v.range_em.to_bits(),
+                    },
+                },
                 italic: glyph.synthetic_italic,
-                hint: raster.hinting,
             };
-            // Glyph ID is part of cache identity, separately from font/raster settings.
-            let image = self.image(key, glyph.glyph_id, font)?;
-            let Some(image) = image else {
+            let source = self.image(key, font)?;
+            let source = if matches!(source, GlyphSource::RasterFallback) {
+                if physical_size > self.options.max_raster_size {
+                    return Err(TextRenderError::InvalidOptions);
+                }
+                self.image(
+                    Key {
+                        representation: coverage,
+                        ..key
+                    },
+                    font,
+                )?
+            } else {
+                source
+            };
+            let GlyphSource::Image(image) = source else {
                 skipped.push(index);
                 continue;
             };
-            let x = glyph.position[0] * scale + image.left as f32;
-            let y = glyph.position[1] * scale - image.top as f32;
-            let w = image.width as f32;
-            let h = image.height as f32;
+            let factor = if let Representation::Mtsdf { pixels_per_em, .. } = key.representation
+                && image.page.kind == Kind::Mtsdf
+            {
+                physical_size / pixels_per_em as f32
+            } else {
+                1.
+            };
+            let x = glyph.position[0] * scale + image.left as f32 * factor;
+            let y = glyph.position[1] * scale - image.top as f32 * factor;
+            let w = image.width as f32 * factor;
+            let h = image.height as f32 * factor;
             if [x, y, x + w, y + h].iter().any(|v| !v.is_finite()) {
                 return Err(TextRenderError::InvalidOptions);
             }
@@ -571,10 +754,10 @@ impl TextRenderer {
                 rect: [x, y, w, h],
                 uv: image.uv,
                 kind: [
-                    if image.page.kind == Kind::Mask {
-                        0.
-                    } else {
-                        1.
+                    match image.page.kind {
+                        Kind::Mask => 0.,
+                        Kind::Color => 1.,
+                        Kind::Mtsdf => 2.,
                     },
                     0.,
                     0.,
@@ -613,12 +796,17 @@ impl TextRenderer {
         self.stats.geometry_bytes += data.len() as u64 * 48;
         Ok(PreparedText {
             graphics: self.graphics.clone(),
-            data: Arc::new(PreparedData { buffer, batches }),
+            data: Arc::new(PreparedData {
+                raster_pipeline: batches.iter().any(|b| b.page.kind != Kind::Mtsdf),
+                field_pipeline: batches.iter().any(|b| b.page.kind == Kind::Mtsdf),
+                buffer,
+                batches,
+            }),
             size,
             bounds: bounds.map(|b| Rect::new(b[0], b[1], b[2] - b[0], b[3] - b[1])),
             glyph_count: data.len(),
             skipped: skipped.into(),
-            raster,
+            preparation,
         })
     }
     /// Records ordered prepared batches into a frame-owned pass, honoring its viewport/scissor.
@@ -637,34 +825,49 @@ impl TextRenderer {
         let Some(buffer) = &text.data.buffer else {
             return Ok(());
         };
-        let pipeline = self.pipeline(&pass.render_format())?;
+        let format = pass.render_format();
+        // Validate/create every required variant before recording commands.
+        let raster_pipeline = if text.data.raster_pipeline {
+            Some(self.pipeline(&format, false)?)
+        } else {
+            None
+        };
+        let field_pipeline = if text.data.field_pipeline {
+            Some(self.pipeline(&format, true)?)
+        } else {
+            None
+        };
         let (draw_buffer, range) = pass.upload_instances(bytemuck::bytes_of(&parameters), 4);
         self.stats.parameter_bytes += 48;
         for batch in &text.data.batches {
             pass.retain_resource(batch.page.allocation.clone());
         }
         pass.apply_raster_state();
-        pass.set_pipeline(&pipeline);
         pass.set_vertex_buffer(0, buffer, 0..buffer.size());
         pass.set_vertex_buffer(1, &draw_buffer, range);
+        let mut previous = None;
         for batch in &text.data.batches {
+            let field = batch.page.kind == Kind::Mtsdf;
+            if previous != Some(field) {
+                pass.set_pipeline(if field {
+                    field_pipeline.as_ref().unwrap()
+                } else {
+                    raster_pipeline.as_ref().unwrap()
+                });
+                previous = Some(field);
+            }
             pass.set_bind_group(0, &batch.page.group, &[]);
             pass.inner.draw(0..6, batch.range.clone());
             self.stats.draw_calls += 1;
         }
         Ok(())
     }
-    fn image(
-        &mut self,
-        key: Key,
-        glyph: u16,
-        font: &TextFont,
-    ) -> Result<Option<GlyphImage>, TextRenderError> {
+    fn image(&mut self, key: Key, font: &TextFont) -> Result<GlyphSource, TextRenderError> {
         self.clock += 1;
         if let Some(cached) = self.cache.get_mut(&key) {
             self.stats.cache_hits += 1;
             cached.last = self.clock;
-            if let Some(image) = &cached.image
+            if let GlyphSource::Image(image) = &cached.source
                 && let Some(shelf) = self
                     .pages
                     .iter_mut()
@@ -672,7 +875,7 @@ impl TextRenderer {
             {
                 shelf.last = self.clock;
             }
-            return Ok(cached.image.clone());
+            return Ok(cached.source.clone());
         }
         self.stats.cache_misses += 1;
         let mut font_ref = swash::FontRef::from_index(font.data(), font.face_index() as usize)
@@ -685,49 +888,90 @@ impl TextRenderer {
         let coords = font_ref
             .variations()
             .normalized_coords([(weight, f32::from(key.weight))]);
+        let (size, hint) = match key.representation {
+            Representation::Coverage { size, hint } => (f32::from_bits(size), hint),
+            Representation::Mtsdf { pixels_per_em, .. } => (pixels_per_em as f32, false),
+        };
         let mut scaler = self
             .scale
             .builder(font_ref)
-            .size(f32::from_bits(key.size))
-            .hint(key.hint)
+            .size(size)
+            .hint(hint)
             .normalized_coords(coords)
             .build();
-        // Check outline dimensions before Swash allocates its output image.
-        // Bitmap dimensions are validated after decoding; Swash owns decode scratch.
+        let glyph = key.glyph;
         let slant = key.italic.then(|| {
             swash::zeno::Transform::skew(
                 swash::zeno::Angle::from_degrees(14.),
                 swash::zeno::Angle::from_degrees(0.),
             )
         });
-        if let Some(mut outline) = scaler
-            .scale_color_outline(glyph)
-            .or_else(|| scaler.scale_outline(glyph))
-        {
-            if let Some(t) = &slant {
-                outline.transform(t);
+        let source = match key.representation {
+            Representation::Mtsdf {
+                pixels_per_em,
+                range_em,
+            } => {
+                // Probe artwork before monochrome outlines: some color glyphs have both.
+                // Classification is size independent. Raster fallback is generated separately
+                // at the requested physical size, preserving the existing source priority.
+                if scaler.scale_color_outline(glyph).is_some()
+                    || scaler
+                        .scale_color_bitmap(glyph, StrikeWith::BestFit)
+                        .is_some()
+                {
+                    GlyphSource::RasterFallback
+                } else if let Some(mut outline) = scaler.scale_outline(glyph) {
+                    if let Some(t) = &slant {
+                        outline.transform(t);
+                    }
+                    match super::distance_field::generate(
+                        &outline,
+                        pixels_per_em,
+                        f32::from_bits(range_em),
+                        self.options.page_size,
+                    )? {
+                        Some(image) => GlyphSource::Image(self.upload(image, Kind::Mtsdf)?),
+                        None => GlyphSource::Blank,
+                    }
+                } else if scaler.scale_bitmap(glyph, StrikeWith::BestFit).is_some() {
+                    GlyphSource::RasterFallback
+                } else {
+                    GlyphSource::Blank
+                }
             }
-            let bounds = outline.bounds();
-            if [bounds.width(), bounds.height()]
-                .iter()
-                .any(|v| !v.is_finite() || v.ceil() + 4. > self.options.page_size as f32)
-            {
-                return Err(TextRenderError::GlyphTooLarge);
+            Representation::Coverage { .. } => {
+                // Check outline dimensions before Swash allocates its output image.
+                // Bitmap dimensions are validated after decoding; Swash owns decode scratch.
+                if let Some(mut outline) = scaler
+                    .scale_color_outline(glyph)
+                    .or_else(|| scaler.scale_outline(glyph))
+                {
+                    if let Some(t) = &slant {
+                        outline.transform(t);
+                    }
+                    let bounds = outline.bounds();
+                    if [bounds.width(), bounds.height()]
+                        .iter()
+                        .any(|v| !v.is_finite() || v.ceil() + 4. > self.options.page_size as f32)
+                    {
+                        return Err(TextRenderError::GlyphTooLarge);
+                    }
+                }
+                let mut render = Render::new(&[
+                    Source::ColorOutline(0),
+                    Source::ColorBitmap(StrikeWith::BestFit),
+                    Source::Outline,
+                    Source::Bitmap(StrikeWith::BestFit),
+                ]);
+                render.format(swash::zeno::Format::Alpha);
+                render.transform(slant);
+                match render.render(&mut scaler, glyph) {
+                    Some(image) if image.placement.width > 0 && image.placement.height > 0 => {
+                        GlyphSource::Image(self.upload_image(image)?)
+                    }
+                    _ => GlyphSource::Blank,
+                }
             }
-        }
-        let mut render = Render::new(&[
-            Source::ColorOutline(0),
-            Source::ColorBitmap(StrikeWith::BestFit),
-            Source::Outline,
-        ]);
-        render.format(swash::zeno::Format::Alpha);
-        render.transform(slant);
-        let image = render.render(&mut scaler, glyph);
-        let image = match image {
-            Some(image) if image.placement.width > 0 && image.placement.height > 0 => {
-                Some(self.upload_image(image)?)
-            }
-            _ => None,
         };
         if self.cache.len() >= self.options.max_cached_glyphs {
             let victim = *self.cache.iter().min_by_key(|(_, v)| v.last).unwrap().0;
@@ -736,11 +980,11 @@ impl TextRenderer {
         self.cache.insert(
             key,
             Cached {
-                image: image.clone(),
+                source: source.clone(),
                 last: self.clock,
             },
         );
-        Ok(image)
+        Ok(source)
     }
     fn upload_image(&mut self, mut image: Image) -> Result<GlyphImage, TextRenderError> {
         let kind = match image.content {
@@ -748,6 +992,16 @@ impl TextRenderer {
             Content::Color => Kind::Color,
             Content::SubpixelMask => return Err(TextRenderError::InvalidRaster),
         };
+        if kind == Kind::Color {
+            // COLR layers are premultiplied sRGB; PNG bitmap images are straight sRGB.
+            linearize_color(
+                &mut image.data,
+                matches!(image.source, Source::ColorOutline(_)),
+            );
+        }
+        self.upload(image, kind)
+    }
+    fn upload(&mut self, image: Image, kind: Kind) -> Result<GlyphImage, TextRenderError> {
         let (w, h) = (image.placement.width, image.placement.height);
         let size = self.options.page_size;
         if w.checked_add(2).is_none_or(|v| v > size) || h.checked_add(2).is_none_or(|v| v > size) {
@@ -755,14 +1009,6 @@ impl TextRenderer {
         }
         if image.data.len() != (w as usize) * (h as usize) * kind.bytes() {
             return Err(TextRenderError::InvalidRaster);
-        }
-        if kind == Kind::Color {
-            // Swash COLR layer blits produce premultiplied sRGB; PNG bitmap
-            // sources decode to straight sRGB. Normalize both to linear premultiplied RGBA.
-            linearize_color(
-                &mut image.data,
-                matches!(image.source, Source::ColorOutline(_)),
-            );
         }
         let mut allocation = None;
         for shelf in &mut self.pages {
@@ -898,9 +1144,7 @@ impl TextRenderer {
                     .cache
                     .values()
                     .filter(|v| {
-                        v.image
-                            .as_ref()
-                            .is_some_and(|i| Arc::ptr_eq(&i.page, &s.page))
+                        matches!(&v.source, GlyphSource::Image(i) if Arc::ptr_eq(&i.page, &s.page))
                     })
                     .count();
                 Arc::strong_count(&s.page) == 1 + cache_refs
@@ -911,7 +1155,7 @@ impl TextRenderer {
         if let Some(index) = victim {
             let page = self.pages.swap_remove(index).page;
             self.cache
-                .retain(|_, v| v.image.as_ref().is_none_or(|i| i.page.id != page.id));
+                .retain(|_, v| !matches!(&v.source, GlyphSource::Image(i) if i.page.id == page.id));
         }
     }
 }

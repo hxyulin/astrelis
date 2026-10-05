@@ -439,3 +439,377 @@ fn real_multilingual_layout_rasterizes_fallback_without_new_shaping() {
         assert!(data[64 * 22 * 4..64 * 44 * 4].iter().any(|&v| v != 0));
     });
 }
+
+#[test]
+fn mtsdf_reuses_fields_across_font_sizes_dpi_and_keeps_explicit_metadata() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = TextRenderer::new(&g);
+        let mut fonts = super::super::TextSystem::new();
+        fonts
+            .load_font(include_bytes!("../../tests/fonts/TestColor.ttf"))
+            .unwrap();
+        let mut buffer = super::super::TextBuffer::new();
+        let style = super::super::TextStyle::new()
+            .family("Astrelis Test Color")
+            .font_size(20.)
+            .line_height(24.);
+        buffer.set_text("M ", style.clone()).unwrap();
+        let cpu = buffer.layout(&mut fonts).unwrap();
+        let settings = MtsdfOptions::new();
+        let first = renderer.prepare_text(&cpu, settings).unwrap();
+        assert_eq!(first.preparation(), TextPreparation::Mtsdf(settings));
+        assert_eq!(first.scale_factor(), 1.);
+        assert_eq!(first.skipped_glyphs(), [1]);
+        assert_eq!(first.data.batches[0].page.kind, Kind::Mtsdf);
+        let before = renderer.stats();
+        let second = renderer
+            .prepare_text(&cpu, settings.scale_factor(2.))
+            .unwrap();
+        assert_eq!(second.size(), first.size().map(|v| v * 2.));
+        let a = first.ink_bounds().unwrap();
+        let b = second.ink_bounds().unwrap();
+        assert_eq!(
+            [b.x, b.y, b.width, b.height],
+            [a.x, a.y, a.width, a.height].map(|v| v * 2.)
+        );
+        buffer
+            .set_style(style.font_size(40.).line_height(48.))
+            .unwrap();
+        let larger = renderer
+            .prepare_text(&buffer.layout(&mut fonts).unwrap(), settings)
+            .unwrap();
+        assert_eq!(renderer.stats().cache_misses, before.cache_misses);
+        assert_eq!(renderer.stats().uploaded_bytes, before.uploaded_bytes);
+        assert!(Arc::ptr_eq(
+            &first.data.batches[0].page,
+            &larger.data.batches[0].page
+        ));
+        assert_eq!(renderer.stats().atlas_bytes, 1024 * 1024 * 4);
+        let changed = renderer
+            .prepare_text(&cpu, settings.range_em(0.125))
+            .unwrap();
+        assert!(renderer.stats().cache_misses > before.cache_misses);
+        assert!(changed.ink_bounds().unwrap().width < a.width);
+        // Outline geometry does not inherit coverage's physical raster size cap.
+        let huge = renderer
+            .prepare_text(&cpu, settings.scale_factor(50.))
+            .unwrap();
+        assert_eq!(huge.size(), first.size().map(|v| v * 50.));
+    });
+}
+
+#[test]
+fn mtsdf_and_intrinsic_artwork_preserve_order_color_opacity_and_msaa() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut renderer = TextRenderer::new(&g);
+        let cpu = layout("M😀M😁M");
+        let prepared = renderer.prepare_text(&cpu, MtsdfOptions::new()).unwrap();
+        assert_eq!(prepared.glyph_count(), 5);
+        assert_eq!(
+            prepared
+                .data
+                .batches
+                .iter()
+                .map(|b| b.page.kind)
+                .collect::<Vec<_>>(),
+            [
+                Kind::Mtsdf,
+                Kind::Color,
+                Kind::Mtsdf,
+                Kind::Color,
+                Kind::Mtsdf
+            ]
+        );
+        let mask = renderer
+            .prepare_text(&layout("M"), MtsdfOptions::new().scale_factor(2.))
+            .unwrap();
+        let mut shapes = ShapeRenderer::new(&g);
+        for samples in [1, 4] {
+            let mut t = target(&g, samples);
+            renderer.prepare(&t.render_format()).unwrap();
+            let before = renderer.stats();
+            let bytes = pixels(&g, &mut t, |frame| {
+                let mut pass = frame.render_pass().begin().unwrap();
+                renderer
+                    .draw(
+                        &mut pass,
+                        &prepared,
+                        TextDraw::default().color([0., 0., 1., 1.]).opacity(0.5),
+                    )
+                    .unwrap();
+            });
+            near(pixel(&bytes, 5, 10), [0, 0, 128, 128]);
+            near(pixel(&bytes, 25, 10), [127, 0, 0, 127]);
+            near(pixel(&bytes, 45, 10), [0, 0, 128, 128]);
+            assert_eq!(renderer.stats().cache_misses, before.cache_misses);
+            assert_eq!(renderer.stats().uploaded_bytes, before.uploaded_bytes);
+            assert_eq!(renderer.stats().geometry_bytes, before.geometry_bytes);
+            assert_eq!(
+                renderer.stats().parameter_bytes - before.parameter_bytes,
+                48
+            );
+            assert_eq!(renderer.stats().draw_calls - before.draw_calls, 5);
+            let bytes = pixels(&g, &mut t, |frame| {
+                let mut pass = frame.render_pass().begin().unwrap();
+                pass.set_scissor_rect(4, 4, 30, 40).unwrap();
+                renderer
+                    .draw(
+                        &mut pass,
+                        &mask,
+                        TextDraw::default().color([1., 0., 0., 1.]),
+                    )
+                    .unwrap();
+                shapes
+                    .draw(
+                        &mut pass,
+                        ShapeDraw::rect(Rect::new(10., 10., 20., 20.), [0., 1., 0., 1.]),
+                    )
+                    .unwrap();
+                renderer
+                    .draw(
+                        &mut pass,
+                        &mask,
+                        TextDraw::default()
+                            .color([0., 0., 1., 1.])
+                            .opacity(0.5)
+                            .transform_2d(Transform2D::translation(2., 0.)),
+                    )
+                    .unwrap();
+            });
+            near(pixel(&bytes, 0, 10), [0; 4]);
+            near(pixel(&bytes, 40, 10), [0; 4]);
+            near(pixel(&bytes, 15, 15), [0, 128, 128, 255]);
+        }
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn mtsdf_page_leases_survive_cache_clear_and_release_on_gpu_completion() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let mut renderer = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                page_size: 128,
+                max_pages: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let cpu = layout("M");
+        let prepared = renderer.prepare_text(&cpu, MtsdfOptions::new()).unwrap();
+        let mut frame = t.begin_frame().unwrap();
+        {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &prepared, TextDraw::default())
+                .unwrap();
+        }
+        drop(prepared);
+        renderer.clear_cache();
+        assert_eq!(renderer.stats().live_pages, 1);
+        assert!(matches!(
+            renderer.prepare_text(&cpu, MtsdfOptions::new()),
+            Err(TextRenderError::AtlasFull)
+        ));
+        let submission = frame.finish().unwrap();
+        g.device()
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(std::time::Duration::from_secs(10)),
+            })
+            .unwrap();
+        assert_eq!(renderer.stats().live_pages, 0);
+        let result = pixels(&g, &mut t, |frame| {
+            drop(frame.render_pass().load_all().begin().unwrap());
+        });
+        near(pixel(&result, 5, 10), [255; 4]);
+        assert!(renderer.prepare_text(&cpu, MtsdfOptions::new()).is_ok());
+    });
+}
+
+#[test]
+fn mtsdf_invalid_options_and_page_pressure_leave_retained_resources_usable() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                page_size: 128,
+                max_pages: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let cpu = layout("M");
+        let options = MtsdfOptions::new();
+        let prepared = renderer.prepare_text(&cpu, options).unwrap();
+        let before = renderer.stats();
+        for invalid in [
+            options.pixels_per_em(0),
+            options.pixels_per_em(257),
+            options.range_em(0.),
+            options.range_em(f32::NAN),
+            options.range_em(1.1),
+            options.range_em(0.01),
+            options.scale_factor(0.),
+            options.scale_factor(f32::INFINITY),
+        ] {
+            assert!(matches!(
+                renderer.prepare_text(&cpu, invalid),
+                Err(TextRenderError::InvalidOptions)
+            ));
+        }
+        assert_eq!(renderer.stats().cache_misses, before.cache_misses);
+        assert!(matches!(
+            renderer.prepare_text(&cpu, options.pixels_per_em(256)),
+            Err(TextRenderError::GlyphTooLarge)
+        ));
+        assert!(matches!(
+            renderer.prepare_text(&layout("😀"), options),
+            Err(TextRenderError::AtlasFull)
+        ));
+        let mut t = target(&g, 1);
+        let mut painter = crate::Painter::new(&g);
+        let bytes = pixels(&g, &mut t, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            let mut paint = painter.begin(&mut pass).unwrap();
+            assert!(
+                paint
+                    .draw_text(&prepared, TextDraw::default().opacity(2.))
+                    .is_err()
+            );
+            paint.draw_text(&prepared, TextDraw::default()).unwrap();
+        });
+        near(pixel(&bytes, 5, 10), [255; 4]);
+        drop(prepared);
+        renderer.clear_cache();
+        assert!(renderer.prepare_text(&cpu, options).is_ok());
+    });
+}
+
+#[test]
+fn mtsdf_multilingual_cff_variable_weight_and_italic_match_unhinted_coverage() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let mut system = super::super::TextSystem::new();
+        system
+            .load_font(include_bytes!("../../tests/fonts/SourceSans3-Regular.otf"))
+            .unwrap();
+        system
+            .load_font(include_bytes!("../../tests/fonts/NotoSansArabic.ttf"))
+            .unwrap();
+        let mut buffer = super::super::TextBuffer::new();
+        let mut renderer = TextRenderer::new(&g);
+        let mut images = Vec::new();
+        for (family, content, weight, slant) in [
+            (
+                "Source Sans 3",
+                "AV ffi e\u{301}",
+                400,
+                super::super::FontSlant::Normal,
+            ),
+            (
+                "Source Sans 3",
+                "AV office",
+                400,
+                super::super::FontSlant::Italic,
+            ),
+            (
+                "Source Sans 3",
+                "B8@g",
+                400,
+                super::super::FontSlant::Normal,
+            ),
+            (
+                "Noto Sans Arabic",
+                "مب",
+                400,
+                super::super::FontSlant::Normal,
+            ),
+            (
+                "Noto Sans Arabic",
+                "مب",
+                700,
+                super::super::FontSlant::Normal,
+            ),
+        ] {
+            buffer
+                .set_text(
+                    content,
+                    super::super::TextStyle::new()
+                        .family(family)
+                        .font_size(28.)
+                        .line_height(38.)
+                        .weight(weight)
+                        .slant(slant),
+                )
+                .unwrap();
+            let cpu = buffer.layout(&mut system).unwrap();
+            assert!(cpu.missing_glyphs().is_empty());
+            let field = renderer.prepare_text(&cpu, MtsdfOptions::new()).unwrap();
+            let coverage = renderer
+                .prepare_text(
+                    &cpu,
+                    TextRasterOptions::new().hinting(false).scale_factor(3.),
+                )
+                .unwrap();
+            assert_eq!(field.glyph_count(), coverage.glyph_count());
+            for transform in [
+                Transform2D::IDENTITY,
+                Transform2D::rotation(0.1).then(Transform2D::translation(4., 0.)),
+                Transform2D::scale(0.75, 1.25).then(Transform2D::translation(3.5, 0.5)),
+            ] {
+                let render = |renderer: &mut TextRenderer,
+                              t: &mut Framebuffer,
+                              p: &PreparedText,
+                              tr: Transform2D| {
+                    pixels(&g, t, |frame| {
+                        let mut pass = frame.render_pass().begin().unwrap();
+                        renderer
+                            .draw(&mut pass, p, TextDraw::default().transform_2d(tr))
+                            .unwrap();
+                    })
+                };
+                let actual = render(&mut renderer, &mut t, &field, transform);
+                let reference = render(
+                    &mut renderer,
+                    &mut t,
+                    &coverage,
+                    Transform2D::scale(1. / 3., 1. / 3.).then(transform),
+                );
+                let area: u64 = reference
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|p| u64::from(p[3]))
+                    .sum();
+                let error: u64 = actual
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(reference.as_chunks::<4>().0.iter())
+                    .map(|(a, b)| u64::from(a[3].abs_diff(b[3])))
+                    .sum();
+                assert!(area > 10000);
+                assert!(
+                    error as f64 / (area as f64) < 0.25,
+                    "{family} weight {weight}: alpha error {error}/{area}"
+                );
+                if transform == Transform2D::IDENTITY {
+                    images.push(actual);
+                }
+            }
+        }
+        assert_ne!(
+            images[3], images[4],
+            "variable weight must affect generated outlines"
+        );
+    });
+}

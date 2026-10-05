@@ -1,4 +1,4 @@
-//! Font loading, advanced CPU shaping/layout, and explicit GPU coverage/color text.
+//! Font loading, advanced CPU shaping/layout, and explicit GPU coverage/color and distance-field text.
 //!
 //! Keep one [`TextSystem`] per application and one [`TextBuffer`] per retained text
 //! item. Font discovery is explicit. [`TextBuffer::layout`] evaluates dirty state
@@ -35,7 +35,8 @@
 //! batches into existing frame-owned passes, without shaping/rasterizing. Raster
 //! scale is explicit; mask colors are linear, while color glyph RGB is intrinsic.
 //! Cache budgets include prepared texts, recordings, and GPU completion leases.
-//! Painter text integration and distance fields remain separate milestones.
+//! [`crate::Painter`] exposes the same explicit preparation and drawing contract.
+//! Select [`MtsdfOptions`] for scalable outline fill; coverage remains the default.
 //!
 //! ```no_run
 //! use astrelis::{GraphicsContext, FramebufferOptions, TextSystem, TextBuffer,
@@ -60,7 +61,17 @@
 //! # Ok(()) }
 //! ```
 
+//! ```no_run
+//! use astrelis::{Painter, TextLayout, MtsdfOptions, PreparedText, TextRenderError};
+//! fn prepare(painter: &mut Painter, layout: &TextLayout, dpi: f32)
+//!     -> Result<PreparedText, TextRenderError> {
+//!     painter.prepare_text(layout,
+//!         MtsdfOptions::new().pixels_per_em(64).range_em(0.25).scale_factor(dpi))
+//! }
+//! ```
+
 mod buffer;
+mod distance_field;
 mod layout;
 mod renderer;
 mod style;
@@ -70,8 +81,8 @@ pub use buffer::TextBuffer;
 pub use cosmic_text as cosmic;
 pub use layout::{TextFont, TextGlyph, TextLayout, TextLine};
 pub use renderer::{
-    PreparedText, TextDraw, TextRasterOptions, TextRenderError, TextRenderer, TextRendererOptions,
-    TextRendererStats,
+    MtsdfOptions, PreparedText, TextDraw, TextPreparation, TextRasterOptions, TextRenderError,
+    TextRenderer, TextRendererOptions, TextRendererStats,
 };
 pub use style::{FontFamily, FontSlant, FontStretch, TextAlign, TextStyle, TextWrap};
 pub use system::{FontId, FontInfo, TextSystem};
