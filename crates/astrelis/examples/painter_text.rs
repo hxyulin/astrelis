@@ -1,4 +1,4 @@
-//! Standalone Painter with retained multilingual text, scoped transforms, and ordered layers.
+//! Standalone Painter with batched multilingual text preparation, scoped transforms, and ordered layers.
 //! Space toggles MSAA. Copy this file and its licensed fonts into your application.
 use astrelis::{
     FrameError, GraphicsContext, LineDraw, Mesh, MeshRenderer, Painter, PreparedText, Rect,
@@ -25,10 +25,11 @@ struct State {
     target: RenderTarget<'static>,
     fonts: TextSystem,
     paragraph: TextBuffer,
+    caption: TextBuffer,
     painter: Painter,
     custom: MeshRenderer,
     marker: Mesh,
-    prepared: Option<PreparedText>,
+    prepared: Vec<PreparedText>,
 }
 impl State {
     fn new(events: &ActiveEventLoop) -> Result<Self, Box<dyn Error>> {
@@ -51,6 +52,14 @@ impl State {
         let mut paragraph = TextBuffer::new();
         paragraph.set_text("Painter: retained coverage and color text\n\nHello, office! AV kerning and combining marks: e\u{301}.\nالعربية — مرحبا بالعالم 123\nMixed fallback: Hello العربية 😀 😁\n\nResize to reflow. Preparation stays outside painting.\nSpace toggles MSAA. Shapes and text preserve call order.\n\nThe two geometric color marks come from the original test font: one uses COLR layers, the other a PNG bitmap.",
             TextStyle::new().family("Source Sans 3").font_size(22.).line_height(32.))?;
+        let mut caption = TextBuffer::new();
+        caption.set_text(
+            "Two layouts share geometry; each draws with its own placement and color.",
+            TextStyle::new()
+                .family("Source Sans 3")
+                .font_size(12.)
+                .line_height(18.),
+        )?;
         let painter = Painter::new(&graphics);
         let custom = MeshRenderer::new(&graphics);
         let marker = graphics.create_mesh(
@@ -67,10 +76,11 @@ impl State {
             target,
             fonts,
             paragraph,
+            caption,
             painter,
             custom,
             marker,
-            prepared: None,
+            prepared: Vec::new(),
         };
         state.prepare()?;
         state.window.request_redraw();
@@ -79,7 +89,7 @@ impl State {
     fn prepare(&mut self) -> Result<(), Box<dyn Error>> {
         let size = self.window.inner_size();
         if size.width == 0 || size.height == 0 {
-            self.prepared = None;
+            self.prepared.clear();
             return Ok(());
         }
         let scale = self.window.scale_factor() as f32;
@@ -88,11 +98,15 @@ impl State {
         let layout = self.paragraph.layout(&mut self.fonts)?;
         // Drop the obsolete resource before preparing a replacement. Glyph cache
         // entries remain reusable; in-flight recordings retain completion leases.
-        self.prepared = None;
-        self.prepared = Some(
-            self.painter
-                .prepare_text(&layout, TextRasterOptions::new().scale_factor(scale))?,
-        );
+        self.prepared.clear();
+        self.caption
+            .set_width(Some((size.width as f32 / scale - 96.).max(0.)))?;
+        let caption = self.caption.layout(&mut self.fonts)?;
+        // Returned resources share geometry storage, but can be drawn independently.
+        self.prepared = self.painter.prepare_texts(
+            [layout, caption],
+            TextRasterOptions::new().scale_factor(scale),
+        )?;
         self.painter.prepare_for_target(&self.target)?;
         self.custom.prepare_for_target(&self.target)?;
         Ok(())
@@ -143,7 +157,7 @@ impl State {
             let margin = (16. * scale) as u32;
             if w > margin * 2 && h > margin * 2 {
                 pass.set_scissor_rect(margin, margin, w - margin * 2, h - margin * 2)?;
-                if let Some(text) = &self.prepared {
+                if let Some(text) = self.prepared.first() {
                     let mut paint = self.painter.begin(&mut pass)?;
                     let panel = Rect::new(
                         20. * scale,
@@ -167,6 +181,13 @@ impl State {
                                 [0.2, 0.7, 1., 0.8],
                             )
                             .width(2. * scale),
+                        )?;
+                    }
+                    if let Some(caption) = self.prepared.get(1) {
+                        paint.draw_text(
+                            caption,
+                            TextDraw::new([44. * scale, h as f32 - 48. * scale])
+                                .color([0.45, 0.7, 0.85, 1.]),
                         )?;
                     }
                     paint.stroke_rounded_rect(

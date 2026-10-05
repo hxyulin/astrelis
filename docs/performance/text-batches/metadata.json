@@ -1,0 +1,117 @@
+{
+  "measured_at": "2026-10-05T13:54:22.650599+00:00",
+  "base_commit": "f23134292c0ba1fc21034702d1d6c30b8c4e9c97",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434\n",
+  "samples": 40,
+  "warmup": 8,
+  "commands": [
+    "cargo bench -p astrelis --bench text_batches",
+    "cargo bench -p astrelis --bench text_workloads -- --no-timestamps"
+  ],
+  "conditions": "Three sequential release runs per benchmark. All checks and native window launch completed, window closed before measurements. No concurrent builds/captures. GPU waits/readbacks outside CPU intervals. GPU execution not measured. Each batch benchmark runs individual then batched for counts 60,600,1000. Both retain previous texts until replacement success.",
+  "source_sha256": {
+    "crates/astrelis/src/api_tests.rs": "6396833c22269744359c13f34568de102880f2d36b4ecb1a134bf63d0249dced",
+    "crates/astrelis/src/attachments.rs": "c4a0e9ec3f17943817c89d4fbf14ed74001e55c83f2267a041a29685088d9ae0",
+    "crates/astrelis/src/context.rs": "26ec9563c4528b41193564f6fb144c9b7461acedddb166e468d0008394ac2c24",
+    "crates/astrelis/src/depth_stencil.rs": "3b2d259252ea4c49bcbafefdd4d03a99e5dfe9775161f72482dfc7e9cde97509",
+    "crates/astrelis/src/depth_stencil_tests.rs": "ea5e5cff8cd4e125e9cb590778873272bcf8814e563f701ff1fb7b03a50c90dd",
+    "crates/astrelis/src/drawing.rs": "fc20149837e393fa8d37a19aabbb338ed387278f22e21eb92ca8102a49573877",
+    "crates/astrelis/src/error.rs": "902192858b8323f72cab50238bbb385ee6f227e4dd8fa0386892137055b3981d",
+    "crates/astrelis/src/frame.rs": "4496805987834bbffc47b2e14d2364826a254a91d7ebeef3da3a7f159fda7c33",
+    "crates/astrelis/src/framebuffer.rs": "db2e347f14de7d0a6294f7811b18b0bee0faf6bcd22ed8653da6b4afc72de9df",
+    "crates/astrelis/src/framebuffer_tests.rs": "0cf349cb6e6cd795ea3523b6bef8f73f158865c9e5add6d6009ec13d0bc7e406",
+    "crates/astrelis/src/lib.rs": "9dee88e1bf778f77c05dcc2c2a4d1e3fd5f282069176d024561171a63602b202",
+    "crates/astrelis/src/material.rs": "c45de39d6a62988bb3305b78ac67ccac36ab08f42344809a865d77f6b40455c1",
+    "crates/astrelis/src/material_tests.rs": "7c6d6e4ad990833ea384cf9478b12d241a7e7d46e8662345c5eecb052063a8f5",
+    "crates/astrelis/src/mesh.rs": "5ae760f2bfe0ac44c287a5dda3d2de8b1f7d803bb37de8676d64f4e5ba5aeca0",
+    "crates/astrelis/src/mesh.wgsl": "13de0c9d000c19b4c93e54868b1d76e3d90fa281e26d20845d5ebb8caf0b1ed2",
+    "crates/astrelis/src/mesh_renderer.rs": "fab3c321e8fbec768abf1d4488b0a80f9dccb107a9890bdf23e11fe6f515bfba",
+    "crates/astrelis/src/mesh_renderer_tests.rs": "1140c6e70bc8671a4b7f5565d78fcad43713e6aeda2ca94d13565d63367ca538",
+    "crates/astrelis/src/painter.rs": "a6648f2267bb9b12035de4494ce7b345b2d27a46e4ccda93d070e4aeb4ded0ce",
+    "crates/astrelis/src/painter_tests.rs": "946389ff8b2ac91d523e79393bb6c8dd749f46a956ccd8e33ee886c4213567f6",
+    "crates/astrelis/src/pass.rs": "90438a87b70b9d4276e52404fa5080e01fba91db01559c85c793e51a4eb492a7",
+    "crates/astrelis/src/primitive.rs": "d4ae8808b82d90f8b6bde2b5bd591327c1d0ff82add72ea23617066a90608043",
+    "crates/astrelis/src/primitive.wgsl": "00ce6063954b4210b8c317f196c7e605b06fbc458d3b17a7c5edc43b5d65cd94",
+    "crates/astrelis/src/primitive_tests.rs": "b2ff423466b628737317d16920eac9725f4869e7fca4ac494993e30f4c153074",
+    "crates/astrelis/src/target.rs": "4382c68a1244b440b692b6685c68cc5a419077c271601787107f196bf7c505c3",
+    "crates/astrelis/src/text/buffer.rs": "b986c7397db11df502a3bfa4f1914d27ab7ff755fa46c29524c07dd3508e0279",
+    "crates/astrelis/src/text/distance_field.rs": "2c4f3bc81cb3e4ee6d2266cc1621d4d263b9840f3c99faafeeea45945a7ce5f3",
+    "crates/astrelis/src/text/geometry.rs": "a6de28fdb2a8e9e49f3ad6106e0376ac7e74e2e31052595b89760885e7364dd9",
+    "crates/astrelis/src/text/layout.rs": "a1214266f4a0f08b0a39a975e731ed13b820f13f193b54eb372ef77d7afeb6c6",
+    "crates/astrelis/src/text/mod.rs": "8f59b34356b39b379ca873d022a1911a268cf2353e0781643088cd8c9ea6cab7",
+    "crates/astrelis/src/text/render_tests.rs": "c16022308f2c6495f89d60ec9e9819a5f7dc89dd041bb3608935ea1fd375ed1b",
+    "crates/astrelis/src/text/renderer.rs": "5af1819fb50d2ed080d4900273e2e55d0eacc2507d480d0d77da87549d856ae1",
+    "crates/astrelis/src/text/style.rs": "448346fcbdeadcd42a2d8db04ebf064ea5e23b904f8a0b62885abd2bb4af59b8",
+    "crates/astrelis/src/text/system.rs": "7a5259026ada4e24fcc4abaad2a3ef7499d8f799c917df4cdd446c2fb281cf6f",
+    "crates/astrelis/src/text/tests.rs": "f0a69646817901688739f96ace159330f66735e4e439ef0bfc3b2f7d53ab8338",
+    "crates/astrelis/src/text/text.wgsl": "4b47c64fe18a33c66da19661f9d461ba7bfd124e770704c63b707fdbd4bae8d3",
+    "crates/astrelis/src/texture.rs": "e218312644b5327a36e267725b9c95e0c538b5b597390f1840f6d24b91219282",
+    "crates/astrelis/src/texture.wgsl": "769eeae7945184c744ced21fb7f00f74f8493d99b36553b4c93918dfef772cf3",
+    "crates/astrelis/src/texture_renderer.rs": "e8f90126c6506af2128163a078aee82bb8663c3fedbf835f39787482cd332ca1",
+    "crates/astrelis/src/texture_tests.rs": "9a66fbc0958e732ddedb6efa8da703aae2c888be7deff5115f0572d43545b2e8",
+    "crates/astrelis/src/uploads.rs": "35ef609ac7e8a93b65cbab13bfc1c1f008ef0fc90d837deb7432d5d3621393a5",
+    "Cargo.toml": "5b6617ae4b9dd087df0a0b7677c168651804548a3f689cd33e4f23d93c76b1bf",
+    "Cargo.lock": "55a17028024e4f57f3c89a19cce631464ba99e5747fb8014532355c94dabea61",
+    "crates/astrelis/Cargo.toml": "80ccb51f246523a390ae1245c888fe31df5bf7c5e8051ad32e6ec8189e74ce23",
+    "crates/astrelis/benches/text_batches.rs": "70c26e3a0f08ada20948415cd81b39b0ad8d8db89314a556a7dd75c34a0df360",
+    "crates/astrelis/benches/text_workloads.rs": "d47844421d76cfecf46420a75b5542e91163bb60100ad24e4239ff9b7cdfba08",
+    "crates/astrelis/examples/painter_text.rs": "e7246a2a7ea47183ffd602c880357fc191067a8f0d86241f08a9e39b46ca1bd0"
+  },
+  "fonts_sha256": {
+    "SourceSans3-Regular.otf": "08df266400933d3178d081a45f94a08814c3e55b4b7dd2e0ff69cb1329f13ab6",
+    "TestColor.ttf": "89bb0f29171dcfedd6fe3fdca39dc84cf6d4116676df80ce078966b49a4b1225",
+    "NotoSansArabic.ttf": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e"
+  },
+  "artifacts": [
+    {
+      "path": "batches-run-1.csv",
+      "sha256": "2e20f88b60f0a9f4e4ba8f3f03b4313a596164200773af8596bbe505396d24bd"
+    },
+    {
+      "path": "batches-run-1.log",
+      "sha256": "db5fe370b70819c8bf9d0bef8263cda43f1978b2d944fdd5e045056571a8ca5b"
+    },
+    {
+      "path": "batches-run-2.csv",
+      "sha256": "db4e5d2295cdf36e7e121dc233749b1d502528a376307717bc38bf988d179c18"
+    },
+    {
+      "path": "batches-run-2.log",
+      "sha256": "db5fe370b70819c8bf9d0bef8263cda43f1978b2d944fdd5e045056571a8ca5b"
+    },
+    {
+      "path": "batches-run-3.csv",
+      "sha256": "b3c24bbd8327730521f0f5582d1ead8ea691514daefc910fd34bdacb6ebc95dc"
+    },
+    {
+      "path": "batches-run-3.log",
+      "sha256": "db5fe370b70819c8bf9d0bef8263cda43f1978b2d944fdd5e045056571a8ca5b"
+    },
+    {
+      "path": "workloads-run-1.csv",
+      "sha256": "32d902a24fa8b711f2e17d137006d58febe276307eb4f44c0c6822a748752b36"
+    },
+    {
+      "path": "workloads-run-1.log",
+      "sha256": "6ba9f2ca84e61b41991c61a438331b1682d8bd30727341bac15544c6485d994d"
+    },
+    {
+      "path": "workloads-run-2.csv",
+      "sha256": "696cb20cd162af697dc62d67c8e60f37b38c5147b262cad86a18e2086da82c28"
+    },
+    {
+      "path": "workloads-run-2.log",
+      "sha256": "6ba9f2ca84e61b41991c61a438331b1682d8bd30727341bac15544c6485d994d"
+    },
+    {
+      "path": "workloads-run-3.csv",
+      "sha256": "02f3419d37b0a11672346c98d2fa5573e3aed0450e1dc76e2102154ac896fdcd"
+    },
+    {
+      "path": "workloads-run-3.log",
+      "sha256": "6ba9f2ca84e61b41991c61a438331b1682d8bd30727341bac15544c6485d994d"
+    }
+  ],
+  "ownership": "Dedicated geometry remains inline on the single-layout path. Small batched results share Arc-backed geometry with independent atlas ownership."
+}

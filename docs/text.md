@@ -357,6 +357,44 @@ matched before/after CPU and GPU-preparation workloads, including paragraph
 reuse, geometry recycling, lifetime checks, and the added recording cost of
 tracking each text resource through completion.
 
+## Batched preparation
+
+`TextRenderer::prepare_texts(layouts, preparation)` and the corresponding Painter
+method accept iterators of values implementing `AsRef<TextLayout>`, including
+borrowed snapshots and `Arc<TextLayout>` collections. They return one independently
+drawable `PreparedText` per input, in input order, with shared settings and scale.
+They perform the same glyph/atlas resolution as `prepare_text`, then combine
+consecutive small layouts into geometry uploads. Layouts may use different fonts,
+font sizes and paragraph constraints under those common preparation settings.
+
+A text is never split between geometry buffers. Buffers contain at most 64 KiB of
+payload (or the device's smaller buffer limit); larger texts use dedicated buffers.
+Empty and blank results preserve metadata/skipped glyphs and lease no geometry.
+Retaining one text can keep the whole shared geometry buffer alive. Its atlas-page
+ownership remains specific to its own glyphs: a mask-only result does not retain a
+sibling result's color page. Drawing may reorder, transform, clip or recolor results
+independently, including through another renderer on the same device.
+
+Geometry tokens are shared across results in the same buffer, so recording retains
+one geometry token per buffer plus the actual atlas allocations used by each draw.
+Every token remains held through GPU completion. Clearing/dropping the originating
+renderer releases its recycle pool without invalidating prepared resources.
+A failed batch returns no partial vector; earlier work may populate caches and
+upload geometry, and previous resources remain valid. Invalid preparation settings
+are rejected even for an empty collection.
+
+The CPU glyph/atlas resolution step and the geometry upload step now have separate
+internal functions. Glyph generation and atlas upload are still synchronous; this
+API introduces no workers, jobs, implicit submission, or per-frame upload budget.
+The existing single-layout convenience path remains available.
+
+The standalone `painter_text` example prepares a paragraph and caption together,
+then draws each with different placement/color. The matched `text_batches` benchmark
+compares individual and batched preparation for 60, 600 and 1,000 changing labels,
+retaining old resources until replacement succeeds in both modes. It verifies
+whole-frame pixel equality and reports update, layout, preparation, recording and
+frame CPU separately. See the [batched preparation report](performance/text-batches.md).
+
 ## Quality/workload check and next representation
 
 The [screen-sized workload baseline](performance/text-workloads.md) extends the

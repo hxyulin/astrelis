@@ -50,3 +50,7 @@ harness = false
 [[bench]]
 name = "text_distance_fields"
 harness = false
+
+[[bench]]
+name = "text_batches"
+harness = false

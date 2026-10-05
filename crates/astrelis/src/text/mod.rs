@@ -34,7 +34,9 @@
 //! access. Buffer mutation goes through validated setters to preserve invalidation.
 //! [`TextRenderer::prepare_text`] rasterizes a retained layout into immutable
 //! [`PreparedText`] geometry and atlas leases. [`TextRenderer::draw`] records those
-//! batches into existing frame-owned passes, without shaping/rasterizing. Raster
+//! batches into existing frame-owned passes, without shaping/rasterizing.
+//! [`TextRenderer::prepare_texts`] prepares multiple layouts with shared geometry
+//! uploads and returns independently drawable resources in input order. Raster
 //! scale is explicit; mask colors are linear, while color glyph RGB is intrinsic.
 //! Cache budgets include prepared texts, recordings, and GPU completion leases.
 //! [`crate::Painter`] exposes the same explicit preparation and drawing contract.

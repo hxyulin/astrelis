@@ -137,6 +137,17 @@ impl Painter {
     ) -> Result<PreparedText, TextRenderError> {
         self.text.prepare_text(layout, preparation)
     }
+    /// Prepares layouts in input order with shared geometry uploads, outside painting.
+    /// Results remain independently drawable. Settings, chunk size, ownership and
+    /// failure behavior follow [`TextRenderer::prepare_texts`]. Accepts borrowed
+    /// layouts and `Arc<TextLayout>` collections; no TextSystem is borrowed.
+    pub fn prepare_texts<L: AsRef<TextLayout>>(
+        &mut self,
+        layouts: impl IntoIterator<Item = L>,
+        preparation: impl Into<TextPreparation>,
+    ) -> Result<Vec<PreparedText>, TextRenderError> {
+        self.text.prepare_texts(layouts, preparation)
+    }
     /// Starts immediate painting with identity transform on an existing color pass.
     /// Device/output checks happen here; individual draws validate geometry and resources.
     /// Dropping the session leaves the pass open with its current raster settings.

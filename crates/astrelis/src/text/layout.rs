@@ -136,3 +136,9 @@ impl TextLayout {
         self.size
     }
 }
+
+impl AsRef<TextLayout> for TextLayout {
+    fn as_ref(&self) -> &TextLayout {
+        self
+    }
+}

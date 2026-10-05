@@ -366,6 +366,26 @@ renderer.draw(&mut pass, &prepared,
     TextDraw::new([20., 30.]).color([0.8, 0.9, 1., 1.]))?;
 ```
 
+For several changed labels, `TextRenderer::prepare_texts` and
+`Painter::prepare_texts` share geometry uploads while returning independently
+drawable resources in input order. They accept borrowed layouts and collections
+of `Arc<TextLayout>`:
+
+```rust
+let prepared = painter.prepare_texts(
+    &layouts,
+    TextRasterOptions::new().scale_factor(dpi_scale),
+)?;
+// Each text keeps its own position, color, clipping, and atlas-page ownership.
+paint.draw_text(&prepared[0], TextDraw::new([20., 30.]))?;
+paint.draw_text(&prepared[1], TextDraw::new([20., 60.]).color([0.7, 0.8, 1., 1.]))?;
+```
+
+Small texts share geometry buffers with at most 64 KiB of payload, subject to the
+device buffer limit. Keeping one text alive keeps its shared geometry buffer alive;
+it retains only its own atlas pages. Oversized texts use dedicated buffers. See the
+[batched preparation measurements](docs/performance/text-batches.md).
+
 Raster scale applies DPI once to glyphs and layout positions. Draw placement uses
 viewport-relative physical pixels. Coverage is colored with linear RGBA; intrinsic
 color glyphs retain their RGB and receive draw opacity. Batches preserve layout
@@ -500,6 +520,7 @@ Space toggles MSAA; Z toggles 2x/4x magnification. See the
 and explicit recovery under a small atlas budget:
 
 ```sh
+cargo bench -p astrelis --bench text_batches
 cargo bench -p astrelis --bench text_workloads
 cargo bench -p astrelis --bench text_workloads -- --no-timestamps
 ```

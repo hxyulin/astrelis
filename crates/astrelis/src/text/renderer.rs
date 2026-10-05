@@ -266,7 +266,7 @@ pub struct TextRendererStats {
     pub geometry_bytes: u64,
     /// New glyph geometry buffer allocations. Empty preparations allocate nothing.
     pub geometry_buffer_allocations: u64,
-    /// Preparations that reused a buffer released by its last text/recording/completion owner.
+    /// Geometry uploads that reused a buffer released by its last text/recording/completion owner.
     pub geometry_buffer_reuses: u64,
     /// Recording-owned placement/color payload bytes, 48 per nonempty text draw.
     pub parameter_bytes: u64,
@@ -388,17 +388,43 @@ struct DrawData {
     color: [f32; 4],
 }
 #[derive(Debug)]
+struct TextDraft {
+    glyphs: Vec<GlyphData>,
+    batches: Vec<Batch>,
+    size: [f32; 2],
+    bounds: Option<Rect>,
+    skipped: Vec<usize>,
+    preparation: TextPreparation,
+}
+
+#[derive(Debug)]
 struct Batch {
     page: Arc<Page>,
     range: Range<u32>,
 }
 #[derive(Debug)]
+enum GeometryBuffer {
+    Dedicated(Geometry),
+    Shared(Arc<Geometry>),
+}
+impl std::ops::Deref for GeometryBuffer {
+    type Target = Geometry;
+    fn deref(&self) -> &Geometry {
+        match self {
+            Self::Dedicated(geometry) => geometry,
+            Self::Shared(geometry) => geometry,
+        }
+    }
+}
+
+#[derive(Debug)]
 struct PreparedData {
-    buffer: Option<Geometry>,
+    buffer: Option<GeometryBuffer>,
+    buffer_range: Range<u64>,
     batches: Vec<Batch>,
     raster_pipeline: bool,
     field_pipeline: bool,
-    lease: Arc<TextLease>,
+    lease: Option<Arc<TextLease>>,
 }
 // GPU completion callbacks require Send even on WebGPU, whose buffer/texture
 // handles are not Send. Retain only ownership tokens in the callback; wgpu owns
@@ -668,7 +694,8 @@ impl TextRenderer {
     /// No TextSystem borrow is
     /// needed: layouts retain font sources. Preparation can populate/evict caches even on failure;
     /// previous prepared texts remain valid. Repeated preparation reuses atlas images but creates
-    /// a new geometry buffer; keep PreparedText for unchanged content. Unsupported/blank
+    /// a new geometry payload, reusing released buffers when available; keep PreparedText
+    /// for unchanged content. Unsupported/blank
     /// sources are skipped and reported by original glyph index. Physical coverage/color sizes
     /// must fit `max_raster_size`; pure outline fields instead use bounded generation density.
     pub fn prepare_text(
@@ -676,16 +703,97 @@ impl TextRenderer {
         layout: &TextLayout,
         preparation: impl Into<TextPreparation>,
     ) -> Result<PreparedText, TextRenderError> {
+        let draft = self.prepare_geometry(layout, preparation.into())?;
+        let bytes = draft.glyphs.len() as u64 * 48;
+        let geometry = (!draft.glyphs.is_empty())
+            .then(|| GeometryBuffer::Dedicated(self.upload_geometry(&draft.glyphs)));
+        Ok(self.finish_text(draft, geometry, 0..bytes, false))
+    }
+    /// Prepares layouts in input order, sharing geometry uploads for consecutive small texts.
+    ///
+    /// Accepts owned/borrowed layouts and `Arc<TextLayout>` collections. Every result
+    /// remains independently drawable, with its own measurement, skipped glyphs and
+    /// atlas-page ownership. Coverage/MTSDF settings and scale apply to all inputs.
+    /// No shaping, command recording, submission, or completion wait occurs here.
+    ///
+    /// Small texts share buffers containing at most 64 KiB of glyph payload; a text
+    /// is never split between buffers. Larger texts use a dedicated exact-sized buffer.
+    /// Retaining one result or recording keeps its shared geometry buffer alive, but
+    /// does not keep other results' atlas pages leased. Empty/blank layouts produce
+    /// corresponding empty results without geometry uploads or storage leases.
+    ///
+    /// An error returns no partial result vector. Earlier work may populate caches
+    /// and upload geometry, as with repeated [`Self::prepare_text`] calls; existing
+    /// resources stay valid. Retain the results until layout/settings change.
+    ///
+    /// ```no_run
+    /// # use astrelis::{TextRenderer, TextLayout, TextRasterOptions, TextRenderError};
+    /// # use std::sync::Arc;
+    /// fn prepare(renderer: &mut TextRenderer, layouts: &[Arc<TextLayout>], dpi: f32)
+    ///     -> Result<(), TextRenderError> {
+    ///     let texts = renderer.prepare_texts(layouts,
+    ///         TextRasterOptions::new().scale_factor(dpi))?;
+    ///     assert_eq!(texts.len(), layouts.len());
+    ///     // Store these resources; each may be drawn with its own placement/style.
+    ///     Ok(())
+    /// }
+    /// ```
+    pub fn prepare_texts<L: AsRef<TextLayout>>(
+        &mut self,
+        layouts: impl IntoIterator<Item = L>,
+        preparation: impl Into<TextPreparation>,
+    ) -> Result<Vec<PreparedText>, TextRenderError> {
         let preparation = preparation.into();
-        if let TextPreparation::Mtsdf(options) = preparation
-            && (!(16..=256).contains(&options.pixels_per_em)
-                || !options.range_em.is_finite()
-                || options.range_em <= 0.
-                || options.range_em > 1.
-                || options.range_em * (options.pixels_per_em as f32) < 2.)
-        {
-            return Err(TextRenderError::InvalidOptions);
+        // Validate settings even for an empty collection.
+        validate_preparation(preparation)?;
+        let mut result = Vec::new();
+        let mut pending = Vec::new();
+        let mut glyphs = Vec::new();
+        let chunk_bytes = (64 * 1024).min(self.graphics.device().limits().max_buffer_size);
+        for layout in layouts {
+            let mut draft = self.prepare_geometry(layout.as_ref(), preparation)?;
+            let bytes = draft.glyphs.len() as u64 * 48;
+            if bytes > chunk_bytes {
+                self.flush_texts(&mut result, &mut pending, &mut glyphs);
+                let geometry = self.upload_geometry(&draft.glyphs);
+                result.push(self.finish_text(
+                    draft,
+                    Some(GeometryBuffer::Dedicated(geometry)),
+                    0..bytes,
+                    true,
+                ));
+                continue;
+            }
+            if (glyphs.len() as u64 * 48) + bytes > chunk_bytes {
+                self.flush_texts(&mut result, &mut pending, &mut glyphs);
+            }
+            let start = glyphs.len() as u64 * 48;
+            glyphs.extend(std::mem::take(&mut draft.glyphs));
+            pending.push((draft, start..start + bytes));
         }
+        self.flush_texts(&mut result, &mut pending, &mut glyphs);
+        Ok(result)
+    }
+    fn flush_texts(
+        &mut self,
+        result: &mut Vec<PreparedText>,
+        pending: &mut Vec<(TextDraft, Range<u64>)>,
+        glyphs: &mut Vec<GlyphData>,
+    ) {
+        let geometry = (!glyphs.is_empty()).then(|| Arc::new(self.upload_geometry(glyphs)));
+        for (draft, range) in pending.drain(..) {
+            let buffer = (!range.is_empty())
+                .then(|| GeometryBuffer::Shared(geometry.as_ref().unwrap().clone()));
+            result.push(self.finish_text(draft, buffer, range, true));
+        }
+        glyphs.clear();
+    }
+    fn prepare_geometry(
+        &mut self,
+        layout: &TextLayout,
+        preparation: TextPreparation,
+    ) -> Result<TextDraft, TextRenderError> {
+        validate_preparation(preparation)?;
         let scale = preparation.scale_factor();
         if !scale.is_finite()
             || scale <= 0.
@@ -803,44 +911,63 @@ impl TextRenderer {
         if bounds.is_some_and(|b| !(b[2] - b[0]).is_finite() || !(b[3] - b[1]).is_finite()) {
             return Err(TextRenderError::InvalidOptions);
         }
-        let buffer = if data.is_empty() {
-            None
-        } else {
-            let (geometry, reused) = GeometryPool::upload(
-                &self.geometry_pool,
-                &self.graphics,
-                bytemuck::cast_slice(&data),
-            );
-            if reused {
-                self.stats.geometry_buffer_reuses += 1;
-            } else {
-                self.stats.geometry_buffer_allocations += 1;
-            }
-            Some(geometry)
-        };
-        self.stats.geometry_bytes += data.len() as u64 * 48;
-        let lease = Arc::new(TextLease {
-            _geometry: buffer.as_ref().map(|geometry| geometry.lease.clone()),
-            _pages: batches
-                .iter()
-                .map(|batch| batch.page.allocation.clone())
-                .collect(),
-        });
-        Ok(PreparedText {
-            graphics: self.graphics.clone(),
-            data: Arc::new(PreparedData {
-                raster_pipeline: batches.iter().any(|b| b.page.kind != Kind::Mtsdf),
-                field_pipeline: batches.iter().any(|b| b.page.kind == Kind::Mtsdf),
-                buffer,
-                batches,
-                lease,
-            }),
+        Ok(TextDraft {
+            glyphs: data,
+            batches,
             size,
             bounds: bounds.map(|b| Rect::new(b[0], b[1], b[2] - b[0], b[3] - b[1])),
-            glyph_count: data.len(),
-            skipped: skipped.into(),
+            skipped,
             preparation,
         })
+    }
+    fn upload_geometry(&mut self, glyphs: &[GlyphData]) -> Geometry {
+        let (geometry, reused) = GeometryPool::upload(
+            &self.geometry_pool,
+            &self.graphics,
+            bytemuck::cast_slice(glyphs),
+        );
+        if reused {
+            self.stats.geometry_buffer_reuses += 1;
+        } else {
+            self.stats.geometry_buffer_allocations += 1;
+        }
+        self.stats.geometry_bytes += glyphs.len() as u64 * 48;
+        geometry
+    }
+    fn finish_text(
+        &self,
+        draft: TextDraft,
+        buffer: Option<GeometryBuffer>,
+        buffer_range: Range<u64>,
+        shared: bool,
+    ) -> PreparedText {
+        let glyph_count = (buffer_range.end - buffer_range.start) as usize / 48;
+        let lease = (!shared).then(|| {
+            Arc::new(TextLease {
+                _geometry: buffer.as_ref().map(|geometry| geometry.lease.clone()),
+                _pages: draft
+                    .batches
+                    .iter()
+                    .map(|batch| batch.page.allocation.clone())
+                    .collect(),
+            })
+        });
+        PreparedText {
+            graphics: self.graphics.clone(),
+            data: Arc::new(PreparedData {
+                raster_pipeline: draft.batches.iter().any(|b| b.page.kind != Kind::Mtsdf),
+                field_pipeline: draft.batches.iter().any(|b| b.page.kind == Kind::Mtsdf),
+                buffer,
+                buffer_range,
+                batches: draft.batches,
+                lease,
+            }),
+            size: draft.size,
+            bounds: draft.bounds,
+            glyph_count,
+            skipped: draft.skipped.into(),
+            preparation: draft.preparation,
+        }
     }
     /// Records ordered prepared batches into a frame-owned pass, honoring its viewport/scissor.
     /// Restores owned pipeline/bindings/raster state each call; never shapes or rasterizes.
@@ -873,9 +1000,18 @@ impl TextRenderer {
         let (draw_buffer, range) = pass.upload_instances(bytemuck::bytes_of(&parameters), 4);
         self.stats.parameter_bytes += 48;
         // Keep both atlas and geometry immutable through recording and GPU completion.
-        pass.retain_resource(text.data.lease.clone());
+        if let Some(lease) = &text.data.lease {
+            pass.retain_resource(lease.clone());
+        } else {
+            // Shared geometry needs one token per buffer, not one per label.
+            // Atlas ownership stays specific to the text's actual page batches.
+            pass.retain_resource(buffer.lease.clone());
+            for batch in &text.data.batches {
+                pass.retain_resource(batch.page.allocation.clone());
+            }
+        }
         pass.apply_raster_state();
-        pass.set_vertex_buffer(0, &buffer.buffer, 0..text.glyph_count as u64 * 48);
+        pass.set_vertex_buffer(0, &buffer.buffer, text.data.buffer_range.clone());
         pass.set_vertex_buffer(1, &draw_buffer, range);
         let mut previous = None;
         for batch in &text.data.batches {
@@ -1213,6 +1349,23 @@ fn linearize_color(data: &mut [u8], premultiplied: bool) {
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+
+fn validate_preparation(preparation: TextPreparation) -> Result<(), TextRenderError> {
+    if let TextPreparation::Mtsdf(options) = preparation
+        && (!(16..=256).contains(&options.pixels_per_em)
+            || !options.range_em.is_finite()
+            || options.range_em <= 0.
+            || options.range_em > 1.
+            || options.range_em * (options.pixels_per_em as f32) < 2.)
+    {
+        return Err(TextRenderError::InvalidOptions);
+    }
+    let scale = preparation.scale_factor();
+    if !scale.is_finite() || scale <= 0. {
+        return Err(TextRenderError::InvalidOptions);
+    }
+    Ok(())
+}
 
 fn draw_parameters(
     bounds: Option<Rect>,

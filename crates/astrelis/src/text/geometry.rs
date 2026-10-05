@@ -54,7 +54,8 @@ impl GeometryPool {
                 size.next_power_of_two()
             } else {
                 size
-            };
+            }
+            .min(graphics.device().limits().max_buffer_size & !3);
             let buffer = graphics.device().create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Astrelis prepared glyphs"),
                 size: capacity,

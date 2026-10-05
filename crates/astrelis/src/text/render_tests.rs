@@ -1,6 +1,12 @@
 use super::*;
 use crate::framebuffer::tests::pixels;
-use crate::{Framebuffer, FramebufferOptions, ShapeDraw, ShapeRenderer};
+use crate::{
+    Framebuffer, FramebufferOptions, ShapeDraw, ShapeRenderer, TextBuffer, TextStyle, TextSystem,
+};
+
+fn same_geometry(a: &GeometryBuffer, b: &GeometryBuffer) -> bool {
+    std::ptr::eq::<Geometry>(&**a, &**b)
+}
 
 fn layout(text: &str) -> Arc<TextLayout> {
     let mut system = super::super::TextSystem::new();
@@ -838,7 +844,7 @@ fn geometry_reuse_preserves_clones_recordings_and_submitted_draws() {
             .unwrap();
         assert_eq!(renderer.stats().geometry_buffer_allocations, 2);
         assert_eq!(renderer.stats().geometry_buffer_reuses, 0);
-        let owner = Arc::downgrade(&retained.data.lease);
+        let owner = Arc::downgrade(retained.data.lease.as_ref().unwrap());
         let mut frame = target.begin_frame().unwrap();
         {
             let mut pass = frame.render_pass().begin().unwrap();
@@ -899,6 +905,358 @@ fn geometry_reuse_preserves_clones_recordings_and_submitted_draws() {
                 .unwrap();
         });
         assert_eq!(actual, expected);
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn batched_text_matches_individual_metadata_pixels_and_order() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let layouts = [
+            layout(""),
+            layout("M"),
+            layout("😀"),
+            layout("M😁"),
+            layout(" "),
+            layout("M😀M😁M"),
+        ];
+        for settings in [
+            TextPreparation::from(TextRasterOptions::new()),
+            TextRasterOptions::new().scale_factor(2.).into(),
+            MtsdfOptions::new().into(),
+        ] {
+            let mut renderer = TextRenderer::new(&g);
+            let individual: Vec<_> = layouts
+                .iter()
+                .map(|l| renderer.prepare_text(l, settings).unwrap())
+                .collect();
+            let before = renderer.stats();
+            let batched = renderer.prepare_texts(&layouts, settings).unwrap();
+            let after = renderer.stats();
+            assert_eq!(after.cache_misses, before.cache_misses);
+            assert_eq!(after.uploaded_bytes, before.uploaded_bytes);
+            assert_eq!(
+                after.geometry_buffer_allocations - before.geometry_buffer_allocations,
+                1
+            );
+            assert_eq!(batched.len(), layouts.len());
+            let shared = batched[1].data.buffer.as_ref().unwrap();
+            assert_eq!(batched[1].data.buffer_range.start, 0);
+            assert_eq!(batched[2].data.buffer_range.start, 48);
+            assert!(same_geometry(
+                shared,
+                batched[2].data.buffer.as_ref().unwrap()
+            ));
+            for (a, b) in individual.iter().zip(&batched) {
+                assert_eq!(a.size(), b.size());
+                assert_eq!(a.ink_bounds(), b.ink_bounds());
+                assert_eq!(a.skipped_glyphs(), b.skipped_glyphs());
+                assert_eq!(a.glyph_count(), b.glyph_count());
+                assert_eq!(a.preparation(), b.preparation());
+            }
+            assert!(batched[0].data.buffer.is_none());
+            assert!(batched[4].data.buffer.is_none());
+            for samples in [1, 4] {
+                let mut t = target(&g, samples);
+                let render =
+                    |renderer: &mut TextRenderer, t: &mut Framebuffer, texts: &[PreparedText]| {
+                        pixels(&g, t, |frame| {
+                            let mut pass = frame.render_pass().begin().unwrap();
+                            pass.set_scissor_rect(4, 4, 56, 56).unwrap();
+                            // Reverse the returned order and overlap translucent content.
+                            for (i, text) in texts.iter().enumerate().rev() {
+                                renderer
+                                    .draw(
+                                        &mut pass,
+                                        text,
+                                        TextDraw::new([i as f32 * 5., i as f32 * 4.])
+                                            .color([0.2, 0.7, 1., 0.6])
+                                            .transform_2d(Transform2D::rotation(0.07)),
+                                    )
+                                    .unwrap();
+                            }
+                        })
+                    };
+                let expected = render(&mut renderer, &mut t, &individual);
+                let actual = render(&mut renderer, &mut t, &batched);
+                assert_eq!(actual, expected);
+            }
+        }
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn batch_chunks_keep_storage_and_atlas_ownership_independent() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = TextRenderer::new(&g);
+        let cpu = layout("M");
+        let layouts = vec![cpu; 1366]; // 1365 glyphs fit in the first 64 KiB buffer.
+        let before = renderer.stats();
+        let mut texts = renderer
+            .prepare_texts(&layouts, TextRasterOptions::new())
+            .unwrap();
+        assert_eq!(
+            renderer.stats().geometry_buffer_allocations - before.geometry_buffer_allocations,
+            2
+        );
+        assert!(same_geometry(
+            texts[0].data.buffer.as_ref().unwrap(),
+            texts[1364].data.buffer.as_ref().unwrap()
+        ));
+        assert!(!same_geometry(
+            texts[0].data.buffer.as_ref().unwrap(),
+            texts[1365].data.buffer.as_ref().unwrap()
+        ));
+        let kept = texts.remove(1000);
+        let GeometryBuffer::Shared(storage) = kept.data.buffer.as_ref().unwrap() else {
+            panic!("expected shared geometry");
+        };
+        let shared = Arc::downgrade(storage);
+        drop(texts);
+        assert!(shared.upgrade().is_some());
+        let mut target = target(&g, 1);
+        let mut frame = target.begin_frame().unwrap();
+        let token = Arc::downgrade(&kept.data.buffer.as_ref().unwrap().lease);
+        {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &kept, TextDraw::default())
+                .unwrap();
+        }
+        drop(kept);
+        assert!(shared.upgrade().is_none());
+        assert!(token.upgrade().is_some());
+        drop(frame);
+        assert!(token.upgrade().is_none());
+
+        // Sharing geometry does not lease a sibling's unrelated color atlas page.
+        let mut two = renderer
+            .prepare_texts([layout("M"), layout("😀")], TextRasterOptions::new())
+            .unwrap();
+        let color_budget = Arc::downgrade(&two[1].data.batches[0].page.allocation);
+        let mask = two.remove(0);
+        drop(two);
+        renderer.clear_cache();
+        assert!(color_budget.upgrade().is_none());
+        assert_eq!(renderer.stats().live_pages, 1);
+        drop(mask);
+        assert_eq!(renderer.stats().live_pages, 0);
+
+        let big = layout(&"M".repeat(1400));
+        let mixed = renderer
+            .prepare_texts(
+                [layout("M"), big, layout(""), layout("M")],
+                TextRasterOptions::new(),
+            )
+            .unwrap();
+        assert_eq!(mixed[1].glyph_count(), 1400);
+        assert_eq!(
+            mixed[1].data.buffer.as_ref().unwrap().buffer.size(),
+            1400 * 48
+        );
+        assert!(mixed[2].data.buffer.is_none());
+        assert!(!same_geometry(
+            mixed[0].data.buffer.as_ref().unwrap(),
+            mixed[3].data.buffer.as_ref().unwrap()
+        ));
+    });
+}
+
+#[test]
+fn failed_and_empty_batches_preserve_existing_resources_and_painter_usage() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut painter = crate::Painter::new(&g);
+        let mut target = target(&g, 1);
+        let cpu = layout("M");
+        let retained = painter
+            .prepare_texts([cpu.as_ref()], TextRasterOptions::new())
+            .unwrap();
+        let expected = pixels(&g, &mut target, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            let mut paint = painter.begin(&mut pass).unwrap();
+            paint.draw_text(&retained[0], TextDraw::default()).unwrap();
+        });
+        let before = painter.text().stats();
+        assert!(
+            painter
+                .prepare_texts(std::iter::empty::<&TextLayout>(), TextRasterOptions::new())
+                .unwrap()
+                .is_empty()
+        );
+        let blanks = painter
+            .prepare_texts([layout(""), layout(" ")], TextRasterOptions::new())
+            .unwrap();
+        assert!(blanks.iter().all(|t| t.glyph_count() == 0));
+        assert_eq!(
+            before.geometry_buffer_allocations,
+            painter.text().stats().geometry_buffer_allocations
+        );
+        assert_eq!(
+            before.geometry_buffer_reuses,
+            painter.text().stats().geometry_buffer_reuses
+        );
+        assert!(matches!(
+            painter.prepare_texts(
+                std::iter::empty::<&TextLayout>(),
+                TextRasterOptions::new().scale_factor(0.)
+            ),
+            Err(TextRenderError::InvalidOptions)
+        ));
+        let mut fonts = TextSystem::new();
+        fonts
+            .load_font(include_bytes!("../../tests/fonts/TestColor.ttf"))
+            .unwrap();
+        let mut huge = TextBuffer::new();
+        huge.set_text(
+            "M",
+            TextStyle::new()
+                .family("Astrelis Test Color")
+                .font_size(600.),
+        )
+        .unwrap();
+        let huge = huge.layout(&mut fonts).unwrap();
+        // Fail after an earlier chunk was built/uploaded. No partial result vector
+        // escapes, and the caller's previous resource still renders identically.
+        let mut inputs = vec![cpu.clone(); 1366];
+        inputs.push(huge);
+        assert!(matches!(
+            painter.prepare_texts(&inputs, TextRasterOptions::new()),
+            Err(TextRenderError::InvalidOptions)
+        ));
+        let mut small = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                page_size: 32,
+                max_pages: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let old = small.prepare_text(&cpu, TextRasterOptions::new()).unwrap();
+        assert!(matches!(
+            small.prepare_texts([cpu.clone(), layout("😀")], TextRasterOptions::new()),
+            Err(TextRenderError::AtlasFull)
+        ));
+        assert_eq!(old.glyph_count(), 1);
+        let actual = pixels(&g, &mut target, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            let mut paint = painter.begin(&mut pass).unwrap();
+            paint.draw_text(&retained[0], TextDraw::default()).unwrap();
+        });
+        assert_eq!(actual, expected);
+    });
+}
+
+#[test]
+fn shared_geometry_is_reused_only_after_submitted_work_completes() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut renderer = TextRenderer::new(&g);
+        let layouts = [layout("M"), layout("M")];
+        let texts = renderer
+            .prepare_texts(&layouts, TextRasterOptions::new())
+            .unwrap();
+        let token = Arc::downgrade(&texts[0].data.buffer.as_ref().unwrap().lease);
+        let mut target = target(&g, 1);
+        let expected = pixels(&g, &mut target, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &texts[1], TextDraw::new([16., 0.]))
+                .unwrap();
+        });
+        let mut frame = target.begin_frame().unwrap();
+        {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &texts[1], TextDraw::new([16., 0.]))
+                .unwrap();
+        }
+        drop(texts);
+        assert!(token.upgrade().is_some());
+        let other = renderer
+            .prepare_texts([layout("😀"), layout("😁")], TextRasterOptions::new())
+            .unwrap();
+        assert_eq!(renderer.stats().geometry_buffer_allocations, 2);
+        assert_eq!(renderer.stats().geometry_buffer_reuses, 0);
+        let submission = frame.finish().unwrap();
+        g.device()
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(std::time::Duration::from_secs(10)),
+            })
+            .unwrap();
+        assert!(token.upgrade().is_none());
+        let actual = pixels(&g, &mut target, |_| {});
+        assert_eq!(actual, expected);
+        let reused = renderer
+            .prepare_texts(&layouts, TextRasterOptions::new())
+            .unwrap();
+        assert_eq!(renderer.stats().geometry_buffer_allocations, 2);
+        assert_eq!(renderer.stats().geometry_buffer_reuses, 1);
+        let actual = pixels(&g, &mut target, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &reused[1], TextDraw::new([16., 0.]))
+                .unwrap();
+        });
+        assert_eq!(actual, expected);
+        drop(other);
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn batching_and_capacity_buckets_respect_application_device_limits() {
+    pollster::block_on(async {
+        let base = GraphicsContext::headless().await.unwrap();
+        let (device, queue) = base
+            .adapter()
+            .request_device(&wgpu::DeviceDescriptor {
+                required_limits: wgpu::Limits {
+                    max_buffer_size: 1000,
+                    max_uniform_buffer_binding_size: 256,
+                    max_storage_buffer_binding_size: 256,
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let g = GraphicsContext::from_wgpu(
+            base.instance().clone(),
+            base.adapter().clone(),
+            device,
+            queue,
+        );
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut renderer = TextRenderer::new(&g);
+        let inputs = [layout("M"), layout(&"M".repeat(20)), layout("M")];
+        let texts = renderer
+            .prepare_texts(&inputs, TextRasterOptions::new())
+            .unwrap();
+        assert_eq!(texts.len(), 3);
+        assert_eq!(renderer.stats().geometry_buffer_allocations, 3);
+        for text in &texts {
+            let buffer = &text.data.buffer.as_ref().unwrap().buffer;
+            assert!(buffer.size() <= 1000);
+            assert!(text.data.buffer_range.end <= buffer.size());
+        }
+        let individual = renderer
+            .prepare_text(&inputs[1], TextRasterOptions::new())
+            .unwrap();
+        assert_eq!(individual.data.buffer.as_ref().unwrap().buffer.size(), 1000);
+        g.device()
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(g.queue().submit([])),
+                timeout: Some(std::time::Duration::from_secs(10)),
+            })
+            .unwrap();
         assert!(errors.pop().await.is_none());
     });
 }
