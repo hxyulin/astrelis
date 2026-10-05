@@ -1,0 +1,1 @@
+cpu_only=true; samples=40; warmup=8; font_discovery=false; snapshot_hit_iterations=1000; other_iterations=1; cold_buffer_uses_warmed_font_system=true

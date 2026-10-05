@@ -1,5 +1,8 @@
 # Screen-sized text and cache workload baseline
 
+These are the original measurements. The [changing-text follow-up](text-updates.md)
+compares paragraph reuse and geometry recycling with this implementation.
+
 Measured on 2026-10-05, Apple M3 Pro / Metal, macOS 27.0.1, Rust 1.98.1, release.
 Three sequential CPU runs follow completed checks with the window example closed.
 Each case uses eight warmups and forty measured samples. [Metadata](text-workloads-m3-pro-metadata.json)

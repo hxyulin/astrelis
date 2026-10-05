@@ -9,7 +9,8 @@ use std::{collections::HashMap, sync::Arc};
 /// Setters do no shaping. [`Self::layout`] applies validated changes and returns a
 /// shared immutable snapshot. Unchanged evaluation clones its Arc only; width,
 /// wrap, alignment and default metric changes preserve backend shaped runs. Font
-/// selection/features/content changes reshape. Loading fonts or evaluating with a
+/// selection/features changes reshape. Content edits preserve matching leading and
+/// trailing paragraphs and reshape changed paragraphs. Loading fonts or evaluating with a
 /// different system also reshapes, avoiding stale fallback or face identities.
 /// Every snapshot remains usable after later edits. One style per buffer is supported.
 #[derive(Debug)]
@@ -142,13 +143,15 @@ impl TextBuffer {
         ));
         self.backend.set_size(self.width, None);
         self.backend.set_wrap(self.wrap.backend());
-        if self.text_dirty || self.evaluated_system != Some(source) {
+        if self.evaluated_system != Some(source) {
             self.backend.set_text(
                 &self.text,
                 &self.style.attrs(),
                 cosmic::Shaping::Advanced,
                 self.align.backend(),
             );
+        } else if self.text_dirty {
+            update_paragraphs(&mut self.backend, &self.text, &self.style, self.align);
         } else {
             for line in &mut self.backend.lines {
                 line.set_align(self.align.backend());
@@ -165,7 +168,15 @@ impl TextBuffer {
             )?
         } else {
             self.backend.shape_until_scroll(&mut system.backend, false);
-            snapshot(&self.backend, system, self.text.clone(), self.style.clone())?
+            snapshot(
+                &self.backend,
+                system,
+                self.text.clone(),
+                self.style.clone(),
+                self.cached
+                    .as_ref()
+                    .map_or(0, |layout| layout.glyphs().len().min(self.text.len())),
+            )?
         };
         let layout = Arc::new(layout);
         self.cached = Some(layout.clone());
@@ -174,6 +185,74 @@ impl TextBuffer {
         self.layout_dirty = false;
         Ok(layout)
     }
+}
+
+fn update_paragraphs(buffer: &mut cosmic::Buffer, text: &str, style: &TextStyle, align: TextAlign) {
+    let mut paragraphs: Vec<_> = cosmic::LineIter::new(text)
+        .map(|(range, ending)| (&text[range], ending))
+        .collect();
+    if paragraphs
+        .last()
+        .is_none_or(|(_, ending)| *ending != cosmic::LineEnding::None)
+    {
+        paragraphs.push(("", cosmic::LineEnding::None));
+    }
+    let matches = |line: &cosmic::BufferLine, &(text, ending): &(&str, cosmic::LineEnding)| {
+        line.text() == text && line.ending() == ending
+    };
+    let prefix = buffer
+        .lines
+        .iter()
+        .zip(&paragraphs)
+        .take_while(|(a, b)| matches(a, b))
+        .count();
+    let suffix = buffer.lines[prefix..]
+        .iter()
+        .rev()
+        .zip(paragraphs[prefix..].iter().rev())
+        .take_while(|(a, b)| matches(a, b))
+        .count();
+    let old_end = buffer.lines.len() - suffix;
+    let new_end = paragraphs.len() - suffix;
+    let attrs = style.attrs();
+    if old_end - prefix == new_end - prefix {
+        // Common label/paragraph edits keep String and backend shaping scratch.
+        for (line, &(text, ending)) in buffer.lines[prefix..old_end]
+            .iter_mut()
+            .zip(&paragraphs[prefix..new_end])
+        {
+            line.set_text(text, ending, cosmic::AttrsList::new(&attrs));
+        }
+    } else {
+        // Move matching suffix paragraphs rather than invalidating them when lines
+        // are inserted or removed. Source offsets are rebuilt by the snapshot.
+        buffer.lines.splice(
+            prefix..old_end,
+            paragraphs[prefix..new_end].iter().map(|&(text, ending)| {
+                cosmic::BufferLine::new(
+                    text,
+                    ending,
+                    cosmic::AttrsList::new(&attrs),
+                    cosmic::Shaping::Advanced,
+                )
+            }),
+        );
+    }
+    for line in &mut buffer.lines {
+        if line.attrs_list().defaults() != attrs {
+            line.set_attrs_list(cosmic::AttrsList::new(&attrs));
+        }
+        line.set_align(align.backend());
+    }
+    // Mark structural edits for evaluation without globally invalidating cached
+    // shaping/layout. Newly inserted cosmic lines are Empty rather than Unused,
+    // so the backend's individual-invalidation scan alone would miss them.
+    // No evaluation occurs at the temporary scroll position.
+    buffer.set_scroll(cosmic::Scroll {
+        line: 1,
+        ..Default::default()
+    });
+    buffer.set_scroll(cosmic::Scroll::default());
 }
 
 fn blank_snapshot(
@@ -222,6 +301,7 @@ fn snapshot(
     system: &mut TextSystem,
     text: Arc<str>,
     style: TextStyle,
+    glyph_capacity: usize,
 ) -> Result<TextLayout, TextError> {
     // Match the backend's explicit CR/LF/CRLF/LFCR splitting exactly, including a
     // terminal empty paragraph. This avoids normalizing away source byte offsets.
@@ -236,13 +316,14 @@ fn snapshot(
         system_id: system.id,
         text,
         style,
-        glyphs: Vec::new(),
-        lines: Vec::new(),
+        glyphs: Vec::with_capacity(glyph_capacity),
+        lines: Vec::with_capacity(buffer.lines.len()),
         fonts: Vec::new(),
         missing: Vec::new(),
         size: [0., 0.],
     };
     let mut font_indices = HashMap::new();
+    let mut last_font = None;
     for run in buffer.layout_runs() {
         if [
             run.line_y,
@@ -261,7 +342,11 @@ fn snapshot(
         let paragraph = &paragraphs[run.line_i];
         for glyph in run.glyphs {
             let key = (glyph.font_id, glyph.font_weight.0);
-            let font_index = if let Some(&index) = font_indices.get(&key) {
+            let font_index = if let Some((last, index)) = last_font
+                && last == key
+            {
+                index
+            } else if let Some(&index) = font_indices.get(&key) {
                 index
             } else {
                 let font = system
@@ -284,9 +369,18 @@ fn snapshot(
                     weight: glyph.font_weight.0,
                     backend: font,
                 });
-                font_indices.insert(key, index);
+                // Single-face labels need neither per-glyph hashing nor a hash
+                // allocation. Add the first face only when a second one appears.
+                if index == 1 {
+                    let first = &output.fonts[0];
+                    font_indices.insert((first.id.face, first.weight), 0);
+                }
+                if index > 0 {
+                    font_indices.insert(key, index);
+                }
                 index
             };
+            last_font = Some((key, font_index));
             let offset = [
                 glyph.font_size * glyph.x_offset,
                 -glyph.font_size * glyph.y_offset,

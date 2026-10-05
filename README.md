@@ -347,7 +347,8 @@ let measured_size = layout.size();
 
 Advanced shaping uses cosmic-text with font fallback, kerning, ligatures, and
 complex-script support. Unchanged evaluation reuses its snapshot; width changes
-reuse shaped runs. Snapshots retain text and font data across edits and font loading.
+reuse shaped runs. Content edits preserve matching leading/trailing paragraphs.
+Snapshots retain text and font data across edits and font loading.
 Measurement requires no window/GPU and does not apply DPI or compute pixel ink bounds.
 This milestone provides one style per buffer; rich spans and text editing/hit testing
 follow separately. See the
@@ -372,7 +373,9 @@ order and current clipping. A draw uploads 48 bytes of placement/color parameter
 with no shaping, rasterization, or recurring glyph-geometry upload. Atlas budgets
 include prepared texts, recordings, and GPU completion leases. Cache exhaustion
 returns `AtlasFull`; callers control resource release and polling. Painter exposes
-this same explicit preparation and retained drawing:
+this same explicit preparation and retained drawing. Released geometry buffers
+are recycled under a bounded budget after their text/recording/GPU owners finish;
+see the [changing-text performance report](docs/performance/text-updates.md):
 
 ```rust
 painter.prepare(&target.render_format())?; // Primitive and text pipelines.

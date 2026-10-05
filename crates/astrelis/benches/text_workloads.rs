@@ -302,11 +302,17 @@ fn rendering(g: &GraphicsContext, fonts: &mut TextSystem, timer: Option<&Timer>)
             let mut totals = Vec::new();
             let mut gpus = Vec::new();
             let mut updates = Vec::new();
+            let mut layouts = Vec::new();
+            let mut preparations = Vec::new();
             let mut batches = 0;
             for sample in 0..WARMUP + SAMPLES {
                 if case == "update_60_of_600" {
+                    let before_update = painter.text().stats();
                     let start = Instant::now();
+                    let mut layout_time = Duration::ZERO;
+                    let mut preparation_time = Duration::ZERO;
                     for j in 0..60 {
+                        let layout_start = Instant::now();
                         let i = (sample * 60 + j) % LABELS;
                         buffers[i].set_text(
                             &format!("Item {:05}", 10000 + sample * 60 + j),
@@ -315,16 +321,32 @@ fn rendering(g: &GraphicsContext, fonts: &mut TextSystem, timer: Option<&Timer>)
                                 .font_size(14.)
                                 .line_height(21.),
                         )?;
-                        let next = painter.prepare_text(
-                            buffers[i].layout(fonts)?.as_ref(),
-                            TextRasterOptions::new(),
-                        )?;
+                        let layout = buffers[i].layout(fonts)?;
+                        layout_time += layout_start.elapsed();
+                        let preparation_start = Instant::now();
+                        let next =
+                            painter.prepare_text(layout.as_ref(), TextRasterOptions::new())?;
+                        preparation_time += preparation_start.elapsed();
                         visible(&next, origin(i));
                         texts[i].0 = next;
                     }
                     let elapsed = us(start.elapsed());
+                    let after_update = painter.text().stats();
                     if sample >= WARMUP {
+                        assert_eq!(before_update.cache_misses, after_update.cache_misses);
+                        assert_eq!(before_update.uploaded_bytes, after_update.uploaded_bytes);
+                        assert_eq!(
+                            before_update.geometry_buffer_allocations,
+                            after_update.geometry_buffer_allocations
+                        );
+                        assert_eq!(
+                            after_update.geometry_buffer_reuses
+                                - before_update.geometry_buffer_reuses,
+                            60
+                        );
                         updates.push(elapsed);
+                        layouts.push(us(layout_time));
+                        preparations.push(us(preparation_time));
                     }
                     wait(g, g.queue().submit([]))?;
                 }
@@ -360,6 +382,8 @@ fn rendering(g: &GraphicsContext, fonts: &mut TextSystem, timer: Option<&Timer>)
             print(&label, "pass_gpu", gpus);
             if case == "update_60_of_600" {
                 print(&label, "content_layout_prepare_cpu", updates);
+                print(&label, "content_layout_cpu", layouts);
+                print(&label, "cached_glyph_geometry_cpu", preparations);
             }
             eprintln!(
                 "case={label}; drawable_glyphs={glyphs}; text_calls={}; page_batches_per_frame={batches}; stats={:?}",

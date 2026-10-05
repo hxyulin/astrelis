@@ -4,7 +4,9 @@
 //! item. Font discovery is explicit. [`TextBuffer::layout`] evaluates dirty state
 //! and returns an immutable, shared [`TextLayout`]; an unchanged buffer returns
 //! the same snapshot without reshaping. Width/wrap/alignment changes retain shaped
-//! runs. Snapshots own their source text and font references, so they survive later
+//! runs. Content edits retain matching leading/trailing paragraphs and reshape the
+//! changed paragraphs; snapshots still traverse the full document. Snapshots own
+//! their source text and font references, so they survive later
 //! edits, font loading, and dropping the system. No GPU initialization is required.
 //!
 //! All metrics use application-selected local units, X right/Y down. Layout does
@@ -72,6 +74,7 @@
 
 mod buffer;
 mod distance_field;
+mod geometry;
 mod layout;
 mod renderer;
 mod style;

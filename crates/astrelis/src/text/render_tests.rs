@@ -813,3 +813,92 @@ fn mtsdf_multilingual_cff_variable_weight_and_italic_match_unhinted_coverage() {
         );
     });
 }
+
+#[test]
+fn geometry_reuse_preserves_clones_recordings_and_submitted_draws() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut target = target(&g, 1);
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut renderer = TextRenderer::new(&g);
+        renderer.prepare(&target.render_format()).unwrap();
+        let original = renderer
+            .prepare_text(&layout("M"), TextRasterOptions::new())
+            .unwrap();
+        let expected = pixels(&g, &mut target, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &original, TextDraw::default())
+                .unwrap();
+        });
+        let retained = original.clone();
+        drop(original);
+        let other = renderer
+            .prepare_text(&layout("😀"), TextRasterOptions::new())
+            .unwrap();
+        assert_eq!(renderer.stats().geometry_buffer_allocations, 2);
+        assert_eq!(renderer.stats().geometry_buffer_reuses, 0);
+        let owner = Arc::downgrade(&retained.data.lease);
+        let mut frame = target.begin_frame().unwrap();
+        {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &retained, TextDraw::default())
+                .unwrap();
+        }
+        drop(retained);
+        assert!(owner.upgrade().is_some());
+        let third = renderer
+            .prepare_text(&layout("😁"), TextRasterOptions::new())
+            .unwrap();
+        assert_eq!(renderer.stats().geometry_buffer_allocations, 3);
+        assert_eq!(renderer.stats().geometry_buffer_reuses, 0);
+        let submission = frame.finish().unwrap();
+        g.device()
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(std::time::Duration::from_secs(10)),
+            })
+            .unwrap();
+        assert!(owner.upgrade().is_none());
+        let actual = pixels(&g, &mut target, |_| {});
+        assert_eq!(
+            actual, expected,
+            "later preparation changed an earlier draw"
+        );
+        let reused = renderer
+            .prepare_text(&layout("😀"), TextRasterOptions::new())
+            .unwrap();
+        assert_eq!(renderer.stats().geometry_buffer_allocations, 3);
+        assert_eq!(renderer.stats().geometry_buffer_reuses, 1);
+        let expected = pixels(&g, &mut target, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &other, TextDraw::default())
+                .unwrap();
+        });
+        let actual = pixels(&g, &mut target, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &reused, TextDraw::default())
+                .unwrap();
+        });
+        assert_eq!(
+            actual, expected,
+            "recycled geometry did not upload correctly"
+        );
+        drop(third);
+        renderer.clear_cache();
+        // Clearing the renderer or dropping it must not invalidate retained storage.
+        drop(renderer);
+        let mut independent = TextRenderer::new(&g);
+        let actual = pixels(&g, &mut target, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            independent
+                .draw(&mut pass, &reused, TextDraw::default())
+                .unwrap();
+        });
+        assert_eq!(actual, expected);
+        assert!(errors.pop().await.is_none());
+    });
+}

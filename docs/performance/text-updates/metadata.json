@@ -1,0 +1,207 @@
+{
+  "measured_at": "2026-10-05T11:01:01.509069+00:00",
+  "base_commit": "d014ebd18e09274139aec5afc8f3d5b5b7fd6a15",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434\n",
+  "samples": 40,
+  "warmup": 8,
+  "gpu_execution": "not measured; --no-timestamps",
+  "commands": [
+    "cargo bench -p astrelis --bench text",
+    "cargo bench -p astrelis --bench text_workloads -- --no-timestamps"
+  ],
+  "conditions": "Sequential release runs. No concurrent builds, captures or window example. CPU benchmark first, then GPU workload, repeated three times per state. Fonts loaded explicitly. Completion waits/readbacks outside timed stages.",
+  "baseline_notes": "GPU baseline used the base commit library with bench instrumentation separating layout and geometry. CPU baseline used base-commit CPU text sources, with added one-paragraph-edit benchmark; a preliminary pooled GPU renderer was compiled into that binary but the CPU benchmark initializes no GPU and calls no renderer. Final GPU benchmark adds post-interval assertions for zero warm allocations and 60 reuses; these assertions are outside timed stages.",
+  "final_source_sha256": {
+    "crates/astrelis/src/api_tests.rs": "6396833c22269744359c13f34568de102880f2d36b4ecb1a134bf63d0249dced",
+    "crates/astrelis/src/attachments.rs": "c4a0e9ec3f17943817c89d4fbf14ed74001e55c83f2267a041a29685088d9ae0",
+    "crates/astrelis/src/context.rs": "26ec9563c4528b41193564f6fb144c9b7461acedddb166e468d0008394ac2c24",
+    "crates/astrelis/src/depth_stencil.rs": "3b2d259252ea4c49bcbafefdd4d03a99e5dfe9775161f72482dfc7e9cde97509",
+    "crates/astrelis/src/depth_stencil_tests.rs": "ea5e5cff8cd4e125e9cb590778873272bcf8814e563f701ff1fb7b03a50c90dd",
+    "crates/astrelis/src/drawing.rs": "fc20149837e393fa8d37a19aabbb338ed387278f22e21eb92ca8102a49573877",
+    "crates/astrelis/src/error.rs": "902192858b8323f72cab50238bbb385ee6f227e4dd8fa0386892137055b3981d",
+    "crates/astrelis/src/frame.rs": "4496805987834bbffc47b2e14d2364826a254a91d7ebeef3da3a7f159fda7c33",
+    "crates/astrelis/src/framebuffer.rs": "db2e347f14de7d0a6294f7811b18b0bee0faf6bcd22ed8653da6b4afc72de9df",
+    "crates/astrelis/src/framebuffer_tests.rs": "0cf349cb6e6cd795ea3523b6bef8f73f158865c9e5add6d6009ec13d0bc7e406",
+    "crates/astrelis/src/lib.rs": "9dee88e1bf778f77c05dcc2c2a4d1e3fd5f282069176d024561171a63602b202",
+    "crates/astrelis/src/material.rs": "c45de39d6a62988bb3305b78ac67ccac36ab08f42344809a865d77f6b40455c1",
+    "crates/astrelis/src/material_tests.rs": "7c6d6e4ad990833ea384cf9478b12d241a7e7d46e8662345c5eecb052063a8f5",
+    "crates/astrelis/src/mesh.rs": "5ae760f2bfe0ac44c287a5dda3d2de8b1f7d803bb37de8676d64f4e5ba5aeca0",
+    "crates/astrelis/src/mesh.wgsl": "13de0c9d000c19b4c93e54868b1d76e3d90fa281e26d20845d5ebb8caf0b1ed2",
+    "crates/astrelis/src/mesh_renderer.rs": "fab3c321e8fbec768abf1d4488b0a80f9dccb107a9890bdf23e11fe6f515bfba",
+    "crates/astrelis/src/mesh_renderer_tests.rs": "1140c6e70bc8671a4b7f5565d78fcad43713e6aeda2ca94d13565d63367ca538",
+    "crates/astrelis/src/painter.rs": "4da53b43cb3e6782c7a4daa7bb5309b0a28750fd9ec271c2b9e7824502eb3466",
+    "crates/astrelis/src/painter_tests.rs": "946389ff8b2ac91d523e79393bb6c8dd749f46a956ccd8e33ee886c4213567f6",
+    "crates/astrelis/src/pass.rs": "90438a87b70b9d4276e52404fa5080e01fba91db01559c85c793e51a4eb492a7",
+    "crates/astrelis/src/primitive.rs": "d4ae8808b82d90f8b6bde2b5bd591327c1d0ff82add72ea23617066a90608043",
+    "crates/astrelis/src/primitive.wgsl": "00ce6063954b4210b8c317f196c7e605b06fbc458d3b17a7c5edc43b5d65cd94",
+    "crates/astrelis/src/primitive_tests.rs": "b2ff423466b628737317d16920eac9725f4869e7fca4ac494993e30f4c153074",
+    "crates/astrelis/src/target.rs": "4382c68a1244b440b692b6685c68cc5a419077c271601787107f196bf7c505c3",
+    "crates/astrelis/src/text/buffer.rs": "b986c7397db11df502a3bfa4f1914d27ab7ff755fa46c29524c07dd3508e0279",
+    "crates/astrelis/src/text/distance_field.rs": "2c4f3bc81cb3e4ee6d2266cc1621d4d263b9840f3c99faafeeea45945a7ce5f3",
+    "crates/astrelis/src/text/geometry.rs": "4837e81b5b43a10a4433386dce13108a9ceaee731f0303caa4bd1a1eb62a3027",
+    "crates/astrelis/src/text/layout.rs": "dc7261bd49fa0cbdcae57607b24c130700602f547a64b493e0c7ca421273bd05",
+    "crates/astrelis/src/text/mod.rs": "130719210c47bb1cd546ff4f6fe7406e710f6e0de1c554c22a14b349da46e58f",
+    "crates/astrelis/src/text/render_tests.rs": "b243a896b3e0586b5b7f3b1d8b8e58331de3cbb68b4e0a6401885d7c8c5457f8",
+    "crates/astrelis/src/text/renderer.rs": "a62811b046130f4389af7484513f8835eb39b689c7f0ff99fa6133d54c61f7df",
+    "crates/astrelis/src/text/style.rs": "448346fcbdeadcd42a2d8db04ebf064ea5e23b904f8a0b62885abd2bb4af59b8",
+    "crates/astrelis/src/text/system.rs": "7a5259026ada4e24fcc4abaad2a3ef7499d8f799c917df4cdd446c2fb281cf6f",
+    "crates/astrelis/src/text/tests.rs": "f0a69646817901688739f96ace159330f66735e4e439ef0bfc3b2f7d53ab8338",
+    "crates/astrelis/src/text/text.wgsl": "4b47c64fe18a33c66da19661f9d461ba7bfd124e770704c63b707fdbd4bae8d3",
+    "crates/astrelis/src/texture.rs": "e218312644b5327a36e267725b9c95e0c538b5b597390f1840f6d24b91219282",
+    "crates/astrelis/src/texture.wgsl": "769eeae7945184c744ced21fb7f00f74f8493d99b36553b4c93918dfef772cf3",
+    "crates/astrelis/src/texture_renderer.rs": "e8f90126c6506af2128163a078aee82bb8663c3fedbf835f39787482cd332ca1",
+    "crates/astrelis/src/texture_tests.rs": "9a66fbc0958e732ddedb6efa8da703aae2c888be7deff5115f0572d43545b2e8",
+    "crates/astrelis/src/uploads.rs": "35ef609ac7e8a93b65cbab13bfc1c1f008ef0fc90d837deb7432d5d3621393a5",
+    "Cargo.toml": "5b6617ae4b9dd087df0a0b7677c168651804548a3f689cd33e4f23d93c76b1bf",
+    "Cargo.lock": "55a17028024e4f57f3c89a19cce631464ba99e5747fb8014532355c94dabea61",
+    "crates/astrelis/Cargo.toml": "0ffdda870cc8caf13ef408f4c44fb1ce2b22b1d2cc047c2e5005024cda2dc1e5",
+    "crates/astrelis/benches/text.rs": "5dd952b0caec9cd6959984dcd68ca9c79ca552d0127c1a56991f91838c238ae6",
+    "crates/astrelis/benches/text_workloads.rs": "d47844421d76cfecf46420a75b5542e91163bb60100ad24e4239ff9b7cdfba08"
+  },
+  "baseline_source_sha256": {
+    "crates/astrelis/src/api_tests.rs": "6396833c22269744359c13f34568de102880f2d36b4ecb1a134bf63d0249dced",
+    "crates/astrelis/src/attachments.rs": "c4a0e9ec3f17943817c89d4fbf14ed74001e55c83f2267a041a29685088d9ae0",
+    "crates/astrelis/src/context.rs": "26ec9563c4528b41193564f6fb144c9b7461acedddb166e468d0008394ac2c24",
+    "crates/astrelis/src/depth_stencil.rs": "3b2d259252ea4c49bcbafefdd4d03a99e5dfe9775161f72482dfc7e9cde97509",
+    "crates/astrelis/src/depth_stencil_tests.rs": "ea5e5cff8cd4e125e9cb590778873272bcf8814e563f701ff1fb7b03a50c90dd",
+    "crates/astrelis/src/drawing.rs": "fc20149837e393fa8d37a19aabbb338ed387278f22e21eb92ca8102a49573877",
+    "crates/astrelis/src/error.rs": "902192858b8323f72cab50238bbb385ee6f227e4dd8fa0386892137055b3981d",
+    "crates/astrelis/src/frame.rs": "4496805987834bbffc47b2e14d2364826a254a91d7ebeef3da3a7f159fda7c33",
+    "crates/astrelis/src/framebuffer.rs": "db2e347f14de7d0a6294f7811b18b0bee0faf6bcd22ed8653da6b4afc72de9df",
+    "crates/astrelis/src/framebuffer_tests.rs": "0cf349cb6e6cd795ea3523b6bef8f73f158865c9e5add6d6009ec13d0bc7e406",
+    "crates/astrelis/src/lib.rs": "9dee88e1bf778f77c05dcc2c2a4d1e3fd5f282069176d024561171a63602b202",
+    "crates/astrelis/src/material.rs": "c45de39d6a62988bb3305b78ac67ccac36ab08f42344809a865d77f6b40455c1",
+    "crates/astrelis/src/material_tests.rs": "7c6d6e4ad990833ea384cf9478b12d241a7e7d46e8662345c5eecb052063a8f5",
+    "crates/astrelis/src/mesh.rs": "5ae760f2bfe0ac44c287a5dda3d2de8b1f7d803bb37de8676d64f4e5ba5aeca0",
+    "crates/astrelis/src/mesh.wgsl": "13de0c9d000c19b4c93e54868b1d76e3d90fa281e26d20845d5ebb8caf0b1ed2",
+    "crates/astrelis/src/mesh_renderer.rs": "fab3c321e8fbec768abf1d4488b0a80f9dccb107a9890bdf23e11fe6f515bfba",
+    "crates/astrelis/src/mesh_renderer_tests.rs": "1140c6e70bc8671a4b7f5565d78fcad43713e6aeda2ca94d13565d63367ca538",
+    "crates/astrelis/src/painter.rs": "4da53b43cb3e6782c7a4daa7bb5309b0a28750fd9ec271c2b9e7824502eb3466",
+    "crates/astrelis/src/painter_tests.rs": "946389ff8b2ac91d523e79393bb6c8dd749f46a956ccd8e33ee886c4213567f6",
+    "crates/astrelis/src/pass.rs": "90438a87b70b9d4276e52404fa5080e01fba91db01559c85c793e51a4eb492a7",
+    "crates/astrelis/src/primitive.rs": "d4ae8808b82d90f8b6bde2b5bd591327c1d0ff82add72ea23617066a90608043",
+    "crates/astrelis/src/primitive.wgsl": "00ce6063954b4210b8c317f196c7e605b06fbc458d3b17a7c5edc43b5d65cd94",
+    "crates/astrelis/src/primitive_tests.rs": "b2ff423466b628737317d16920eac9725f4869e7fca4ac494993e30f4c153074",
+    "crates/astrelis/src/target.rs": "4382c68a1244b440b692b6685c68cc5a419077c271601787107f196bf7c505c3",
+    "crates/astrelis/src/text/buffer.rs": "5c1933988d23fd601f01229db294943b967056ee884e3cfaf8ece900c47e374a",
+    "crates/astrelis/src/text/distance_field.rs": "2c4f3bc81cb3e4ee6d2266cc1621d4d263b9840f3c99faafeeea45945a7ce5f3",
+    "crates/astrelis/src/text/layout.rs": "dc7261bd49fa0cbdcae57607b24c130700602f547a64b493e0c7ca421273bd05",
+    "crates/astrelis/src/text/mod.rs": "70466c8a1c747896fd089aae29fbf1b2c9bf7b6552c85431a10fff302d991b36",
+    "crates/astrelis/src/text/render_tests.rs": "feaa3ef9964079f19a153ef52094194f7a4433274b9586dcf8d56799b5479268",
+    "crates/astrelis/src/text/renderer.rs": "4ad200230f696a210f943c73beb94913252f336a0a950b80f3c204eef829fecc",
+    "crates/astrelis/src/text/style.rs": "448346fcbdeadcd42a2d8db04ebf064ea5e23b904f8a0b62885abd2bb4af59b8",
+    "crates/astrelis/src/text/system.rs": "7a5259026ada4e24fcc4abaad2a3ef7499d8f799c917df4cdd446c2fb281cf6f",
+    "crates/astrelis/src/text/tests.rs": "f1c33f7ce17710862a38cb558a1665cff31a745757770eeeb7913e16076381a7",
+    "crates/astrelis/src/text/text.wgsl": "4b47c64fe18a33c66da19661f9d461ba7bfd124e770704c63b707fdbd4bae8d3",
+    "crates/astrelis/src/texture.rs": "e218312644b5327a36e267725b9c95e0c538b5b597390f1840f6d24b91219282",
+    "crates/astrelis/src/texture.wgsl": "769eeae7945184c744ced21fb7f00f74f8493d99b36553b4c93918dfef772cf3",
+    "crates/astrelis/src/texture_renderer.rs": "e8f90126c6506af2128163a078aee82bb8663c3fedbf835f39787482cd332ca1",
+    "crates/astrelis/src/texture_tests.rs": "9a66fbc0958e732ddedb6efa8da703aae2c888be7deff5115f0572d43545b2e8",
+    "crates/astrelis/src/uploads.rs": "7cfef3870eb9ad696a9c1deeba3fc92815684eed852acb7e5de33fb45070c826"
+  },
+  "fonts_sha256": {
+    "SourceSans3-Regular.otf": "08df266400933d3178d081a45f94a08814c3e55b4b7dd2e0ff69cb1329f13ab6",
+    "TestColor.ttf": "89bb0f29171dcfedd6fe3fdca39dc84cf6d4116676df80ce078966b49a4b1225",
+    "NotoSansArabic.ttf": "63111b5b2e074dd48cc67692e0a2726d86ee94c1c37fe8598257b7b4e87e869e"
+  },
+  "artifacts": [
+    {
+      "path": "cpu-after-1.csv",
+      "sha256": "53d357cd48d74d49ef283eb9a9c57a7321ab3c591d29477a72e695a13ff63f3a"
+    },
+    {
+      "path": "cpu-after-1.log",
+      "sha256": "9f9525c674095b055964359eb15cbdb3d2bc43d919c59d13f51a8c2b47b6eabf"
+    },
+    {
+      "path": "cpu-before-1.csv",
+      "sha256": "5ee642c23f97ba91e15118b9b6c6152b5a6449a8a90b6005fba90c17b5820df0"
+    },
+    {
+      "path": "cpu-before-1.log",
+      "sha256": "9f9525c674095b055964359eb15cbdb3d2bc43d919c59d13f51a8c2b47b6eabf"
+    },
+    {
+      "path": "gpu-after-1.csv",
+      "sha256": "ea9b30251bfda9d0e29a3afc3eaf4bbff527a5b10dfffebfcef6c47248fe1b3b"
+    },
+    {
+      "path": "gpu-after-1.log",
+      "sha256": "6ba9f2ca84e61b41991c61a438331b1682d8bd30727341bac15544c6485d994d"
+    },
+    {
+      "path": "gpu-before-1.csv",
+      "sha256": "77b61d4e674be63b1d9fa08592f33acc527eff7b7784832ec496897b337e548d"
+    },
+    {
+      "path": "gpu-before-1.log",
+      "sha256": "eb3433da3df9bae1ee2cbfe10460cf603de5e4059c71f167944b7fb96a352c4a"
+    },
+    {
+      "path": "cpu-after-2.csv",
+      "sha256": "3a682cc0931f31a31e0b1108ae1e4798048b02dad15e5034d5655f489f52a807"
+    },
+    {
+      "path": "cpu-after-2.log",
+      "sha256": "9f9525c674095b055964359eb15cbdb3d2bc43d919c59d13f51a8c2b47b6eabf"
+    },
+    {
+      "path": "cpu-before-2.csv",
+      "sha256": "a42587c1873538c57e383dcf57a625a4cba4455dbc05d82c5c6f07fc77f45196"
+    },
+    {
+      "path": "cpu-before-2.log",
+      "sha256": "9f9525c674095b055964359eb15cbdb3d2bc43d919c59d13f51a8c2b47b6eabf"
+    },
+    {
+      "path": "gpu-after-2.csv",
+      "sha256": "1b8514e5295117b4d2a022922b91872fe0912b517c85a8fc3e42a326d22a061e"
+    },
+    {
+      "path": "gpu-after-2.log",
+      "sha256": "6ba9f2ca84e61b41991c61a438331b1682d8bd30727341bac15544c6485d994d"
+    },
+    {
+      "path": "gpu-before-2.csv",
+      "sha256": "d91bc98855c68ac03de43d74d4a68c4325b0146ce7270801828542335b5f6627"
+    },
+    {
+      "path": "gpu-before-2.log",
+      "sha256": "eb3433da3df9bae1ee2cbfe10460cf603de5e4059c71f167944b7fb96a352c4a"
+    },
+    {
+      "path": "cpu-after-3.csv",
+      "sha256": "8bd0637614e0b5b597070d19e85f9aa26131590e3439b2b656088f788586eecf"
+    },
+    {
+      "path": "cpu-after-3.log",
+      "sha256": "9f9525c674095b055964359eb15cbdb3d2bc43d919c59d13f51a8c2b47b6eabf"
+    },
+    {
+      "path": "cpu-before-3.csv",
+      "sha256": "d5e3ccc71b895284748cf36a7f26bcba3d3d814cfdf62fb1f263177378be3b9e"
+    },
+    {
+      "path": "cpu-before-3.log",
+      "sha256": "9f9525c674095b055964359eb15cbdb3d2bc43d919c59d13f51a8c2b47b6eabf"
+    },
+    {
+      "path": "gpu-after-3.csv",
+      "sha256": "684ad01df75bd1f03be3bd89f725be84aa78ce4b2db044cc34c9b33c8ad1c981"
+    },
+    {
+      "path": "gpu-after-3.log",
+      "sha256": "6ba9f2ca84e61b41991c61a438331b1682d8bd30727341bac15544c6485d994d"
+    },
+    {
+      "path": "gpu-before-3.csv",
+      "sha256": "94a24c7a5d857dd5f511a27dca5f7b4846163f475d8b34b3106b306dfd81d86d"
+    },
+    {
+      "path": "gpu-before-3.log",
+      "sha256": "eb3433da3df9bae1ee2cbfe10460cf603de5e4059c71f167944b7fb96a352c4a"
+    }
+  ],
+  "source_notes": "Final source hashes include a CPU regression-test refinement after measurements. Production implementation and benchmark sources are unchanged."
+}

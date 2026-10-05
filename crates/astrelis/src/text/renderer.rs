@@ -1,4 +1,7 @@
-use super::{FontId, TextFont, TextLayout};
+use super::{
+    FontId, TextFont, TextLayout,
+    geometry::{Geometry, GeometryPool},
+};
 use crate::{
     Error, GraphicsContext, Material, MaterialOptions, Rect, RenderFormat, RenderPass, Transform2D,
     VertexLayout,
@@ -8,7 +11,7 @@ use std::{
     collections::HashMap,
     ops::Range,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
 };
@@ -259,8 +262,12 @@ pub struct TextRendererStats {
     pub cache_misses: u64,
     /// Atlas upload payload bytes, excluding implicit texture initialization.
     pub uploaded_bytes: u64,
-    /// Immutable glyph-buffer bytes created during preparation.
+    /// Glyph geometry payload bytes uploaded during preparation, excluding allocation padding.
     pub geometry_bytes: u64,
+    /// New glyph geometry buffer allocations. Empty preparations allocate nothing.
+    pub geometry_buffer_allocations: u64,
+    /// Preparations that reused a buffer released by its last text/recording/completion owner.
+    pub geometry_buffer_reuses: u64,
     /// Recording-owned placement/color payload bytes, 48 per nonempty text draw.
     pub parameter_bytes: u64,
     /// GPU draws recorded, one per consecutive atlas-page batch.
@@ -387,10 +394,19 @@ struct Batch {
 }
 #[derive(Debug)]
 struct PreparedData {
-    buffer: Option<wgpu::Buffer>,
+    buffer: Option<Geometry>,
     batches: Vec<Batch>,
     raster_pipeline: bool,
     field_pipeline: bool,
+    lease: Arc<TextLease>,
+}
+// GPU completion callbacks require Send even on WebGPU, whose buffer/texture
+// handles are not Send. Retain only ownership tokens in the callback; wgpu owns
+// the actual resources referenced by recorded commands.
+#[derive(Debug)]
+struct TextLease {
+    _geometry: Option<Arc<()>>,
+    _pages: Vec<Arc<Allocation>>,
 }
 /// Immutable glyph geometry and atlas leases, independent of later preparation/cache clearing.
 /// Clones share GPU storage. Draws upload only a 48-byte placement/color record, not glyph geometry.
@@ -442,6 +458,10 @@ impl PreparedText {
 /// Leased pages are never evicted or overwritten. Budget exhaustion returns `AtlasFull` without
 /// waiting; callers control dropping resources and device polling. Font-size/raster limits bound
 /// image work, while Swash keeps a fixed eight-entry scaler cache and no CPU glyph-image cache.
+/// Changed text can reuse released geometry buffers. Recycling is bounded to 64
+/// buffers / 1 MiB (each at most 64 KiB), including buffers awaiting completion.
+/// Prepared texts, clones, recordings and GPU work prevent their storage being overwritten.
+/// Larger geometry remains exact-sized and is released rather than recycled.
 pub struct TextRenderer {
     graphics: GraphicsContext,
     options: TextRendererOptions,
@@ -458,6 +478,7 @@ pub struct TextRenderer {
     clock: u64,
     next_page: u64,
     stats: TextRendererStats,
+    geometry_pool: Arc<Mutex<GeometryPool>>,
 }
 impl std::fmt::Debug for TextRenderer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -560,6 +581,7 @@ impl TextRenderer {
             fonts: HashMap::new(),
             cache: HashMap::new(),
             pages: Vec::new(),
+            geometry_pool: Arc::default(),
             budget: Arc::new(Budget {
                 pages: AtomicUsize::new(0),
                 bytes: AtomicUsize::new(0),
@@ -578,13 +600,15 @@ impl TextRenderer {
             ..self.stats
         }
     }
-    /// Releases lookup caches and page ownership. Existing prepared texts/recordings remain usable.
+    /// Releases lookup caches, page ownership, and recycled geometry storage.
+    /// Existing prepared texts/recordings remain usable.
     /// Live leased pages continue counting against this renderer's budget until dropped/completed.
     pub fn clear_cache(&mut self) {
         self.cache.clear();
         self.pages.clear();
         self.fonts.clear();
         self.scale = ScaleContext::new();
+        self.geometry_pool = Arc::default();
     }
     fn pipeline(
         &mut self,
@@ -782,18 +806,26 @@ impl TextRenderer {
         let buffer = if data.is_empty() {
             None
         } else {
-            use wgpu::util::DeviceExt;
-            Some(
-                self.graphics
-                    .device()
-                    .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                        label: Some("Astrelis prepared glyphs"),
-                        contents: bytemuck::cast_slice(&data),
-                        usage: wgpu::BufferUsages::VERTEX,
-                    }),
-            )
+            let (geometry, reused) = GeometryPool::upload(
+                &self.geometry_pool,
+                &self.graphics,
+                bytemuck::cast_slice(&data),
+            );
+            if reused {
+                self.stats.geometry_buffer_reuses += 1;
+            } else {
+                self.stats.geometry_buffer_allocations += 1;
+            }
+            Some(geometry)
         };
         self.stats.geometry_bytes += data.len() as u64 * 48;
+        let lease = Arc::new(TextLease {
+            _geometry: buffer.as_ref().map(|geometry| geometry.lease.clone()),
+            _pages: batches
+                .iter()
+                .map(|batch| batch.page.allocation.clone())
+                .collect(),
+        });
         Ok(PreparedText {
             graphics: self.graphics.clone(),
             data: Arc::new(PreparedData {
@@ -801,6 +833,7 @@ impl TextRenderer {
                 field_pipeline: batches.iter().any(|b| b.page.kind == Kind::Mtsdf),
                 buffer,
                 batches,
+                lease,
             }),
             size,
             bounds: bounds.map(|b| Rect::new(b[0], b[1], b[2] - b[0], b[3] - b[1])),
@@ -839,11 +872,10 @@ impl TextRenderer {
         };
         let (draw_buffer, range) = pass.upload_instances(bytemuck::bytes_of(&parameters), 4);
         self.stats.parameter_bytes += 48;
-        for batch in &text.data.batches {
-            pass.retain_resource(batch.page.allocation.clone());
-        }
+        // Keep both atlas and geometry immutable through recording and GPU completion.
+        pass.retain_resource(text.data.lease.clone());
         pass.apply_raster_state();
-        pass.set_vertex_buffer(0, buffer, 0..buffer.size());
+        pass.set_vertex_buffer(0, &buffer.buffer, 0..text.glyph_count as u64 * 48);
         pass.set_vertex_buffer(1, &draw_buffer, range);
         let mut previous = None;
         for batch in &text.data.batches {

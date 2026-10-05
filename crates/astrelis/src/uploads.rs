@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
 
 pub(crate) type UploadPool = Arc<Mutex<Vec<(wgpu::Buffer, Vec<u8>)>>>;
 
@@ -7,6 +10,30 @@ struct Page {
     buffer: wgpu::Buffer,
     bytes: Vec<u8>,
     pool: UploadPool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recording_leases_deduplicate_small_and_large_collections() {
+        let resources: Vec<_> = (0..600).map(Arc::new).collect();
+        let weak = Arc::downgrade(&resources[599]);
+        let mut uploads = DrawUploads::default();
+        for r in &resources {
+            uploads.retain(r.clone());
+            uploads.retain(r.clone());
+        }
+        for r in resources.iter().rev() {
+            uploads.retain(r.clone());
+        }
+        assert_eq!(uploads.leases.len(), resources.len());
+        drop(resources);
+        assert!(weak.upgrade().is_some());
+        drop(uploads);
+        assert!(weak.upgrade().is_none());
+    }
 }
 impl Drop for Page {
     fn drop(&mut self) {
@@ -23,19 +50,42 @@ impl Drop for Page {
 pub(crate) struct DrawUploads {
     pages: Vec<Page>,
     leases: Vec<Arc<dyn ResourceLease>>,
+    lease_ids: Option<HashSet<usize>>,
 }
 pub(crate) trait ResourceLease: std::fmt::Debug + Send + Sync {}
 impl<T: std::fmt::Debug + Send + Sync> ResourceLease for T {}
 impl DrawUploads {
     pub(crate) fn retain(&mut self, resource: Arc<dyn ResourceLease>) {
-        // Repeated draws of the same prepared data need only one recording lease.
-        if !self.leases.iter().any(|r| Arc::ptr_eq(r, &resource)) {
+        // Small passes need no hash allocation. Larger collections must avoid a
+        // quadratic scan when each label retains independent geometry.
+        if self
+            .leases
+            .last()
+            .is_some_and(|r| Arc::ptr_eq(r, &resource))
+        {
+            return;
+        }
+        if self.lease_ids.is_none() && self.leases.len() >= 8 {
+            self.lease_ids = Some(
+                self.leases
+                    .iter()
+                    .map(|r| Arc::as_ptr(r) as *const () as usize)
+                    .collect(),
+            );
+        }
+        let fresh = if let Some(ids) = &mut self.lease_ids {
+            ids.insert(Arc::as_ptr(&resource) as *const () as usize)
+        } else {
+            !self.leases.iter().any(|r| Arc::ptr_eq(r, &resource))
+        };
+        if fresh {
             self.leases.push(resource);
         }
     }
     pub(crate) fn retain_until_complete(&mut self, queue: &wgpu::Queue) {
         if !self.leases.is_empty() {
             let leases = std::mem::take(&mut self.leases);
+            self.lease_ids = None;
             queue.on_submitted_work_done(move || drop(leases));
         }
     }

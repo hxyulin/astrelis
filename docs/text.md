@@ -210,8 +210,11 @@ invalid loading leaves existing fonts and snapshots unchanged.
 
 Unchanged evaluation returns the same `Arc<TextLayout>` in constant time. Width,
 wrap, alignment, and default font-size/line-height changes reuse backend shaped
-runs but rebuild layout/snapshot vectors. Content, font selection, features,
-tracking, or font-generation changes reshape. Retaining old snapshots retains their
+runs but rebuild layout/snapshot vectors. Content edits keep matching leading and
+trailing paragraphs, including after paragraph insertion/deletion, and reshape the
+changed middle. Font selection, features, tracking, or font-generation changes
+reshape affected runs. Snapshots still visit all glyphs and rebuild absolute source
+offsets; this is not incremental word shaping or constant-time document editing. Retaining old snapshots retains their
 layout allocations and font references until the caller drops them. Font discovery
 is explicit and potentially blocking; loading also copies bytes unless an existing
 `Arc<[u8]>` is supplied with `load_font_shared`.
@@ -275,10 +278,17 @@ scaler cache plus reusable decode/outline scratch; the font-key table is limited
 to 64 entries. Outline extents are checked before raster output allocation. Bitmap
 dimensions are checked after decode, so backend temporary decode scratch is outside
 the atlas budget. Prepared geometry allocations are caller-owned and limited by the
-device buffer limit, separate from atlas bytes. Repeated preparation creates a new
-geometry buffer even when all glyph images hit; retain PreparedText to avoid that work.
+device buffer limit, separate from atlas bytes. Repeated preparation builds a new
+geometry payload even when all glyph images hit; retain PreparedText to avoid that work.
+Released buffers can be reused only after every prepared-text clone, recording, and
+GPU-completion owner releases its token. The renderer retains at most 64 recycled
+buffers and 1 MiB of capacity, including buffers awaiting completion; each buffer
+is at most 64 KiB. Small buffers use power-of-two capacity buckets, while larger
+paragraphs stay exact-sized and are released. `clear_cache()` releases recycled
+storage; retained resources stay valid, even after dropping the renderer.
 
-`stats()` exposes hits/misses, atlas uploads, prepared geometry bytes, parameter
+`stats()` exposes hits/misses, atlas uploads, prepared geometry payload bytes,
+geometry-buffer allocations/reuses, parameter
 bytes, recorded draw counts, live pages, logical atlas bytes, and cached key count.
 Pixel tests cover intrinsic color/opacity, linear compositing, DPI, clipping, MSAA,
 renderer interleaving, multiple prepared texts and source identities, overlapping
@@ -341,6 +351,11 @@ clearing. The standalone `painter_text` example owns its complete window lifecyc
 reflow/DPI preparation, surface recovery, and MSAA changes. The
 [Painter text recording baseline](performance/painter-text.md) compares direct and
 facade calls with matching draw counts; it does not measure GPU execution.
+
+The [changing-text performance report](performance/text-updates.md) records
+matched before/after CPU and GPU-preparation workloads, including paragraph
+reuse, geometry recycling, lifetime checks, and the added recording cost of
+tracking each text resource through completion.
 
 ## Quality/workload check and next representation
 

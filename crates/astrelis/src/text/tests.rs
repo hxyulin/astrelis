@@ -207,6 +207,71 @@ fn unchanged_evaluation_and_idempotent_setters_reuse_the_snapshot() {
 }
 
 #[test]
+fn paragraph_edits_insertions_and_deletions_match_fresh_layouts() {
+    let mut system = system();
+    let mut buffer = TextBuffer::new();
+    buffer.set_width(Some(130.)).unwrap();
+    let initial = "office AV\r\ne\u{301} العربية\ntrailing ffi\n";
+    buffer.set_text(initial, style()).unwrap();
+    let retained = buffer.layout(&mut system).unwrap();
+    for text in [
+        "office AV\r\nchanged العربية\ntrailing ffi\n",
+        "office AV\r\ninserted\nchanged العربية\ntrailing ffi\n",
+        "office AV\r\ntrailing ffi\n",
+        "new first\r\ntrailing ffi\n",
+        "new first\r\ntrailing ffi\nlast",
+        "\r\n\n\r\r",
+        "",
+        initial,
+    ] {
+        buffer.set_text(text, style()).unwrap();
+        let edited = buffer.layout(&mut system).unwrap();
+        let mut fresh = TextBuffer::new();
+        fresh.set_width(Some(130.)).unwrap();
+        fresh.set_text(text, style()).unwrap();
+        let fresh = fresh.layout(&mut system).unwrap();
+        assert_eq!(edited.glyphs().len(), fresh.glyphs().len(), "{text:?}");
+        for (i, (actual, expected)) in edited.glyphs().iter().zip(fresh.glyphs()).enumerate() {
+            assert_eq!(actual, expected, "glyph {i}, text {text:?}");
+        }
+        assert_eq!(edited.lines(), fresh.lines(), "{text:?}");
+        assert_eq!(edited.size(), fresh.size());
+        assert_eq!(edited.missing_glyphs(), fresh.missing_glyphs());
+        assert_eq!(edited.fonts().len(), fresh.fonts().len());
+        valid_clusters(&edited);
+    }
+    assert_eq!(retained.text(), initial);
+    valid_clusters(&retained);
+
+    // Matching paragraph text must still invalidate font selection and layout
+    // when style, wrapping, alignment, or the font database changes.
+    let changed_style = style().weight(700).font_size(24.).line_height(32.);
+    buffer.set_text(initial, changed_style.clone()).unwrap();
+    buffer.set_width(Some(180.)).unwrap();
+    buffer.set_align(TextAlign::Center);
+    buffer.set_wrap(TextWrap::Word);
+    let edited = buffer.layout(&mut system).unwrap();
+    let mut fresh = TextBuffer::new();
+    fresh.set_text(initial, changed_style.clone()).unwrap();
+    fresh.set_width(Some(180.)).unwrap();
+    fresh.set_align(TextAlign::Center);
+    fresh.set_wrap(TextWrap::Word);
+    let fresh = fresh.layout(&mut system).unwrap();
+    assert_eq!(edited.glyphs(), fresh.glyphs());
+    assert_eq!(edited.lines(), fresh.lines());
+    system.load_font(LATIN).unwrap();
+    let regenerated = buffer.layout(&mut system).unwrap();
+    let mut fresh = TextBuffer::new();
+    fresh.set_text(initial, changed_style).unwrap();
+    fresh.set_width(Some(180.)).unwrap();
+    fresh.set_align(TextAlign::Center);
+    fresh.set_wrap(TextWrap::Word);
+    let fresh = fresh.layout(&mut system).unwrap();
+    assert_eq!(regenerated.glyphs(), fresh.glyphs());
+    assert_eq!(regenerated.lines(), fresh.lines());
+}
+
+#[test]
 fn wrapping_alignment_and_metrics_invalidate_layout() {
     let mut system = system();
     let mut buffer = TextBuffer::new();

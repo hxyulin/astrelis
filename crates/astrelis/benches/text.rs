@@ -138,5 +138,36 @@ fn main() -> Result<()> {
             )?,
         );
     }
+    // One changing paragraph in a larger retained document; alternate equal-length
+    // contents so font/glyph selection stays warm while source text really changes.
+    for paragraphs in [10, 100, 1000] {
+        let seed = "office AV e\u{301} العربية 123 words wrap across lines.";
+        let content = vec![seed; paragraphs].join("\n");
+        let mut changed = vec![seed; paragraphs];
+        changed[paragraphs / 2] = "office AV e\u{301} العربية 456 words wrap across lines.";
+        let changed = changed.join("\n");
+        let mut retained = buffer(&content, 320.)?;
+        let initial = retained.layout(&mut system)?;
+        let mut alternate = false;
+        row(
+            content.chars().count(),
+            initial.glyphs().len(),
+            "one_paragraph_edit",
+            measure(
+                || {
+                    alternate = !alternate;
+                    retained.set_text(if alternate { &changed } else { &content }, style())?;
+                    black_box(retained.layout(&mut system)?);
+                    Ok(())
+                },
+                1,
+            )?,
+        );
+        let fresh = buffer(retained.text(), 320.)?.layout(&mut system)?;
+        let edited = retained.layout(&mut system)?;
+        assert_eq!(fresh.glyphs(), edited.glyphs());
+        assert_eq!(fresh.lines(), edited.lines());
+    }
+
     Ok(())
 }

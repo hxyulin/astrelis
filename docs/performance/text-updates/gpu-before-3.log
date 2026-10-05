@@ -1,0 +1,33 @@
+adapter=AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; size=[1920, 1080]; samples=40; warmup=8; timestamps_supported=true; timestamps_enabled=false; timestamp_period_ns=1
+case=empty_1x; valid_measured_gpu_samples=0
+case=empty_1x; drawable_glyphs=0; text_calls=0; page_batches_per_frame=0; stats=TextRendererStats { cache_hits: 0, cache_misses: 0, uploaded_bytes: 0, geometry_bytes: 0, parameter_bytes: 0, draw_calls: 0, live_pages: 0, atlas_bytes: 0, cached_glyphs: 0 }
+case=paragraph_1x; valid_measured_gpu_samples=0
+case=paragraph_1x; drawable_glyphs=4480; text_calls=1; page_batches_per_frame=1; stats=TextRendererStats { cache_hits: 5346, cache_misses: 30, uploaded_bytes: 2270, geometry_bytes: 215040, parameter_bytes: 2304, draw_calls: 48, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 30 }
+readback_nonzero_alpha_pixels=266560
+case=labels_600_1x; valid_measured_gpu_samples=0
+case=labels_600_1x; drawable_glyphs=5400; text_calls=600; page_batches_per_frame=600; stats=TextRendererStats { cache_hits: 11331, cache_misses: 45, uploaded_bytes: 3080, geometry_bytes: 474240, parameter_bytes: 1384704, draw_calls: 28848, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 45 }
+readback_nonzero_alpha_pixels=255460
+case=mixed_color_600_1x; valid_measured_gpu_samples=0
+case=mixed_color_600_1x; drawable_glyphs=3000; text_calls=600; page_batches_per_frame=3000; stats=TextRendererStats { cache_hits: 11333, cache_misses: 48, uploaded_bytes: 5438, geometry_bytes: 474480, parameter_bytes: 2767104, draw_calls: 172848, live_pages: 2, atlas_bytes: 5242880, cached_glyphs: 48 }
+readback_nonzero_alpha_pixels=799200
+case=update_60_of_600_1x; valid_measured_gpu_samples=0
+case=update_60_of_600_1x; drawable_glyphs=5400; text_calls=600; page_batches_per_frame=600; stats=TextRendererStats { cache_hits: 46133, cache_misses: 48, uploaded_bytes: 5438, geometry_bytes: 1977840, parameter_bytes: 4149504, draw_calls: 201648, live_pages: 2, atlas_bytes: 5242880, cached_glyphs: 48 }
+readback_nonzero_alpha_pixels=238080
+case=empty_4x; valid_measured_gpu_samples=0
+case=empty_4x; drawable_glyphs=0; text_calls=0; page_batches_per_frame=0; stats=TextRendererStats { cache_hits: 46133, cache_misses: 48, uploaded_bytes: 5438, geometry_bytes: 1977840, parameter_bytes: 4149504, draw_calls: 201648, live_pages: 2, atlas_bytes: 5242880, cached_glyphs: 48 }
+case=paragraph_4x; valid_measured_gpu_samples=0
+case=paragraph_4x; drawable_glyphs=4480; text_calls=1; page_batches_per_frame=1; stats=TextRendererStats { cache_hits: 51509, cache_misses: 48, uploaded_bytes: 5438, geometry_bytes: 2192880, parameter_bytes: 4151808, draw_calls: 201696, live_pages: 2, atlas_bytes: 5242880, cached_glyphs: 48 }
+readback_nonzero_alpha_pixels=296736
+case=labels_600_4x; valid_measured_gpu_samples=0
+case=labels_600_4x; drawable_glyphs=5400; text_calls=600; page_batches_per_frame=600; stats=TextRendererStats { cache_hits: 57509, cache_misses: 48, uploaded_bytes: 5438, geometry_bytes: 2452080, parameter_bytes: 5534208, draw_calls: 230496, live_pages: 2, atlas_bytes: 5242880, cached_glyphs: 48 }
+readback_nonzero_alpha_pixels=300114
+case=mixed_color_600_4x; valid_measured_gpu_samples=0
+case=mixed_color_600_4x; drawable_glyphs=3000; text_calls=600; page_batches_per_frame=3000; stats=TextRendererStats { cache_hits: 57514, cache_misses: 48, uploaded_bytes: 5438, geometry_bytes: 2452320, parameter_bytes: 6916608, draw_calls: 374496, live_pages: 2, atlas_bytes: 5242880, cached_glyphs: 48 }
+readback_nonzero_alpha_pixels=799200
+case=update_60_of_600_4x; valid_measured_gpu_samples=0
+case=update_60_of_600_4x; drawable_glyphs=5400; text_calls=600; page_batches_per_frame=600; stats=TextRendererStats { cache_hits: 92314, cache_misses: 48, uploaded_bytes: 5438, geometry_bytes: 3955680, parameter_bytes: 8299008, draw_calls: 403296, live_pages: 2, atlas_bytes: 5242880, cached_glyphs: 48 }
+readback_nonzero_alpha_pixels=283844
+unique_workload_scalars=4638; distinct_shaped_face_glyph_pairs=1822
+case=cold_unique; measured_cache_misses=72880; measured_atlas_payload_bytes=9487120; measured_geometry_bytes=4970880; peak_live_pages=1; peak_atlas_bytes=1048576; atlas_full_retries=0; measured_atlas_full_retries=0; stats=TextRendererStats { cache_hits: 147744, cache_misses: 87456, uploaded_bytes: 11384544, geometry_bytes: 5965056, parameter_bytes: 0, draw_calls: 0, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 1822 }
+case=cached_unique; measured_cache_misses=0; measured_atlas_payload_bytes=0; measured_geometry_bytes=4970880; peak_live_pages=1; peak_atlas_bytes=1048576; atlas_full_retries=0; measured_atlas_full_retries=0; stats=TextRendererStats { cache_hits: 238278, cache_misses: 1822, uploaded_bytes: 237178, geometry_bytes: 6089328, parameter_bytes: 0, draw_calls: 0, live_pages: 1, atlas_bytes: 1048576, cached_glyphs: 1822 }
+case=raster_size_pressure; measured_cache_misses=901; measured_atlas_payload_bytes=369770; measured_geometry_bytes=40320; peak_live_pages=2; peak_atlas_bytes=131072; atlas_full_retries=1; measured_atlas_full_retries=1; stats=TextRendererStats { cache_hits: 147, cache_misses: 1077, uploaded_bytes: 385015, geometry_bytes: 48384, parameter_bytes: 0, draw_calls: 0, live_pages: 2, atlas_bytes: 131072, cached_glyphs: 92 }
