@@ -15,6 +15,7 @@ cosmic-text.workspace = true
 bymsdfgen-core.workspace = true
 swash.workspace = true
 lyon_tessellation.workspace = true
+unicode-segmentation.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
@@ -66,4 +67,8 @@ harness = false
 
 [[bench]]
 name = "points"
+harness = false
+
+[[bench]]
+name = "text_interaction"
 harness = false

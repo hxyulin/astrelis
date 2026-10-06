@@ -1,0 +1,3 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/dev/projects/astrelis/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 2.52s
+     Running benches/text_interaction.rs (target/release/deps/text_interaction-2dc83555facf090f)

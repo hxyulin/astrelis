@@ -924,6 +924,18 @@ impl<'frame> RenderPass<'frame> {
         self.sample_count
     }
 
+    /// Returns the tracked physical scissor [x, y, width, height].
+    /// Raw wgpu changes do not update this value; the next wrapped draw restores it.
+    pub fn scissor_rect(&self) -> [u32; 4] {
+        self.scissor
+    }
+
+    /// Returns the tracked physical viewport [x, y, width, height, min_depth, max_depth].
+    /// Raw wgpu changes do not update it. Geometry uses coordinates relative to its origin.
+    pub fn viewport(&self) -> [f32; 6] {
+        self.viewport
+    }
+
     /// Returns the attachment's physical pixel dimensions.
     pub fn size(&self) -> [u32; 2] {
         self.size

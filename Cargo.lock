@@ -108,6 +108,7 @@ dependencies = [
  "lyon_tessellation",
  "pollster",
  "swash",
+ "unicode-segmentation",
  "wgpu",
  "winit",
 ]

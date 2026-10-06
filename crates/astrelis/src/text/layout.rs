@@ -1,5 +1,8 @@
 use super::{FontId, TextStyle, cosmic};
-use std::{ops::Range, sync::Arc};
+use std::{
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
 
 /// Retained selected font instance. Its source bytes survive dropping [`super::TextSystem`].
 /// Instance weight matters for variable fonts; the source face and requested weight
@@ -81,6 +84,8 @@ pub struct TextLine {
     pub height: f32,
     /// Advance width of the visual line, not its aligned position or ink bounds.
     pub width: f32,
+    /// Leftmost advance position in local units. Empty lines retain their alignment anchor.
+    pub left: f32,
     /// Paragraph direction detected by the Unicode bidi algorithm.
     pub rtl: bool,
 }
@@ -92,7 +97,8 @@ pub struct TextLine {
 /// maximum line advance; height includes all line boxes, including a trailing empty
 /// line after an explicit break. A width constraint controls wrapping/alignment;
 /// it does not force the measured width to equal the constraint. Empty text has
-/// zero width and one configured line box. No editing/caret policy is implied by clusters.
+/// zero width and one configured line box. Interaction geometry is indexed lazily;
+/// it retains no backend buffer and requires no fonts/GPU after layout evaluation.
 #[derive(Debug)]
 pub struct TextLayout {
     pub(crate) system_id: u64,
@@ -103,6 +109,8 @@ pub struct TextLayout {
     pub(crate) fonts: Vec<TextFont>,
     pub(crate) missing: Vec<Range<usize>>,
     pub(crate) size: [f32; 2],
+    pub(super) interaction:
+        OnceLock<Result<Box<super::interaction::Interaction>, super::TextError>>,
 }
 impl TextLayout {
     /// Original UTF-8 content, preserving explicit line endings.

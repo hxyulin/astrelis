@@ -29,6 +29,37 @@
 //! # Ok::<(), astrelis::text::TextError>(())
 //! ```
 //!
+//! Selectable text uses [`TextLayout::hit_test`], [`TextLayout::caret`] and
+//! [`TextLayout::selection_rects`] on the same snapshot used for drawing. The
+//! optional CPU index is built lazily; [`TextLayout::prepare_interaction`] can warm
+//! it before input. Ordinary labels allocate no interaction vectors. Queries use
+//! local layout units, so the host first undoes its draw translation/transform/DPI.
+//! Positions are whole-buffer UTF-8 byte offsets at extended-grapheme boundaries,
+//! with [`TextAffinity`] distinguishing soft-wrap/bidi edges. Ligature interior
+//! carets divide the advance evenly; font GDEF caret positions are not yet used.
+//! Applications retain anchor/focus, remap offsets after edits, and draw selection
+//! rectangles/carets independently of immutable prepared glyph geometry.
+//!
+//! ```
+//! use astrelis::{TextSystem, TextBuffer, TextStyle, TextPosition, TextAffinity};
+//! let mut fonts = TextSystem::new();
+//! fonts.load_font(include_bytes!("../../tests/fonts/SourceSans3-Regular.otf"))?;
+//! let mut buffer = TextBuffer::new();
+//! buffer.set_text("office e\u{301}", TextStyle::new().family("Source Sans 3"))?;
+//! let layout = buffer.layout(&mut fonts)?;
+//! assert_eq!(layout.interaction_bytes(), 0);
+//! layout.prepare_interaction()?; // CPU only; no GPU resource preparation.
+//! let position = layout.hit_test([10., 10.]).unwrap();
+//! let caret = layout.caret(position).unwrap();
+//! assert!(caret.height > 0.);
+//! assert!(!layout.is_text_boundary(layout.text().len() - 1));
+//! let end = TextPosition::new(layout.text().len()).affinity(TextAffinity::Upstream);
+//! assert!(layout.caret(end).is_some());
+//! let rectangles: Vec<_> = layout.selection_rects(0..6)?.collect();
+//! assert_eq!(rectangles.len(), 1);
+//! # Ok::<(), astrelis::TextError>(())
+//! ```
+//!
 //! The CPU backend is re-exported as [`cosmic`] for font inspection/custom consumers.
 //! [`TextSystem::as_cosmic`] and [`TextFont::as_cosmic`] expose read-only backend
 //! access. Buffer mutation goes through validated setters to preserve invalidation.
@@ -80,6 +111,7 @@
 mod buffer;
 mod distance_field;
 mod geometry;
+mod interaction;
 mod layout;
 mod renderer;
 mod style;
@@ -87,6 +119,7 @@ mod system;
 
 pub use buffer::TextBuffer;
 pub use cosmic_text as cosmic;
+pub use interaction::{SelectionRects, TextAffinity, TextCaret, TextPosition};
 pub use layout::{TextFont, TextGlyph, TextLayout, TextLine};
 pub use renderer::{
     MtsdfOptions, PreparedText, TextDraw, TextPreparation, TextRasterOptions, TextRenderError,
@@ -95,7 +128,7 @@ pub use renderer::{
 pub use style::{FontFamily, FontSlant, FontStretch, TextAlign, TextStyle, TextWrap};
 pub use system::{FontId, FontInfo, TextSystem};
 
-/// Font loading or paragraph layout failure. Rejected setters leave the buffer unchanged.
+/// Font loading, paragraph layout, or text interaction failure. Rejected setters leave the buffer unchanged.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TextError {
     /// The provided data contains no faces usable by the shaping backend.
@@ -111,6 +144,8 @@ pub enum TextError {
     FontUnavailable,
     /// Computed positions or line metrics overflowed finite floating-point units.
     LayoutOverflow,
+    /// Selection endpoints must be ordered, in bounds, and at grapheme/paragraph-break boundaries.
+    InvalidSelection,
 }
 impl std::fmt::Display for TextError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -121,6 +156,7 @@ impl std::fmt::Display for TextError {
             Self::NoFonts => "load a font before laying out nonempty text",
             Self::FontUnavailable => "selected font data is unavailable or invalid",
             Self::LayoutOverflow => "text layout positions or metrics exceed finite units",
+            Self::InvalidSelection => "selection must use ordered valid text boundaries",
         })
     }
 }
@@ -128,3 +164,6 @@ impl std::error::Error for TextError {}
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod interaction_tests;

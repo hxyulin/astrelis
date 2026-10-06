@@ -7,7 +7,8 @@
 //! required by the library, and no scene graph or display list is imposed.
 //!
 //! [`text`] provides font loading, advanced shaping, and retained paragraph layout
-//! independently of a GPU. [`TextSystem`] explicitly loads fonts; [`TextBuffer`]
+//! independently of a GPU. Lazy CPU caret/hit-test/selection queries share the retained
+//! snapshot without changing prepared glyphs. [`TextSystem`] explicitly loads fonts; [`TextBuffer`]
 //! evaluates into shared [`TextLayout`] snapshots with measurements, glyph origins,
 //! source clusters, bidi levels, and retained font data. Unchanged evaluation reuses
 //! its snapshot. [`TextRenderer`] explicitly prepares coverage/color or MTSDF glyph atlases
@@ -491,10 +492,11 @@ pub use points::{Point2D, PointAppend, PointBuffer, PointBufferOptions};
 pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use text::{
-    FontFamily, FontId, FontInfo, FontSlant, FontStretch, MtsdfOptions, PreparedText, TextAlign,
-    TextBuffer, TextDraw, TextError, TextFont, TextGlyph, TextLayout, TextLine, TextPreparation,
-    TextRasterOptions, TextRenderError, TextRenderer, TextRendererOptions, TextRendererStats,
-    TextStyle, TextSystem, TextWrap,
+    FontFamily, FontId, FontInfo, FontSlant, FontStretch, MtsdfOptions, PreparedText,
+    SelectionRects, TextAffinity, TextAlign, TextBuffer, TextCaret, TextDraw, TextError, TextFont,
+    TextGlyph, TextLayout, TextLine, TextPosition, TextPreparation, TextRasterOptions,
+    TextRenderError, TextRenderer, TextRendererOptions, TextRendererStats, TextStyle, TextSystem,
+    TextWrap,
 };
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{

@@ -1260,3 +1260,72 @@ fn batching_and_capacity_buckets_respect_application_device_limits() {
         assert!(errors.pop().await.is_none());
     });
 }
+
+#[test]
+fn caret_and_selection_updates_reuse_prepared_glyphs_and_geometry() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut fonts = TextSystem::new();
+        fonts
+            .load_font(include_bytes!("../../tests/fonts/SourceSans3-Regular.otf"))
+            .unwrap();
+        let mut b = TextBuffer::new();
+        b.set_text(
+            "office abc",
+            TextStyle::new()
+                .family("Source Sans 3")
+                .font_size(12.)
+                .line_height(16.),
+        )
+        .unwrap();
+        let layout = b.layout(&mut fonts).unwrap();
+        let mut renderer = TextRenderer::new(&g);
+        renderer.prepare(&t.render_format()).unwrap();
+        let prepared = renderer
+            .prepare_text(&layout, TextRasterOptions::new())
+            .unwrap();
+        let geometry = prepared.data.buffer.as_ref().unwrap();
+        let before = renderer.stats();
+        let mut shapes = ShapeRenderer::new(&g);
+        shapes.prepare(&t.render_format()).unwrap();
+        for byte in [0, 1, 3, 6, 8, 10] {
+            let bytes = pixels(&g, &mut t, |frame| {
+                let mut pass = frame.render_pass().begin().unwrap();
+                for rect in layout.selection_rects(0..byte).unwrap() {
+                    shapes
+                        .draw(&mut pass, ShapeDraw::rect(rect, [0.1, 0.3, 0.7, 0.5]))
+                        .unwrap();
+                }
+                renderer
+                    .draw(&mut pass, &prepared, TextDraw::default())
+                    .unwrap();
+                let caret = layout.caret(super::super::TextPosition::new(byte)).unwrap();
+                shapes
+                    .draw(
+                        &mut pass,
+                        ShapeDraw::rect(
+                            crate::Rect::new(caret.origin[0], caret.origin[1], 1., caret.height),
+                            [1.; 4],
+                        ),
+                    )
+                    .unwrap();
+            });
+            assert!(bytes.iter().any(|&b| b != 0));
+            assert!(same_geometry(
+                geometry,
+                prepared.data.buffer.as_ref().unwrap()
+            ));
+            let stats = renderer.stats();
+            assert_eq!(stats.uploaded_bytes, before.uploaded_bytes);
+            assert_eq!(stats.geometry_bytes, before.geometry_bytes);
+            assert_eq!(
+                stats.geometry_buffer_allocations,
+                before.geometry_buffer_allocations
+            );
+            assert!(Arc::ptr_eq(&layout, &b.layout(&mut fonts).unwrap()));
+        }
+        assert!(errors.pop().await.is_none());
+    });
+}

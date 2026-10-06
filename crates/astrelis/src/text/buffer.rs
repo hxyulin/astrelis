@@ -165,6 +165,8 @@ impl TextBuffer {
                 system.id,
                 self.text.clone(),
                 self.style.clone(),
+                self.align,
+                self.width,
             )?
         } else {
             self.backend.shape_until_scroll(&mut system.backend, false);
@@ -260,6 +262,8 @@ fn blank_snapshot(
     system_id: u64,
     text: Arc<str>,
     style: TextStyle,
+    align: TextAlign,
+    width: Option<f32>,
 ) -> Result<TextLayout, TextError> {
     let mut lines = Vec::with_capacity(buffer.lines.len());
     let mut offset = 0;
@@ -278,6 +282,7 @@ fn blank_snapshot(
             baseline,
             height,
             width: 0.,
+            left: empty_anchor(align, width, false),
             rtl: false,
         });
         offset += line.ending().as_str().len();
@@ -293,6 +298,7 @@ fn blank_snapshot(
         fonts: Vec::new(),
         missing: Vec::new(),
         size: [0., top],
+        interaction: Default::default(),
     })
 }
 
@@ -321,6 +327,7 @@ fn snapshot(
         fonts: Vec::new(),
         missing: Vec::new(),
         size: [0., 0.],
+        interaction: Default::default(),
     };
     let mut font_indices = HashMap::new();
     let mut last_font = None;
@@ -339,6 +346,7 @@ fn snapshot(
         }
         let line_index = output.lines.len();
         let glyph_start = output.glyphs.len();
+        let mut left = f32::INFINITY;
         let paragraph = &paragraphs[run.line_i];
         for glyph in run.glyphs {
             let key = (glyph.font_id, glyph.font_weight.0);
@@ -386,12 +394,13 @@ fn snapshot(
                 -glyph.font_size * glyph.y_offset,
             ];
             let advance_origin = [glyph.x, run.line_y + glyph.y];
+            left = left.min(glyph.x.min(glyph.x + glyph.w));
             let position = [advance_origin[0] + offset[0], advance_origin[1] + offset[1]];
             if position
                 .into_iter()
                 .chain(advance_origin)
                 .chain(offset)
-                .chain([glyph.w, glyph.font_size])
+                .chain([glyph.w, glyph.font_size, glyph.x + glyph.w])
                 .any(|v| !v.is_finite())
             {
                 return Err(TextError::LayoutOverflow);
@@ -427,10 +436,38 @@ fn snapshot(
             baseline: run.line_y,
             height: run.line_height,
             width: run.line_w,
+            left: if left.is_finite() {
+                left
+            } else {
+                empty_anchor(
+                    buffer.lines[run.line_i]
+                        .align()
+                        .map_or(TextAlign::Start, |a| match a {
+                            cosmic::Align::Left => TextAlign::Left,
+                            cosmic::Align::Right => TextAlign::Right,
+                            cosmic::Align::Center => TextAlign::Center,
+                            cosmic::Align::End => TextAlign::End,
+                            cosmic::Align::Justified => TextAlign::Justified,
+                        }),
+                    buffer.size().0,
+                    run.rtl,
+                )
+            },
             rtl: run.rtl,
         });
     }
     output.missing.sort_by_key(|range| (range.start, range.end));
     output.missing.dedup();
     Ok(output)
+}
+
+fn empty_anchor(align: TextAlign, width: Option<f32>, rtl: bool) -> f32 {
+    let width = width.unwrap_or(0.);
+    match align {
+        TextAlign::Center => width * 0.5,
+        TextAlign::Right => width,
+        TextAlign::Start if rtl => width,
+        TextAlign::End if !rtl => width,
+        _ => 0.,
+    }
 }

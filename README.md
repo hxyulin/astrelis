@@ -556,6 +556,7 @@ cargo run -p astrelis --example ui_workload
 cargo run -p astrelis --example scene_3d
 cargo run -p astrelis --example mixed_2d
 cargo run -p astrelis --example painter
+cargo run -p astrelis --example selectable_text
 cargo run -p astrelis --example text_layout
 cargo run -p astrelis --example text
 cargo run -p astrelis --example painter_text
@@ -667,3 +668,9 @@ implemented; outline/shadow effects remain separate.
 cargo run -p astrelis --example text_distance_fields
 cargo bench -p astrelis --bench text_distance_fields
 ```
+
+`selectable_text` adds retained CPU hit-testing, caret affinity, and selection
+rectangles to the same shaped layout. It handles multilingual pointer/keyboard
+selection and reports unchanged atlas/geometry counters while selection moves.
+The optional interaction index is never built for ordinary labels. See the
+[interaction API and measurements](docs/performance/text-interaction.md).
