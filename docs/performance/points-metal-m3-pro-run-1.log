@@ -1,0 +1,31 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/dev/projects/astrelis/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 0.88s
+     Running benches/points.rs (target/release/deps/points-f6eb5150fd68dd87)
+adapter=AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; samples=15; warmup=4; GPU pass timestamp feature=true; target=1920x1080 RGBA8 1x
+rejected GPU timestamps: begin=162776904154625, end=0, completed_us=7020.708
+GPU timestamps disabled after failed calibration; completed_frame_us is synchronized CPU wall time, not GPU pass time
+GPU pass timestamps calibrated=false
+pixel equivalence passed: polyline 10000 unchanged
+pixel equivalence passed: polyline 10000 append_256
+pixel equivalence passed: polyline 10000 replace_all
+pixel equivalence passed: polyline 10000 visible_4096
+pixel equivalence passed: markers 10000 unchanged
+pixel equivalence passed: markers 10000 append_256
+pixel equivalence passed: markers 10000 replace_all
+pixel equivalence passed: markers 10000 visible_4096
+pixel equivalence passed: polyline 100000 unchanged
+pixel equivalence passed: polyline 100000 append_256
+pixel equivalence passed: polyline 100000 replace_all
+pixel equivalence passed: polyline 100000 visible_4096
+pixel equivalence passed: markers 100000 unchanged
+pixel equivalence passed: markers 100000 append_256
+pixel equivalence passed: markers 100000 replace_all
+pixel equivalence passed: markers 100000 visible_4096
+pixel equivalence passed: polyline 1000000 unchanged
+pixel equivalence passed: polyline 1000000 append_256
+pixel equivalence passed: polyline 1000000 replace_all
+pixel equivalence passed: polyline 1000000 visible_4096
+pixel equivalence passed: markers 1000000 unchanged
+pixel equivalence passed: markers 1000000 append_256
+pixel equivalence passed: markers 1000000 replace_all
+pixel equivalence passed: markers 1000000 visible_4096

@@ -6,6 +6,8 @@ use crate::{
 };
 
 /// Reusable 2D drawing resources composed from independent primitive/path/image/text renderers.
+/// Optional polyline and marker renderers share application-owned point buffers;
+/// [`Self::prepare_points`] checks and warms their vertex-storage pipelines separately.
 ///
 /// Create once per device and retain across frames. [`Self::begin`] borrows an
 /// application-owned pass; it never acquires a frame, clears attachments, submits,
@@ -49,6 +51,8 @@ pub struct Painter {
     shapes: ShapeRenderer,
     lines: LineRenderer,
     paths: PathRenderer,
+    polylines: crate::PolylineRenderer,
+    markers: crate::MarkerRenderer,
     textures: TextureRenderer,
     text: TextRenderer,
     shape_scratch: Vec<ShapeDraw>,
@@ -57,11 +61,12 @@ pub struct Painter {
     path_scratch: Vec<PathDraw>,
 }
 impl Painter {
-    /// Creates independent shape, line, path, image, and text renderers with empty pipeline caches.
+    /// Creates independent shape, line, path, polyline, marker, image, and text renderers.
+    /// Pipeline caches start empty; point-rendering capabilities are checked on use.
     pub fn new(graphics: &GraphicsContext) -> Self {
         Self::with_options(graphics, crate::PipelineOptions::default())
     }
-    /// Configures the same immutable pipeline policy for shapes, lines, paths, images and text.
+    /// Configures the same immutable pipeline policy for all owned renderers.
     /// Depth/stencil attachment allocation and dynamic references belong to the pass.
     /// Text uses default atlas budgets; replace [`Self::text`] to select other budgets,
     /// preserving its pipeline options when the same clipping policy is wanted.
@@ -71,6 +76,8 @@ impl Painter {
             shapes: ShapeRenderer::with_options(graphics, options.clone()),
             lines: LineRenderer::with_options(graphics, options.clone()),
             paths: PathRenderer::with_options(graphics, options.clone()),
+            polylines: crate::PolylineRenderer::with_options(graphics, options.clone()),
+            markers: crate::MarkerRenderer::with_options(graphics, options.clone()),
             textures: TextureRenderer::with_options(graphics, options.clone()),
             text: TextRenderer::with_options(
                 graphics,
@@ -101,6 +108,20 @@ impl Painter {
         self.shapes.prepare_brush(format)?;
         self.lines.prepare_brush(format)?;
         self.paths.prepare_brush(format)
+    }
+    /// Warms optional dense polyline/marker shading and checks vertex-storage support.
+    /// Ordinary prepare does not require point-rendering capabilities. Samples stay separate.
+    pub fn prepare_points(&mut self, format: &RenderFormat) -> Result<(), Error> {
+        self.polylines.prepare(format)?;
+        self.markers.prepare(format)
+    }
+    /// Borrows GPU-expanded connected-line rendering over updateable point buffers.
+    pub fn polylines(&mut self) -> &mut crate::PolylineRenderer {
+        &mut self.polylines
+    }
+    /// Borrows GPU-expanded screen-pixel markers over updateable point buffers.
+    pub fn markers(&mut self) -> &mut crate::MarkerRenderer {
+        &mut self.markers
     }
     /// Prepares primitive and text pipelines for a surface, rejecting a foreign device.
     pub fn prepare_for_target(&mut self, target: &crate::RenderTarget<'_>) -> Result<(), Error> {
@@ -255,6 +276,30 @@ pub struct PaintSession<'draw, 'frame> {
     transform: Transform2D,
 }
 impl<'frame> PaintSession<'_, 'frame> {
+    /// Draws retained connected samples with the session transform applied on the GPU.
+    /// Width stays in screen pixels. No sample upload, scan, or CPU tessellation occurs.
+    pub fn draw_polyline(
+        &mut self,
+        points: &crate::PointBuffer,
+        mut draw: crate::PolylineDraw,
+    ) -> Result<(), Error> {
+        if self.transform != Transform2D::IDENTITY {
+            draw.transform = draw.transform.then(self.transform);
+        }
+        self.painter.polylines.draw(self.pass, points, draw)
+    }
+    /// Draws a retained sample range as screen-pixel markers. Radius stays fixed under zoom.
+    /// Gaps are skipped; overlap order follows the logical sample sequence.
+    pub fn draw_markers(
+        &mut self,
+        points: &crate::PointBuffer,
+        mut draw: crate::MarkerDraw,
+    ) -> Result<(), Error> {
+        if self.transform != Transform2D::IDENTITY {
+            draw.transform = draw.transform.then(self.transform);
+        }
+        self.painter.markers.draw(self.pass, points, draw)
+    }
     /// Draws a shape with a reusable brush in original geometry coordinates.
     /// Draw color acts as tint; the session transform moves geometry and brush together.
     pub fn draw_shape_with_brush(

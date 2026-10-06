@@ -3,6 +3,23 @@ use std::{error, fmt};
 /// An initialization, mesh validation, target, or rendering failure.
 #[derive(Debug)]
 pub enum Error {
+    /// Point capacity must be nonzero.
+    InvalidPointCapacity,
+    /// Point storage exceeds buffer/binding or draw-index limits.
+    PointBufferTooLarge,
+    /// A linear append or replacement exceeds fixed point capacity.
+    PointCapacityExceeded,
+    /// A sample is nonfinite and is not the explicit gap sentinel.
+    InvalidPoint {
+        /// Zero-based index within the supplied update slice.
+        index: usize,
+    },
+    /// Logical update/draw range is reversed or exceeds initialized samples.
+    InvalidPointRange,
+    /// Point style, color, transform, or transformed bounds are invalid.
+    InvalidPointDraw,
+    /// Vertex storage or required drawing/binding limits are unavailable.
+    UnsupportedPointLimits,
     /// Brush stops, gradient geometry, or brush transform are invalid.
     InvalidBrush,
     /// Brush storage exceeds the device's buffer or storage binding limits.
@@ -211,6 +228,13 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidPointCapacity => f.write_str("point capacity must be nonzero"),
+            Self::PointBufferTooLarge => f.write_str("point storage exceeds device buffer or draw limits"),
+            Self::PointCapacityExceeded => f.write_str("point update exceeds fixed linear capacity"),
+            Self::InvalidPoint {index} => write!(f,"point {index} must be finite or an explicit gap"),
+            Self::InvalidPointRange => f.write_str("logical point range must fit initialized samples"),
+            Self::InvalidPointDraw => f.write_str("point style/color/transform/bounds must be finite and valid"),
+            Self::UnsupportedPointLimits => f.write_str("point rendering requires vertex storage and compatible device limits"),
             Self::InvalidBrush => f.write_str("brush stops/geometry must be finite and ordered, and gradient transforms invertible"),
             Self::BrushTooLarge => f.write_str("brush stops exceed the device buffer or storage binding limit"),
             Self::UnsupportedBrushLimits => f.write_str("brush shading requires fragment storage buffers and compatible device limits"),

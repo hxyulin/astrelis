@@ -336,3 +336,21 @@ These are CPU recording/submission comparisons against Astrelis renderers, with
 GPU completion between samples excluded from the totals. They establish neither
 GPU execution cost nor the original direct-wgpu overhead gate. General paths,
 connected joins, text, and arbitrary clipping remain separate future work.
+
+
+## Retained dense-point stage
+
+PointBuffer adds explicit fixed-capacity linear/ring XY storage and partial updates.
+Independent PolylineRenderer and MarkerRenderer share it, with GPU transforms,
+physical-pixel stroke/marker size, selected logical ranges and explicit gaps. They
+compose through existing passes and the optional Painter point-rendering pair.
+Chart scales, original data, reduction and interaction policy remain application-owned.
+
+The standalone streaming_chart example retains original history, updates a summary
+hierarchy only where data changes, and explicitly reduces visible ranges while
+preserving extrema and gaps. This is an example-specific policy rather than a
+library scene/data processing system. [Point contracts](points.md) specify ordering,
+limits and stroke quality; [performance evidence](performance/points.md) separates
+update/record CPU work, completion wall latency and application-side reduction.
+Advertised Metal timestamp counters fail calibration here, so GPU-pass results remain
+unavailable. No universal GPU or relative-overhead gate is claimed from these runs.

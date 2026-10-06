@@ -75,7 +75,8 @@ pure outline geometry does not need rebuilding solely for a DPI transform.
 `PipelineOptions` selects blending, color writes, and optional wgpu depth/stencil
 state for built-in 2D shading. Shapes, lines and textures accept it through
 `with_options`; paths also accept it. Text uses `TextRendererOptions::pipeline`. Painter's `with_options`
-constructor applies one policy to all five renderers. Text retains its independent
+constructor applies one policy to all seven renderers, including the optional
+point-rendering pair. Text retains its independent
 atlas/cache budgets and can be replaced through `painter.text()`.
 `TextRendererOptions` is now `Clone` rather than `Copy`, because it owns pipeline
 configuration; clone options explicitly when configuring multiple text renderers.
@@ -178,3 +179,20 @@ rejection. Existing lifetime, cache-pressure and submission tests remain applica
 
 The [CPU comparison](performance/renderer-api.md) includes alternating baseline/current
 runs, raw timings, source/executable hashes, and measurement limitations.
+
+## Dense retained point series
+
+`GraphicsContext::create_point_buffer(PointBufferOptions)` creates fixed-capacity
+XY storage, with explicit gaps and optional ring eviction. PolylineRenderer and
+MarkerRenderer independently prepare/draw/bind that same resource. Their per-draw
+`transform`, `space`, color and logical `range` values stay separate from samples;
+widths and marker radii are physical pixels after geometry transforms. Both accept
+PipelineOptions and share clipping/state-restoration rules with other renderers.
+
+There is no CPU point mirror, draw-time scan, or automatic reduction. Sample updates
+validate supplied data and queue writes, following the same live-data ordering as
+mesh/texture updates. Vertex storage support is checked at creation/preparation;
+Painter's ordinary preparation does not require it. `prepare_points` separately
+warms the optional pair before `draw_polyline` / `draw_markers` in a PaintSession.
+See [point contracts](points.md) for capacity, ring indices, fast-stroke overlap,
+screen geometry and application-owned reduction, and [measurements](performance/points.md).

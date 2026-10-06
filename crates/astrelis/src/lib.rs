@@ -197,6 +197,48 @@
 //! not at their source-code position between draws. Use encoder copies or custom
 //! commands when updates must occur at a precise point in the command sequence.
 //!
+//! # Retained dense data
+//!
+//! [`PointBuffer`] stores eight-byte XY samples with explicit capacity and optional
+//! ring eviction. [`Point2D::gap`] breaks connections. Replacement, logical-range
+//! writes, and appends validate and upload only supplied data; pan/zoom does not
+//! rebuild samples. Updates follow the queue-write ordering described above.
+//! [`PolylineRenderer`] expands connected segments and joins in the vertex shader;
+//! [`MarkerRenderer`] shares the same samples for circles, squares, or diamonds.
+//! Each selected range uses one draw and 80 bytes of frame parameters. Sample work
+//! scales with the selected range; there is no automatic culling or reduction.
+//! Widths and marker radii use physical screen pixels, independent of the affine
+//! data/Painter transform. These fast strokes do not union self-intersections.
+//!
+//! ```no_run
+//! use astrelis::{Error, GraphicsContext, Point2D, PointBufferOptions};
+//! fn samples(graphics: &GraphicsContext) -> Result<astrelis::PointBuffer, Error> {
+//!     let mut points = graphics.create_point_buffer(PointBufferOptions::new(100_000).ring())?;
+//!     points.append(&[Point2D::new([0., 1.]), Point2D::new([1., 2.]), Point2D::gap()])?;
+//!     points.write(1, &[Point2D::new([1., 1.5])])?;
+//!     Ok(points)
+//! }
+//! ```
+//!
+//! ```no_run
+//! use astrelis::{Error, MarkerDraw, MarkerRenderer, PointBuffer, PolylineDraw,
+//!     PolylineRenderer, RenderPass, Transform2D};
+//! fn series(pass: &mut RenderPass<'_>, lines: &mut PolylineRenderer,
+//!     markers: &mut MarkerRenderer, points: &PointBuffer) -> Result<(), Error> {
+//!     let view = Transform2D([10., 0., 0., -20., 30., 200.]);
+//!     lines.draw(pass, points, PolylineDraw::new([0.2, 0.7, 1., 1.])
+//!         .transform(view).width_pixels(1.5).range(0..points.len()))?;
+//!     markers.draw(pass, points, MarkerDraw::new([1.; 4])
+//!         .transform(view).radius_pixels(2.))?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! Point rendering requires vertex-stage storage buffers; ordinary Painter drawing
+//! does not. Warm optional pipelines with [`Painter::prepare_points`], then use
+//! [`PaintSession::draw_polyline`] / [`PaintSession::draw_markers`]. Applications own
+//! original data, visible-range selection, and any min/max reduction policy.
+//!
 //! # Solid 2D primitives
 //!
 //! [`ShapeRenderer`] fills and outlines rectangles, uniformly rounded rectangles,
@@ -407,6 +449,8 @@ mod painter;
 mod pass;
 mod path;
 mod pipeline_options;
+mod point_renderer;
+mod points;
 mod primitive;
 mod target;
 mod texture;
@@ -439,6 +483,11 @@ pub use path::{
     PathStroke, PreparedPath,
 };
 pub use pipeline_options::PipelineOptions;
+pub use point_renderer::{
+    MarkerDraw, MarkerDrawSession, MarkerRenderer, MarkerShape, PolylineDraw, PolylineDrawSession,
+    PolylineRenderer,
+};
+pub use points::{Point2D, PointAppend, PointBuffer, PointBufferOptions};
 pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use text::{

@@ -63,3 +63,7 @@ harness = false
 [[bench]]
 name = "brushes"
 harness = false
+
+[[bench]]
+name = "points"
+harness = false

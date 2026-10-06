@@ -248,9 +248,40 @@ offscreen pass. Changing immutable brush settings creates a new brush resource.
 Run `cargo run -p astrelis --example brushes` for the single-file gallery.
 See [brush contracts](docs/brushes.md) for coordinates, lifetimes, and limitations.
 
+## Dense charts and point series
+
+`PointBuffer` retains eight-byte XY samples at fixed capacity. Explicit replacement,
+logical range writes, and append upload only supplied data; optional ring storage
+evicts oldest points without moving existing samples. `Point2D::gap()` marks breaks.
+Independent `PolylineRenderer` and `MarkerRenderer` share this storage and expand
+geometry on the GPU, with one draw and 80 bytes of parameters per selected range.
+
+```rust
+let mut points = graphics.create_point_buffer(PointBufferOptions::new(100_000).ring())?;
+points.append(&incoming)?;
+let mut lines = PolylineRenderer::new(&graphics);
+lines.prepare(&target.render_format())?;
+lines.draw(&mut pass, &points, PolylineDraw::new([0.2, 0.7, 1., 1.])
+    .transform(view).width_pixels(1.5).range(visible_start..visible_end))?;
+```
+
+Widths and marker radii stay physical screen pixels while affine data transforms
+pan/zoom positions. Connected lines provide miter/bevel/round joins and caps;
+markers provide circles/squares/diamonds. Coverage, MSAA, clipping, and shared
+PipelineOptions work with both. Fast polyline strokes do not union self-intersections.
+Data updates follow queue-write ordering and are not snapshots between draws.
+Vertex-storage support is required; ordinary Painter rendering remains independent.
+Applications explicitly select visible samples and own any reduction policy.
+
+Run `cargo run -p astrelis --release --example streaming_chart` for a single-file
+10K/100K/1M rolling chart with application-side min/max reduction, pan/zoom, gaps,
+markers, and update statistics. See [dense-data contracts](docs/points.md) and
+[measurements](docs/performance/points.md).
+
 ## Painter
 
-`Painter` retains a shape, line, path, image, and text renderer and lends an immediate painting
+`Painter` retains shape, line, path, image, text, and optional polyline/marker renderers,
+and lends an immediate painting
 session on an existing pass. It preserves call order and exposes explicit batches;
 it does not buffer a display list. Borrowed transform scopes apply local geometry
 transforms without changing the parent's transform. They leave viewport, clipping,
@@ -289,6 +320,9 @@ one explicit `draw_shapes` batch. `shapes()`, `lines()`, `paths()`, `textures()`
 expose the owned renderers outside an active session for direct scopes, preparation,
 custom image materials/samplers, and immutable prepared image data. Painter owns no
 window, frame, scene, or UI layout. There is no session flush or finish operation.
+`prepare_points(format)` separately warms the vertex-storage pair; `polylines()`
+and `markers()` expose them, and sessions offer `draw_polyline` / `draw_markers`.
+Shared transforms move their positions while widths/radii stay physical pixels.
 
 ## Scoped drawing
 

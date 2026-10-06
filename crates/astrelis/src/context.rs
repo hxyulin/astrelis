@@ -30,6 +30,15 @@ pub struct GraphicsContext {
 }
 
 impl GraphicsContext {
+    /// Allocates fixed-capacity linear/ring samples for polylines and markers.
+    /// Creation checks vertex storage/device limits and queues no sample uploads.
+    /// Use replace/append/write explicitly before recording the consuming frame.
+    pub fn create_point_buffer(
+        &self,
+        options: crate::PointBufferOptions,
+    ) -> Result<crate::PointBuffer, Error> {
+        crate::PointBuffer::create(self, options)
+    }
     /// Validates and uploads an immutable solid, linear, or radial brush.
     /// Stops, geometry mapping, and device limits are checked before GPU allocation.
     /// Reuse it with paths, shapes, or lines on this device; draw color acts as tint.
