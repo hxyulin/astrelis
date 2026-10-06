@@ -271,6 +271,26 @@
 //! caller-controlled. Texture sessions snapshot a live framebuffer image for the
 //! scope's duration; begin a new scope to follow later storage replacement.
 //!
+//! # Vector paths
+//!
+//! [`Path`] retains device-independent lines, quadratic/cubic curves, and multiple
+//! contours. Its builder validates coordinates and command order. [`PathRenderer`]
+//! explicitly prepares fills with [`FillRule`] or centered connected strokes with
+//! [`PathStroke`]. Stroke caps, joins, widths, and curve tolerance are preparation
+//! settings; colors, transforms, and edge coverage remain per draw. Overlapping
+//! stroke triangles are unioned before shading so translucent crossings blend once.
+//! Retain [`PreparedPath`] across frames; drawing uploads only 64-byte placement
+//! records. [`PathRenderer::draw_many`] instances ordered placements of one path,
+//! and [`PathRenderer::bind`] selects one pipeline for multiple prepared paths.
+//!
+//! Curve tolerance uses path units and scales with geometry; choose a smaller
+//! tolerance explicitly for large zooms. Coverage uses an approximate centered
+//! one-pixel screen-space band, independent of target MSAA. Narrow features and
+//! sharp/touching contours can have approximate coverage. Select
+//! [`EdgeAntialiasing::None`] to use only interior triangles and target MSAA.
+//! PipelineOptions, pass clipping, raw access, and depth/stencil follow the other
+//! 2D renderers. Painter exposes `prepare_path`, `draw_path`, and `draw_paths`.
+//!
 //! # Painter convenience
 //!
 //! [`Painter`] composes independent 2D renderers and lends a [`PaintSession`] on
@@ -353,6 +373,7 @@ mod mesh;
 mod mesh_renderer;
 mod painter;
 mod pass;
+mod path;
 mod pipeline_options;
 mod primitive;
 mod target;
@@ -380,6 +401,10 @@ pub use mesh::{
 pub use mesh_renderer::{MeshDrawSession, MeshRenderer};
 pub use painter::{PaintSession, Painter};
 pub use pass::{RenderPass, RenderPassBuilder};
+pub use path::{
+    FillRule, LineJoin, Path, PathBuilder, PathDraw, PathDrawSession, PathOptions, PathRenderer,
+    PathStroke, PreparedPath,
+};
 pub use pipeline_options::PipelineOptions;
 pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};

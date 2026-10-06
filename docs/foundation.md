@@ -8,6 +8,12 @@ This milestone establishes consumer examples, regression checks, and a reproduci
 performance baseline. Adding those checks does not itself mean every performance
 target has passed.
 
+The retained [path stage](paths.md) adds vector fills and connected strokes through
+an independent renderer and Painter. Its [measurement evidence](performance/paths.md)
+reports preparation separately from warm recording, checks matched direct-wgpu
+drawing, and explicitly records the remaining recording-overhead and coverage
+limitations. It preserves application ownership of passes, clipping, and submission.
+
 ## API acceptance
 
 | Condition | Evidence |

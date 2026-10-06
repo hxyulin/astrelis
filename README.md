@@ -158,7 +158,7 @@ passes. Both provide `draw`, `draw_many`, and `bind` scopes. Batches validate ev
 item before drawing, preserve order, and split by upload capacity. Warmed workloads
 reuse buffers, pipeline variants, and CPU scratch. Defaults disable depth/stencil
 tests and writes so primitives can overlay a 3D pass, including read-only aspects.
-Custom stencil-tested primitives can use mesh materials.
+`PipelineOptions` configures custom blending and depth/stencil policies.
 
 ```rust
 let mut shapes = ShapeRenderer::new(&graphics);
@@ -174,9 +174,48 @@ strokes.draw(LineDraw::new([30., 50.], [130., 50.], [1.; 4])
     .width(3.).cap(LineCap::Round))?;
 ```
 
+## Vector paths
+
+`Path` is immutable CPU geometry with lines, quadratic/cubic Bézier segments, and
+multiple open or closed contours. Filling implicitly closes open contours;
+stroking preserves open ends. `PathRenderer` prepares nonzero/even-odd fills or
+centered strokes with butt/square/round caps and miter/bevel/round joins. Overlapping
+stroke triangles are unioned so translucent crossings blend once.
+
+```rust
+let mut builder = Path::builder();
+builder.move_to([0., 0.]).line_to([80., 0.])
+    .quadratic_to([100., 40.], [80., 80.]).line_to([0., 80.]).close();
+let path = builder.build()?;
+let mut paths = PathRenderer::new(&graphics);
+let fill = paths.prepare_path(&path, PathOptions::new())?;
+let outline = paths.prepare_path(&path,
+    PathOptions::new().stroke(PathStroke::new(3.).join(LineJoin::Round)))?;
+paths.prepare(&target.render_format())?;
+
+let mut pass = frame.render_pass().begin()?;
+let mut draws = paths.bind(&mut pass)?;
+let placement = Transform2D::translation(20., 30.);
+draws.draw(&fill, PathDraw::new([0.1, 0.4, 0.8, 0.8]).transform(placement))?;
+draws.draw(&outline, PathDraw::new([1.; 4]).transform(placement))?;
+```
+
+Retain `PreparedPath` across frames. Color and transforms upload only a 64-byte
+parameter record; geometry is not rebuilt. `draw_many` instances ordered placements
+of one path. Curve tolerance is explicit in path units and scales with geometry:
+large zooms may need preparation with a smaller tolerance. Coverage uses an
+approximate centered one-pixel screen-space band. Narrow features and sharp or
+touching contours can have approximate coverage; select `EdgeAntialiasing::None`
+with target MSAA for geometric sample coverage. Defaults share the same
+`PipelineOptions`/clipping/depth/stencil contract as other 2D renderers.
+
+Run `cargo run -p astrelis --example paths` for the standalone fill/stroke gallery.
+It owns its window and event loop; A switches coverage, Space switches MSAA.
+See [path contracts](docs/paths.md) for ownership, quality, and preparation costs.
+
 ## Painter
 
-`Painter` retains a shape, line, image, and text renderer and lends an immediate painting
+`Painter` retains a shape, line, path, image, and text renderer and lends an immediate painting
 session on an existing pass. It preserves call order and exposes explicit batches;
 it does not buffer a display list. Borrowed transform scopes apply local geometry
 transforms without changing the parent's transform. They leave viewport, clipping,
@@ -207,10 +246,11 @@ frame.finish()?;
 
 Image bindings use `create_image_binding` or `create_sampled_binding`, with
 `prepare_image` for the binding/attachment variant. A session offers `draw_image`,
-`draw_shapes`, `draw_lines`, and `draw_images`. Transformed batches reuse CPU scratch;
+`draw_shapes`, `draw_lines`, `draw_paths`, and `draw_images`. `prepare_path` retains
+geometry before `draw_path`/`draw_paths`. Transformed batches reuse CPU scratch;
 identity-transform batches delegate directly. `stroke_rect`, `stroke_rounded_rect`,
 and `stroke_ellipse` provide outline conveniences; fills and outlines can share
-one explicit `draw_shapes` batch. `shapes()`, `lines()`, `textures()`, and `text()`
+one explicit `draw_shapes` batch. `shapes()`, `lines()`, `paths()`, `textures()`, and `text()`
 expose the owned renderers outside an active session for direct scopes, preparation,
 custom image materials/samplers, and immutable prepared image data. Painter owns no
 window, frame, scene, or UI layout. There is no session flush or finish operation.

@@ -21,6 +21,7 @@ meshes.prepare(&target.render_format())?;
 meshes.prepare_material(&material, &framebuffer.render_format())?;
 shapes.prepare(&target.render_format())?;
 lines.prepare(&target.render_format())?;
+paths.prepare(&target.render_format())?;
 text.prepare(&target.render_format())?;
 textures.prepare(&image, &target.render_format())?;
 ```
@@ -73,8 +74,8 @@ pure outline geometry does not need rebuilding solely for a DPI transform.
 
 `PipelineOptions` selects blending, color writes, and optional wgpu depth/stencil
 state for built-in 2D shading. Shapes, lines and textures accept it through
-`with_options`; text uses `TextRendererOptions::pipeline`. Painter's `with_options`
-constructor applies one policy to all four renderers. Text retains its independent
+`with_options`; paths also accept it. Text uses `TextRendererOptions::pipeline`. Painter's `with_options`
+constructor applies one policy to all five renderers. Text retains its independent
 atlas/cache budgets and can be replaced through `painter.text()`.
 `TextRendererOptions` is now `Clone` rather than `Copy`, because it owns pipeline
 configuration; clone options explicitly when configuring multiple text renderers.

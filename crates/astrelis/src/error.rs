@@ -54,6 +54,22 @@ pub enum Error {
     InvalidShapeDraw,
     /// Line endpoints, width, color, transform, or transformed bounds are invalid.
     InvalidLineDraw,
+    /// A path command has nonfinite coordinates or is outside an open contour.
+    InvalidPath {
+        /// Zero-based index of the rejected command.
+        command: usize,
+    },
+    /// Path tolerance, stroke width, or miter limit is invalid.
+    InvalidPathOptions,
+    /// Prepared path geometry exceeds the device buffer or index-count limit.
+    PathTooLarge,
+    /// Path tessellation failed or generated invalid geometry.
+    PathTessellation {
+        /// Tessellator diagnostic.
+        message: String,
+    },
+    /// Path color, transform, or transformed geometry is invalid.
+    InvalidPathDraw,
     /// Text placement, color, opacity, or transformed bounds are invalid.
     InvalidTextDraw,
     /// Sampling would read from an active color or resolve attachment.
@@ -187,6 +203,11 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidPath { command } => write!(f, "invalid path command at index {command}"),
+            Self::InvalidPathOptions => f.write_str("path tolerance must be positive, stroke width nonnegative, and miter limit at least one; values must be finite"),
+            Self::PathTooLarge => f.write_str("prepared path geometry exceeds device buffer or index-count limits"),
+            Self::PathTessellation { message } => write!(f, "path tessellation failed: {message}"),
+            Self::InvalidPathDraw => f.write_str("path color/transform/bounds must be finite and alpha in 0..=1"),
             Self::InvalidAttachments => f.write_str("pass attachments must have compatible formats, dimensions, and samples"),
             Self::ExpectedSingleColor => f.write_str("this renderer requires a single color output at slot zero"),
             Self::Validation(error) => write!(f, "GPU validation failed: {error}"),

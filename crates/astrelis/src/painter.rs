@@ -1,10 +1,11 @@
 use crate::{
-    Error, GraphicsContext, LineDraw, LineRenderer, PreparedText, Rect, RenderFormat, RenderPass,
-    ShapeDraw, ShapeRenderer, Stroke, TextDraw, TextLayout, TextPreparation, TextRenderError,
-    TextRenderer, TextureBinding, TextureBindingOptions, TextureDraw, TextureRenderer, Transform2D,
+    Error, GraphicsContext, LineDraw, LineRenderer, Path, PathDraw, PathOptions, PathRenderer,
+    PreparedPath, PreparedText, Rect, RenderFormat, RenderPass, ShapeDraw, ShapeRenderer, Stroke,
+    TextDraw, TextLayout, TextPreparation, TextRenderError, TextRenderer, TextureBinding,
+    TextureBindingOptions, TextureDraw, TextureRenderer, Transform2D,
 };
 
-/// Reusable 2D drawing resources composed from independent primitive/image/text renderers.
+/// Reusable 2D drawing resources composed from independent primitive/path/image/text renderers.
 ///
 /// Create once per device and retain across frames. [`Self::begin`] borrows an
 /// application-owned pass; it never acquires a frame, clears attachments, submits,
@@ -14,10 +15,12 @@ use crate::{
 /// independently usable, and custom GPU work fits through [`PaintSession::pass`].
 ///
 /// Colors, coordinates, transforms, caps, coverage, and errors follow [`ShapeDraw`],
-/// [`LineDraw`], [`TextureDraw`], and [`TextDraw`]. Text shaping and rasterization
+/// [`LineDraw`], [`PathDraw`], [`TextureDraw`], and [`TextDraw`]. Text shaping and rasterization
 /// are explicit: prepare a [`TextLayout`] before [`Self::prepare_text`], retain the
 /// returned [`PreparedText`], and reuse it across sessions. Prepare variants before
-/// first use to avoid pipeline creation while recording. After warm-up, a fixed batch workload reuses
+/// first use to avoid pipeline creation while recording. Paths are tessellated explicitly
+/// through [`Self::prepare_path`], retaining geometry independently of draw color/transform.
+/// After warm-up, a fixed batch workload reuses
 /// GPU pages and CPU scratch; transformed batches retain capacity up to their peak.
 ///
 /// ```no_run
@@ -45,18 +48,20 @@ pub struct Painter {
     graphics: GraphicsContext,
     shapes: ShapeRenderer,
     lines: LineRenderer,
+    paths: PathRenderer,
     textures: TextureRenderer,
     text: TextRenderer,
     shape_scratch: Vec<ShapeDraw>,
     line_scratch: Vec<LineDraw>,
     image_scratch: Vec<TextureDraw>,
+    path_scratch: Vec<PathDraw>,
 }
 impl Painter {
-    /// Creates independent shape, line, image, and text renderers with empty pipeline caches.
+    /// Creates independent shape, line, path, image, and text renderers with empty pipeline caches.
     pub fn new(graphics: &GraphicsContext) -> Self {
         Self::with_options(graphics, crate::PipelineOptions::default())
     }
-    /// Configures the same immutable pipeline policy for shapes, lines, images and text.
+    /// Configures the same immutable pipeline policy for shapes, lines, paths, images and text.
     /// Depth/stencil attachment allocation and dynamic references belong to the pass.
     /// Text uses default atlas budgets; replace [`Self::text`] to select other budgets,
     /// preserving its pipeline options when the same clipping policy is wanted.
@@ -65,6 +70,7 @@ impl Painter {
             graphics: graphics.clone(),
             shapes: ShapeRenderer::with_options(graphics, options.clone()),
             lines: LineRenderer::with_options(graphics, options.clone()),
+            paths: PathRenderer::with_options(graphics, options.clone()),
             textures: TextureRenderer::with_options(graphics, options.clone()),
             text: TextRenderer::with_options(
                 graphics,
@@ -77,6 +83,7 @@ impl Painter {
             shape_scratch: Vec::new(),
             line_scratch: Vec::new(),
             image_scratch: Vec::new(),
+            path_scratch: Vec::new(),
         }
     }
     /// Prepares default primitive and text pipelines for this attachment format.
@@ -85,6 +92,7 @@ impl Painter {
     pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), Error> {
         self.shapes.prepare(format)?;
         self.lines.prepare(format)?;
+        self.paths.prepare(format)?;
         self.text.prepare(format)
     }
     /// Prepares primitive and text pipelines for a surface, rejecting a foreign device.
@@ -135,6 +143,20 @@ impl Painter {
     /// Borrows the underlying renderer for direct preparation, drawing, or scopes.
     pub fn lines(&mut self) -> &mut LineRenderer {
         &mut self.lines
+    }
+    /// Borrows the independent path renderer for preparation, drawing, or scopes.
+    pub fn paths(&mut self) -> &mut PathRenderer {
+        &mut self.paths
+    }
+    /// Tessellates and uploads a retained fill/stroke outside an active session.
+    /// Color, placement, and edge coverage remain per draw. Does not prepare an
+    /// attachment pipeline. Retain the result until geometry/settings change.
+    pub fn prepare_path(
+        &mut self,
+        path: &Path,
+        options: PathOptions,
+    ) -> Result<PreparedPath, Error> {
+        self.paths.prepare_path(path, options)
     }
     /// Borrows the underlying renderer for custom samplers/materials, prepared data,
     /// live sources, direct drawing, or scopes outside an active painting session.
@@ -207,7 +229,7 @@ impl Painter {
 /// Pass access records in place with no flush required. Following paint calls
 /// restore the state their renderer needs. Application groups and chosen wrapped
 /// raster settings remain caller-controlled. Painter does not own stencil clipping
-/// policy, layout, windows, text shaping, paths, or a retained display list.
+/// policy, layout, windows, text shaping, or a retained display list.
 /// The exclusive pass borrow prevents overlapping direct use:
 ///
 /// ```compile_fail
@@ -387,6 +409,30 @@ impl<'frame> PaintSession<'_, 'frame> {
             draw.transform = draw.transform.then(self.transform);
         }
         self.painter.text.draw(self.pass, text, draw)
+    }
+    /// Draws prepared vector geometry; the session transform follows its draw transform.
+    /// No tessellation or geometry upload occurs during painting.
+    pub fn draw_path(&mut self, path: &PreparedPath, mut draw: PathDraw) -> Result<(), Error> {
+        if self.transform != Transform2D::IDENTITY {
+            draw.transform = draw.transform.then(self.transform);
+        }
+        self.painter.paths.draw(self.pass, path, draw)
+    }
+    /// Instances ordered placements of one retained path, validating the whole slice.
+    /// The identity session forwards directly; transformed sessions reuse CPU scratch.
+    pub fn draw_paths(&mut self, path: &PreparedPath, draws: &[PathDraw]) -> Result<(), Error> {
+        if self.transform == Transform2D::IDENTITY {
+            return self.painter.paths.draw_many(self.pass, path, draws);
+        }
+        self.painter.path_scratch.clear();
+        self.painter.path_scratch.extend(
+            draws
+                .iter()
+                .map(|d| d.transform(d.transform.then(self.transform))),
+        );
+        self.painter
+            .paths
+            .draw_many(self.pass, path, &self.painter.path_scratch)
     }
     /// Validates a whole slice, then instances ordered placements of one image.
     pub fn draw_images(

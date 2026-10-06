@@ -15,6 +15,7 @@ bytemuck = { version = "1", features = ["derive"] }
 cosmic-text = { version = "=0.19.0", default-features = false, features = ["std"] }
 bymsdfgen-core = { version = "=0.1.1", default-features = false }
 swash = { version = "=0.2.10", default-features = false, features = ["std", "scale", "render"] }
+lyon_tessellation = "=1.0.22"
 wgpu = { version = "=30.0.1", default-features = false, features = [
     "std", "parking_lot", "wgsl", "metal", "vulkan", "dx12", "webgpu",
 ] }

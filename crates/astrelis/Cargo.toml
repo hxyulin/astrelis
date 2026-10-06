@@ -1,6 +1,6 @@
 [package]
 name = "astrelis"
-description = "A small mesh, image, and 2D primitive rendering API built directly on wgpu"
+description = "A rendering API for meshes, images, vector paths, and text built directly on wgpu"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -14,6 +14,7 @@ bytemuck.workspace = true
 cosmic-text.workspace = true
 bymsdfgen-core.workspace = true
 swash.workspace = true
+lyon_tessellation.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
@@ -53,4 +54,8 @@ harness = false
 
 [[bench]]
 name = "text_batches"
+harness = false
+
+[[bench]]
+name = "paths"
 harness = false
