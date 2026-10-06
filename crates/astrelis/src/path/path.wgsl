@@ -10,16 +10,16 @@ fn safe_unit(v: vec2<f32>) -> vec2<f32> {
     return normalize(v / scale);
 }
 
-@vertex
-fn vertex_main(
-    @location(0) position: vec2<f32>,
-    @location(1) incoming: vec2<f32>,
-    @location(2) outgoing: vec2<f32>,
-    @location(3) outer: f32,
-    @location(4) axes: vec4<f32>,
-    @location(5) translation_viewport: vec4<f32>,
-    @location(6) color: vec4<f32>,
-    @location(7) style: vec4<f32>,
+
+fn path_vertex(
+    position: vec2<f32>,
+    incoming: vec2<f32>,
+    outgoing: vec2<f32>,
+    outer: f32,
+    axes: vec4<f32>,
+    translation_viewport: vec4<f32>,
+    color: vec4<f32>,
+    style: vec4<f32>,
 ) -> Output {
     let matrix = mat2x2(axes.xy, axes.zw);
     var pixel = matrix * position + translation_viewport.xy;
@@ -55,4 +55,18 @@ fn fragment_covered(input: Output) -> @location(0) vec4<f32> {
     let color = shade(input);
     if color.a == 0.0 { discard; }
     return color;
+}
+
+@vertex
+fn vertex_main(
+    @location(0) position: vec2<f32>,
+    @location(1) incoming: vec2<f32>,
+    @location(2) outgoing: vec2<f32>,
+    @location(3) outer: f32,
+    @location(4) axes: vec4<f32>,
+    @location(5) translation_viewport: vec4<f32>,
+    @location(6) color: vec4<f32>,
+    @location(7) style: vec4<f32>,
+) -> Output {
+    return path_vertex(position,incoming,outgoing,outer,axes,translation_viewport,color,style);
 }

@@ -95,6 +95,13 @@ impl Painter {
         self.paths.prepare(format)?;
         self.text.prepare(format)
     }
+    /// Warms brush shading for shapes, lines, and paths in these attachments/MSAA.
+    /// Brushes are created separately on GraphicsContext; this uploads no stops or geometry.
+    pub fn prepare_brush(&mut self, format: &RenderFormat) -> Result<(), Error> {
+        self.shapes.prepare_brush(format)?;
+        self.lines.prepare_brush(format)?;
+        self.paths.prepare_brush(format)
+    }
     /// Prepares primitive and text pipelines for a surface, rejecting a foreign device.
     pub fn prepare_for_target(&mut self, target: &crate::RenderTarget<'_>) -> Result<(), Error> {
         if !target.graphics().same_device(&self.graphics) {
@@ -248,6 +255,117 @@ pub struct PaintSession<'draw, 'frame> {
     transform: Transform2D,
 }
 impl<'frame> PaintSession<'_, 'frame> {
+    /// Draws a shape with a reusable brush in original geometry coordinates.
+    /// Draw color acts as tint; the session transform moves geometry and brush together.
+    pub fn draw_shape_with_brush(
+        &mut self,
+        brush: &crate::Brush,
+        mut draw: ShapeDraw,
+    ) -> Result<(), Error> {
+        if self.transform != Transform2D::IDENTITY {
+            draw.transform = draw.transform.then(self.transform);
+        }
+        self.painter.shapes.draw_with_brush(self.pass, brush, draw)
+    }
+    /// Instances an ordered shape batch with one brush, validating it before drawing.
+    /// Transformed batches reuse Painter-owned CPU scratch.
+    pub fn draw_shapes_with_brush(
+        &mut self,
+        brush: &crate::Brush,
+        draws: &[ShapeDraw],
+    ) -> Result<(), Error> {
+        if self.transform == Transform2D::IDENTITY {
+            return self
+                .painter
+                .shapes
+                .draw_many_with_brush(self.pass, brush, draws);
+        }
+        self.painter.shape_scratch.clear();
+        self.painter
+            .shape_scratch
+            .extend(draws.iter().map(|d| ShapeDraw {
+                transform: d.transform.then(self.transform),
+                ..*d
+            }));
+        self.painter
+            .shapes
+            .draw_many_with_brush(self.pass, brush, &self.painter.shape_scratch)
+    }
+    /// Draws an independent line with a reusable brush in its original endpoint coordinates.
+    /// Color acts as tint. Brush coordinates are not automatically measured along the line.
+    pub fn draw_line_with_brush(
+        &mut self,
+        brush: &crate::Brush,
+        mut draw: LineDraw,
+    ) -> Result<(), Error> {
+        if self.transform != Transform2D::IDENTITY {
+            draw.transform = draw.transform.then(self.transform);
+        }
+        self.painter.lines.draw_with_brush(self.pass, brush, draw)
+    }
+    /// Instances an ordered line batch with one brush, preserving per-line geometry and tint.
+    pub fn draw_lines_with_brush(
+        &mut self,
+        brush: &crate::Brush,
+        draws: &[LineDraw],
+    ) -> Result<(), Error> {
+        if self.transform == Transform2D::IDENTITY {
+            return self
+                .painter
+                .lines
+                .draw_many_with_brush(self.pass, brush, draws);
+        }
+        self.painter.line_scratch.clear();
+        self.painter
+            .line_scratch
+            .extend(draws.iter().map(|d| LineDraw {
+                transform: d.transform.then(self.transform),
+                ..*d
+            }));
+        self.painter
+            .lines
+            .draw_many_with_brush(self.pass, brush, &self.painter.line_scratch)
+    }
+    /// Draws retained path geometry with a reusable brush, without tessellation or stop uploads.
+    /// Color acts as tint; original path coordinates define brush placement before transforms.
+    pub fn draw_path_with_brush(
+        &mut self,
+        path: &PreparedPath,
+        brush: &crate::Brush,
+        mut draw: PathDraw,
+    ) -> Result<(), Error> {
+        if self.transform != Transform2D::IDENTITY {
+            draw.transform = draw.transform.then(self.transform);
+        }
+        self.painter
+            .paths
+            .draw_with_brush(self.pass, path, brush, draw)
+    }
+    /// Instances ordered placements of one retained path with one brush.
+    /// Geometry, stops, and pipelines stay reusable; transformed batches reuse CPU scratch.
+    pub fn draw_paths_with_brush(
+        &mut self,
+        path: &PreparedPath,
+        brush: &crate::Brush,
+        draws: &[PathDraw],
+    ) -> Result<(), Error> {
+        if self.transform == Transform2D::IDENTITY {
+            return self
+                .painter
+                .paths
+                .draw_many_with_brush(self.pass, path, brush, draws);
+        }
+        self.painter.path_scratch.clear();
+        self.painter
+            .path_scratch
+            .extend(draws.iter().map(|d| PathDraw {
+                transform: d.transform.then(self.transform),
+                ..*d
+            }));
+        self.painter
+            .paths
+            .draw_many_with_brush(self.pass, path, brush, &self.painter.path_scratch)
+    }
     /// Returns the transform applied after each draw's own transform.
     pub fn transform(&self) -> Transform2D {
         self.transform

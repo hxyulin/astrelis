@@ -17,8 +17,19 @@ const PAGE_INSTANCES: usize = 819; // 80-byte records fit a 64 KiB upload page.
 
 trait PrimitiveData: Copy {
     fn parameters(self, viewport: [f32; 2]) -> Result<Parameters, Error>;
+    fn object_frame(self) -> ([f32; 2], [f32; 2], [f32; 2]);
 }
 impl PrimitiveData for ShapeDraw {
+    fn object_frame(self) -> ([f32; 2], [f32; 2], [f32; 2]) {
+        (
+            [
+                self.rect.x + self.rect.width * 0.5,
+                self.rect.y + self.rect.height * 0.5,
+            ],
+            [1., 0.],
+            [0., 1.],
+        )
+    }
     fn parameters(self, viewport: [f32; 2]) -> Result<Parameters, Error> {
         self.validate()?;
         let Rect {
@@ -78,6 +89,21 @@ impl PrimitiveData for ShapeDraw {
     }
 }
 impl PrimitiveData for LineDraw {
+    fn object_frame(self) -> ([f32; 2], [f32; 2], [f32; 2]) {
+        let dx = self.end[0] - self.start[0];
+        let dy = self.end[1] - self.start[1];
+        let length = dx.hypot(dy);
+        let axis = if length == 0. {
+            [1., 0.]
+        } else {
+            [dx / length, dy / length]
+        };
+        (
+            [self.start[0] + dx * 0.5, self.start[1] + dy * 0.5],
+            axis,
+            [-axis[1], axis[0]],
+        )
+    }
     fn parameters(self, viewport: [f32; 2]) -> Result<Parameters, Error> {
         self.validate()?;
         let dx = self.end[0] - self.start[0];
@@ -122,6 +148,46 @@ impl PrimitiveData for LineDraw {
             viewport,
         )
         .ok_or(Error::InvalidLineDraw)
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+struct BrushParameters {
+    base: Parameters,
+    origin_x: [f32; 4],
+    axis_y: [f32; 4],
+}
+impl BrushParameters {
+    fn new<T: PrimitiveData>(
+        draw: T,
+        viewport: [f32; 2],
+        brush: &crate::Brush,
+        graphics: &GraphicsContext,
+    ) -> Result<Self, Error> {
+        let base = draw.parameters(viewport)?;
+        let (center, x, y) = draw.object_frame();
+        let bx = f64::from(base.axis_y_min[2])
+            .abs()
+            .max(f64::from(base.axis_y_min[2]) + f64::from(base.span_style[0]));
+        let by = f64::from(base.axis_y_min[3])
+            .abs()
+            .max(f64::from(base.axis_y_min[3]) + f64::from(base.span_style[1]));
+        let extent = std::array::from_fn(|i| {
+            f64::from(center[i]).abs() + f64::from(x[i]).abs() * bx + f64::from(y[i]).abs() * by
+        });
+        if extent
+            .iter()
+            .any(|v| !v.is_finite() || *v > f64::from(f32::MAX) * 0.125)
+        {
+            return Err(Error::InvalidBrushDraw);
+        }
+        brush.validate(graphics, extent, base.color)?;
+        Ok(Self {
+            base,
+            origin_x: [center[0], center[1], x[0], x[1]],
+            axis_y: [y[0], y[1], 0., 0.],
+        })
     }
 }
 
@@ -231,8 +297,12 @@ fn pack(
 struct PrimitiveRenderer {
     graphics: GraphicsContext,
     material: Material,
+    brush_material: Option<Material>,
     pipelines: crate::mesh_renderer::Pipelines,
     parameters: Vec<Parameters>,
+    brush_parameters: Vec<BrushParameters>,
+    page_capacity: usize,
+    brush_page_capacity: usize,
 }
 impl PrimitiveRenderer {
     fn new(g: &GraphicsContext, options: crate::PipelineOptions) -> Self {
@@ -262,6 +332,11 @@ impl PrimitiveRenderer {
             ),
             pipelines: Default::default(),
             parameters: Vec::new(),
+            brush_parameters: Vec::new(),
+            brush_material: None,
+            page_capacity: (g.device().limits().max_buffer_size / 80)
+                .clamp(1, PAGE_INSTANCES as u64) as usize,
+            brush_page_capacity: (g.device().limits().max_buffer_size / 112).clamp(1, 585) as usize,
         }
     }
     fn pipeline(&mut self, format: &RenderFormat) -> Result<wgpu::RenderPipeline, Error> {
@@ -269,6 +344,7 @@ impl PrimitiveRenderer {
             format.single_color()?,
             format.sample_count,
             format.depth_stencil,
+            false,
         )
     }
     fn pipeline_for(
@@ -276,13 +352,37 @@ impl PrimitiveRenderer {
         color: wgpu::TextureFormat,
         sample_count: u32,
         depth_stencil: Option<wgpu::TextureFormat>,
+        brushed: bool,
     ) -> Result<wgpu::RenderPipeline, Error> {
+        if brushed && self.brush_material.is_none() {
+            let limits = self.graphics.device().limits();
+            if limits.max_vertex_attributes < 7
+                || limits.max_vertex_buffer_array_stride < 112
+                || limits.max_buffer_size < 112
+                || limits.max_inter_stage_shader_variables < 5
+            {
+                return Err(Error::UnsupportedBrushLimits);
+            }
+            let layout=VertexLayout {stride:112,step_mode:wgpu::VertexStepMode::Instance,attributes:wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4].to_vec()};
+            self.brush_material = Some(crate::brush::material(
+                &self.graphics,
+                &self.material,
+                &[layout],
+                include_str!("primitive.wgsl"),
+                include_str!("primitive_brush.wgsl"),
+            )?);
+        }
+        let material = if brushed {
+            self.brush_material.as_ref().unwrap()
+        } else {
+            &self.material
+        };
         // Built-in solid shading requires floating-point, blendable color, just as
         // built-in mesh shading does. Inert depth/stencil permits sharing a 3D pass.
         Ok(crate::mesh_renderer::pipeline(
             &self.graphics,
             &mut self.pipelines,
-            &self.material,
+            material,
             color,
             sample_count,
             depth_stencil,
@@ -297,15 +397,20 @@ impl PrimitiveRenderer {
     fn bind<'draw, 'frame>(
         &'draw mut self,
         pass: &'draw mut RenderPass<'frame>,
+        brush: Option<&'draw crate::Brush>,
     ) -> Result<Session<'draw, 'frame>, Error> {
         if !pass.same_device(&self.graphics) {
             return Err(Error::DeviceMismatch);
+        }
+        if let Some(brush) = brush {
+            brush.validate_device(&self.graphics)?;
         }
         crate::mesh_renderer::validate_aspects(pass, &self.material)?;
         let pipeline = self.pipeline_for(
             pass.single_color_format()?,
             pass.sample_count(),
             pass.depth_stencil_format(),
+            brush.is_some(),
         )?;
         pass.apply_raster_state();
         pass.set_pipeline(&pipeline);
@@ -314,6 +419,11 @@ impl PrimitiveRenderer {
             pipeline,
             parameters: &mut self.parameters,
             dirty: false,
+            brush,
+            graphics: &self.graphics,
+            brush_parameters: &mut self.brush_parameters,
+            page_capacity: self.page_capacity,
+            brush_page_capacity: self.brush_page_capacity,
         })
     }
 }
@@ -323,6 +433,11 @@ struct Session<'draw, 'frame> {
     pipeline: wgpu::RenderPipeline,
     parameters: &'draw mut Vec<Parameters>,
     dirty: bool,
+    brush: Option<&'draw crate::Brush>,
+    graphics: &'draw GraphicsContext,
+    brush_parameters: &'draw mut Vec<BrushParameters>,
+    page_capacity: usize,
+    brush_page_capacity: usize,
 }
 impl<'frame> Session<'_, 'frame> {
     fn restore(&mut self) {
@@ -333,12 +448,40 @@ impl<'frame> Session<'_, 'frame> {
         }
     }
     fn draw<T: PrimitiveData>(&mut self, draw: T) -> Result<(), Error> {
+        if let Some(brush) = self.brush {
+            let p = BrushParameters::new(draw, self.pass.viewport_size(), brush, self.graphics)?;
+            self.restore();
+            brush.bind(self.pass);
+            record(
+                self.pass,
+                std::slice::from_ref(&p),
+                self.brush_page_capacity,
+            );
+            return Ok(());
+        }
         let p = draw.parameters(self.pass.viewport_size())?;
         self.restore();
-        record(self.pass, std::slice::from_ref(&p));
+        record(self.pass, std::slice::from_ref(&p), self.page_capacity);
         Ok(())
     }
     fn draw_many<T: PrimitiveData>(&mut self, draws: &[T]) -> Result<(), Error> {
+        if let Some(brush) = self.brush {
+            self.brush_parameters.clear();
+            for &draw in draws {
+                self.brush_parameters.push(BrushParameters::new(
+                    draw,
+                    self.pass.viewport_size(),
+                    brush,
+                    self.graphics,
+                )?);
+            }
+            if !self.brush_parameters.is_empty() {
+                self.restore();
+                brush.bind(self.pass);
+                record(self.pass, self.brush_parameters, self.brush_page_capacity);
+            }
+            return Ok(());
+        }
         self.parameters.clear();
         for draw in draws {
             self.parameters
@@ -346,7 +489,7 @@ impl<'frame> Session<'_, 'frame> {
         }
         if !self.parameters.is_empty() {
             self.restore();
-            record(self.pass, self.parameters);
+            record(self.pass, self.parameters, self.page_capacity);
         }
         Ok(())
     }
@@ -355,8 +498,8 @@ impl<'frame> Session<'_, 'frame> {
         self.pass
     }
 }
-fn record(pass: &mut RenderPass<'_>, parameters: &[Parameters]) {
-    for chunk in parameters.chunks(PAGE_INSTANCES) {
+fn record<T: Pod>(pass: &mut RenderPass<'_>, parameters: &[T], capacity: usize) {
+    for chunk in parameters.chunks(capacity) {
         let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk), 4);
         pass.set_vertex_buffer(0, &buffer, range);
         pass.inner.draw(0..6, 0..chunk.len() as u32);
@@ -399,6 +542,50 @@ impl ShapeRenderer {
         }
         self.prepare(&target.render_format())
     }
+    /// Warms the shared brush shader for these attachments/MSAA without creating brushes.
+    pub fn prepare_brush(&mut self, format: &RenderFormat) -> Result<(), Error> {
+        self.inner.pipeline_for(
+            format.single_color()?,
+            format.sample_count,
+            format.depth_stencil,
+            true,
+        )?;
+        Ok(())
+    }
+    /// Records one primitive with a brush in original geometry coordinates.
+    /// Draw color acts as straight RGBA tint; white preserves the brush. Owns bind group zero.
+    pub fn draw_with_brush(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        brush: &crate::Brush,
+        draw: ShapeDraw,
+    ) -> Result<(), Error> {
+        self.bind_with_brush(pass, brush)?.draw(draw)
+    }
+    /// Validates the whole slice before recording ordered instances with one brush.
+    /// Uploads 112 bytes per placement; stops stay retained. Empty slices are a no-op.
+    pub fn draw_many_with_brush(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        brush: &crate::Brush,
+        draws: &[ShapeDraw],
+    ) -> Result<(), Error> {
+        if draws.is_empty() {
+            return Ok(());
+        }
+        self.bind_with_brush(pass, brush)?.draw_many(draws)
+    }
+    /// Borrows the pass with one brush and pipeline selected for repeated draws.
+    /// Pass access invalidates state; the next draw restores pipeline and brush bindings.
+    pub fn bind_with_brush<'draw, 'frame>(
+        &'draw mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        brush: &'draw crate::Brush,
+    ) -> Result<ShapeDrawSession<'draw, 'frame>, Error> {
+        Ok(ShapeDrawSession {
+            inner: self.inner.bind(pass, Some(brush))?,
+        })
+    }
     /// Validates and records one primitive. Rejected operations record no draw.
     pub fn draw(&mut self, pass: &mut RenderPass<'_>, draw: ShapeDraw) -> Result<(), Error> {
         self.bind(pass)?.draw(draw)
@@ -424,7 +611,7 @@ impl ShapeRenderer {
         pass: &'draw mut RenderPass<'frame>,
     ) -> Result<ShapeDrawSession<'draw, 'frame>, Error> {
         Ok(ShapeDrawSession {
-            inner: self.inner.bind(pass)?,
+            inner: self.inner.bind(pass, None)?,
         })
     }
 }
@@ -486,6 +673,50 @@ impl LineRenderer {
         }
         self.prepare(&target.render_format())
     }
+    /// Warms the shared brush shader for these attachments/MSAA without creating brushes.
+    pub fn prepare_brush(&mut self, format: &RenderFormat) -> Result<(), Error> {
+        self.inner.pipeline_for(
+            format.single_color()?,
+            format.sample_count,
+            format.depth_stencil,
+            true,
+        )?;
+        Ok(())
+    }
+    /// Records one primitive with a brush in original geometry coordinates.
+    /// Draw color acts as straight RGBA tint; white preserves the brush. Owns bind group zero.
+    pub fn draw_with_brush(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        brush: &crate::Brush,
+        draw: LineDraw,
+    ) -> Result<(), Error> {
+        self.bind_with_brush(pass, brush)?.draw(draw)
+    }
+    /// Validates the whole slice before recording ordered instances with one brush.
+    /// Uploads 112 bytes per placement; stops stay retained. Empty slices are a no-op.
+    pub fn draw_many_with_brush(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        brush: &crate::Brush,
+        draws: &[LineDraw],
+    ) -> Result<(), Error> {
+        if draws.is_empty() {
+            return Ok(());
+        }
+        self.bind_with_brush(pass, brush)?.draw_many(draws)
+    }
+    /// Borrows the pass with one brush and pipeline selected for repeated draws.
+    /// Pass access invalidates state; the next draw restores pipeline and brush bindings.
+    pub fn bind_with_brush<'draw, 'frame>(
+        &'draw mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        brush: &'draw crate::Brush,
+    ) -> Result<LineDrawSession<'draw, 'frame>, Error> {
+        Ok(LineDrawSession {
+            inner: self.inner.bind(pass, Some(brush))?,
+        })
+    }
     /// Validates and records one primitive. Rejected operations record no draw.
     pub fn draw(&mut self, pass: &mut RenderPass<'_>, draw: LineDraw) -> Result<(), Error> {
         self.bind(pass)?.draw(draw)
@@ -511,7 +742,7 @@ impl LineRenderer {
         pass: &'draw mut RenderPass<'frame>,
     ) -> Result<LineDrawSession<'draw, 'frame>, Error> {
         Ok(LineDrawSession {
-            inner: self.inner.bind(pass)?,
+            inner: self.inner.bind(pass, None)?,
         })
     }
 }

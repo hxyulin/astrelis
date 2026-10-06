@@ -1,0 +1,20 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/dev/projects/astrelis/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 1.15s
+     Running benches/paths.rs (target/release/deps/paths-3a299af4619da4f4)
+adapter=AdapterInfo { name: "Apple M3 Pro", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; counts=[1000]; samples=30; warmup=6; target=64x64 linear RGBA8 1xMSAA; gpu_execution=not_measured; reference=direct_wgpu; same_shader_and_layouts; reused_64KiB_parameter_pages; geometry=quad_2interior_8fringe_triangles
+prepare_fill segments=16; vertices,indices,bytes=Some((1361, 3984, 59488))
+prepare_stroke segments=16; vertices,indices,bytes=Some((2066, 8610, 100552))
+prepare_fill segments=64; vertices,indices,bytes=Some((5441, 15936, 237856))
+prepare_stroke segments=64; vertices,indices,bytes=Some((8138, 34242, 397384))
+prepare_fill segments=256; vertices,indices,bytes=Some((21761, 63744, 951328))
+prepare_stroke segments=256; vertices,indices,bytes=Some((32426, 136770, 1584712))
+prepare_icon_fill segments=4; vertices,indices,bytes=Some((210, 624, 9216))
+prepare_polyline_stroke segments=128; vertices,indices,bytes=Some((1197, 3585, 52644))
+pixel equivalence passed: individual count=1000 coverage=false
+pixel equivalence passed: scoped count=1000 coverage=false
+pixel equivalence passed: batch count=1000 coverage=false
+pixel equivalence passed: painter_batch count=1000 coverage=false
+pixel equivalence passed: individual count=1000 coverage=true
+pixel equivalence passed: scoped count=1000 coverage=true
+pixel equivalence passed: batch count=1000 coverage=true
+pixel equivalence passed: painter_batch count=1000 coverage=true

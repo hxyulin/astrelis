@@ -111,6 +111,9 @@ blending, 64 KiB upload pages, and full pixel checks before timing. It reports
 individual/scoped and explicit batch paths separately and includes preparation
 cases with 16/64/256 cubic segments. See [measurement evidence](performance/paths.md).
 
-This stage does not add SVG parsing, arc commands, dashes, variable-width strokes,
-inside/outside path strokes, boolean operations, gradient/image brushes, clip
+The subsequent [brush stage](brushes.md) adds reusable solid/linear/radial shading
+through additive brush drawing APIs, independently of this prepared geometry.
+
+This path stage does not add SVG parsing, arc commands, dashes, variable-width strokes,
+inside/outside path strokes, boolean operations, image brushes, clip
 stacks, or layer/effect helpers. Those remain separate capabilities.

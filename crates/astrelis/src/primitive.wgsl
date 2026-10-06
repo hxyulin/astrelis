@@ -5,10 +5,10 @@ struct Output {
     @location(2) @interpolate(flat) style: vec2<f32>,
     @location(3) @interpolate(flat) color: vec4<f32>,
 };
-@vertex fn vertex_main(@builtin(vertex_index) index: u32,
-    @location(0) origin_axis_x: vec4<f32>, @location(1) axis_y_min: vec4<f32>,
-    @location(2) span_style: vec4<f32>, @location(3) geometry: vec4<f32>,
-    @location(4) color: vec4<f32>) -> Output {
+ fn primitive_vertex(index: u32,
+    origin_axis_x: vec4<f32>, axis_y_min: vec4<f32>,
+    span_style: vec4<f32>, geometry: vec4<f32>,
+    color: vec4<f32>) -> Output {
     let corners = array(vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 0.0),
                         vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0));
     let local = axis_y_min.zw + corners[index] * span_style.xy;
@@ -143,4 +143,11 @@ fn shade_fragment_main(input: Output) -> vec4<f32> {
     let color = shade_fragment_main(input);
     if color.a <= 0.0 { discard; }
     return color;
+}
+
+@vertex fn vertex_main(@builtin(vertex_index) index: u32,
+    @location(0) origin_axis_x: vec4<f32>, @location(1) axis_y_min: vec4<f32>,
+    @location(2) span_style: vec4<f32>, @location(3) geometry: vec4<f32>,
+    @location(4) color: vec4<f32>) -> Output {
+    return primitive_vertex(index,origin_axis_x,axis_y_min,span_style,geometry,color);
 }

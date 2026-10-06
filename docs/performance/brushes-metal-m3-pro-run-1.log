@@ -1,0 +1,49 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/dev/projects/astrelis/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 3.01s
+     Running benches/brushes.rs (target/release/deps/brushes-5fa562805c5a21e8)
+Apple M3 Pro; Metal; 30 samples, 6 warm-ups, alternating reference/brush order
+pixel equivalence passed: path 100 solid
+pixel equivalence passed: path 100 linear_2
+pixel equivalence passed: path 100 linear_8
+pixel equivalence passed: path 100 radial_8
+pixel equivalence passed: path 100 linear_64
+pixel equivalence passed: shape 100 solid
+pixel equivalence passed: shape 100 linear_2
+pixel equivalence passed: shape 100 linear_8
+pixel equivalence passed: shape 100 radial_8
+pixel equivalence passed: shape 100 linear_64
+pixel equivalence passed: line 100 solid
+pixel equivalence passed: line 100 linear_2
+pixel equivalence passed: line 100 linear_8
+pixel equivalence passed: line 100 radial_8
+pixel equivalence passed: line 100 linear_64
+pixel equivalence passed: path 1000 solid
+pixel equivalence passed: path 1000 linear_2
+pixel equivalence passed: path 1000 linear_8
+pixel equivalence passed: path 1000 radial_8
+pixel equivalence passed: path 1000 linear_64
+pixel equivalence passed: shape 1000 solid
+pixel equivalence passed: shape 1000 linear_2
+pixel equivalence passed: shape 1000 linear_8
+pixel equivalence passed: shape 1000 radial_8
+pixel equivalence passed: shape 1000 linear_64
+pixel equivalence passed: line 1000 solid
+pixel equivalence passed: line 1000 linear_2
+pixel equivalence passed: line 1000 linear_8
+pixel equivalence passed: line 1000 radial_8
+pixel equivalence passed: line 1000 linear_64
+pixel equivalence passed: path 10000 solid
+pixel equivalence passed: path 10000 linear_2
+pixel equivalence passed: path 10000 linear_8
+pixel equivalence passed: path 10000 radial_8
+pixel equivalence passed: path 10000 linear_64
+pixel equivalence passed: shape 10000 solid
+pixel equivalence passed: shape 10000 linear_2
+pixel equivalence passed: shape 10000 linear_8
+pixel equivalence passed: shape 10000 radial_8
+pixel equivalence passed: shape 10000 linear_64
+pixel equivalence passed: line 10000 solid
+pixel equivalence passed: line 10000 linear_2
+pixel equivalence passed: line 10000 linear_8
+pixel equivalence passed: line 10000 radial_8
+pixel equivalence passed: line 10000 linear_64

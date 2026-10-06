@@ -320,6 +320,37 @@
 //! }
 //! ```
 //!
+//! # Reusable brushes
+//!
+//! [`Brush`] supplies solid, linear-gradient, or centered radial-gradient shading
+//! for paths, shapes, and lines. [`GraphicsContext::create_brush`] validates and
+//! uploads immutable stops once. Brush geometry uses original drawing coordinates;
+//! [`BrushOptions::transform`] maps brush coordinates into those units. Draw/Painter
+//! transforms move geometry and brush together. Colors interpolate in premultiplied
+//! linear RGBA, including ordered hard stops and clamp/repeat/reflect extension.
+//!
+//! Use `prepare_brush` to warm the renderer's attachment/MSAA variant, then
+//! `draw_with_brush`, `draw_many_with_brush`, or `bind_with_brush`. Draw color becomes
+//! a straight RGBA tint: white preserves the brush. Brushes own bind group zero;
+//! subsequent custom commands establish their own bindings. The ordinary color-only
+//! APIs retain their smaller parameter records and avoid stop-buffer sampling.
+//!
+//! ```no_run
+//! use astrelis::{BrushOptions, Error, GradientStop, GraphicsContext, Rect,
+//!     RenderPass, ShapeDraw, ShapeRenderer};
+//! fn gradient(graphics: &GraphicsContext, renderer: &mut ShapeRenderer,
+//!     pass: &mut RenderPass<'_>) -> Result<(), Error>
+//! {
+//!     // Keep the brush in application state instead of recreating it every frame.
+//!     let brush = graphics.create_brush(BrushOptions::linear([0., 0.], [100., 0.], &[
+//!         GradientStop::new(0., [0.1, 0.4, 1., 1.]),
+//!         GradientStop::new(1., [1., 0.2, 0.1, 1.]),
+//!     ]))?;
+//!     renderer.draw_with_brush(pass, &brush,
+//!         ShapeDraw::rounded_rect(Rect::new(0., 0., 100., 40.), 8., [1.; 4]))
+//! }
+//! ```
+//!
 //! # Custom passes and renderers
 //!
 //! [`Frame::begin_render_pass`] accepts [`RenderPassDescriptor`] with depth-only
@@ -362,6 +393,7 @@
 //! reexports its exact [`wgpu`] version for application-controlled GPU work.
 
 mod attachments;
+mod brush;
 mod context;
 mod depth_stencil;
 mod drawing;
@@ -384,6 +416,7 @@ mod uploads;
 pub use attachments::{
     RenderColorAttachment, RenderDepthStencilAttachment, RenderFormat, RenderPassDescriptor,
 };
+pub use brush::{Brush, BrushKind, BrushOptions, GradientSpread, GradientStop};
 pub use context::GraphicsContext;
 pub mod text;
 pub use drawing::{

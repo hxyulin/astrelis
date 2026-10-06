@@ -84,7 +84,8 @@ Defaults use premultiplied source-over and ignore depth/stencil. Explicit states
 must match the attachment format. Read-only pass aspects reject writing states
 before recording. Built-in 2D vertices use depth zero. Pipeline configuration is
 fixed for a renderer's lifetime; multiple renderers can share a device/pass and
-prepared resources. Shader/resource layouts remain renderer-specific.
+prepared resources. Vertex/shader interfaces remain renderer-specific; the built-in
+path/shape/line brush binding layout is shared.
 
 For a stencil mask already written with reference 1:
 
@@ -118,6 +119,22 @@ coverage rather than their enclosing quads. Stencil coverage is binary per sampl
 a fractional stencil value; use texture masks or actual multisampled mask geometry
 when soft clip coverage is needed.
 Default/read-only shading keeps its original fragment path.
+
+## Brushes on retained and analytic geometry
+
+`GraphicsContext::create_brush(BrushOptions)` uploads an immutable solid/linear/radial
+resource, independent of renderers and prepared paths. ShapeRenderer, LineRenderer,
+and PathRenderer provide `prepare_brush`, `draw_with_brush`, `draw_many_with_brush`,
+and `bind_with_brush`. Ordinary `prepare`/`draw` retain color-only shading. Painter's
+`prepare_brush` warms all three; its corresponding `*_with_brush` session calls
+preserve transforms, validation, and ordered batching.
+
+Brush geometry uses original drawing coordinates before transforms. White draw
+color preserves it; other colors are straight RGBA tints. Gradients interpolate
+premultiplied linear color and share one pipeline across stop counts/spread modes.
+They own bind group zero. Brush settings are immutable; replacing them does not
+rebuild path geometry. See [brush contracts](brushes.md) for coordinate and lifetime
+details and [measurement evidence](performance/brushes.md) for costs.
 
 ## Retained images through Painter
 

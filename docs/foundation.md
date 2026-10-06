@@ -14,6 +14,11 @@ reports preparation separately from warm recording, checks matched direct-wgpu
 drawing, and explicitly records the remaining recording-overhead and coverage
 limitations. It preserves application ownership of passes, clipping, and submission.
 
+The [brush stage](brushes.md) adds immutable solid/linear/radial shading shared by
+paths, shapes, and lines, retaining geometry and ordinary color-only drawing.
+It reports [CPU recording costs](performance/brushes.md) separately from unmeasured
+GPU execution and makes coordinate, buffer, and binding ownership explicit.
+
 ## API acceptance
 
 | Condition | Evidence |

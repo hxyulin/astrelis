@@ -3,6 +3,14 @@ use std::{error, fmt};
 /// An initialization, mesh validation, target, or rendering failure.
 #[derive(Debug)]
 pub enum Error {
+    /// Brush stops, gradient geometry, or brush transform are invalid.
+    InvalidBrush,
+    /// Brush storage exceeds the device's buffer or storage binding limits.
+    BrushTooLarge,
+    /// The device lacks the buffers, fragment storage, or vertex layout needed for brushes.
+    UnsupportedBrushLimits,
+    /// Brush coordinate arithmetic or color/tint multiplication would overflow.
+    InvalidBrushDraw,
     /// Attachments are absent or have inconsistent dimensions, samples, or formats.
     InvalidAttachments,
     /// A built-in color renderer requires exactly one color output at slot zero.
@@ -203,6 +211,10 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidBrush => f.write_str("brush stops/geometry must be finite and ordered, and gradient transforms invertible"),
+            Self::BrushTooLarge => f.write_str("brush stops exceed the device buffer or storage binding limit"),
+            Self::UnsupportedBrushLimits => f.write_str("brush shading requires fragment storage buffers and compatible device limits"),
+            Self::InvalidBrushDraw => f.write_str("brush coordinate or color/tint arithmetic would overflow"),
             Self::InvalidPath { command } => write!(f, "invalid path command at index {command}"),
             Self::InvalidPathOptions => f.write_str("path tolerance must be positive, stroke width nonnegative, and miter limit at least one; values must be finite"),
             Self::PathTooLarge => f.write_str("prepared path geometry exceeds device buffer or index-count limits"),

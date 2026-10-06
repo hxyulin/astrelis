@@ -166,6 +166,7 @@ impl Parameters {
 pub struct PathRenderer {
     graphics: GraphicsContext,
     material: Material,
+    brush_material: Option<Material>,
     pipelines: crate::mesh_renderer::Pipelines,
     tessellators: geometry::Tessellators,
     parameters: Vec<Parameters>,
@@ -218,6 +219,7 @@ impl PathRenderer {
         Self {
             graphics: graphics.clone(),
             material,
+            brush_material: None,
             pipelines: Default::default(),
             tessellators: Default::default(),
             parameters: Vec::new(),
@@ -277,6 +279,7 @@ impl PathRenderer {
             format.single_color()?,
             format.sample_count,
             format.depth_stencil,
+            false,
         )
     }
     fn pipeline_for(
@@ -284,11 +287,35 @@ impl PathRenderer {
         color: wgpu::TextureFormat,
         samples: u32,
         depth_stencil: Option<wgpu::TextureFormat>,
+        brushed: bool,
     ) -> Result<wgpu::RenderPipeline, Error> {
+        if brushed && self.brush_material.is_none() {
+            if self
+                .graphics
+                .device()
+                .limits()
+                .max_inter_stage_shader_variables
+                < 3
+            {
+                return Err(Error::UnsupportedBrushLimits);
+            }
+            self.brush_material = Some(crate::brush::material(
+                &self.graphics,
+                &self.material,
+                &self.material.vertex_layouts,
+                include_str!("path.wgsl"),
+                include_str!("brush.wgsl"),
+            )?);
+        }
+        let material = if brushed {
+            self.brush_material.as_ref().unwrap()
+        } else {
+            &self.material
+        };
         Ok(crate::mesh_renderer::pipeline(
             &self.graphics,
             &mut self.pipelines,
-            &self.material,
+            material,
             color,
             samples,
             depth_stencil,
@@ -303,6 +330,17 @@ impl PathRenderer {
     /// Prepares an attachment/MSAA pipeline; does not tessellate or upload paths.
     pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), Error> {
         self.pipeline(format)?;
+        Ok(())
+    }
+    /// Warms brush shading for these attachments/MSAA, without uploading brush or path data.
+    /// All brushes share this variant; ordinary solid drawing keeps its own cheaper pipeline.
+    pub fn prepare_brush(&mut self, format: &RenderFormat) -> Result<(), Error> {
+        self.pipeline_for(
+            format.single_color()?,
+            format.sample_count,
+            format.depth_stencil,
+            true,
+        )?;
         Ok(())
     }
     /// Prepares a surface variant, rejecting another device.
@@ -336,12 +374,55 @@ impl PathRenderer {
         }
         self.bind(pass)?.draw_many(path, draws)
     }
+    /// Draws retained geometry with an immutable brush in original path coordinates.
+    /// Draw color multiplies it as a straight RGBA tint; white preserves the brush.
+    /// This owns bind group zero. Rejected draws record no geometry commands.
+    pub fn draw_with_brush(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        path: &PreparedPath,
+        brush: &crate::Brush,
+        draw: PathDraw,
+    ) -> Result<(), Error> {
+        self.bind_with_brush(pass, brush)?.draw(path, draw)
+    }
+    /// Instances ordered placements of one path with one brush. Validates the whole batch.
+    /// Only placement parameters are uploaded; stops and geometry stay retained.
+    pub fn draw_many_with_brush(
+        &mut self,
+        pass: &mut RenderPass<'_>,
+        path: &PreparedPath,
+        brush: &crate::Brush,
+        draws: &[PathDraw],
+    ) -> Result<(), Error> {
+        if draws.is_empty() {
+            return Ok(());
+        }
+        self.bind_with_brush(pass, brush)?.draw_many(path, draws)
+    }
     /// Selects one pipeline for repeated retained path draws in an exclusive pass scope.
     /// Different prepared paths can share the scope. Pass access invalidates its
     /// state, which the next path draw restores. Dropping leaves the pass open.
     pub fn bind<'draw, 'frame>(
         &'draw mut self,
         pass: &'draw mut RenderPass<'frame>,
+    ) -> Result<PathDrawSession<'draw, 'frame>, Error> {
+        self.bind_internal(pass, None)
+    }
+    /// Selects brush shading and one reusable brush for repeated path draws.
+    /// Different paths can share it. Pass access restores pipeline/bindings on the next draw.
+    pub fn bind_with_brush<'draw, 'frame>(
+        &'draw mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        brush: &'draw crate::Brush,
+    ) -> Result<PathDrawSession<'draw, 'frame>, Error> {
+        brush.validate_device(&self.graphics)?;
+        self.bind_internal(pass, Some(brush))
+    }
+    fn bind_internal<'draw, 'frame>(
+        &'draw mut self,
+        pass: &'draw mut RenderPass<'frame>,
+        brush: Option<&'draw crate::Brush>,
     ) -> Result<PathDrawSession<'draw, 'frame>, Error> {
         if !pass.same_device(&self.graphics) {
             return Err(Error::DeviceMismatch);
@@ -351,6 +432,7 @@ impl PathRenderer {
             pass.single_color_format()?,
             pass.sample_count(),
             pass.depth_stencil_format(),
+            brush.is_some(),
         )?;
         pass.apply_raster_state();
         pass.set_pipeline(&pipeline);
@@ -361,6 +443,7 @@ impl PathRenderer {
             parameters: &mut self.parameters,
             dirty: false,
             page_capacity: self.page_capacity,
+            brush,
         })
     }
 }
@@ -374,6 +457,7 @@ pub struct PathDrawSession<'draw, 'frame> {
     parameters: &'draw mut Vec<Parameters>,
     dirty: bool,
     page_capacity: usize,
+    brush: Option<&'draw crate::Brush>,
 }
 impl<'frame> PathDrawSession<'_, 'frame> {
     fn validate_device(&self, path: &PreparedPath) -> Result<(), Error> {
@@ -393,7 +477,13 @@ impl<'frame> PathDrawSession<'_, 'frame> {
     pub fn draw(&mut self, path: &PreparedPath, draw: PathDraw) -> Result<(), Error> {
         self.validate_device(path)?;
         let p = Parameters::new(path, draw, self.pass.viewport_size())?;
+        if let Some(brush) = self.brush {
+            brush.validate(self.graphics, path.coordinate_extent, draw.color)?;
+        }
         self.restore();
+        if let Some(brush) = self.brush {
+            brush.bind(self.pass);
+        }
         record(
             self.pass,
             path,
@@ -409,10 +499,16 @@ impl<'frame> PathDrawSession<'_, 'frame> {
         self.validate_device(path)?;
         self.parameters.clear();
         for &draw in draws {
-            self.parameters
-                .push(Parameters::new(path, draw, self.pass.viewport_size())?);
+            let p = Parameters::new(path, draw, self.pass.viewport_size())?;
+            if let Some(brush) = self.brush {
+                brush.validate(self.graphics, path.coordinate_extent, draw.color)?;
+            }
+            self.parameters.push(p);
         }
         self.restore();
+        if let Some(brush) = self.brush {
+            brush.bind(self.pass);
+        }
         record(
             self.pass,
             path,

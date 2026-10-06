@@ -30,6 +30,13 @@ pub struct GraphicsContext {
 }
 
 impl GraphicsContext {
+    /// Validates and uploads an immutable solid, linear, or radial brush.
+    /// Stops, geometry mapping, and device limits are checked before GPU allocation.
+    /// Reuse it with paths, shapes, or lines on this device; draw color acts as tint.
+    pub fn create_brush(&self, options: crate::BrushOptions<'_>) -> Result<crate::Brush, Error> {
+        crate::Brush::create(self, options)
+    }
+
     pub(crate) fn same_device(&self, other: &Self) -> bool {
         self.instance == other.instance && self.device == other.device
     }

@@ -213,6 +213,41 @@ Run `cargo run -p astrelis --example paths` for the standalone fill/stroke galle
 It owns its window and event loop; A switches coverage, Space switches MSAA.
 See [path contracts](docs/paths.md) for ownership, quality, and preparation costs.
 
+## Brushes and gradients
+
+`GraphicsContext::create_brush` creates reusable solid, linear-gradient, or centered
+radial-gradient shading. Brushes work with paths, shapes, and lines independently
+of geometry. Stops are ordered linear straight RGBA; interpolation uses
+premultiplied linear color. Equal stop positions create hard transitions.
+Clamp, repeat, and reflect control extension beyond the gradient interval.
+
+```rust
+let brush = graphics.create_brush(BrushOptions::linear([0., 0.], [100., 0.], &[
+    GradientStop::new(0., [0.1, 0.4, 1., 1.]),
+    GradientStop::new(0.5, [0.8, 0.1, 0.6, 1.]),
+    GradientStop::new(1., [1., 0.5, 0.1, 0.5]),
+]))?;
+// Retain this brush; warm attachment variants before the frame loop.
+paths.prepare_brush(&target.render_format())?;
+paths.draw_with_brush(&mut pass, &fill, &brush, PathDraw::default())?;
+```
+
+Brush coordinates use original geometry units before draw/Painter transforms.
+`BrushOptions::transform` maps brush coordinates into those units, including
+elliptical radial gradients through nonuniform scale. White draw color preserves
+the brush; other colors multiply it as tint and opacity. Brush scopes and batches
+use `bind_with_brush` / `draw_many_with_brush`, preserving input order. They own
+bind group zero, which custom GPU work must establish again when needed.
+
+Stops upload once; path placements still upload 64 bytes, brushed shape/line
+placements upload 112 bytes. Existing color-only drawing keeps its smaller records
+and avoids gradient sampling. Brush creation checks fragment storage support and
+device buffer limits. There is no fixed stop cap, color-ramp texture, or hidden
+offscreen pass. Changing immutable brush settings creates a new brush resource.
+
+Run `cargo run -p astrelis --example brushes` for the single-file gallery.
+See [brush contracts](docs/brushes.md) for coordinates, lifetimes, and limitations.
+
 ## Painter
 
 `Painter` retains a shape, line, path, image, and text renderer and lends an immediate painting
