@@ -1,7 +1,7 @@
 # Astrelis
 
-The `next` branch develops a rendering API directly over wgpu in one workspace
-crate. The earlier implementation remains on `main`.
+The `next` branch develops a rendering API directly over wgpu in the `astrelis` workspace
+crate, with an optional `astrelis-winit` integration crate. The earlier implementation remains on `main`.
 
 Applications own windows, event loops, draw order, and scheduling. `GraphicsContext`
 handles GPU initialization and resource creation. Independent renderers record
@@ -674,3 +674,23 @@ rectangles to the same shaped layout. It handles multilingual pointer/keyboard
 selection and reports unchanged atlas/geometry counters while selection moves.
 The optional interaction index is never built for ordinary labels. See the
 [interaction API and measurements](docs/performance/text-interaction.md).
+
+The optional `astrelis-winit` crate supplies `WindowContext` for application-owned
+loops and a desktop `Runner`/`Handler` for managed lifecycle and redraw scheduling.
+Applications retain their models and renderers, prepare before acquisition, and
+record application-selected passes into a borrowed core frame. It supports shared
+devices, independent window redraws, hidden-window adapter setup, paced acquisition
+retries, and attachment settings preserved across surface recreation. Core Astrelis
+has no winit runtime dependency. See the [lifecycle contract](docs/winit.md) and
+[performance measurements](docs/performance/winit.md).
+
+```sh
+cargo run -p astrelis-winit --example runner_triangle
+cargo run -p astrelis-winit --example runner_multi_window
+cargo run -p astrelis-winit --example custom_loop
+```
+
+These examples are separate, copyable files without shared support code or smoke
+test modes. The convenience runner targets macOS, Windows, and Linux; its first
+window may block during initial GPU setup. Browser/mobile event-loop drivers and
+RXUI integration remain separate work.

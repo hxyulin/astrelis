@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/astrelis"]
+members = ["crates/astrelis", "crates/astrelis-winit"]
 
 [workspace.package]
 version = "0.4.0-dev.0"

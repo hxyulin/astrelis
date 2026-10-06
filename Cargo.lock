@@ -114,6 +114,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "astrelis-winit"
+version = "0.4.0-dev.0"
+dependencies = [
+ "astrelis",
+ "pollster",
+ "winit",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

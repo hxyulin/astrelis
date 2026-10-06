@@ -1,0 +1,28 @@
+[package]
+name = "astrelis-winit"
+description = "Window and application lifecycle integration between Astrelis and winit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+astrelis = { path = "../astrelis", version = "0.4.0-dev.0" }
+winit.workspace = true
+
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+pollster.workspace = true
+
+[[bench]]
+name = "lifecycle"
+harness = false
+
+[[bench]]
+name = "scheduling"
+harness = false
+
+[lints]
+workspace = true

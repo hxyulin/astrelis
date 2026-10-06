@@ -1,0 +1,6 @@
+variant,stage,samples,median_us,p95_us
+runner,dispatch_prepare,320,0.500,1.291
+runner,acquire,320,8207.041,8673.417
+runner,record,320,7.083,14.125
+runner,finish_notify,320,86.708,135.750
+runner,total,320,8301.500,8780.750

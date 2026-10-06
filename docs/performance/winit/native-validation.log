@@ -1,0 +1,75 @@
+success exit=0
+native WindowId(535241590016) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(535241590016) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(535241590016) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(535241599616) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(535241599616) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(535241599616) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(535241599616) Occluded(false)
+native WindowId(535241590016) Occluded(false)
+stage=1 counts={WindowId(535241599616): 1, WindowId(535241590016): 1} prepares=4 t=1.831
+stage=2 counts={WindowId(535241599616): 1, WindowId(535241590016): 1} prepares=4 t=2.186
+stage=3 counts={WindowId(535241599616): 1, WindowId(535241590016): 3} prepares=6 t=2.537
+native WindowId(535241590016) Occluded(true)
+stage=4 counts={WindowId(535241599616): 1, WindowId(535241590016): 3} prepares=6 t=2.890
+native WindowId(535241590016) Occluded(false)
+stage=5 counts={WindowId(535241599616): 1, WindowId(535241590016): 4} prepares=7 t=3.245
+stage=6 counts={WindowId(535241599616): 1, WindowId(535241590016): 4} prepares=8 t=3.596
+stage=7 counts={WindowId(535241599616): 1, WindowId(535241590016): 4} prepares=8 t=3.952
+stage=8 counts={WindowId(535241599616): 1, WindowId(535241590016): 6} prepares=10 t=4.307
+stage=9 counts={WindowId(535241599616): 1, WindowId(535241590016): 51} prepares=55 t=4.666
+stage=10 counts={WindowId(535241599616): 1, WindowId(535241590016): 51} prepares=56 t=5.010
+PASS success closed=2 exiting=true
+
+resumed_error exit=0
+PASS resumed_error closed=2 exiting=true
+
+created_error exit=0
+PASS created_error closed=2 exiting=true
+
+render_error exit=0
+native WindowId(503801070848) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(503801070848) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(503801070848) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(503801080448) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(503801080448) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(503801080448) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(503801080448) Occluded(false)
+native WindowId(503801070848) Occluded(false)
+PASS render_error closed=2 exiting=true
+
+submitted_error exit=0
+native WindowId(534201369856) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(534201369856) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(534201369856) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(534201379456) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(534201379456) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(534201379456) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(534201379456) Occluded(false)
+native WindowId(534201369856) Occluded(false)
+PASS submitted_error closed=2 exiting=true
+
+shutdown_error exit=0
+native WindowId(534872474880) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(534872474880) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(534872474880) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(534872484480) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(534872484480) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(534872484480) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(534872484480) Occluded(false)
+native WindowId(534872474880) Occluded(false)
+PASS shutdown_error closed=2 exiting=true
+
+prepare_error exit=0
+PASS prepare_error closed=2 exiting=true
+
+closed_error exit=0
+native WindowId(507659339008) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(507659339008) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(507659339008) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(507659348608) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(507659348608) ScaleFactorChanged { scale_factor: 2.0, inner_size_writer: InnerSizeWriter { new_inner_size: (Weak) } }
+native WindowId(507659348608) Resized(PhysicalSize { width: 720, height: 520 })
+native WindowId(507659348608) Occluded(false)
+native WindowId(507659339008) Occluded(false)
+PASS closed_error closed=2 exiting=true
