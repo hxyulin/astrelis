@@ -560,7 +560,7 @@ fn rich_text_spans_cross_paragraphs_survive_edits_and_reject_invalid_ranges() {
     let before = buffer.spans().to_vec();
     for span in [
         TextSpan::new(0..100),
-        TextSpan::new(3..1),
+        TextSpan::new(std::ops::Range { start: 3, end: 1 }),
         TextSpan::new(0..1).font_size(0.),
         TextSpan::new(0..1).weight(0),
         TextSpan::new(0..1).color([1., 1., 1., 2.]),

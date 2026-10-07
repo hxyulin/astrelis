@@ -607,7 +607,7 @@ fn snapshot(
                     .iter()
                     .map(|g| g.x + g.w)
                     .fold(f32::NEG_INFINITY, f32::max);
-                if !(right > left) {
+                if right.partial_cmp(&left) != Some(std::cmp::Ordering::Greater) {
                     continue;
                 }
                 let lines = [
@@ -630,7 +630,8 @@ fn snapshot(
                         right - left,
                         metrics.thickness * size,
                     );
-                    if !enabled || !(rect.height > 0.) {
+                    if !enabled || rect.height.partial_cmp(&0.) != Some(std::cmp::Ordering::Greater)
+                    {
                         continue;
                     }
                     if !rect.bottom().is_finite() || !rect.right().is_finite() {
