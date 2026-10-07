@@ -455,9 +455,8 @@ impl<H: Handler> Driver<'_, H> {
                                 .retry(Instant::now(), self.state.options.retry_delay);
                         }
                     }
-                    FrameError::Validation => {
-                        self.fail(event_loop, RunError::Acquisition { window: id, source })
-                    }
+                    // Validation and future terminal outcomes stop the runner.
+                    _ => self.fail(event_loop, RunError::Acquisition { window: id, source }),
                 }
             }
             Err(error) => self.fail(event_loop, error),

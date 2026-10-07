@@ -22,6 +22,7 @@ use swash::scale::{
 
 /// GPU text resource preparation failure. Drawing uses [`crate::Error`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum TextRenderError {
     /// A device, attachment format, or pipeline error from the rendering layer.
     Graphics(Error),
@@ -606,10 +607,24 @@ impl std::fmt::Debug for TextRenderer {
     }
 }
 impl TextRenderer {
-    /// Creates a renderer with default bounded atlas settings.
+    /// Creates a renderer with default bounded atlas settings. Never fails: the default
+    /// page size is clamped to the device's texture dimension limit.
     pub fn new(graphics: &GraphicsContext) -> Self {
-        Self::with_options(graphics, TextRendererOptions::default())
-            .expect("default text options fit supported wgpu limits")
+        Self::with_pipeline(graphics, crate::PipelineOptions::default())
+    }
+    /// Default atlas settings with `pipeline`, valid for any device.
+    pub(crate) fn with_pipeline(g: &GraphicsContext, pipeline: crate::PipelineOptions) -> Self {
+        let defaults = TextRendererOptions::default();
+        Self::build(
+            g,
+            TextRendererOptions {
+                pipeline,
+                page_size: defaults
+                    .page_size
+                    .min(g.device().limits().max_texture_dimension_2d),
+                ..defaults
+            },
+        )
     }
     /// Validates atlas/raster limits and creates device resources, without allocating atlas pages.
     pub fn with_options(
@@ -626,6 +641,9 @@ impl TextRenderer {
         {
             return Err(TextRenderError::InvalidOptions);
         }
+        Ok(Self::build(g, options))
+    }
+    fn build(g: &GraphicsContext, options: TextRendererOptions) -> Self {
         let layout = g
             .device()
             .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -708,7 +726,7 @@ impl TextRenderer {
                     ),
             ),
         );
-        Ok(Self {
+        Self {
             graphics: g.clone(),
             options,
             layout,
@@ -728,7 +746,7 @@ impl TextRenderer {
             }),
             clock: 0,
             stats: Default::default(),
-        })
+        }
     }
     /// Returns cumulative work and current live allocation counters.
     pub fn stats(&self) -> TextRendererStats {

@@ -3,6 +3,7 @@ use winit::window::WindowId;
 
 /// Window creation, metrics, or presentation configuration failed.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum WindowError {
     /// The operating system rejected window creation.
     Native(winit::error::OsError),
@@ -93,6 +94,7 @@ pub enum Callback {
 
 /// Native runner failure, with the original error retained where available.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum RunError {
     /// Invalid retry delay or recovery limit.
     InvalidOptions,

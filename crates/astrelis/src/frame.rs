@@ -14,6 +14,7 @@ use crate::{
 /// Applications should schedule a later redraw for retry, or wait for a resize or
 /// visibility change while suspended. Neither outcome means the device has failed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum FrameError {
     /// Acquisition timed out or remained outdated; schedule a later redraw.
     Retry,

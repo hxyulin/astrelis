@@ -867,3 +867,28 @@ fn scoped_custom_meshes_keep_application_bindings_and_instance_bounds() {
         assert!(scope.pop().await.is_none());
     });
 }
+
+#[test]
+fn text_errors_convert_into_the_crate_error_with_question_mark() {
+    use crate::{TextBuffer, TextError, TextRenderError};
+    use std::error::Error as _;
+    fn layout() -> Result<(), Error> {
+        TextBuffer::new().set_width(Some(-1.))?;
+        Ok(())
+    }
+    fn atlas(error: TextRenderError) -> Result<(), Error> {
+        Err(error)?
+    }
+    let error = layout().unwrap_err();
+    assert!(matches!(error, Error::Text(TextError::InvalidWidth)));
+    assert_eq!(error.to_string(), TextError::InvalidWidth.to_string());
+    assert!(error.source().is_some());
+    let error = atlas(TextRenderError::AtlasFull).unwrap_err();
+    assert!(matches!(&error, Error::TextRender(e) if matches!(**e, TextRenderError::AtlasFull)));
+    assert!(error.source().is_some());
+    // A wrapped graphics error is unwrapped rather than nested.
+    assert!(matches!(
+        atlas(TextRenderError::Graphics(Error::InvalidClip)),
+        Err(Error::InvalidClip)
+    ));
+}

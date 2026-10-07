@@ -37,6 +37,14 @@ failures. Drawing retained text cannot report `AtlasFull` or `InvalidRaster`.
 Rejected draws record no draw commands; earlier successful calls remain recorded.
 Preparation failures may populate caches but preserve existing prepared resources.
 
+`TextError` and `TextRenderError` convert into `Error` with `?` (`Error::Text`,
+`Error::TextRender`; a wrapped `TextRenderError::Graphics` unwraps to its inner
+error), so mixed text and rendering code can return one error type. `Error`,
+`TextError`, `TextRenderError`, `FrameError`, and the winit `WindowError` and
+`RunError` are `#[non_exhaustive]`; matches need a wildcard arm. `TextRenderer::new`
+and `Painter::new` do not panic: the default atlas page size is clamped to the
+device's texture limit, and only `TextRenderer::with_options` validates input.
+
 ## Geometry, density, and transforms
 
 All 2D descriptors accept `.transform(impl Into<Transform2D>)`. The shared type

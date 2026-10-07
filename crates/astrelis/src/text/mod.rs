@@ -135,6 +135,7 @@ pub use system::{FontId, FontInfo, TextSystem};
 
 /// Font loading, paragraph layout, or text interaction failure. Rejected setters leave the buffer unchanged.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TextError {
     /// The provided data contains no faces usable by the shaping backend.
     InvalidFont,

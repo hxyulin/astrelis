@@ -1,7 +1,12 @@
 use std::{error, fmt};
 
 /// An initialization, mesh validation, target, or rendering failure.
+///
+/// Text failures convert with `?`: [`crate::TextError`] becomes [`Self::Text`], and a
+/// [`crate::TextRenderError`] becomes [`Self::TextRender`], or its inner error when it
+/// wraps one of these.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
     /// Point capacity must be nonzero.
     InvalidPointCapacity,
@@ -227,6 +232,23 @@ pub enum Error {
     InvalidClip,
     /// A first surface pass tried to load contents, or finish had no surface clear pass.
     UninitializedFrame,
+    /// Font loading, text layout or text interaction failed.
+    Text(crate::TextError),
+    /// Glyph atlas or text preparation failed; see [`crate::TextRenderError`].
+    TextRender(Box<crate::TextRenderError>),
+}
+impl From<crate::TextError> for Error {
+    fn from(value: crate::TextError) -> Self {
+        Self::Text(value)
+    }
+}
+impl From<crate::TextRenderError> for Error {
+    fn from(value: crate::TextRenderError) -> Self {
+        match value {
+            crate::TextRenderError::Graphics(error) => error,
+            other => Self::TextRender(Box::new(other)),
+        }
+    }
 }
 
 impl fmt::Display for Error {
@@ -321,6 +343,8 @@ impl fmt::Display for Error {
             Self::UninitializedFrame => {
                 f.write_str("a frame must start with a clear pass before presentation")
             }
+            Self::Text(e) => e.fmt(f),
+            Self::TextRender(e) => e.fmt(f),
         }
     }
 }
@@ -331,6 +355,8 @@ impl error::Error for Error {
             Self::CreateSurface(error) => Some(error),
             Self::Adapter(error) => Some(error),
             Self::Device(error) => Some(error),
+            Self::Text(error) => Some(error),
+            Self::TextRender(error) => Some(error.as_ref()),
             _ => None,
         }
     }

@@ -79,14 +79,7 @@ impl Painter {
             polylines: crate::PolylineRenderer::with_options(graphics, options.clone()),
             markers: crate::MarkerRenderer::with_options(graphics, options.clone()),
             textures: TextureRenderer::with_options(graphics, options.clone()),
-            text: TextRenderer::with_options(
-                graphics,
-                crate::TextRendererOptions {
-                    pipeline: options,
-                    ..Default::default()
-                },
-            )
-            .expect("default text atlas settings fit supported wgpu limits"),
+            text: TextRenderer::with_pipeline(graphics, options),
             shape_scratch: Vec::new(),
             line_scratch: Vec::new(),
             image_scratch: Vec::new(),
