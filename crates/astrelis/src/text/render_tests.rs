@@ -389,7 +389,6 @@ fn ordered_mask_color_batches_and_unleased_page_eviction_work() {
         let mask = limited
             .prepare_text(&layout("M"), TextRasterOptions::new())
             .unwrap();
-        let page = mask.data.batches[0].page.id;
         assert!(matches!(
             limited.prepare_text(&layout("😀"), TextRasterOptions::new()),
             Err(TextRenderError::AtlasFull)
@@ -398,7 +397,8 @@ fn ordered_mask_color_batches_and_unleased_page_eviction_work() {
         let color = limited
             .prepare_text(&layout("😀"), TextRasterOptions::new())
             .unwrap();
-        assert_ne!(color.data.batches[0].page.id, page);
+        // The unleased mask page was reclaimed for the color page under the same budget.
+        assert_eq!(color.data.batches[0].page.kind, Kind::Color);
         assert_eq!(limited.stats().live_pages, 1);
         assert_eq!(limited.stats().atlas_bytes, 32 * 32 * 4);
     });
@@ -1444,4 +1444,118 @@ fn half_precision_packing_matches_ieee_binary16() {
         assert_eq!(super::f16_bits(value), bits, "{value}");
     }
     assert_eq!(super::f16_bits(f32::NAN) & 0x7e00, 0x7e00);
+}
+
+#[test]
+fn trim_and_budget_growth_recover_from_atlas_full_without_touching_leased_pages() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let mut renderer = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                page_size: 32,
+                max_pages: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        renderer.prepare(&t.render_format()).unwrap();
+        let raster = TextRasterOptions::new();
+        let m = layout("M");
+        let mask = renderer.prepare_text(&m, raster).unwrap();
+        // The only page is leased by `mask`; a color glyph needs a second page.
+        assert!(matches!(
+            renderer.prepare_text(&layout("😀"), raster),
+            Err(TextRenderError::AtlasFull)
+        ));
+        assert_eq!(renderer.trim(), TextTrim::default());
+        assert!(matches!(
+            renderer.set_max_pages(0),
+            Err(TextRenderError::InvalidOptions)
+        ));
+        renderer.set_max_pages(2).unwrap();
+        assert_eq!(renderer.options().max_pages, 2);
+        let color = renderer.prepare_text(&layout("😀"), raster).unwrap();
+        assert_eq!(renderer.stats().live_pages, 2);
+        let draw = |renderer: &mut TextRenderer, t: &mut Framebuffer| {
+            pixels(&g, t, |frame| {
+                let mut pass = frame.render_pass().begin().unwrap();
+                renderer
+                    .draw(&mut pass, &mask, TextDraw::default())
+                    .unwrap();
+            })
+        };
+        let before = draw(&mut renderer, &mut t);
+        assert!(before.chunks(4).any(|p| p[3] > 200));
+
+        // Only the unleased color page and its cache entry are released.
+        drop(color);
+        let trimmed = renderer.trim();
+        assert_eq!(
+            trimmed,
+            TextTrim {
+                pages: 1,
+                atlas_bytes: 32 * 32 * 4,
+                cached_glyphs: 1,
+            }
+        );
+        assert_eq!(renderer.stats().live_pages, 1);
+        assert_eq!(renderer.stats().atlas_bytes, 32 * 32);
+        assert_eq!(draw(&mut renderer, &mut t), before);
+        let misses = renderer.stats().cache_misses;
+        drop(renderer.prepare_text(&m, raster).unwrap());
+        assert_eq!(
+            renderer.stats().cache_misses,
+            misses,
+            "leased glyph stays cached"
+        );
+
+        // Once nothing leases them, trimming returns the whole budget.
+        drop(mask);
+        g.device()
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
+        assert_eq!(renderer.trim().pages, 1);
+        assert_eq!(renderer.stats().live_pages, 0);
+        assert_eq!(renderer.stats().cached_glyphs, 0);
+        drop(renderer.prepare_text(&m, raster).unwrap());
+        assert_eq!(renderer.stats().cache_misses, misses + 1);
+    });
+}
+
+#[test]
+fn full_glyph_cache_evicts_least_recently_used_keys() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                max_cached_glyphs: 4,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let text = layout("M");
+        // Each raster scale is a distinct coverage key for the same glyph.
+        let mut prepare = |scale: f32| {
+            let before = renderer.stats();
+            drop(
+                renderer
+                    .prepare_text(&text, TextRasterOptions::new().raster_scale(scale))
+                    .unwrap(),
+            );
+            let after = renderer.stats();
+            assert!(after.cached_glyphs <= 4);
+            after.cache_misses - before.cache_misses
+        };
+        for scale in [1., 1.25, 1.5, 1.75] {
+            assert_eq!(prepare(scale), 1);
+        }
+        assert_eq!(prepare(1.), 0, "hit refreshes the oldest key");
+        assert_eq!(prepare(2.), 1);
+        assert_eq!(prepare(1.), 0, "recently used key survived eviction");
+        assert_eq!(prepare(1.25), 1, "least recently used key was evicted");
+        assert_eq!(renderer.stats().cached_glyphs, 4);
+    });
 }

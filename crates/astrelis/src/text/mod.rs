@@ -127,7 +127,7 @@ pub use interaction::{SelectionRects, TextAffinity, TextCaret, TextPosition};
 pub use layout::{TextDecoration, TextDecorationKind, TextFont, TextGlyph, TextLayout, TextLine};
 pub use renderer::{
     MtsdfOptions, PreparedText, TextDraw, TextPreparation, TextRasterOptions, TextRenderError,
-    TextRenderer, TextRendererOptions, TextRendererStats,
+    TextRenderer, TextRendererOptions, TextRendererStats, TextTrim,
 };
 pub use span::TextSpan;
 pub use style::{FontFamily, FontSlant, FontStretch, TextAlign, TextStyle, TextWrap};

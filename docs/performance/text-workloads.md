@@ -85,7 +85,14 @@ Append-only packing can strand free space among old size variants. On AtlasFull,
 the caller explicitly clears caches and retries under the same budget; the timed
 interval includes the failed work, clearing, and successful retry. The renderer
 itself does not wait or increase its budget. All three runs needed one such retry.
-The benchmark checks the page limit and logs retries plus peak live bytes.
+The benchmark checks the page limit and logs retries plus peak live bytes. The
+retry now uses `trim()`, which keeps blank cache entries, instead of `clear_cache()`.
+
+`evicting_unique` prepares the 1,822-key unique workload with a 1,024-key cache, so
+every glyph misses and evicts. Per-miss LRU scans made it 26.4 ms against 15.9 ms
+for `cold_unique` (M3 Pro, `--no-timestamps`, one run). Bulk quarter eviction and
+per-page cache reference counts bring it to 15.8 ms, the cost of the misses alone.
+Its rows are not yet in the tables below.
 
 | Preparation workload | Median CPU, μs |
 | --- | ---: |

@@ -12,7 +12,7 @@ use std::{
     ops::Range,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
     },
 };
 use swash::scale::{
@@ -29,8 +29,12 @@ pub enum TextRenderError {
     InvalidOptions,
     /// A padded glyph image exceeds the configured atlas page size.
     GlyphTooLarge,
-    /// Pages remain leased by prepared texts, recordings, or pending GPU work.
-    /// Drop unused prepared texts, clear caches, and poll for completion before retrying.
+    /// Every page in the budget is leased by prepared texts, recordings, or pending GPU work.
+    ///
+    /// Recoverable: the renderer and earlier prepared texts stay valid. Drop unused prepared
+    /// texts, finish frames and poll the device so completions release their leases, then
+    /// retry; [`TextRenderer::trim`] also releases unleased cached pages at once, and
+    /// [`TextRenderer::set_max_pages`] raises the budget.
     AtlasFull,
     /// The backend could not parse a retained font or returned inconsistent image data.
     InvalidRaster,
@@ -310,11 +314,22 @@ struct Budget {
 }
 #[derive(Debug)]
 struct Page {
-    id: u64,
     kind: Kind,
     texture: wgpu::Texture,
     group: wgpu::BindGroup,
     allocation: Arc<Allocation>,
+    // Renderer clock of the last cache hit or allocation, for LRU page reclaim.
+    last: AtomicU64,
+    // Cache entries referencing this page, so leases are detected without a cache scan.
+    cache_refs: AtomicUsize,
+}
+impl Page {
+    /// No prepared text, recording or GPU completion holds the page; only the renderer's
+    /// shelf and cache entries do.
+    fn unleased(self: &Arc<Self>) -> bool {
+        Arc::strong_count(self) == 1 + self.cache_refs.load(Ordering::Relaxed)
+            && Arc::strong_count(&self.allocation) == 1
+    }
 }
 #[derive(Debug)]
 struct Allocation {
@@ -333,7 +348,6 @@ struct Shelf {
     x: u32,
     y: u32,
     row: u32,
-    last: u64,
 }
 impl Shelf {
     fn allocate(&mut self, w: u32, h: u32, size: u32) -> Option<[u32; 2]> {
@@ -385,6 +399,31 @@ struct GlyphImage {
 struct Cached {
     source: GlyphSource,
     last: u64,
+}
+impl Cached {
+    fn new(source: GlyphSource, last: u64) -> Self {
+        if let GlyphSource::Image(image) = &source {
+            image.page.cache_refs.fetch_add(1, Ordering::Relaxed);
+        }
+        Self { source, last }
+    }
+}
+impl Drop for Cached {
+    fn drop(&mut self) {
+        if let GlyphSource::Image(image) = &self.source {
+            image.page.cache_refs.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+}
+/// What [`TextRenderer::trim`] released.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TextTrim {
+    /// Atlas pages released from the budget.
+    pub pages: usize,
+    /// Logical atlas texture bytes of those pages.
+    pub atlas_bytes: usize,
+    /// Cached glyph keys dropped with them; they rasterize again on next use.
+    pub cached_glyphs: usize,
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -530,8 +569,11 @@ impl PreparedText {
 /// Coverage/color draws use a separate fragment shader without field reconstruction.
 /// Raster phase is always zero; fractional movement filters existing images without rerasterizing.
 /// Only consecutive glyphs on the same page are instanced together, preserving layout order.
-/// Leased pages are never evicted or overwritten. Budget exhaustion returns `AtlasFull` without
-/// waiting; callers control dropping resources and device polling. Font-size/raster limits bound
+/// Leased pages are never evicted or overwritten. A full cache evicts its least recently used
+/// quarter at once, and a full page budget reclaims the least recently used unleased page, so
+/// neither scans the cache per glyph. Budget exhaustion returns a recoverable `AtlasFull`
+/// without waiting; callers control dropping resources, device polling, [`Self::trim`] and
+/// [`Self::set_max_pages`]. Font-size/raster limits bound
 /// image work, while Swash keeps a fixed eight-entry scaler cache and no CPU glyph-image cache.
 /// Changed text can reuse released geometry buffers. Recycling is bounded to 64
 /// buffers / 1 MiB (each at most 64 KiB), including buffers awaiting completion.
@@ -551,7 +593,6 @@ pub struct TextRenderer {
     pages: Vec<Shelf>,
     budget: Arc<Budget>,
     clock: u64,
-    next_page: u64,
     stats: TextRendererStats,
     geometry_pool: Arc<Mutex<GeometryPool>>,
     solid: Option<Arc<Page>>,
@@ -686,7 +727,6 @@ impl TextRenderer {
                 bytes: AtomicUsize::new(0),
             }),
             clock: 0,
-            next_page: 0,
             stats: Default::default(),
         })
     }
@@ -698,6 +738,46 @@ impl TextRenderer {
             cached_glyphs: self.cache.len(),
             ..self.stats
         }
+    }
+    /// Current options, including any budget changed by [`Self::set_max_pages`].
+    pub fn options(&self) -> &TextRendererOptions {
+        &self.options
+    }
+    /// Changes the live page budget. Raising it lets a preparation that returned
+    /// `AtlasFull` succeed on retry. Lowering it below the live count releases nothing
+    /// immediately; new pages wait until reclaim, [`Self::trim`] or lease release makes room.
+    pub fn set_max_pages(&mut self, max_pages: usize) -> Result<(), TextRenderError> {
+        if max_pages == 0 {
+            return Err(TextRenderError::InvalidOptions);
+        }
+        self.options.max_pages = max_pages;
+        Ok(())
+    }
+    /// Releases every atlas page that no prepared text, recording or pending GPU work holds,
+    /// with the cache entries that point into them. Leased pages and blank/fallback entries
+    /// stay cached. Use it after `AtlasFull`, or to return memory when text goes idle.
+    /// Costs one pass over the pages plus one over the cache when anything is released.
+    pub fn trim(&mut self) -> TextTrim {
+        let mut trim = TextTrim::default();
+        let mut released = Vec::new();
+        self.pages.retain(|shelf| {
+            if !shelf.page.unleased() {
+                return true;
+            }
+            trim.pages += 1;
+            trim.atlas_bytes += shelf.page.allocation.bytes;
+            released.push(shelf.page.clone());
+            false
+        });
+        if !released.is_empty() {
+            let before = self.cache.len();
+            self.cache.retain(|_, v| {
+                !matches!(&v.source, GlyphSource::Image(i)
+                    if released.iter().any(|p| Arc::ptr_eq(p, &i.page)))
+            });
+            trim.cached_glyphs = before - self.cache.len();
+        }
+        trim
     }
     /// Releases lookup caches, page ownership, and recycled geometry storage.
     /// Existing prepared texts/recordings remain usable.
@@ -1054,7 +1134,6 @@ impl TextRenderer {
             });
         let group = self.bind_page(&texture);
         let page = Arc::new(Page {
-            id: 0,
             kind: Kind::Mask,
             texture,
             group,
@@ -1065,6 +1144,8 @@ impl TextRenderer {
                     bytes: AtomicUsize::new(0),
                 }),
             }),
+            last: AtomicU64::new(0),
+            cache_refs: AtomicUsize::new(0),
         });
         self.solid = Some(page.clone());
         page
@@ -1216,13 +1297,8 @@ impl TextRenderer {
         if let Some(cached) = self.cache.get_mut(&key) {
             self.stats.cache_hits += 1;
             cached.last = self.clock;
-            if let GlyphSource::Image(image) = &cached.source
-                && let Some(shelf) = self
-                    .pages
-                    .iter_mut()
-                    .find(|s| Arc::ptr_eq(&s.page, &image.page))
-            {
-                shelf.last = self.clock;
+            if let GlyphSource::Image(image) = &cached.source {
+                image.page.last.store(self.clock, Ordering::Relaxed);
             }
             return Ok(cached.source.clone());
         }
@@ -1324,17 +1400,21 @@ impl TextRenderer {
             }
         };
         if self.cache.len() >= self.options.max_cached_glyphs {
-            let victim = *self.cache.iter().min_by_key(|(_, v)| v.last).unwrap().0;
-            self.cache.remove(&victim);
+            self.evict_glyphs();
         }
-        self.cache.insert(
-            key,
-            Cached {
-                source: source.clone(),
-                last: self.clock,
-            },
-        );
+        self.cache
+            .insert(key, Cached::new(source.clone(), self.clock));
         Ok(source)
+    }
+    /// Drops the least recently used quarter of the cache in one pass, so a full cache
+    /// costs amortized constant time per miss instead of a scan for each.
+    fn evict_glyphs(&mut self) {
+        let len = self.cache.len();
+        let count = (len / 4).max(len + 1 - self.options.max_cached_glyphs.min(len + 1));
+        let mut ages: Vec<u64> = self.cache.values().map(|v| v.last).collect();
+        // Clock values are unique per entry, so this keeps exactly `len - count` entries.
+        let (_, &mut threshold, _) = ages.select_nth_unstable(count - 1);
+        self.cache.retain(|_, v| v.last > threshold);
     }
     fn upload_image(&mut self, mut image: Image) -> Result<GlyphImage, TextRenderError> {
         let kind = match image.content {
@@ -1365,7 +1445,7 @@ impl TextRenderer {
             if shelf.page.kind == kind
                 && let Some(pos) = shelf.allocate(w + 2, h + 2, size)
             {
-                shelf.last = self.clock;
+                shelf.page.last.store(self.clock, Ordering::Relaxed);
                 allocation = Some((shelf.page.clone(), pos));
                 break;
             }
@@ -1402,9 +1482,7 @@ impl TextRenderer {
                 let bytes = (size as usize) * (size as usize) * kind.bytes();
                 self.budget.pages.fetch_add(1, Ordering::Relaxed);
                 self.budget.bytes.fetch_add(bytes, Ordering::Relaxed);
-                self.next_page += 1;
                 let page = Arc::new(Page {
-                    id: self.next_page,
                     kind,
                     texture,
                     group,
@@ -1412,13 +1490,14 @@ impl TextRenderer {
                         bytes,
                         budget: self.budget.clone(),
                     }),
+                    last: AtomicU64::new(self.clock),
+                    cache_refs: AtomicUsize::new(0),
                 });
                 let mut shelf = Shelf {
                     page: page.clone(),
                     x: 0,
                     y: 0,
                     row: 0,
-                    last: self.clock,
                 };
                 let pos = shelf.allocate(w + 2, h + 2, size).unwrap();
                 self.pages.push(shelf);
@@ -1468,27 +1547,19 @@ impl TextRenderer {
         if self.budget.pages.load(Ordering::Relaxed) < self.options.max_pages {
             return;
         }
+        // O(pages) to choose; the cache pass runs once per reclaimed page, not per glyph.
         let victim = self
             .pages
             .iter()
             .enumerate()
-            .filter(|(_, s)| {
-                let cache_refs = self
-                    .cache
-                    .values()
-                    .filter(|v| {
-                        matches!(&v.source, GlyphSource::Image(i) if Arc::ptr_eq(&i.page, &s.page))
-                    })
-                    .count();
-                Arc::strong_count(&s.page) == 1 + cache_refs
-                    && Arc::strong_count(&s.page.allocation) == 1
-            })
-            .min_by_key(|(_, s)| s.last)
+            .filter(|(_, s)| s.page.unleased())
+            .min_by_key(|(_, s)| s.page.last.load(Ordering::Relaxed))
             .map(|(i, _)| i);
         if let Some(index) = victim {
             let page = self.pages.swap_remove(index).page;
-            self.cache
-                .retain(|_, v| !matches!(&v.source, GlyphSource::Image(i) if i.page.id == page.id));
+            self.cache.retain(
+                |_, v| !matches!(&v.source, GlyphSource::Image(i) if Arc::ptr_eq(&i.page, &page)),
+            );
         }
     }
 }

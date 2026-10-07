@@ -301,8 +301,28 @@ textures, preserving retained UVs and already-recorded commands. Default setting
 allow eight 1024² pages, 16,384 cached glyph keys, and a 512-pixel physical font-size
 limit. The page budget counts retained prepared texts, active recordings, and
 submitted work through completion callbacks. `clear_cache()` releases cache ownership
-but cannot release those leases. `AtlasFull` never waits: drop obsolete texts and
-drive queue/device progress, or configure a larger budget, before retrying.
+but cannot release those leases. A full key cache evicts its least recently used
+quarter in one pass; a full page budget reclaims the least recently used unleased
+page. Each page counts the cache entries pointing into it, so neither path scans
+the cache per glyph.
+
+`AtlasFull` is recoverable and never waits. The renderer and earlier prepared texts
+stay valid; drop obsolete texts and drive queue/device progress, then retry.
+`trim()` releases every unleased page with its cache entries and reports a
+`TextTrim { pages, atlas_bytes, cached_glyphs }`; it is also the way to return
+atlas memory when text goes idle. `set_max_pages(n)` raises (or lowers) the budget
+at runtime; `options()` reports it:
+
+```rust
+let prepared = match renderer.prepare_text(&layout, raster) {
+    Err(TextRenderError::AtlasFull) => {
+        renderer.trim();
+        renderer.prepare_text(&layout, raster)?
+    }
+    result => result?,
+};
+```
+
 Preparation failures may populate caches but never invalidate earlier prepared text.
 
 Glyph images are not retained in a CPU image cache. Swash uses an eight-entry

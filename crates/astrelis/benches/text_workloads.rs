@@ -431,17 +431,26 @@ fn preparation(g: &GraphicsContext, fonts: &mut TextSystem) -> Result<()> {
         unique.chars().count(),
         unique_keys.len()
     );
-    for case in ["cold_unique", "cached_unique", "raster_size_pressure"] {
+    for case in [
+        "cold_unique",
+        "cached_unique",
+        "evicting_unique",
+        "raster_size_pressure",
+    ] {
         let mut renderer = TextRenderer::with_options(
             g,
-            if case == "raster_size_pressure" {
-                TextRendererOptions {
+            match case {
+                "raster_size_pressure" => TextRendererOptions {
                     page_size: 256,
                     max_pages: 2,
                     ..Default::default()
-                }
-            } else {
-                Default::default()
+                },
+                // A key budget below the working set: every glyph misses and evicts.
+                "evicting_unique" => TextRendererOptions {
+                    max_cached_glyphs: 1024,
+                    ..Default::default()
+                },
+                _ => Default::default(),
             },
         )?;
         let small = layout(
@@ -483,7 +492,7 @@ fn preparation(g: &GraphicsContext, fonts: &mut TextSystem) -> Result<()> {
                 Err(TextRenderError::AtlasFull) if case == "raster_size_pressure" => {
                     // Append-only packing can strand free space across pages. No
                     // previous PreparedText or recording is retained in this case.
-                    // Explicitly release cached pages and retry without increasing
+                    // Explicitly trim unleased pages and retry without increasing
                     // the budget or hiding a completion wait in preparation.
                     let occupied = renderer.stats();
                     max_pages = max_pages.max(occupied.live_pages);
@@ -492,7 +501,7 @@ fn preparation(g: &GraphicsContext, fonts: &mut TextSystem) -> Result<()> {
                     if sample >= WARMUP {
                         measured_retries += 1;
                     }
-                    renderer.clear_cache();
+                    assert!(renderer.trim().pages > 0);
                     renderer.prepare_text(selected, raster)?
                 }
                 result => result?,

@@ -547,7 +547,8 @@ color glyphs retain their RGB and receive draw opacity. Batches preserve layout
 order and current clipping. A draw uploads 48 bytes of placement/color parameters,
 with no shaping, rasterization, or recurring glyph-geometry upload. Atlas budgets
 include prepared texts, recordings, and GPU completion leases. Cache exhaustion
-returns `AtlasFull`; callers control resource release and polling. Painter exposes
+returns a recoverable `AtlasFull`; callers control resource release and polling,
+and `trim()` / `set_max_pages()` free or grow the atlas before retrying. Painter exposes
 this same explicit preparation and retained drawing. Released geometry buffers
 are recycled under a bounded budget after their text/recording/GPU owners finish;
 see the [changing-text performance report](performance/text-updates.md):
