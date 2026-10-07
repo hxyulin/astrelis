@@ -1,0 +1,59 @@
+name: Bug report
+description: Report incorrect rendering, a crash, a panic or an API that misbehaves.
+labels: [bug]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does the problem occur?
+      options:
+        - Context, targets or frames
+        - Meshes, materials or custom passes
+        - Shapes, lines, paths or brushes
+        - Images, textures or framebuffers
+        - Text layout, rendering or selection
+        - Painter
+        - Window lifecycle (astrelis-winit)
+        - Build, installation or documentation
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: >-
+        The smallest code that shows the problem, or the example and steps that
+        trigger it, such as `cargo run -p astrelis --example text`.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: >-
+        Include the full error, panic message or wgpu validation output. Attach
+        a screenshot for rendering problems.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: >-
+        Astrelis version or commit, OS, Rust version, GPU and driver, and the
+        wgpu backend (Metal, Vulkan, DX12 or WebGPU). Mention the display scale
+        factor and MSAA sample count when they matter.
+      placeholder: |
+        astrelis: main @ abc1234
+        OS: macOS 27.0
+        rustc: 1.99.0
+        GPU / backend: Apple M3 Pro / Metal
+    validations:
+      required: true

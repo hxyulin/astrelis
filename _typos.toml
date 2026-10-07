@@ -1,0 +1,17 @@
+[default]
+extend-ignore-re = [
+    # Plural of an all-caps acronym, split by typos as `PN` + `Gs`.
+    "PNGs",
+]
+
+[default.extend-words]
+# OpenType variation axis tag, as in `NotoSansArabic[wdth,wght].ttf`.
+wdth = "wdth"
+
+[files]
+extend-exclude = [
+    "*.csv",
+    "*.log",
+    "crates/astrelis/tests/fonts/*.ttf",
+    "crates/astrelis/tests/fonts/*.otf",
+]

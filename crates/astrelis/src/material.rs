@@ -167,6 +167,8 @@ pub struct Material {
 impl Material {
     pub(crate) fn create(graphics: &GraphicsContext, options: MaterialOptions<'_>) -> Self {
         static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        // Deprecated in 1.99 in favor of `try_update`, which the 1.98.1 MSRV lacks.
+        #[allow(deprecated)]
         let id = NEXT_ID
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
             .expect("material identity space exhausted");

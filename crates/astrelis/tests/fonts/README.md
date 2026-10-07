@@ -19,8 +19,8 @@ fonts. The collection test packages the real TTF in memory as a two-face TTC sha
 tables, adjusting the container's absolute offsets; no additional binary fixture
 or custom font parser is needed.
 
-`TestColor.ttf` is an original geometric test fixture under the repository MIT
-license. It contains a rectangular coverage glyph, overlapping opaque-red and
+`TestColor.ttf` is an original geometric test fixture under the repository MIT or
+Apache-2.0 license. It contains a rectangular coverage glyph, overlapping opaque-red and
 half-transparent-green COLR v0 layers, and a half-transparent PNG bitmap in sbix.
 Regenerate it using `generate_color.py` with fonttools 4.60.2. Fonttools is needed
 only for regeneration, not Rust builds/tests/examples. The deterministic generator

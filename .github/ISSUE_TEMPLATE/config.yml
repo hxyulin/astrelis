@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: API guide
+    url: https://github.com/hxyulin/astrelis/blob/main/docs/guide.md
+    about: Read how contexts, passes, renderers and Painter fit together.
