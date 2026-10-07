@@ -73,3 +73,7 @@ harness = false
 [[bench]]
 name = "text_interaction"
 harness = false
+
+[[bench]]
+name = "store_ops"
+harness = false
