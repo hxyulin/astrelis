@@ -1,10 +1,8 @@
-use super::{
-    FontId, TextFont, TextLayout,
-    geometry::{Geometry, GeometryPool},
-};
+use super::{FontId, TextFont, TextLayout};
 use crate::{
     Error, GraphicsContext, Material, MaterialOptions, Rect, RenderFormat, RenderPass, Transform2D,
     VertexLayout,
+    geometry_pool::{Geometry, GeometryPool},
 };
 use bytemuck::{Pod, Zeroable};
 use std::{
@@ -1191,7 +1189,9 @@ impl TextRenderer {
         let (geometry, reused) = GeometryPool::upload(
             &self.geometry_pool,
             &self.graphics,
-            bytemuck::cast_slice(glyphs),
+            "Astrelis prepared glyphs",
+            wgpu::BufferUsages::VERTEX,
+            &[bytemuck::cast_slice(glyphs)],
         );
         if reused {
             self.stats.geometry_buffer_reuses += 1;

@@ -826,6 +826,15 @@ impl<'frame> RenderPass<'frame> {
     pub(crate) fn viewport_size(&self) -> [f32; 2] {
         [self.viewport[2], self.viewport[3]]
     }
+    pub(crate) fn retain_resource_ref<T: crate::uploads::ResourceLease + 'static>(
+        &mut self,
+        resource: &Arc<T>,
+    ) {
+        self.uploads
+            .as_mut()
+            .expect("resource leases require a frame-owned pass")
+            .retain_ref(resource);
+    }
     pub(crate) fn retain_resource(
         &mut self,
         resource: std::sync::Arc<dyn crate::uploads::ResourceLease>,

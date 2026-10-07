@@ -445,6 +445,7 @@ mod drawing;
 mod error;
 mod frame;
 mod framebuffer;
+mod geometry_pool;
 mod material;
 mod mesh;
 mod mesh_renderer;

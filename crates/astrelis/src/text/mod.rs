@@ -113,7 +113,6 @@
 
 mod buffer;
 mod distance_field;
-mod geometry;
 mod interaction;
 mod layout;
 mod renderer;

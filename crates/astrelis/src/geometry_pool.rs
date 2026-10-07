@@ -1,4 +1,4 @@
-//! Reuse completed geometry allocations without mutating any retained text.
+//! Reuse completed geometry allocations without mutating any retained resource.
 
 use crate::GraphicsContext;
 use std::sync::{Arc, Mutex, Weak};
@@ -10,25 +10,29 @@ const MAX_IDLE_BUFFERS: usize = 64;
 const MAX_POOLED_BUFFER: u64 = 64 * 1024;
 
 #[derive(Debug, Default)]
-pub(super) struct GeometryPool {
+pub(crate) struct GeometryPool {
     buffers: Vec<(wgpu::Buffer, Weak<()>)>,
     bytes: u64,
 }
 
 #[derive(Debug)]
-pub(super) struct Geometry {
+pub(crate) struct Geometry {
     pub buffer: wgpu::Buffer,
     pub lease: Arc<()>,
     pool: Weak<Mutex<GeometryPool>>,
 }
 
 impl GeometryPool {
+    /// Uploads `parts` back to back into an idle completed buffer of this pool,
+    /// or a new one. Every buffer in a pool must use the same `usage`.
     pub fn upload(
         pool: &Arc<Mutex<Self>>,
         graphics: &GraphicsContext,
-        contents: &[u8],
+        label: &'static str,
+        usage: wgpu::BufferUsages,
+        parts: &[&[u8]],
     ) -> (Geometry, bool) {
-        let size = contents.len() as u64;
+        let size = parts.iter().map(|part| part.len() as u64).sum::<u64>();
         let reusable = {
             let mut idle = pool.lock().unwrap_or_else(|e| e.into_inner());
             let best = idle
@@ -46,10 +50,14 @@ impl GeometryPool {
         };
         let reused = reusable.is_some();
         let buffer = if let Some(buffer) = reusable {
-            graphics.queue().write_buffer(&buffer, 0, contents);
+            let mut offset = 0;
+            for part in parts {
+                graphics.queue().write_buffer(&buffer, offset, part);
+                offset += part.len() as u64;
+            }
             buffer
         } else {
-            // Keep large paragraphs exact-sized. Small labels can grow within a bucket.
+            // Keep large geometry exact-sized. Small geometry can grow within a bucket.
             let capacity = if size <= MAX_POOLED_BUFFER {
                 size.next_power_of_two()
             } else {
@@ -57,17 +65,21 @@ impl GeometryPool {
             }
             .min(graphics.device().limits().max_buffer_size & !3);
             let buffer = graphics.device().create_buffer(&wgpu::BufferDescriptor {
-                label: Some("Astrelis prepared glyphs"),
+                label: Some(label),
                 size: capacity,
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                usage: usage | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: true,
             });
-            buffer
-                .slice(..)
-                .get_mapped_range_mut()
-                .unwrap()
-                .slice(..contents.len())
-                .copy_from_slice(contents);
+            {
+                let mut mapped = buffer.slice(..).get_mapped_range_mut().unwrap();
+                let mut offset = 0;
+                for part in parts {
+                    mapped
+                        .slice(offset..offset + part.len())
+                        .copy_from_slice(part);
+                    offset += part.len();
+                }
+            }
             buffer.unmap();
             buffer
         };
@@ -103,6 +115,14 @@ impl Drop for Geometry {
 mod tests {
     use super::*;
 
+    fn upload(
+        pool: &Arc<Mutex<GeometryPool>>,
+        graphics: &GraphicsContext,
+        bytes: &[u8],
+    ) -> (Geometry, bool) {
+        GeometryPool::upload(pool, graphics, "test", wgpu::BufferUsages::VERTEX, &[bytes])
+    }
+
     #[test]
     fn idle_geometry_storage_is_bounded_and_large_buffers_are_released() {
         pollster::block_on(async {
@@ -110,17 +130,17 @@ mod tests {
             let pool = Arc::default();
             let bytes = vec![0; 16 * 1024];
             let live: Vec<_> = (0..70)
-                .map(|_| GeometryPool::upload(&pool, &graphics, &bytes).0)
+                .map(|_| upload(&pool, &graphics, &bytes).0)
                 .collect();
             assert_eq!(pool.lock().unwrap().bytes, 0);
             drop(live);
             assert_eq!(pool.lock().unwrap().buffers.len(), MAX_IDLE_BUFFERS);
             assert_eq!(pool.lock().unwrap().bytes, MAX_IDLE_BYTES);
-            let (large, reused) = GeometryPool::upload(&pool, &graphics, &vec![0; 128 * 1024]);
+            let (large, reused) = upload(&pool, &graphics, &vec![0; 128 * 1024]);
             assert!(!reused);
             drop(large);
             assert_eq!(pool.lock().unwrap().bytes, MAX_IDLE_BYTES);
-            let (small, reused) = GeometryPool::upload(&pool, &graphics, &[0; 1024]);
+            let (small, reused) = upload(&pool, &graphics, &[0; 1024]);
             assert!(reused);
             assert_eq!(pool.lock().unwrap().bytes, MAX_IDLE_BYTES - 16 * 1024);
             // Pool ownership is weak: a retained allocation cannot keep idle buffers alive.

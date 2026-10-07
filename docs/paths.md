@@ -43,11 +43,14 @@ Settings and final geometry/buffer sizes are checked before allocating GPU geome
 An empty fill, a zero-width stroke, or a degenerate path can produce an empty
 resource with no buffers. Prepared geometry can be used by any PathRenderer or
 Painter on the same device, including with different immutable pipeline policies.
-Geometry is exact-sized and shared by clones. There is no path-specific idle GPU
-pool; wgpu commands retain bound immutable buffers even if the last PreparedPath
-is dropped before submission. Abandoning a recording releases its command references.
-No extra Astrelis CPU resource lease is needed. Tessellator scratch retains its internal peak until
-the renderer is dropped. CPU batch scratch also retains peak capacity.
+Vertices and indices share one buffer, shared by clones. Geometry up to 64 KiB
+comes from a bounded idle pool owned by the PathRenderer, rounded up to a power of
+two; larger geometry is exact-sized and released. Draws lease the buffer to their
+recording, so a dropped path's buffer is reused only after every recording that
+drew it has completed or been abandoned. Re-preparing a changing path every frame
+therefore reuses completed buffers instead of allocating. Tessellator scratch
+(Lyon buffers, welding and edge storage, output vertices and indices) retains its
+peak capacity until the renderer is dropped. CPU batch scratch also retains peak capacity.
 
 ## Drawing and coverage
 

@@ -1,26 +1,30 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use bytemuck::{Pod, Zeroable};
-use wgpu::util::DeviceExt as _;
 
 use super::{Path, PathDraw, PathOptions, geometry};
 use crate::{
     DrawSpace, EdgeAntialiasing, Error, GraphicsContext, Material, MaterialOptions,
     PipelineOptions, Rect, RenderFormat, RenderPass, RenderTarget, VertexLayout,
+    geometry_pool::{Geometry, GeometryPool},
 };
 
+// Vertices followed by indices in one buffer.
 #[derive(Debug)]
 struct Storage {
-    vertices: wgpu::Buffer,
-    indices: wgpu::Buffer,
+    geometry: Geometry,
+    index_offset: u64,
+    index_end: u64,
 }
 
 /// Immutable device-bound fill or stroke geometry, shared by cheap clones.
 ///
 /// Keep it across frames and change [`PathDraw`] color/transform without
 /// tessellating or uploading vertices/indices again. Prepared paths from other
-/// renderers on the same device are accepted. Storage is exact-sized and released
-/// when the last owner and recorded GPU use finish; there is no global path cache.
+/// renderers on the same device are accepted. Storage is released when the last
+/// owner and recorded GPU use finish; there is no global path cache. Geometry up to
+/// 64 KiB goes back to its renderer's bounded idle pool instead, so re-preparing
+/// changing paths reuses completed buffers.
 /// Preparation retains coverage-fringe topology as well as interior triangles.
 /// No attachment format, viewport size, or MSAA count is baked into this resource.
 #[derive(Clone, Debug)]
@@ -51,7 +55,8 @@ impl PreparedPath {
     pub fn index_count(&self) -> u32 {
         self.indices
     }
-    /// Exact retained vertex/index buffer bytes; empty resources retain no buffers.
+    /// Vertex and index bytes of the retained geometry; empty resources retain no
+    /// buffers. Pooled storage of up to 64 KiB rounds its allocation up to a power of two.
     pub fn geometry_bytes(&self) -> u64 {
         u64::from(self.vertices) * 32 + u64::from(self.indices) * 4
     }
@@ -169,6 +174,7 @@ pub struct PathRenderer {
     brush_material: Option<Material>,
     pipelines: crate::mesh_renderer::Pipelines,
     tessellators: geometry::Tessellators,
+    geometry_pool: Arc<Mutex<GeometryPool>>,
     parameters: Vec<Parameters>,
     page_capacity: usize,
 }
@@ -225,6 +231,7 @@ impl PathRenderer {
             brush_material: None,
             pipelines: Default::default(),
             tessellators: Default::default(),
+            geometry_pool: Default::default(),
             parameters: Vec::new(),
             page_capacity: (graphics.device().limits().max_buffer_size / 64).clamp(1, 1024)
                 as usize,
@@ -252,21 +259,23 @@ impl PathRenderer {
         let storage = if indices == 0 {
             None
         } else {
+            let index_offset = vertex_bytes.len() as u64;
+            let index_end = index_offset + index_bytes.len() as u64;
+            if index_end > limit {
+                self.tessellators.recycle(geometry);
+                return Err(Error::PathTooLarge);
+            }
+            let (buffer, _) = GeometryPool::upload(
+                &self.geometry_pool,
+                &self.graphics,
+                "Astrelis prepared path",
+                wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::INDEX,
+                &[vertex_bytes, index_bytes],
+            );
             Some(Arc::new(Storage {
-                vertices: self.graphics.device().create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("Astrelis prepared path vertices"),
-                        contents: vertex_bytes,
-                        usage: wgpu::BufferUsages::VERTEX,
-                    },
-                ),
-                indices: self.graphics.device().create_buffer_init(
-                    &wgpu::util::BufferInitDescriptor {
-                        label: Some("Astrelis prepared path indices"),
-                        contents: index_bytes,
-                        usage: wgpu::BufferUsages::INDEX,
-                    },
-                ),
+                geometry: buffer,
+                index_offset,
+                index_end,
             }))
         };
         let prepared = PreparedPath {
@@ -547,13 +556,13 @@ fn record(
     if parameters.is_empty() {
         return;
     }
-    // These buffers are immutable and never recycled by an Astrelis pool.
-    // wgpu retains bound buffers in the recording, including when all caller
-    // handles drop before submission. No additional CPU resource lease is needed.
-    pass.set_vertex_buffer(0, &storage.vertices, 0..storage.vertices.size());
+    // The lease keeps a recycled buffer out of reuse until this recording completes.
+    pass.retain_resource_ref(&storage.geometry.lease);
+    let buffer = &storage.geometry.buffer;
+    pass.set_vertex_buffer(0, buffer, 0..storage.index_offset);
     pass.set_index_buffer(
-        &storage.indices,
-        0..storage.indices.size(),
+        buffer,
+        storage.index_offset..storage.index_end,
         wgpu::IndexFormat::Uint32,
     );
     let count = if hard {
@@ -628,8 +637,10 @@ mod tests {
                 assert_eq!(renderer.parameters.capacity(), capacity);
                 assert_eq!(renderer.pipelines.len(), 1);
                 assert_eq!(renderer.pipelines.values().next().unwrap(), &pipeline);
-                assert_eq!(path.storage.as_ref().unwrap().vertices, storage.vertices);
-                assert_eq!(path.storage.as_ref().unwrap().indices, storage.indices);
+                assert_eq!(
+                    path.storage.as_ref().unwrap().geometry.buffer,
+                    storage.geometry.buffer
+                );
                 let pool = g.upload_pool.lock().unwrap();
                 assert!(pool.iter().all(|(b, _)| buffers.contains(b)));
                 assert_eq!(
@@ -666,8 +677,68 @@ mod tests {
             });
             assert_eq!(&bytes[(2 * 64 + 2) * 4..(2 * 64 + 3) * 4], &[255; 4]);
             assert!(weak.upgrade().is_none());
-            // Dropping a renderer releases its CPU scratch and pipeline cache;
-            // there is no path-specific idle GPU pool retaining freed geometry.
+            // Dropping a renderer releases its CPU scratch, pipeline cache and idle
+            // geometry pool; recordings keep only the buffers they draw.
+        });
+    }
+
+    #[test]
+    fn reprepared_paths_reuse_geometry_only_after_recorded_use_completes() {
+        pollster::block_on(async {
+            let g = GraphicsContext::headless().await.unwrap();
+            let mut renderer = PathRenderer::new(&g);
+            let square = |size: f32| {
+                let mut builder = Path::builder();
+                builder
+                    .move_to([0., 0.])
+                    .line_to([size, 0.])
+                    .line_to([size, size])
+                    .line_to([0., size])
+                    .close();
+                builder.build().unwrap()
+            };
+            let mut target = g
+                .create_framebuffer(
+                    FramebufferOptions::new(64, 64).usage(
+                        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    ),
+                )
+                .unwrap();
+            renderer.prepare(&target.render_format()).unwrap();
+            let buffer = |p: &PreparedPath| p.storage.as_ref().unwrap().geometry.buffer.clone();
+            let draw = PathDraw::new([1.; 4]).antialiasing(EdgeAntialiasing::None);
+            let small = renderer
+                .prepare_path(&square(8.), PathOptions::new())
+                .unwrap();
+            let first = buffer(&small);
+            let bytes = pixels(&g, &mut target, |f| {
+                renderer
+                    .draw(&mut f.render_pass().begin().unwrap(), &small, draw)
+                    .unwrap();
+                // The recording still uses the dropped path's buffer, so the
+                // next preparation must not overwrite it before submission.
+                drop(small);
+                let large = renderer
+                    .prepare_path(&square(40.), PathOptions::new())
+                    .unwrap();
+                assert_ne!(buffer(&large), first);
+            });
+            assert_eq!(&bytes[(4 * 64 + 4) * 4..(4 * 64 + 5) * 4], &[255; 4]);
+            assert_eq!(&bytes[(20 * 64 + 20) * 4..(20 * 64 + 21) * 4], &[0; 4]);
+            // After completion the idle buffer is reused.
+            g.device()
+                .poll(wgpu::PollType::wait_indefinitely())
+                .unwrap();
+            let again = renderer
+                .prepare_path(&square(8.), PathOptions::new())
+                .unwrap();
+            assert_eq!(buffer(&again), first);
+            let bytes = pixels(&g, &mut target, |f| {
+                renderer
+                    .draw(&mut f.render_pass().begin().unwrap(), &again, draw)
+                    .unwrap();
+            });
+            assert_eq!(&bytes[(4 * 64 + 4) * 4..(4 * 64 + 5) * 4], &[255; 4]);
         });
     }
 }

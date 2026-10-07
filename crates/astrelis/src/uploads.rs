@@ -55,6 +55,18 @@ pub(crate) struct DrawUploads {
 pub(crate) trait ResourceLease: std::fmt::Debug + Send + Sync {}
 impl<T: std::fmt::Debug + Send + Sync> ResourceLease for T {}
 impl DrawUploads {
+    /// Retains `resource` unless it was the last one retained, without touching
+    /// its reference count in that case.
+    pub(crate) fn retain_ref<T: ResourceLease + 'static>(&mut self, resource: &Arc<T>) {
+        if self
+            .leases
+            .last()
+            .is_some_and(|r| std::ptr::addr_eq(Arc::as_ptr(r), Arc::as_ptr(resource)))
+        {
+            return;
+        }
+        self.retain(resource.clone());
+    }
     pub(crate) fn retain(&mut self, resource: Arc<dyn ResourceLease>) {
         // Small passes need no hash allocation. Larger collections must avoid a
         // quadratic scan when each label retains independent geometry.
