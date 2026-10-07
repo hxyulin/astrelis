@@ -409,8 +409,9 @@ impl<'target, 'window> Frame<'target, 'window> {
     /// Submits once, committing framebuffer writes and presenting a surface if owned.
     ///
     /// Offscreen frames submit without presenting. The submission index identifies
-    /// queued work, not GPU completion. Suboptimal surfaces are reconfigured after
-    /// presentation, which may synchronize. Empty offscreen recordings are allowed.
+    /// queued work, not GPU completion. A suboptimal surface is reconfigured once after
+    /// presentation, which may synchronize; it is not reconfigured again until its
+    /// size changes or an optimal image is acquired. Empty offscreen recordings are allowed.
     ///
     /// # Errors
     ///
@@ -451,7 +452,7 @@ impl<'target, 'window> Frame<'target, 'window> {
             target.graphics.queue().present(image);
             drop(view);
             if suboptimal {
-                target.configure();
+                target.reconfigure_suboptimal();
             }
         }
         Ok(submission)

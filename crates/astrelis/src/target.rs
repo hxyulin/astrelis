@@ -85,6 +85,8 @@ pub struct SurfaceTarget<'window> {
     pub(crate) depth_stencil_format: Option<wgpu::TextureFormat>,
     depth_stencil_usage: wgpu::TextureUsages,
     pub(crate) depth_stencil: Option<crate::depth_stencil::DepthStencilAttachment>,
+    // Whether the current configuration was already reapplied for a suboptimal image.
+    suboptimal_reconfigured: bool,
 }
 
 impl<'window> RenderTarget<'window> {
@@ -147,7 +149,7 @@ impl<'window> RenderTarget<'window> {
             [width, height],
             sample_count,
         );
-        let target = SurfaceTarget {
+        let mut target = SurfaceTarget {
             surface,
             graphics: graphics.clone(),
             configuration,
@@ -164,6 +166,7 @@ impl<'window> RenderTarget<'window> {
                 depth_stencil_format,
                 depth_stencil_usage,
             ),
+            suboptimal_reconfigured: false,
         };
         if width != 0 && height != 0 {
             target.configure();
@@ -199,7 +202,10 @@ impl<'window> RenderTarget<'window> {
             acquisition = target.surface.get_current_texture();
         }
         let (image, suboptimal) = match acquisition {
-            wgpu::CurrentSurfaceTexture::Success(image) => (image, false),
+            wgpu::CurrentSurfaceTexture::Success(image) => {
+                target.suboptimal_reconfigured = false;
+                (image, false)
+            }
             wgpu::CurrentSurfaceTexture::Suboptimal(image) => (image, true),
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Outdated => {
                 return Err(FrameError::Retry);
@@ -521,9 +527,21 @@ pub(crate) fn create_multisample_view(
 }
 
 impl SurfaceTarget<'_> {
-    pub(crate) fn configure(&self) {
+    pub(crate) fn configure(&mut self) {
         self.surface
             .configure(self.graphics.device(), &self.configuration);
+        self.suboptimal_reconfigured = false;
+    }
+
+    /// Reapplies the configuration after presenting a suboptimal image, at most once
+    /// until the configuration changes or an optimal image is acquired. Some
+    /// platforms keep reporting suboptimal for an unchanged configuration, and
+    /// reconfiguring every frame would stall presentation without converging.
+    pub(crate) fn reconfigure_suboptimal(&mut self) {
+        if !self.suboptimal_reconfigured {
+            self.configure();
+            self.suboptimal_reconfigured = true;
+        }
     }
 }
 
