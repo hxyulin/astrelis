@@ -420,6 +420,7 @@ impl<'target, 'window> Frame<'target, 'window> {
     /// recording discarded that storage. Clearing an additional framebuffer does not
     /// initialize the surface output.
     pub fn finish(mut self) -> Result<wgpu::SubmissionIndex, Error> {
+        profiling::scope!("astrelis::Frame::finish");
         if matches!(self.target, FrameTarget::Surface { .. })
             && !self.writes.is_initialized(&self.initialized)
         {

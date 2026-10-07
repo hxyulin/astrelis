@@ -135,6 +135,7 @@ impl DrawUploads {
         (page.buffer.clone(), start..start + length)
     }
     pub(crate) fn upload(&self, queue: &wgpu::Queue) {
+        profiling::scope!("astrelis::upload_instances");
         for page in &self.pages {
             queue.write_buffer(&page.buffer, 0, &page.bytes);
         }

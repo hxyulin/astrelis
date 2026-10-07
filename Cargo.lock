@@ -107,6 +107,7 @@ dependencies = [
  "cosmic-text",
  "lyon_tessellation",
  "pollster",
+ "profiling",
  "swash",
  "unicode-segmentation",
  "wgpu",
@@ -119,6 +120,7 @@ version = "0.4.0-dev.0"
 dependencies = [
  "astrelis",
  "pollster",
+ "profiling",
  "winit",
 ]
 

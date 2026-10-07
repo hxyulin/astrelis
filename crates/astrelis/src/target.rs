@@ -185,6 +185,7 @@ impl<'window> RenderTarget<'window> {
     /// the owning window. [`FrameError::Validation`] indicates a wgpu acquisition
     /// validation failure.
     pub fn begin_frame(&mut self) -> Result<Frame<'_, 'window>, FrameError> {
+        profiling::scope!("astrelis::begin_frame");
         let target = match self {
             Self::Surface(target) => target,
             Self::Framebuffer(framebuffer) => return framebuffer.begin_recording(),

@@ -235,6 +235,7 @@ impl PathRenderer {
         path: &Path,
         options: PathOptions,
     ) -> Result<PreparedPath, Error> {
+        profiling::scope!("astrelis::prepare_path");
         let geometry = self.tessellators.prepare(path, options)?;
         let vertices = u32::try_from(geometry.vertices.len()).map_err(|_| Error::PathTooLarge)?;
         let indices = u32::try_from(geometry.indices.len()).map_err(|_| Error::PathTooLarge)?;

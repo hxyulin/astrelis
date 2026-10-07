@@ -11,6 +11,7 @@ readme = "../../README.md"
 
 [dependencies]
 bytemuck.workspace = true
+profiling.workspace = true
 cosmic-text.workspace = true
 bymsdfgen-core.workspace = true
 swash.workspace = true

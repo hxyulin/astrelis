@@ -134,6 +134,7 @@ impl TextBuffer {
         if self.evaluated_system == Some(source) && !self.layout_dirty && !self.text_dirty {
             return Ok(self.cached.as_ref().unwrap().clone());
         }
+        profiling::scope!("astrelis::TextBuffer::layout");
         if system.backend.db().is_empty() && self.text.chars().any(|c| c != '\r' && c != '\n') {
             return Err(TextError::NoFonts);
         }

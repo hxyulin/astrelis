@@ -370,9 +370,12 @@ impl<H: Handler> Driver<'_, H> {
             }
             return;
         }
-        let action = self.call(event_loop, Callback::Prepare, Some(id), |h, cx| {
-            h.prepare(cx, id)
-        });
+        let action = {
+            profiling::scope!("astrelis_winit::prepare");
+            self.call(event_loop, Callback::Prepare, Some(id), |h, cx| {
+                h.prepare(cx, id)
+            })
+        };
         self.drain(event_loop);
         if action != Some(PrepareAction::Render) {
             return;
@@ -387,23 +390,30 @@ impl<H: Handler> Driver<'_, H> {
         let w = self.state.windows.get_mut(&id).expect("ready window");
         let acquired = w.context.info_and_frame();
         let outcome = match acquired {
-            Ok((info, mut frame)) => match self.handler.render(info, &mut frame) {
-                Ok(()) => {
-                    info.window().pre_present_notify();
-                    frame
-                        .finish()
-                        .map_err(|source| RunError::Submission { window: id, source })
+            Ok((info, mut frame)) => {
+                let rendered = {
+                    profiling::scope!("astrelis_winit::render");
+                    self.handler.render(info, &mut frame)
+                };
+                match rendered {
+                    Ok(()) => {
+                        info.window().pre_present_notify();
+                        frame
+                            .finish()
+                            .map_err(|source| RunError::Submission { window: id, source })
+                    }
+                    Err(source) => Err(RunError::Handler {
+                        callback: Callback::Render,
+                        window: Some(id),
+                        source: source.into(),
+                    }),
                 }
-                Err(source) => Err(RunError::Handler {
-                    callback: Callback::Render,
-                    window: Some(id),
-                    source: source.into(),
-                }),
-            },
+            }
             Err(source) => Err(RunError::Acquisition { window: id, source }),
         };
         match outcome {
             Ok(submission) => {
+                profiling::finish_frame!();
                 self.state
                     .windows
                     .get_mut(&id)

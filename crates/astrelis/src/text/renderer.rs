@@ -711,6 +711,7 @@ impl TextRenderer {
         layout: &TextLayout,
         preparation: impl Into<TextPreparation>,
     ) -> Result<PreparedText, TextRenderError> {
+        profiling::scope!("astrelis::prepare_text");
         let draft = self.prepare_geometry(layout, preparation.into())?;
         let bytes = draft.glyphs.len() as u64 * 48;
         let geometry = (!draft.glyphs.is_empty())
@@ -751,6 +752,7 @@ impl TextRenderer {
         layouts: impl IntoIterator<Item = L>,
         preparation: impl Into<TextPreparation>,
     ) -> Result<Vec<PreparedText>, TextRenderError> {
+        profiling::scope!("astrelis::prepare_texts");
         let preparation = preparation.into();
         // Validate settings even for an empty collection.
         validate_preparation(preparation)?;
@@ -1067,6 +1069,7 @@ impl TextRenderer {
             return Ok(cached.source.clone());
         }
         self.stats.cache_misses += 1;
+        profiling::scope!("astrelis::rasterize_glyph");
         let mut font_ref = swash::FontRef::from_index(font.data(), font.face_index() as usize)
             .ok_or(TextRenderError::InvalidRaster)?;
         if !self.fonts.contains_key(&font.id()) && self.fonts.len() >= 64 {
