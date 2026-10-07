@@ -175,7 +175,10 @@ impl<'target, 'window> Frame<'target, 'window> {
         image: wgpu::SurfaceTexture,
         suboptimal: bool,
     ) -> Self {
-        let view = image.texture.create_view(&Default::default());
+        let view = image.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(target.format),
+            ..Default::default()
+        });
         let encoder = create_encoder(&target.graphics);
         Self {
             encoder,
@@ -218,7 +221,7 @@ impl<'target, 'window> Frame<'target, 'window> {
                 ManagedColorAttachment {
                     view: target.multisample_view.as_ref().unwrap_or(view),
                     resolve_target: target.multisample_view.as_ref().map(|_| view),
-                    format: target.configuration.format,
+                    format: target.format,
                     size: target.size,
                     sample_count: target.sample_count,
                     resolved_state: target.multisample_view.as_ref().map(|_| &self.initialized),
@@ -282,7 +285,7 @@ impl<'target, 'window> Frame<'target, 'window> {
             FrameTarget::Surface { view, target, .. } => {
                 let mut a = crate::RenderColorAttachment::new(
                     target.multisample_view.as_ref().unwrap_or(view),
-                    target.configuration.format,
+                    target.format,
                     target.size,
                 );
                 a.resolve_target = target.multisample_view.as_ref().map(|_| view.clone());
@@ -382,7 +385,7 @@ impl<'target, 'window> Frame<'target, 'window> {
     /// Returns the default destination's color format.
     pub fn format(&self) -> wgpu::TextureFormat {
         match &self.target {
-            FrameTarget::Surface { target, .. } => target.configuration.format,
+            FrameTarget::Surface { target, .. } => target.format,
             FrameTarget::Framebuffer(target) => target.format(),
         }
     }

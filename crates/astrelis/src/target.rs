@@ -78,6 +78,8 @@ pub struct SurfaceTarget<'window> {
     pub(crate) surface: wgpu::Surface<'window>,
     pub(crate) graphics: GraphicsContext,
     pub(crate) configuration: wgpu::SurfaceConfiguration,
+    // Render view format: the configured format or its sRGB view format.
+    pub(crate) format: wgpu::TextureFormat,
     pub(crate) size: [u32; 2],
     pub(crate) sample_count: u32,
     pub(crate) multisample_view: Option<wgpu::TextureView>,
@@ -93,7 +95,12 @@ impl<'window> RenderTarget<'window> {
     /// Takes ownership of a wgpu surface and configures it for FIFO presentation.
     ///
     /// Options use physical pixels. A zero dimension suspends rendering
-    /// until a nonzero resize. An sRGB surface format is preferred when supported.
+    /// until a nonzero resize. Rendering targets an sRGB format so that linear shader
+    /// output is encoded for display: an sRGB surface format when one is offered,
+    /// otherwise an sRGB view of a linear surface format (for example a WebGPU
+    /// canvas offering only `Bgra8Unorm`) when the backend supports surface view
+    /// formats. [`Self::format`] reports the view format that passes render to.
+    /// Only when neither is available does output stay in the linear surface format.
     /// The initial sample count is validated and its attachment allocated before
     /// returning, except when suspended. Usable counts are queried once and cached.
     /// The surface must have been created by the context's instance. The
@@ -131,28 +138,37 @@ impl<'window> RenderTarget<'window> {
         {
             return Err(Error::UnsupportedSurface);
         }
-        if let Some(format) = capabilities.formats.iter().find(|format| format.is_srgb()) {
-            configuration.format = *format;
-        }
+        let view_formats = graphics
+            .adapter()
+            .get_downlevel_capabilities()
+            .flags
+            .contains(wgpu::DownlevelFlags::SURFACE_VIEW_FORMATS);
+        let format =
+            if let Some((format, view)) = select_formats(&capabilities.formats, view_formats) {
+                configuration.format = format;
+                if view != format {
+                    configuration.view_formats = vec![view];
+                }
+                view
+            } else {
+                configuration.format
+            };
         configuration.present_mode = wgpu::PresentMode::Fifo;
-        let mut supported_sample_counts = supported_sample_counts(graphics, configuration.format);
+        let mut supported_sample_counts = supported_sample_counts(graphics, format);
         crate::depth_stencil::restrict_counts(
             graphics,
             &mut supported_sample_counts,
             depth_stencil_format,
             depth_stencil_usage,
         )?;
-        validate_sample_count(configuration.format, sample_count, &supported_sample_counts)?;
-        let multisample_view = create_multisample_view(
-            graphics,
-            configuration.format,
-            [width, height],
-            sample_count,
-        );
+        validate_sample_count(format, sample_count, &supported_sample_counts)?;
+        let multisample_view =
+            create_multisample_view(graphics, format, [width, height], sample_count);
         let mut target = SurfaceTarget {
             surface,
             graphics: graphics.clone(),
             configuration,
+            format,
             size: [width, height],
             sample_count,
             multisample_view,
@@ -233,7 +249,7 @@ impl<'window> RenderTarget<'window> {
         target.size = [width, height];
         target.multisample_view = create_multisample_view(
             &target.graphics,
-            target.configuration.format,
+            target.format,
             target.size,
             target.sample_count,
         );
@@ -270,7 +286,7 @@ impl<'window> RenderTarget<'window> {
     /// Returns the selected color format.
     pub fn format(&self) -> wgpu::TextureFormat {
         match self {
-            Self::Surface(target) => target.configuration.format,
+            Self::Surface(target) => target.format,
             Self::Framebuffer(target) => target.format(),
         }
     }
@@ -331,7 +347,7 @@ impl<'window> RenderTarget<'window> {
             Self::Surface(target) => target,
             Self::Framebuffer(framebuffer) => return framebuffer.set_sample_count(count),
         };
-        let format = target.configuration.format;
+        let format = target.format;
         if target.sample_count == count {
             return Ok(());
         }
@@ -555,4 +571,42 @@ pub(crate) fn validate_size(
         return Err(Error::InvalidTargetSize { width, height, max });
     }
     Ok(())
+}
+
+/// Selects a surface format and the sRGB format its views render to.
+///
+/// Prefers a natively sRGB format; otherwise, when surface view formats are
+/// supported, a linear format with an sRGB view. `None` keeps the default.
+fn select_formats(
+    formats: &[wgpu::TextureFormat],
+    view_formats: bool,
+) -> Option<(wgpu::TextureFormat, wgpu::TextureFormat)> {
+    if let Some(&format) = formats.iter().find(|format| format.is_srgb()) {
+        return Some((format, format));
+    }
+    formats
+        .iter()
+        .map(|&format| (format, format.add_srgb_suffix()))
+        .find(|(format, view)| view_formats && format != view)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wgpu::TextureFormat::*;
+
+    #[test]
+    fn surface_formats_render_to_srgb_views() {
+        assert_eq!(
+            select_formats(&[Bgra8Unorm, Bgra8UnormSrgb], false),
+            Some((Bgra8UnormSrgb, Bgra8UnormSrgb))
+        );
+        // WebGPU canvases offer only linear formats but allow sRGB views.
+        assert_eq!(
+            select_formats(&[Rgba16Float, Bgra8Unorm, Rgba8Unorm], true),
+            Some((Bgra8Unorm, Bgra8UnormSrgb))
+        );
+        assert_eq!(select_formats(&[Bgra8Unorm], false), None);
+        assert_eq!(select_formats(&[Rgba16Float], true), None);
+    }
 }
