@@ -13,6 +13,11 @@ use std::{
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TextureAlpha {
     /// RGB is independent of alpha, as in most uploaded images.
+    ///
+    /// Texels are premultiplied before filtering, so the RGB of transparent texels
+    /// never darkens edges. Linear filtering interpolates the view's first mip level
+    /// with the sampler's address modes; use premultiplied data for mipmapped or
+    /// anisotropic sampling.
     #[default]
     Straight,
     /// RGB already contains alpha, as in built-in framebuffer rendering.
@@ -1213,25 +1218,29 @@ impl TextureRenderer {
                             entry_point: Some(if m.shader.is_some() {
                                 &m.fragment_entry
                             } else {
-                                match b.options.alpha {
-                                    TextureAlpha::Straight
-                                        if m.depth_stencil.as_ref().is_some_and(|state| {
-                                            !state.is_depth_read_only()
-                                                || !state.is_stencil_read_only(m.cull_mode)
-                                        }) =>
-                                    {
+                                let covered = m.depth_stencil.as_ref().is_some_and(|state| {
+                                    !state.is_depth_read_only()
+                                        || !state.is_stencil_read_only(m.cull_mode)
+                                });
+                                match (b.options.alpha, b.options.filter, covered) {
+                                    (TextureAlpha::Straight, TextureFilter::Nearest, false) => {
+                                        "fragment_straight"
+                                    }
+                                    (TextureAlpha::Straight, TextureFilter::Nearest, true) => {
                                         "fragment_straight_covered"
                                     }
-                                    TextureAlpha::Premultiplied
-                                        if m.depth_stencil.as_ref().is_some_and(|state| {
-                                            !state.is_depth_read_only()
-                                                || !state.is_stencil_read_only(m.cull_mode)
-                                        }) =>
-                                    {
+                                    (TextureAlpha::Straight, TextureFilter::Linear, false) => {
+                                        "fragment_straight_linear"
+                                    }
+                                    (TextureAlpha::Straight, TextureFilter::Linear, true) => {
+                                        "fragment_straight_linear_covered"
+                                    }
+                                    (TextureAlpha::Premultiplied, _, false) => {
+                                        "fragment_premultiplied"
+                                    }
+                                    (TextureAlpha::Premultiplied, _, true) => {
                                         "fragment_premultiplied_covered"
                                     }
-                                    TextureAlpha::Straight => "fragment_straight",
-                                    TextureAlpha::Premultiplied => "fragment_premultiplied",
                                 }
                             }),
                             compilation_options: Default::default(),

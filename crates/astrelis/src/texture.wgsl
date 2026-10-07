@@ -44,6 +44,26 @@ fn shade_fragment_straight(input: Output) -> vec4<f32> {
     let color = textureSample(image, image_sampler, input.uv);
     return tinted(vec4(color.rgb * color.a, color.a), input.tint);
 }
+// Linear filtering must interpolate premultiplied texels. Filtering straight RGB first
+// blends the colour of transparent texels into edges as dark fringes, so gather the
+// bilinear footprint of the first level, premultiply each texel, then weight it.
+fn shade_fragment_straight_linear(input: Output) -> vec4<f32> {
+    let size = vec2<f32>(textureDimensions(image));
+    let texel = input.uv * size - 0.5;
+    let base = floor(texel);
+    let f = texel - base;
+    // Gathering at the footprint centre keeps the footprint consistent with `base`.
+    let centre = (base + 1.0) / size;
+    let r = textureGather(0, image, image_sampler, centre);
+    let g = textureGather(1, image, image_sampler, centre);
+    let b = textureGather(2, image, image_sampler, centre);
+    let a = textureGather(3, image, image_sampler, centre);
+    // Gathered components are ordered (u0, v1), (u1, v1), (u1, v0), (u0, v0).
+    let weights = vec4((1.0 - f.x) * f.y, f.x * f.y, f.x * (1.0 - f.y), (1.0 - f.x) * (1.0 - f.y));
+    let coverage = weights * a;
+    let color = vec4(dot(r, coverage), dot(g, coverage), dot(b, coverage), dot(a, weights));
+    return tinted(color, input.tint);
+}
 fn shade_fragment_premultiplied(input: Output) -> vec4<f32> {
     return tinted(textureSample(image, image_sampler, input.uv), input.tint);
 }
@@ -53,6 +73,15 @@ fn shade_fragment_premultiplied(input: Output) -> vec4<f32> {
 }
 @fragment fn fragment_straight_covered(input: Output) -> @location(0) vec4<f32> {
     let color = shade_fragment_straight(input);
+    if color.a <= 0.0 { discard; }
+    return color;
+}
+
+@fragment fn fragment_straight_linear(input: Output) -> @location(0) vec4<f32> {
+    return shade_fragment_straight_linear(input);
+}
+@fragment fn fragment_straight_linear_covered(input: Output) -> @location(0) vec4<f32> {
+    let color = shade_fragment_straight_linear(input);
     if color.a <= 0.0 { discard; }
     return color;
 }

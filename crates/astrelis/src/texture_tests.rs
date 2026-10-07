@@ -638,3 +638,48 @@ fn fixed_workload_reuses_upload_pages_and_prepared_pipeline_after_warmup() {
         assert!(scope.pop().await.is_none());
     });
 }
+#[test]
+fn straight_alpha_filters_premultiplied_texels() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut r = TextureRenderer::new(&g);
+        let mut target = output(&g, 1);
+        // Opaque white beside transparent black: filtering straight RGB would darken
+        // the edge, while premultiplied filtering keeps every blend pure white.
+        let t = image(&g, 2, 1, &[255, 255, 255, 255, 0, 0, 0, 0]);
+        let m =
+            g.create_texture_material(TextureMaterialOptions::new().blend(TextureBlend::Replace));
+        for filter in [TextureFilter::Linear, TextureFilter::Nearest] {
+            let b = r
+                .create_binding(t.view(), TextureBindingOptions::new().filter(filter))
+                .unwrap();
+            r.try_prepare_material(&b, &m, &target.render_format())
+                .await
+                .unwrap();
+            let bytes = pixels(&g, &mut target, |f| {
+                r.draw_with_material(
+                    &mut f.render_pass().begin().unwrap(),
+                    &b,
+                    &m,
+                    TextureDraw::default(),
+                )
+                .unwrap()
+            });
+            for x in 0..64 {
+                let [red, green, blue, alpha] = pixel(&bytes, x, 32);
+                for channel in [red, green, blue] {
+                    assert!(
+                        channel.abs_diff(alpha) <= 1,
+                        "{filter:?} x={x}: {red} vs {alpha}"
+                    );
+                }
+            }
+            if filter == TextureFilter::Linear {
+                // Pixel 32 samples texel coordinate 0.516: 48.4% of the opaque texel.
+                near(pixel(&bytes, 32, 32), [124, 124, 124, 124]);
+            }
+        }
+        assert!(scope.pop().await.is_none());
+    });
+}
