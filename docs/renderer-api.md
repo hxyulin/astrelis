@@ -6,6 +6,14 @@ content. Draw descriptors own placement/appearance values. The application owns
 window lifecycle, targets, frame acquisition, passes, draw order and submission.
 There is no renderer base trait, automatic sorting, display list, or implicit flush.
 
+Dynamic per-draw records go into shared 64 KiB upload pages. A draw binds its page
+once and selects its records with `first_instance`, so consecutive draws from one
+page keep the binding. When a draw follows another built-in draw of the same
+geometry with no command in between and its records continue that draw's range,
+the pass extends the earlier draw instead of recording a second one. Any other
+command, raw access through `as_wgpu`, or the end of the pass records the pending
+draw first, so the GPU sees the calls' order and state unchanged.
+
 ## Preparation and errors
 
 All renderers prepare attachment-compatible pipelines from `&RenderFormat`, or

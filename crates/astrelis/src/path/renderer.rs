@@ -561,8 +561,10 @@ fn record(
     pass.bind_clip(2);
     for chunk in parameters.chunks(capacity) {
         let first = pass.bind_instances(1, bytemuck::cast_slice(chunk), 64);
-        pass.inner
-            .draw_indexed(0..count, 0, first..first + chunk.len() as u32);
+        pass.draw_instances(
+            crate::pass::DrawGeometry::Indexed(0..count),
+            first..first + chunk.len() as u32,
+        );
     }
 }
 

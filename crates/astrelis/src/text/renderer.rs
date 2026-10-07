@@ -1308,8 +1308,7 @@ impl TextRenderer {
                 previous = Some(field);
             }
             pass.set_bind_group(0, &batch.page.group, &[]);
-            pass.inner
-                .draw(0..6, base + batch.range.start..base + batch.range.end);
+            pass.draw(0..6, base + batch.range.start..base + batch.range.end);
             self.stats.draw_calls += 1;
         }
         Ok(())

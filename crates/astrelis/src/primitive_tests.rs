@@ -853,3 +853,65 @@ fn box_shadows_match_gaussian_blur_and_follow_offset_spread_and_corners() {
         );
     });
 }
+
+#[test]
+fn consecutive_draws_merge_in_order_and_flush_before_other_commands() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g, 1, false);
+        let mut shapes = ShapeRenderer::new(&g);
+        shapes.prepare(&t.render_format()).unwrap();
+        // Overlapping translucent draws: any reordering changes the blend result.
+        let draws: Vec<_> = (0..40)
+            .map(|i| {
+                let v = i as f32 / 40.;
+                ShapeDraw::rounded_rect(
+                    Rect::new((i % 8) as f32 * 6., (i / 8) as f32 * 9., 14., 14.),
+                    3.,
+                    [v, 0.5, 1. - v, 0.6],
+                )
+            })
+            .collect();
+        let batch = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            shapes.draw_many(&mut p, &draws).unwrap();
+        });
+        let individual = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            for &draw in &draws {
+                shapes.draw(&mut p, draw).unwrap();
+            }
+            p.flush();
+            assert_eq!(p.recorded_draws, 1);
+        });
+        assert_eq!(batch, individual);
+
+        // A state change between draws records the first before the change.
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            shapes
+                .draw(&mut p, ShapeDraw::rect(Rect::new(0., 0., 64., 64.), RED))
+                .unwrap();
+            p.set_scissor_rect(0, 0, 32, 64).unwrap();
+            shapes
+                .draw(&mut p, ShapeDraw::rect(Rect::new(0., 0., 64., 64.), BLUE))
+                .unwrap();
+            p.flush();
+            assert_eq!(p.recorded_draws, 2);
+        });
+        near(pixel(&bytes, 10, 10), [0, 0, 255, 255]);
+        near(pixel(&bytes, 50, 10), [255, 0, 0, 255]);
+
+        // Raw access records the pending draw first, so raw state cannot leak into it.
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            shapes
+                .draw(&mut p, ShapeDraw::rect(Rect::new(0., 0., 64., 64.), GREEN))
+                .unwrap();
+            p.as_wgpu().set_scissor_rect(0, 0, 1, 1);
+        });
+        near(pixel(&bytes, 40, 40), [0, 255, 0, 255]);
+        assert!(errors.pop().await.is_none());
+    });
+}

@@ -491,7 +491,7 @@ impl Session<'_, '_> {
         self.pass.set_pipeline(&self.pipeline);
         self.pass.set_bind_group(0, &self.points.group, &[]);
         let first = self.pass.bind_instances(0, bytemuck::bytes_of(&p), 80);
-        self.pass.inner.draw(0..vertices, first..first + 1);
+        self.pass.draw(0..vertices, first..first + 1);
     }
 }
 

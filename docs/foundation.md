@@ -139,8 +139,10 @@ ranges and outliers before treating the percentage target as universally passed.
 The API checks now include restoration after raw/other renderer access, renderer
 reuse through mesh/prepared scopes, pixel viewport revalidation, custom geometry
 and application bindings, invalid batch rejection, and live-source snapshots.
-Scope methods do not merge or reorder draws automatically. Existing instancing
-and `draw_many` remain the way to reduce GPU command count when compatible.
+Draws are never reordered. Consecutive dynamic draws that share pipeline, bindings
+and raster state, and whose upload records are contiguous, merge into one instanced
+command in the pass; any intervening command ends the merge. `draw_many` still
+avoids per-call validation and is the explicit way to batch.
 
 Future changes should preserve these checks and run the same reference workloads.
 Record both CPU recording and total CPU cost, and use absolute differences alongside

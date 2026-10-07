@@ -294,7 +294,7 @@ impl<'draw, 'frame> PreparedTextureDrawSession<'draw, 'frame> {
             self.dirty = false;
         }
         self.pass.bind_clip(2);
-        self.pass.inner.draw(0..6, 0..self.draws.count);
+        self.pass.draw(0..6, 0..self.draws.count);
         Ok(())
     }
     /// Borrows the pass, invalidating binding assumptions until the next draw.
@@ -319,7 +319,10 @@ fn record_parameters(pass: &mut RenderPass<'_>, parameters: &[Parameters]) {
     pass.bind_clip(2);
     for chunk in parameters.chunks(1024) {
         let first = pass.bind_instances(0, bytemuck::cast_slice(chunk), 64);
-        pass.inner.draw(0..6, first..first + chunk.len() as u32);
+        pass.draw_instances(
+            crate::pass::DrawGeometry::Vertices(0..6),
+            first..first + chunk.len() as u32,
+        );
     }
 }
 
@@ -844,7 +847,7 @@ impl TextureRenderer {
         pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
         pass.set_vertex_buffer(1, &buffer, range);
         pass.bind_clip(2);
-        pass.inner.draw(0..6, 0..draws.count);
+        pass.draw(0..6, 0..draws.count);
         Ok(())
     }
 
@@ -863,7 +866,7 @@ impl TextureRenderer {
         self.setup_draw(pass, binding, material)?;
         pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
         pass.bind_clip(2);
-        pass.inner.draw(0..6, 0..draws.count);
+        pass.draw(0..6, 0..draws.count);
         Ok(())
     }
 

@@ -572,10 +572,9 @@ impl Mesh {
     #[inline]
     pub(crate) fn record_draw(&self, pass: &mut crate::RenderPass<'_>, d: &MeshDraw) {
         if self.indexed {
-            pass.inner
-                .draw_indexed(d.range.clone(), d.base_vertex, d.instances.clone());
+            pass.draw_indexed(d.range.clone(), d.base_vertex, d.instances.clone());
         } else {
-            pass.inner.draw(d.range.clone(), d.instances.clone());
+            pass.draw(d.range.clone(), d.instances.clone());
         }
     }
 

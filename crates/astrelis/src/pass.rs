@@ -1,4 +1,7 @@
-use std::sync::{Arc, atomic::AtomicBool};
+use std::{
+    ops::Range,
+    sync::{Arc, atomic::AtomicBool},
+};
 
 use crate::{Error, Framebuffer, depth_stencil::DepthStencilAttachment, frame::AttachmentWrites};
 
@@ -435,7 +438,14 @@ impl<'frame> RenderPassBuilder<'frame> {
 #[derive(Debug)]
 #[must_use = "keep the pass in scope while recording draws"]
 pub struct RenderPass<'frame> {
-    pub(crate) inner: wgpu::RenderPass<'frame>,
+    inner: wgpu::RenderPass<'frame>,
+    // A built-in instanced draw not yet recorded. A following draw of the same
+    // geometry whose instances continue its range extends it instead of
+    // recording another command. Every other command flushes it first, so
+    // recorded order and state are exactly those of the calls.
+    pending: Option<PendingDraw>,
+    #[cfg(test)]
+    pub(crate) recorded_draws: u32,
     graphics: &'frame crate::GraphicsContext,
     format: Option<wgpu::TextureFormat>,
     size: [u32; 2],
@@ -536,6 +546,9 @@ impl<'frame> RenderPass<'frame> {
         });
         let mut pass = Self {
             inner,
+            pending: None,
+            #[cfg(test)]
+            recorded_draws: 0,
             graphics,
             format: Some(format),
             size,
@@ -720,6 +733,9 @@ impl<'frame> RenderPass<'frame> {
         }
         let mut pass = Self {
             inner,
+            pending: None,
+            #[cfg(test)]
+            recorded_draws: 0,
             graphics,
             format: descriptor
                 .colors
@@ -836,6 +852,7 @@ impl<'frame> RenderPass<'frame> {
         } else if index == 0 {
             self.group_zero = None;
         }
+        self.flush();
         self.inner.set_bind_group(index, group, offsets);
     }
 
@@ -1039,6 +1056,7 @@ impl<'frame> RenderPass<'frame> {
     /// mesh rasterization and stencil comparisons.
     /// Custom renderers are responsible for the GPU state their draws need.
     pub fn as_wgpu(&mut self) -> &mut wgpu::RenderPass<'frame> {
+        self.flush();
         self.raster_dirty = true;
         self.bound_pipeline = None;
         self.vertex_zero = None;
@@ -1069,6 +1087,13 @@ impl<'frame> RenderPass<'frame> {
         {
             return;
         }
+        if let Some(draw) = self.pending.take() {
+            #[cfg(test)]
+            {
+                self.recorded_draws += 1;
+            }
+            draw.record(&mut self.inner);
+        }
         self.inner
             .set_vertex_buffer(slot, buffer.slice(range.clone()));
         *current = Some((buffer.clone(), range));
@@ -1086,6 +1111,7 @@ impl<'frame> RenderPass<'frame> {
         {
             return;
         }
+        self.flush();
         self.inner
             .set_index_buffer(buffer.slice(range.clone()), format);
         self.bound_index = Some((buffer.clone(), range, format));
@@ -1093,6 +1119,7 @@ impl<'frame> RenderPass<'frame> {
 
     pub(crate) fn set_pipeline(&mut self, pipeline: &wgpu::RenderPipeline) {
         if self.bound_pipeline.as_ref() != Some(pipeline) {
+            self.flush();
             self.inner.set_pipeline(pipeline);
             self.bound_pipeline = Some(pipeline.clone());
         }
@@ -1102,6 +1129,7 @@ impl<'frame> RenderPass<'frame> {
         if !self.raster_dirty {
             return;
         }
+        self.flush();
         self.raster_dirty = false;
         let [x, y, width, height, min_depth, max_depth] = self.viewport;
         self.inner
@@ -1113,6 +1141,86 @@ impl<'frame> RenderPass<'frame> {
             .is_some_and(|format| format.has_stencil_aspect())
         {
             self.inner.set_stencil_reference(self.stencil_reference);
+        }
+    }
+
+    /// Records a draw immediately, after any pending draw.
+    pub(crate) fn draw(&mut self, vertices: Range<u32>, instances: Range<u32>) {
+        self.flush();
+        #[cfg(test)]
+        {
+            self.recorded_draws += 1;
+        }
+        self.inner.draw(vertices, instances);
+    }
+
+    /// Records an indexed draw immediately, after any pending draw.
+    pub(crate) fn draw_indexed(
+        &mut self,
+        indices: Range<u32>,
+        base_vertex: i32,
+        instances: Range<u32>,
+    ) {
+        self.flush();
+        #[cfg(test)]
+        {
+            self.recorded_draws += 1;
+        }
+        self.inner.draw_indexed(indices, base_vertex, instances);
+    }
+
+    /// Records an instanced draw of bound geometry, merging it into the pending
+    /// draw when nothing changed in between and its instances continue that
+    /// draw's range. The merged command shades the same instances in the same order.
+    pub(crate) fn draw_instances(&mut self, geometry: DrawGeometry, instances: Range<u32>) {
+        if let Some(pending) = &mut self.pending
+            && pending.geometry == geometry
+            && pending.instances.end == instances.start
+        {
+            pending.instances.end = instances.end;
+            return;
+        }
+        self.flush();
+        self.pending = Some(PendingDraw {
+            geometry,
+            instances,
+        });
+    }
+
+    pub(crate) fn flush(&mut self) {
+        if let Some(draw) = self.pending.take() {
+            #[cfg(test)]
+            {
+                self.recorded_draws += 1;
+            }
+            draw.record(&mut self.inner);
+        }
+    }
+}
+
+impl Drop for RenderPass<'_> {
+    fn drop(&mut self) {
+        self.flush();
+    }
+}
+
+/// Geometry of a mergeable instanced draw.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DrawGeometry {
+    Vertices(Range<u32>),
+    Indexed(Range<u32>),
+}
+
+#[derive(Debug)]
+struct PendingDraw {
+    geometry: DrawGeometry,
+    instances: Range<u32>,
+}
+impl PendingDraw {
+    fn record(self, pass: &mut wgpu::RenderPass<'_>) {
+        match self.geometry {
+            DrawGeometry::Vertices(vertices) => pass.draw(vertices, self.instances),
+            DrawGeometry::Indexed(indices) => pass.draw_indexed(indices, 0, self.instances),
         }
     }
 }

@@ -520,7 +520,10 @@ fn record<T: Pod>(pass: &mut RenderPass<'_>, parameters: &[T], capacity: usize) 
     let stride = std::mem::size_of::<T>() as u64;
     for chunk in parameters.chunks(capacity) {
         let first = pass.bind_instances(0, bytemuck::cast_slice(chunk), stride);
-        pass.inner.draw(0..6, first..first + chunk.len() as u32);
+        pass.draw_instances(
+            crate::pass::DrawGeometry::Vertices(0..6),
+            first..first + chunk.len() as u32,
+        );
     }
 }
 
