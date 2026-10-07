@@ -113,6 +113,13 @@ pub enum Error {
     Device(wgpu::RequestDeviceError),
     /// The context's adapter cannot present to this surface.
     UnsupportedSurface,
+    /// The surface does not offer the requested present or alpha mode.
+    UnsupportedPresentation {
+        /// Requested present mode.
+        present_mode: wgpu::PresentMode,
+        /// Requested compositing alpha mode.
+        alpha_mode: wgpu::CompositeAlphaMode,
+    },
     /// This format cannot be a color attachment with the device's enabled features.
     UnsupportedColorFormat {
         /// Requested color format.
@@ -299,6 +306,7 @@ impl fmt::Display for Error {
             Self::Adapter(error) => write!(f, "could not request a GPU adapter: {error}"),
             Self::Device(error) => write!(f, "could not request a GPU device: {error}"),
             Self::UnsupportedSurface => f.write_str("the adapter cannot present to this surface"),
+            Self::UnsupportedPresentation { present_mode, alpha_mode } => write!(f, "the surface does not offer present mode {present_mode:?} with alpha mode {alpha_mode:?}"),
             Self::UnsupportedColorFormat { format } => write!(f, "{format:?} cannot be a color attachment on this device"),
             Self::InvalidFramebufferUsage { format, usage } => write!(f, "invalid framebuffer usage {usage:?} for {format:?}"),
             Self::UnsupportedMeshFormat { format } => write!(f, "the mesh renderer requires a blendable floating-point output, got {format:?}"),

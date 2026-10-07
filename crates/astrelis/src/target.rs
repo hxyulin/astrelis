@@ -18,6 +18,14 @@ pub struct SurfaceOptions {
     /// Usages of depth/stencil storage, independent of color usages.
     /// Must include rendering; sampling or copies can be enabled when supported.
     pub depth_stencil_usage: wgpu::TextureUsages,
+    /// Presentation pacing, default `Fifo` (vsync, supported everywhere). `AutoVsync`
+    /// and `AutoNoVsync` let wgpu pick a supported mode; other modes must be offered by
+    /// the surface.
+    pub present_mode: wgpu::PresentMode,
+    /// How the compositor blends the window with what is behind it, default `Auto`
+    /// (opaque where offered). Transparent windows need `PreMultiplied` or
+    /// `PostMultiplied`; non-`Auto` modes must be offered by the surface.
+    pub alpha_mode: wgpu::CompositeAlphaMode,
 }
 
 impl SurfaceOptions {
@@ -28,7 +36,21 @@ impl SurfaceOptions {
             sample_count: 1,
             depth_stencil_format: None,
             depth_stencil_usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
         }
+    }
+
+    /// Selects presentation pacing, for example `Mailbox` or `AutoNoVsync` for low latency.
+    pub const fn present_mode(mut self, mode: wgpu::PresentMode) -> Self {
+        self.present_mode = mode;
+        self
+    }
+
+    /// Selects window compositing alpha, for example `PreMultiplied` for transparency.
+    pub const fn alpha_mode(mut self, mode: wgpu::CompositeAlphaMode) -> Self {
+        self.alpha_mode = mode;
+        self
     }
 
     /// Enables a target-owned depth/stencil attachment with rendering usages.
@@ -92,7 +114,8 @@ pub struct SurfaceTarget<'window> {
 }
 
 impl<'window> RenderTarget<'window> {
-    /// Takes ownership of a wgpu surface and configures it for FIFO presentation.
+    /// Takes ownership of a wgpu surface and configures it with the requested present
+    /// and alpha modes (FIFO and automatic alpha by default).
     ///
     /// Options use physical pixels. A zero dimension suspends rendering
     /// until a nonzero resize. Rendering targets an sRGB format so that linear shader
@@ -110,7 +133,8 @@ impl<'window> RenderTarget<'window> {
     /// # Errors
     ///
     /// Returns [`Error::InvalidTargetSize`] for dimensions exceeding device limits,
-    /// [`Error::UnsupportedSurface`] for an incompatible surface, or
+    /// [`Error::UnsupportedSurface`] for an incompatible surface,
+    /// [`Error::UnsupportedPresentation`] for a present/alpha mode the surface lacks, or
     /// [`Error::UnsupportedSampleCount`] if the format cannot support the requested
     /// count with this device. No fallback is chosen or surface configured on rejection.
     pub fn surface(
@@ -123,6 +147,8 @@ impl<'window> RenderTarget<'window> {
             sample_count,
             depth_stencil_format,
             depth_stencil_usage,
+            present_mode,
+            alpha_mode,
         } = options;
         validate_size(graphics, width, height)?;
         if !graphics.adapter().is_surface_supported(&surface) {
@@ -132,12 +158,7 @@ impl<'window> RenderTarget<'window> {
         let mut configuration = surface
             .get_default_config(graphics.adapter(), width.max(1), height.max(1))
             .ok_or(Error::UnsupportedSurface)?;
-        if !capabilities
-            .present_modes
-            .contains(&wgpu::PresentMode::Fifo)
-        {
-            return Err(Error::UnsupportedSurface);
-        }
+        validate_presentation(&capabilities, present_mode, alpha_mode)?;
         let view_formats = graphics
             .adapter()
             .get_downlevel_capabilities()
@@ -153,7 +174,8 @@ impl<'window> RenderTarget<'window> {
             } else {
                 configuration.format
             };
-        configuration.present_mode = wgpu::PresentMode::Fifo;
+        configuration.present_mode = present_mode;
+        configuration.alpha_mode = alpha_mode;
         let mut supported_sample_counts = supported_sample_counts(graphics, format);
         crate::depth_stencil::restrict_counts(
             graphics,
@@ -314,6 +336,22 @@ impl<'window> RenderTarget<'window> {
             colors: vec![Some(self.format())],
             depth_stencil: self.depth_stencil_format(),
             sample_count: self.sample_count(),
+        }
+    }
+
+    /// Returns the configured surface present mode, or `None` for a framebuffer.
+    pub fn present_mode(&self) -> Option<wgpu::PresentMode> {
+        match self {
+            Self::Surface(target) => Some(target.configuration.present_mode),
+            Self::Framebuffer(_) => None,
+        }
+    }
+
+    /// Returns the configured surface alpha mode, or `None` for a framebuffer.
+    pub fn alpha_mode(&self) -> Option<wgpu::CompositeAlphaMode> {
+        match self {
+            Self::Surface(target) => Some(target.configuration.alpha_mode),
+            Self::Framebuffer(_) => None,
         }
     }
 
@@ -590,10 +628,72 @@ fn select_formats(
         .find(|(format, view)| view_formats && format != view)
 }
 
+/// Accepts automatic modes, which wgpu resolves, and modes the surface offers.
+fn validate_presentation(
+    capabilities: &wgpu::SurfaceCapabilities,
+    present_mode: wgpu::PresentMode,
+    alpha_mode: wgpu::CompositeAlphaMode,
+) -> Result<(), Error> {
+    use wgpu::{CompositeAlphaMode as A, PresentMode as P};
+    let present = matches!(present_mode, P::AutoVsync | P::AutoNoVsync)
+        || capabilities.present_modes.contains(&present_mode);
+    let alpha = alpha_mode == A::Auto || capabilities.alpha_modes.contains(&alpha_mode);
+    if present && alpha {
+        Ok(())
+    } else {
+        Err(Error::UnsupportedPresentation {
+            present_mode,
+            alpha_mode,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use wgpu::TextureFormat::*;
+
+    #[test]
+    fn presentation_accepts_automatic_and_offered_modes_only() {
+        use wgpu::{CompositeAlphaMode as A, PresentMode as P};
+        let capabilities = wgpu::SurfaceCapabilities {
+            formats: vec![Bgra8UnormSrgb],
+            present_modes: vec![P::Fifo, P::Mailbox],
+            alpha_modes: vec![A::Opaque, A::PreMultiplied],
+            usages: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format_capabilities: Vec::new(),
+        };
+        let defaults = SurfaceOptions::new(1, 1);
+        assert_eq!(
+            (defaults.present_mode, defaults.alpha_mode),
+            (P::Fifo, A::Auto)
+        );
+        for (present, alpha) in [
+            (P::Fifo, A::Auto),
+            (P::Mailbox, A::PreMultiplied),
+            (P::AutoNoVsync, A::Opaque),
+            (P::AutoVsync, A::Auto),
+        ] {
+            let options = defaults.present_mode(present).alpha_mode(alpha);
+            assert!(
+                validate_presentation(&capabilities, options.present_mode, options.alpha_mode)
+                    .is_ok()
+            );
+        }
+        for (present, alpha) in [(P::Immediate, A::Auto), (P::Fifo, A::PostMultiplied)] {
+            assert!(matches!(
+                validate_presentation(&capabilities, present, alpha),
+                Err(Error::UnsupportedPresentation { present_mode, alpha_mode })
+                    if present_mode == present && alpha_mode == alpha
+            ));
+        }
+        // A surface without FIFO still rejects the default.
+        let no_fifo = wgpu::SurfaceCapabilities {
+            present_modes: vec![P::Mailbox],
+            ..capabilities
+        };
+        assert!(validate_presentation(&no_fifo, P::Fifo, A::Auto).is_err());
+    }
 
     #[test]
     fn surface_formats_render_to_srgb_views() {

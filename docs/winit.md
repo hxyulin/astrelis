@@ -61,7 +61,8 @@ impl WindowContext {
 WindowContext owns an Arc<Window>, a GraphicsContext clone, an optional surface
 RenderTarget, requested SurfaceSettings, cached WindowMetrics/RenderFormat,
 visibility/occlusion state, and a surface generation. Dimensions come from the
-window; settings contain only sample count and depth/stencil format/usages.
+window; settings contain sample count, depth/stencil format/usages, and the present
+and alpha modes (FIFO and automatic by default).
 WindowUpdate reports metrics, presentation availability, and explicit exposure
 redraw requests so a custom
 event loop can request redraw. Native window events do not replace app-wide

@@ -84,6 +84,13 @@ Keep intermediate samples with `Store`. A final resolving pass can use color
 `Discard` to discard samples while retaining resolved output. Resolve and sample
 initialization are tracked separately. Depth/stencil storage is never resolved.
 
+Presentation defaults to FIFO (vsync) with automatic compositing alpha.
+`.present_mode(wgpu::PresentMode::Mailbox)` or `AutoNoVsync` lowers latency, and
+`.alpha_mode(wgpu::CompositeAlphaMode::PreMultiplied)` lets a transparent window
+show through. Automatic modes are always accepted; explicit modes the surface does
+not offer return `Error::UnsupportedPresentation`. `RenderTarget::present_mode()`
+and `alpha_mode()` report the configuration.
+
 ## Images, placement, and materials
 
 Image bindings retain source and sampler resources. Placement, UVs, tint, and affine

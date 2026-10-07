@@ -86,6 +86,8 @@ pub struct SurfaceSettings {
     sample_count: u32,
     depth_stencil_format: Option<wgpu::TextureFormat>,
     depth_stencil_usage: wgpu::TextureUsages,
+    present_mode: wgpu::PresentMode,
+    alpha_mode: wgpu::CompositeAlphaMode,
 }
 impl Default for SurfaceSettings {
     fn default() -> Self {
@@ -99,7 +101,24 @@ impl SurfaceSettings {
             sample_count: 1,
             depth_stencil_format: None,
             depth_stencil_usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
         }
+    }
+
+    /// Selects presentation pacing; FIFO (vsync) by default. See [`SurfaceOptions`].
+    #[must_use]
+    pub const fn present_mode(mut self, mode: wgpu::PresentMode) -> Self {
+        self.present_mode = mode;
+        self
+    }
+
+    /// Selects window compositing alpha; automatic by default. Transparent windows
+    /// also need a transparent native window. See [`SurfaceOptions`].
+    #[must_use]
+    pub const fn alpha_mode(mut self, mode: wgpu::CompositeAlphaMode) -> Self {
+        self.alpha_mode = mode;
+        self
     }
 
     /// Selects the requested MSAA count; one disables MSAA.
@@ -131,6 +150,8 @@ impl SurfaceSettings {
             sample_count: self.sample_count,
             depth_stencil_format: self.depth_stencil_format,
             depth_stencil_usage: self.depth_stencil_usage,
+            present_mode: self.present_mode,
+            alpha_mode: self.alpha_mode,
         }
     }
 }
@@ -174,5 +195,17 @@ mod tests {
                 .unwrap()
                 .has_area()
         );
+    }
+
+    #[test]
+    fn surface_settings_carry_presentation_modes_into_options() {
+        let defaults = SurfaceSettings::new().surface_options(PhysicalSize::new(4, 3));
+        assert_eq!(defaults, SurfaceOptions::new(4, 3));
+        let options = SurfaceSettings::new()
+            .present_mode(wgpu::PresentMode::Mailbox)
+            .alpha_mode(wgpu::CompositeAlphaMode::PreMultiplied)
+            .surface_options(PhysicalSize::new(4, 3));
+        assert_eq!(options.present_mode, wgpu::PresentMode::Mailbox);
+        assert_eq!(options.alpha_mode, wgpu::CompositeAlphaMode::PreMultiplied);
     }
 }
