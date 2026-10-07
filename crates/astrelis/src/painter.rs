@@ -571,6 +571,18 @@ impl<'frame> PaintSession<'_, 'frame> {
     ) -> Result<(), Error> {
         self.draw_shape(ShapeDraw::ellipse(rect, color).stroke(stroke))
     }
+    /// Records the blurred shadow of a rounded rectangle element at `rect`, in pixels.
+    /// Draw it before the element. See [`ShapeDraw::box_shadow`] for spread and offset;
+    /// batches of shadows and other shapes can share one [`Self::draw_shapes`] call.
+    #[inline]
+    pub fn draw_box_shadow(
+        &mut self,
+        rect: Rect,
+        radii: crate::CornerRadii,
+        shadow: crate::BoxShadow,
+    ) -> Result<(), Error> {
+        self.draw_shape(ShapeDraw::box_shadow(rect, radii, shadow))
+    }
     /// Records explicit primitive geometry/space/coverage and its per-draw transform.
     #[inline]
     pub fn draw_shape(&mut self, mut draw: ShapeDraw) -> Result<(), Error> {

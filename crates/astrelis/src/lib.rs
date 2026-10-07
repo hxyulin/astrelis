@@ -243,7 +243,8 @@
 //! # Solid 2D primitives
 //!
 //! [`ShapeRenderer`] fills and outlines rectangles, rounded rectangles with
-//! independent [`CornerRadii`], and ellipses. [`ShapeDraw::stroke`] selects a [`Stroke`] with centered, inside,
+//! independent [`CornerRadii`], and ellipses, and draws Gaussian-blurred
+//! [`BoxShadow`]s. [`ShapeDraw::stroke`] selects a [`Stroke`] with centered, inside,
 //! or outside placement. Width transforms with geometry; a collapsed interior
 //! becomes solid. Fills and outlines share ordered instance batches and pipelines.
 //! [`LineRenderer`] draws independent segments with width and end caps. Geometry
@@ -467,8 +468,8 @@ pub use clip::RoundedClip;
 pub use context::GraphicsContext;
 pub mod text;
 pub use drawing::{
-    CornerRadii, DrawSpace, EdgeAntialiasing, LineCap, LineDraw, Rect, Shape, ShapeDraw, Stroke,
-    StrokePlacement, Transform2D,
+    BoxShadow, CornerRadii, DrawSpace, EdgeAntialiasing, LineCap, LineDraw, Rect, Shape, ShapeDraw,
+    Stroke, StrokePlacement, Transform2D,
 };
 pub use error::Error;
 pub use frame::{Frame, FrameError};

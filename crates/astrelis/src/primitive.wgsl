@@ -39,6 +39,39 @@ fn rounded_box_distance(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) ->
     let radius = select(top, bottom, p.y > 0.0);
     return box_distance(p, half_size - vec2(radius)) - radius;
 }
+// Analytic box shadow after Evan Wallace's "Fast Rounded Rectangle Shadows":
+// the horizontal Gaussian integral is exact per row (via erf), and the vertical
+// integral uses four midpoint rows within three standard deviations. Each row's
+// extent follows the corner radii on its own side.
+fn erf_approx(x: vec2<f32>) -> vec2<f32> {
+    let s = sign(x);
+    let a = abs(x);
+    var r = 1.0 + (0.278393 + (0.230389 + 0.000972 * a + 0.078108 * a * a) * a) * a;
+    r = r * r;
+    return s - s / (r * r);
+}
+fn shadow_row(x: f32, y: f32, sigma: f32, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
+    let left_radius = select(radii.x, radii.w, y > 0.0);
+    let right_radius = select(radii.y, radii.z, y > 0.0);
+    let d = min(half_size.y - vec2(left_radius, right_radius) - abs(y), vec2(0.0));
+    let left = half_size.x - left_radius + sqrt(max(0.0, left_radius * left_radius - d.x * d.x));
+    let right = half_size.x - right_radius + sqrt(max(0.0, right_radius * right_radius - d.y * d.y));
+    let integral = 0.5 + 0.5 * erf_approx((vec2(x) + vec2(left, -right)) * (0.70710678 / sigma));
+    return integral.x - integral.y;
+}
+fn shadow_coverage(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>, sigma: f32) -> f32 {
+    let start = clamp(-3.0 * sigma, p.y - half_size.y, p.y + half_size.y);
+    let end = clamp(3.0 * sigma, p.y - half_size.y, p.y + half_size.y);
+    let step = (end - start) * 0.25;
+    var offset = start + step * 0.5;
+    var value = 0.0;
+    for (var i = 0; i < 4; i += 1) {
+        let weight = exp(-offset * offset / (2.0 * sigma * sigma)) / (2.50662827 * sigma);
+        value += shadow_row(p.x, p.y - offset, sigma, half_size, radii) * weight * step;
+        offset += step;
+    }
+    return clamp(value, 0.0, 1.0);
+}
 // Closest-point distance to an ellipse, normalized by its major radius.
 // Solve the monotone Lagrange-multiplier equation with a bounded bisection.
 // See https://www.geometrictools.com/Documentation/DistancePointEllipseEllipsoid.pdf
@@ -103,7 +136,7 @@ fn shade_fragment_main(input: Output) -> vec4<f32> {
     var bounds = half_size;
     var inner_bounds = vec2(0.0);
     var has_inner = false;
-    if kind == 1u {
+    if kind == 1u || kind == 9u {
         distance = rounded_box_distance(input.local, half_size, input.radii);
     } else if kind == 2u {
         distance = length(input.local / max(half_size, vec2(0.000001))) - 1.0;
@@ -142,10 +175,13 @@ fn shade_fragment_main(input: Output) -> vec4<f32> {
     let analytic = min(clamp(0.5 - distance / edge_width, 0.0, 1.0), filtered_box(input.local, bounds, footprint));
     let inner_analytic = min(clamp(0.5 - inner_distance / inner_edge_width, 0.0, 1.0), filtered_box(input.local, inner_bounds, footprint));
     let inner_coverage = select(0.0, inner_analytic, has_inner);
-    let outlined = kind >= 6u;
+    let outlined = kind >= 6u && kind <= 8u;
     let hard = select(0.0, 1.0, distance <= 0.0 && !(outlined && has_inner && inner_distance <= 0.0));
     let filtered = max(analytic - select(0.0, inner_coverage, outlined), 0.0);
-    let coverage = select(hard, filtered, input.geometry.w > 0.0);
+    var coverage = select(hard, filtered, input.geometry.w > 0.0);
+    if kind == 9u && radius > 0.0 {
+        coverage = shadow_coverage(input.local, half_size, input.radii, radius);
+    }
     let alpha = input.color.a * coverage * clip_coverage(input.clip, input.clip_radii);
     return vec4(input.color.rgb * alpha, alpha);
 }

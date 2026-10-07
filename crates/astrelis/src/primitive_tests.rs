@@ -741,3 +741,115 @@ fn independent_corner_radii_fill_and_outline_each_corner() {
         assert!(errors.pop().await.is_none());
     });
 }
+
+// Exact Gaussian-blurred rectangle: separable products of normal CDF differences.
+fn blurred_rect(x: f64, y: f64, rect: [f64; 4], sigma: f64) -> f64 {
+    fn phi(z: f64) -> f64 {
+        // Abramowitz-Stegun 7.1.26 erf, accurate to 1.5e-7.
+        let t = 1. / (1. + 0.3275911 * (z.abs() / 2f64.sqrt()));
+        let poly = t
+            * (0.254829592
+                + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+        let erf = 1. - poly * (-(z * z) / 2.).exp();
+        0.5 * (1. + erf.copysign(z))
+    }
+    let [left, top, width, height] = rect;
+    (phi((x - left) / sigma) - phi((x - left - width) / sigma))
+        * (phi((y - top) / sigma) - phi((y - top - height) / sigma))
+}
+
+#[test]
+fn box_shadows_match_gaussian_blur_and_follow_offset_spread_and_corners() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g, 1, false);
+        let mut shapes = ShapeRenderer::new(&g);
+        let white = [1.; 4];
+        // Blur 8 is a standard deviation of 4; the shadow moves by its offset.
+        let blurred = pixels(&g, &mut t, |f| {
+            shapes
+                .draw(
+                    &mut f.render_pass().begin().unwrap(),
+                    ShapeDraw::box_shadow(
+                        Rect::new(18., 20., 20., 16.),
+                        crate::CornerRadii::ZERO,
+                        crate::BoxShadow::new(white).offset(4., 4.).blur(8.),
+                    ),
+                )
+                .unwrap();
+        });
+        let mut worst = 0f64;
+        for y in 0..64 {
+            for x in 0..64 {
+                let expected =
+                    blurred_rect(x as f64 + 0.5, y as f64 + 0.5, [22., 24., 20., 16.], 4.);
+                let actual = f64::from(pixel(&blurred, x, y)[3]) / 255.;
+                worst = worst.max((expected - actual).abs());
+            }
+        }
+        assert!(worst * 255. <= 4., "max error {} / 255", worst * 255.);
+        assert_eq!(pixel(&blurred, 63, 63), [0; 4]);
+        // Zero blur with spread is the sharp grown rectangle.
+        let mut sharp = |draw| {
+            pixels(&g, &mut t, |f| {
+                shapes
+                    .draw(&mut f.render_pass().begin().unwrap(), draw)
+                    .unwrap();
+            })
+        };
+        assert_eq!(
+            sharp(ShapeDraw::box_shadow(
+                Rect::new(10.5, 12., 20., 10.),
+                crate::CornerRadii::ZERO,
+                crate::BoxShadow::new(RED).offset(3., -2.).spread(2.),
+            )),
+            sharp(ShapeDraw::rect(Rect::new(11.5, 8., 24., 14.), RED))
+        );
+        // Spread grows nonzero radii; a sharp zero blur matches the rounded shape.
+        assert_eq!(
+            sharp(ShapeDraw::box_shadow(
+                Rect::new(10., 10., 30., 30.),
+                crate::CornerRadii::new(6., 0., 6., 0.),
+                crate::BoxShadow::new(GREEN).spread(4.),
+            )),
+            sharp(ShapeDraw::rounded_rect_corners(
+                Rect::new(6., 6., 38., 38.),
+                crate::CornerRadii::new(10., 0., 10., 0.),
+                GREEN
+            ))
+        );
+        // Only the rounded top-left corner of the shape softens its blurred corner.
+        let corners = sharp(ShapeDraw::box_shadow(
+            Rect::new(12., 12., 40., 40.),
+            crate::CornerRadii::new(16., 0., 0., 0.),
+            crate::BoxShadow::new(white).blur(6.),
+        ));
+        let (rounded, square) = (pixel(&corners, 14, 14)[3], pixel(&corners, 49, 14)[3]);
+        assert!(rounded + 40 < square, "{rounded} {square}");
+        assert_eq!(pixel(&corners, 31, 49), pixel(&corners, 32, 49));
+        assert!(errors.pop().await.is_none());
+        let shadow = ShapeDraw::box_shadow(
+            Rect::new(0., 0., 4., 4.),
+            crate::CornerRadii::ZERO,
+            crate::BoxShadow::new(RED).blur(-1.),
+        );
+        assert!(matches!(shadow.validate(), Err(Error::InvalidShapeDraw)));
+        let shadow = ShapeDraw::box_shadow(
+            Rect::new(0., 0., 4., 4.),
+            crate::CornerRadii::ZERO,
+            crate::BoxShadow::new(RED).spread(f32::NAN),
+        );
+        assert!(shadow.validate().is_err());
+        assert!(
+            ShapeDraw::box_shadow(
+                Rect::new(0., 0., 4., 4.),
+                crate::CornerRadii::ZERO,
+                crate::BoxShadow::new(RED)
+            )
+            .stroke(Stroke::new(1.))
+            .validate()
+            .is_err()
+        );
+    });
+}

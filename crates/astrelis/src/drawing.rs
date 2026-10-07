@@ -280,6 +280,58 @@ pub enum Shape {
     },
     /// Ellipse inscribed in the rectangle, before transformation.
     Ellipse,
+    /// A rounded rectangle convolved with a Gaussian: the soft shape of a box shadow.
+    /// Fills only; outlines are rejected. The quad grows by three standard deviations.
+    Shadow {
+        /// Corner radii of the unblurred shape, fitted like [`Self::RoundedRectangle`].
+        radii: CornerRadii,
+        /// Nonnegative blur radius in the draw's units, as in CSS: the Gaussian's
+        /// standard deviation is half of it. Zero gives the sharp rounded rectangle.
+        blur: f32,
+    },
+}
+
+/// Offset, blur, spread and color of an outer box shadow, as in CSS `box-shadow`.
+///
+/// Use with [`ShapeDraw::box_shadow`] or [`crate::PaintSession::draw_box_shadow`],
+/// before drawing the element that casts it. The whole blurred shape is drawn,
+/// including beneath the element; inset shadows are not provided.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoxShadow {
+    /// Displacement of the shadow from its element, in the draw's units.
+    pub offset: [f32; 2],
+    /// Nonnegative blur radius; the Gaussian's standard deviation is half of it.
+    pub blur: f32,
+    /// Outset of the shadow shape on every side before blurring; negative shrinks it.
+    pub spread: f32,
+    /// Linear, straight RGBA.
+    pub color: [f32; 4],
+}
+impl BoxShadow {
+    /// A sharp shadow directly beneath the element.
+    pub const fn new(color: [f32; 4]) -> Self {
+        Self {
+            offset: [0., 0.],
+            blur: 0.,
+            spread: 0.,
+            color,
+        }
+    }
+    /// Selects the displacement.
+    pub const fn offset(mut self, x: f32, y: f32) -> Self {
+        self.offset = [x, y];
+        self
+    }
+    /// Selects the CSS blur radius.
+    pub const fn blur(mut self, blur: f32) -> Self {
+        self.blur = blur;
+        self
+    }
+    /// Selects the spread distance.
+    pub const fn spread(mut self, spread: f32) -> Self {
+        self.spread = spread;
+        self
+    }
 }
 
 /// Placement of a shape's stroke relative to its original boundary.
@@ -394,6 +446,32 @@ impl ShapeDraw {
             ..Self::rect(rect, color)
         }
     }
+    /// The shadow cast by a rounded rectangle element at `rect`.
+    ///
+    /// The shape is `rect` moved by the offset and grown by the spread; nonzero radii
+    /// grow by the spread too (never below zero). A shape shrunk to nothing draws nothing.
+    /// Space, transform and edge coverage can be changed afterwards like any shape.
+    pub fn box_shadow(rect: Rect, radii: CornerRadii, shadow: BoxShadow) -> Self {
+        // Comparisons keep NaN so that validation rejects it.
+        let positive = |v: f32| if v < 0. { 0. } else { v };
+        let s = shadow.spread;
+        let shape = Rect::new(
+            rect.x + shadow.offset[0] - s,
+            rect.y + shadow.offset[1] - s,
+            positive(rect.width + 2. * s),
+            positive(rect.height + 2. * s),
+        );
+        let radii = radii
+            .to_array()
+            .map(|r| if r > 0. { positive(r + s) } else { r });
+        Self {
+            shape: Shape::Shadow {
+                radii: radii.into(),
+                blur: shadow.blur,
+            },
+            ..Self::rect(shape, shadow.color)
+        }
+    }
     /// A filled ellipse inscribed in `rect`.
     pub const fn ellipse(rect: Rect, color: [f32; 4]) -> Self {
         Self {
@@ -435,6 +513,8 @@ impl ShapeDraw {
             || !self.transform.valid()
             || self.stroke.is_some_and(|stroke| !stroke.valid())
             || matches!(self.shape, Shape::RoundedRectangle { radii } if !radii.valid())
+            || matches!(self.shape, Shape::Shadow { radii, blur }
+                if !radii.valid() || !blur.is_finite() || blur < 0. || self.stroke.is_some())
         {
             return Err(Error::InvalidShapeDraw);
         }

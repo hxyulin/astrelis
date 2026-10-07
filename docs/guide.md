@@ -144,7 +144,25 @@ then `b`. `TextureDraw::space` and `transform` use these same conventions.
 ellipses. `ShapeDraw::rounded_rect` takes one radius; `rounded_rect_corners` takes
 `CornerRadii` clockwise from the top-left. Oversized radii scale together until
 adjacent corners fit, then each stays within half the shorter side; a zero corner
-stays sharp, also in outlines. `.stroke(Stroke::new(width))` selects a centered outline; `.inside()`
+stays sharp, also in outlines.
+
+`ShapeDraw::box_shadow(rect, radii, BoxShadow)` (or `paint.draw_box_shadow`) draws
+the shadow of a rounded element as in CSS `box-shadow`: an offset, a blur radius whose
+Gaussian standard deviation is half of it, a spread that grows the shape and its
+nonzero radii, and a color. The shader integrates the Gaussian analytically per row
+with an erf approximation and samples four rows vertically, within about 3/255 of an
+exact blur; the quad grows by three standard deviations. Draw shadows before their
+elements: the whole blurred shape is drawn, including beneath the element, and inset
+shadows are not provided. Shadows are ordinary shapes, so they batch with other
+shapes, accept brushes, transforms and clipping, and cost one 96-byte record each.
+
+```rust
+let card = Rect::new(20., 20., 200., 120.);
+let radii = CornerRadii::uniform(12.);
+paint.draw_box_shadow(card, radii,
+    BoxShadow::new([0., 0., 0., 0.35]).offset(0., 4.).blur(16.).spread(-2.))?;
+paint.draw_shape(ShapeDraw::rounded_rect_corners(card, radii, surface))?;
+``` `.stroke(Stroke::new(width))` selects a centered outline; `.inside()`
 and `.outside()` place all of its width on the chosen side of the boundary.
 Rectangle outlines have sharp corners; rounded rectangles offset each nonzero corner
 radius, clamping collapsed inner radii to zero. Ellipse outlines use a distance

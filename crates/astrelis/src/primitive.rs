@@ -53,9 +53,16 @@ impl PrimitiveData for ShapeDraw {
                 (if radii == [0.; 4] { 0. } else { 1. }, radii)
             }
             Shape::Ellipse => (2., [0.; 4]),
+            Shape::Shadow { radii, blur } => {
+                // The shader stores the Gaussian's standard deviation.
+                radius = blur * 0.5;
+                (9., radii.fitted(width, height))
+            }
         };
         let half_size = [width * 0.5, height * 0.5];
-        let mut bounds = half_size;
+        // Three standard deviations hold all but 0.3% of the blurred coverage.
+        let blur_extent = if kind == 9. { 3. * radius } else { 0. };
+        let mut bounds = half_size.map(|v| v + blur_extent);
         let mut geometry = half_size;
         let mut stroke_width = 0.;
         if let Some(stroke) = self.stroke {

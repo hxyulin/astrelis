@@ -1,8 +1,8 @@
 //! CPU recording experiments for primitives and an ordered mixed-renderer workload.
 //! References use direct Astrelis renderer calls; this is not a direct-wgpu benchmark.
 use astrelis::{
-    CornerRadii, Frame, Framebuffer, FramebufferOptions, GraphicsContext, LineCap, LineDraw,
-    LineRenderer, Mesh, MeshRenderer, Painter, Rect, ShapeDraw, ShapeRenderer, Stroke,
+    BoxShadow, CornerRadii, Frame, Framebuffer, FramebufferOptions, GraphicsContext, LineCap,
+    LineDraw, LineRenderer, Mesh, MeshRenderer, Painter, Rect, ShapeDraw, ShapeRenderer, Stroke,
     TextureBinding, TextureBindingOptions, TextureDraw, TextureOptions, TextureRenderer, Vertex,
     wgpu,
 };
@@ -34,9 +34,12 @@ enum Mode {
     PainterOutlinesBatch,
     PainterClippedMixed,
     PainterRoundedClipBatch,
+    Shadows,
+    ShadowsBatch,
+    PainterShadowsBatch,
 }
 impl Mode {
-    const CASES: [Self; 13] = [
+    const CASES: [Self; 15] = [
         Self::ShapesScoped,
         Self::ShapesBatch,
         Self::LinesScoped,
@@ -50,6 +53,8 @@ impl Mode {
         Self::PainterOutlinesBatch,
         Self::PainterClippedMixed,
         Self::PainterRoundedClipBatch,
+        Self::ShadowsBatch,
+        Self::PainterShadowsBatch,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -70,6 +75,9 @@ impl Mode {
             Self::PainterOutlinesBatch => "painter_fills_outlines_batch",
             Self::PainterClippedMixed => "painter_clipped_mixed",
             Self::PainterRoundedClipBatch => "painter_rounded_clip_shapes_batch",
+            Self::Shadows => "shadows_individual",
+            Self::ShadowsBatch => "shadows_batch",
+            Self::PainterShadowsBatch => "painter_shadows_batch",
         }
     }
     fn reference(self) -> Self {
@@ -84,6 +92,8 @@ impl Mode {
             // the target leaves pixels unchanged while paying for its evaluation.
             Self::PainterClippedMixed => Self::PainterMixed,
             Self::PainterRoundedClipBatch => Self::PainterShapesBatch,
+            Self::ShadowsBatch => Self::Shadows,
+            Self::PainterShadowsBatch => Self::ShadowsBatch,
             _ => Self::Mixed,
         }
     }
@@ -101,6 +111,7 @@ struct Work {
     placements: Vec<TextureDraw>,
     markers: Vec<ShapeDraw>,
     outlines: Vec<ShapeDraw>,
+    shadows: Vec<ShapeDraw>,
 }
 impl Work {
     fn new(g: &GraphicsContext, target: &Framebuffer, count: usize) -> Result<Self> {
@@ -131,6 +142,7 @@ impl Work {
         let mut placements = Vec::with_capacity(count);
         let mut markers = Vec::with_capacity(count);
         let mut outlines = Vec::with_capacity(count);
+        let mut shadows = Vec::with_capacity(count);
         for i in 0..count {
             let x = (i % 8) as f32 * 8.;
             let y = ((i / 8) % 8) as f32 * 8.;
@@ -168,6 +180,11 @@ impl Work {
             } else {
                 draw
             });
+            shadows.push(ShapeDraw::box_shadow(
+                Rect::new(x + 1.5, y + 1.5, 5., 4.),
+                CornerRadii::uniform(1.5),
+                BoxShadow::new([0., 0., 0., 0.3]).offset(0.5, 1.).blur(3.),
+            ));
         }
         Ok(Self {
             painter,
@@ -182,6 +199,7 @@ impl Work {
             placements,
             markers,
             outlines,
+            shadows,
         })
     }
     fn record(&mut self, mode: Mode, frame: &mut Frame<'_, '_>) -> Result<f64> {
@@ -278,6 +296,16 @@ impl Work {
                 .begin(&mut p)?
                 .clipped_rounded(Rect::new(-16., -16., 96., 96.), CornerRadii::uniform(8.))?
                 .draw_shapes(black_box(&self.rectangles))?,
+            Mode::Shadows => {
+                for &d in &self.shadows {
+                    self.shapes.draw(&mut p, black_box(d))?;
+                }
+            }
+            Mode::ShadowsBatch => self.shapes.draw_many(&mut p, black_box(&self.shadows))?,
+            Mode::PainterShadowsBatch => self
+                .painter
+                .begin(&mut p)?
+                .draw_shapes(black_box(&self.shadows))?,
             Mode::Outlines => {
                 for &d in &self.outlines {
                     self.shapes.draw(&mut p, black_box(d))?;
