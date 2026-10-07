@@ -1,7 +1,9 @@
 use super::{
-    FontId, TextAlign, TextError, TextFont, TextGlyph, TextLayout, TextLine, TextStyle, TextSystem,
-    TextWrap, cosmic,
+    FontId, TextAlign, TextDecoration, TextDecorationKind, TextError, TextFont, TextGlyph,
+    TextLayout, TextLine, TextSpan, TextStyle, TextSystem, TextWrap, cosmic,
+    span::{Segment, paragraph_attrs, segments},
 };
+use crate::Rect;
 use std::{collections::HashMap, sync::Arc};
 
 /// Retained UTF-8 text and paragraph constraints, evaluated explicitly on the CPU.
@@ -12,11 +14,16 @@ use std::{collections::HashMap, sync::Arc};
 /// selection/features changes reshape. Content edits preserve matching leading and
 /// trailing paragraphs and reshape changed paragraphs. Loading fonts or evaluating with a
 /// different system also reshapes, avoiding stale fallback or face identities.
-/// Every snapshot remains usable after later edits. One style per buffer is supported.
+/// Every snapshot remains usable after later edits.
+///
+/// [`Self::set_rich_text`] adds [`TextSpan`] overrides of family, size, weight,
+/// slant, tracking, color and decorations over byte ranges of the same buffer.
 #[derive(Debug)]
 pub struct TextBuffer {
     text: Arc<str>,
     style: TextStyle,
+    spans: Vec<TextSpan>,
+    segments: Vec<Segment>,
     width: Option<f32>,
     wrap: TextWrap,
     align: TextAlign,
@@ -43,6 +50,8 @@ impl TextBuffer {
                 style.line_height,
             )),
             style,
+            spans: Vec::new(),
+            segments: Vec::new(),
             width: None,
             wrap: TextWrap::default(),
             align: TextAlign::default(),
@@ -72,12 +81,38 @@ impl TextBuffer {
     pub fn align(&self) -> TextAlign {
         self.align
     }
-    /// Replaces text and style after validation, without shaping. Identical input
-    /// retains the snapshot and text allocation. Rejected input changes neither.
+    /// Style spans applied over the buffer style, in override order.
+    pub fn spans(&self) -> &[TextSpan] {
+        &self.spans
+    }
+    /// Replaces text and style after validation, without shaping, and removes any
+    /// spans. Identical input retains the snapshot and text allocation. Rejected
+    /// input changes nothing.
     pub fn set_text(&mut self, text: &str, style: TextStyle) -> Result<(), TextError> {
+        self.set_rich_text(text, style, Vec::new())
+    }
+    /// Replaces text, base style and per-range [`TextSpan`] overrides after validation,
+    /// without shaping. Spans must lie on `char` boundaries within `text`; later
+    /// spans override fields set by earlier ones. Identical input retains the snapshot.
+    /// Rejected input changes nothing.
+    pub fn set_rich_text(
+        &mut self,
+        text: &str,
+        style: TextStyle,
+        spans: impl Into<Vec<TextSpan>>,
+    ) -> Result<(), TextError> {
         style.validate()?;
+        let spans = spans.into();
+        for span in &spans {
+            span.validate(text)?;
+        }
         if self.text.as_ref() != text {
             self.text = Arc::from(text);
+            self.text_dirty = true;
+            self.layout_dirty = true;
+        }
+        if self.spans != spans {
+            self.spans = spans;
             self.text_dirty = true;
             self.layout_dirty = true;
         }
@@ -93,7 +128,8 @@ impl TextBuffer {
     }
     fn apply_style(&mut self, style: TextStyle) {
         if style != self.style {
-            self.text_dirty |= !self.style.same_shaping(&style);
+            // Span attributes derive from the base style, including scaled line heights.
+            self.text_dirty |= !self.style.same_shaping(&style) || !self.spans.is_empty();
             self.layout_dirty = true;
             self.style = style;
         }
@@ -144,6 +180,9 @@ impl TextBuffer {
         ));
         self.backend.set_size(self.width, None);
         self.backend.set_wrap(self.wrap.backend());
+        if self.text_dirty || self.evaluated_system != Some(source) {
+            self.segments = segments(self.text.len(), &self.style, &self.spans);
+        }
         if self.evaluated_system != Some(source) {
             self.backend.set_text(
                 &self.text,
@@ -151,8 +190,23 @@ impl TextBuffer {
                 cosmic::Shaping::Advanced,
                 self.align.backend(),
             );
+            if !self.segments.is_empty() {
+                update_paragraphs(
+                    &mut self.backend,
+                    &self.text,
+                    &self.style,
+                    self.align,
+                    &self.segments,
+                );
+            }
         } else if self.text_dirty {
-            update_paragraphs(&mut self.backend, &self.text, &self.style, self.align);
+            update_paragraphs(
+                &mut self.backend,
+                &self.text,
+                &self.style,
+                self.align,
+                &self.segments,
+            );
         } else {
             for line in &mut self.backend.lines {
                 line.set_align(self.align.backend());
@@ -176,6 +230,7 @@ impl TextBuffer {
                 system,
                 self.text.clone(),
                 self.style.clone(),
+                &self.segments,
                 self.cached
                     .as_ref()
                     .map_or(0, |layout| layout.glyphs().len().min(self.text.len())),
@@ -190,16 +245,24 @@ impl TextBuffer {
     }
 }
 
-fn update_paragraphs(buffer: &mut cosmic::Buffer, text: &str, style: &TextStyle, align: TextAlign) {
-    let mut paragraphs: Vec<_> = cosmic::LineIter::new(text)
-        .map(|(range, ending)| (&text[range], ending))
-        .collect();
-    if paragraphs
+fn update_paragraphs(
+    buffer: &mut cosmic::Buffer,
+    text: &str,
+    style: &TextStyle,
+    align: TextAlign,
+    segments: &[Segment],
+) {
+    let mut ranges: Vec<_> = cosmic::LineIter::new(text).collect();
+    if ranges
         .last()
         .is_none_or(|(_, ending)| *ending != cosmic::LineEnding::None)
     {
-        paragraphs.push(("", cosmic::LineEnding::None));
+        ranges.push((text.len()..text.len(), cosmic::LineEnding::None));
     }
+    let paragraphs: Vec<_> = ranges
+        .iter()
+        .map(|(range, ending)| (&text[range.clone()], *ending))
+        .collect();
     let matches = |line: &cosmic::BufferLine, &(text, ending): &(&str, cosmic::LineEnding)| {
         line.text() == text && line.ending() == ending
     };
@@ -241,9 +304,16 @@ fn update_paragraphs(buffer: &mut cosmic::Buffer, text: &str, style: &TextStyle,
             }),
         );
     }
-    for line in &mut buffer.lines {
-        if line.attrs_list().defaults() != attrs {
-            line.set_attrs_list(cosmic::AttrsList::new(&attrs));
+    for (line, (range, _)) in buffer.lines.iter_mut().zip(&ranges) {
+        if segments.is_empty() {
+            // Unstyled text avoids allocating a list per paragraph.
+            if line.attrs_list().defaults() != attrs
+                || line.attrs_list().spans_iter().next().is_some()
+            {
+                line.set_attrs_list(cosmic::AttrsList::new(&attrs));
+            }
+        } else {
+            line.set_attrs_list(paragraph_attrs(style, &attrs, segments, range.clone()));
         }
         line.set_align(align.backend());
     }
@@ -281,6 +351,8 @@ fn blank_snapshot(
             glyph_range: 0..0,
             top,
             baseline,
+            ascent: baseline - top,
+            descent: top + height - baseline,
             height,
             width: 0.,
             left: empty_anchor(align, width, false),
@@ -298,6 +370,7 @@ fn blank_snapshot(
         glyphs: Vec::new(),
         fonts: Vec::new(),
         missing: Vec::new(),
+        decorations: Vec::new(),
         size: [0., top],
         interaction: Default::default(),
     })
@@ -308,8 +381,11 @@ fn snapshot(
     system: &mut TextSystem,
     text: Arc<str>,
     style: TextStyle,
+    segments: &[Segment],
     glyph_capacity: usize,
 ) -> Result<TextLayout, TextError> {
+    // Glyph metadata is the index of its segment plus one; zero is the buffer style.
+    let color = |metadata: usize| metadata.checked_sub(1).and_then(|i| segments.get(i)?.color);
     // Match the backend's explicit CR/LF/CRLF/LFCR splitting exactly, including a
     // terminal empty paragraph. This avoids normalizing away source byte offsets.
     let mut offset = 0;
@@ -327,12 +403,24 @@ fn snapshot(
         lines: Vec::with_capacity(buffer.lines.len()),
         fonts: Vec::new(),
         missing: Vec::new(),
+        decorations: Vec::new(),
         size: [0., 0.],
         interaction: Default::default(),
     };
     let mut font_indices = HashMap::new();
     let mut last_font = None;
+    // Runs are emitted in order for every layout line of every paragraph.
+    let mut layout_line = (usize::MAX, 0);
     for run in buffer.layout_runs() {
+        layout_line = if layout_line.0 == run.line_i {
+            (run.line_i, layout_line.1 + 1)
+        } else {
+            (run.line_i, 0)
+        };
+        let metrics = buffer.lines[run.line_i]
+            .layout_opt()
+            .and_then(|lines| lines.get(layout_line.1))
+            .map_or((0., 0.), |line| (line.max_ascent, line.max_descent));
         if [
             run.line_y,
             run.line_top,
@@ -425,7 +513,57 @@ fn snapshot(
                 synthetic_italic: glyph
                     .cache_key_flags
                     .contains(cosmic::CacheKeyFlags::FAKE_ITALIC),
+                color: color(glyph.metadata),
             });
+        }
+        for span in run.decorations {
+            let data = &span.data;
+            let size = span.font_size;
+            let glyphs = &run.glyphs[span.glyph_range.clone()];
+            // Split by span metadata so each color keeps its own line.
+            for group in glyphs.chunk_by(|a, b| a.metadata == b.metadata) {
+                let left = group.iter().map(|g| g.x).fold(f32::INFINITY, f32::min);
+                let right = group
+                    .iter()
+                    .map(|g| g.x + g.w)
+                    .fold(f32::NEG_INFINITY, f32::max);
+                if !(right > left) {
+                    continue;
+                }
+                let lines = [
+                    (
+                        data.text_decoration.underline != cosmic::UnderlineStyle::None,
+                        TextDecorationKind::Underline,
+                        data.underline_metrics,
+                    ),
+                    (
+                        data.text_decoration.strikethrough,
+                        TextDecorationKind::Strikethrough,
+                        data.strikethrough_metrics,
+                    ),
+                ];
+                for (enabled, kind, metrics) in lines {
+                    // Offsets are the top of the line above the baseline, in EM.
+                    let rect = Rect::new(
+                        left,
+                        run.line_y - metrics.offset * size,
+                        right - left,
+                        metrics.thickness * size,
+                    );
+                    if !enabled || !(rect.height > 0.) {
+                        continue;
+                    }
+                    if !rect.bottom().is_finite() || !rect.right().is_finite() {
+                        return Err(TextError::LayoutOverflow);
+                    }
+                    output.decorations.push(TextDecoration {
+                        kind,
+                        line_index,
+                        rect,
+                        color: color(group[0].metadata),
+                    });
+                }
+            }
         }
         output.size[0] = output.size[0].max(run.line_w);
         output.size[1] = output.size[1].max(run.line_top + run.line_height);
@@ -435,6 +573,8 @@ fn snapshot(
             glyph_range: glyph_start..output.glyphs.len(),
             top: run.line_top,
             baseline: run.line_y,
+            ascent: metrics.0,
+            descent: metrics.1,
             height: run.line_height,
             width: run.line_w,
             left: if left.is_finite() {

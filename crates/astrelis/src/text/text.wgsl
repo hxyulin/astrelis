@@ -9,7 +9,7 @@ struct Output {
     @location(4) @interpolate(flat) clip_radii: vec4<f32>,
 };
 @vertex fn vertex_main(@builtin(vertex_index) index: u32,
-    @location(0) rect: vec4<f32>, @location(1) uv: vec4<f32>, @location(2) kind: vec4<f32>,
+    @location(0) rect: vec4<f32>, @location(1) uv: vec4<f32>, @location(2) kind: vec4<u32>,
     @location(3) origin_axis_x: vec4<f32>, @location(4) axis_y: vec4<f32>, @location(5) color: vec4<f32>,
     @location(6) clip_axes: vec4<f32>, @location(7) clip_offset_half: vec4<f32>,
     @location(8) clip_radii: vec4<f32>) -> Output {
@@ -21,17 +21,29 @@ struct Output {
     var output: Output;
     output.position = vec4(destination * vec2(2.0, -2.0) + vec2(-1.0, 1.0), 0.0, 1.0);
     output.uv = uv.xy + corner * uv.zw;
-    output.color = color;
-    output.kind = kind.x;
+    // Span colors replace the draw RGB unless the draw disables them (axis_y.z).
+    // The draw alpha already includes opacity and multiplies every glyph.
+    let span = vec4(unpack2x16float(kind.y), unpack2x16float(kind.z));
+    output.color = select(color, vec4(span.rgb, span.a * color.a), kind.w != 0u && axis_y.z == 0.0);
+    output.kind = f32(kind.x);
     output.clip = clip_varying(destination, clip_axes, clip_offset_half);
     output.clip_radii = clip_radii;
     return output;
 }
+// Filtered coverage of the unit square in a decoration quad's UV space.
+fn solid_coverage(uv: vec2<f32>) -> f32 {
+    let footprint = max(fwidth(uv), vec2(0.000001));
+    let inside = clamp((vec2(1.0) - uv) / footprint + 0.5, vec2(0.0), vec2(1.0))
+        - clamp(-uv / footprint + 0.5, vec2(0.0), vec2(1.0));
+    return inside.x * inside.y;
+}
 fn shade_fragment_main(input: Output) -> vec4<f32> {
     let texel = textureSample(atlas, atlas_sampler, input.uv);
     let clip = clip_coverage(input.clip, input.clip_radii);
-    if input.kind == 0.0 {
-        let alpha = texel.r * input.color.a * clip;
+    let solid = solid_coverage(input.uv);
+    if input.kind == 0.0 || input.kind == 3.0 {
+        let coverage = select(texel.r, solid, input.kind == 3.0);
+        let alpha = coverage * input.color.a * clip;
         return vec4(input.color.rgb * alpha, alpha);
     }
     // Color atlas stores linear, premultiplied RGBA. Draw RGB colors masks only.

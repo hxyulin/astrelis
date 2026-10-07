@@ -64,8 +64,46 @@ TextBuffer retains backend shaping/layout state so changing wrapping constraints
 can reuse shaped runs. Setters mark the appropriate work dirty. Layout evaluation
 is explicit, caches the resulting snapshot, and can return a cheap shared handle
 when neither content, relevant style/constraints, nor font database generation has
-changed. The initial API accepts one style per buffer; fallback still produces
-multiple font/script runs. Rich spans can follow without changing GPU ownership.
+changed. A buffer has one base style plus optional rich spans (below); fallback
+still produces multiple font/script runs within either.
+
+## Rich text spans
+
+`TextBuffer::set_rich_text(text, style, spans)` applies `TextSpan` overrides over
+UTF-8 byte ranges of one buffer: family, size, line height, weight, slant, stretch,
+tracking, color, underline and strikethrough. Unset fields inherit the base style;
+where spans overlap, later spans override the fields they set, so a bold range and a
+colored range combine. Ranges must lie on `char` boundaries and may cross line breaks.
+`set_text` keeps working and removes spans. A span that sets only the font size scales
+the base line height with it, and each line takes the height of its tallest span.
+
+```rust,ignore
+buffer.set_rich_text("Read the docs, not the code", style, vec![
+    TextSpan::new(9..13).weight(700).color(link).underline(),
+    TextSpan::new(19..27).strikethrough(),
+])?;
+let layout = buffer.layout(&mut fonts)?;
+let prepared = painter.prepare_text(&layout, TextRasterOptions::new())?;
+paint.draw_text(&prepared, TextDraw::new([20., 20.]).color(body))?;
+```
+
+Spans are cosmic-text attribute spans; the merged segment index travels as glyph
+metadata, so `TextGlyph::color` carries the span color and `TextLayout::decorations`
+lists underline/strikethrough rectangles split by color. Decoration position and
+thickness come from each font's underline (`post`) and strikeout (`OS/2`) metrics at
+the glyphs' size. `TextLine::ascent`/`descent` give the largest font extents on each
+line for editor carets and selection boxes.
+
+Preparation bakes span colors into the immutable glyph records (two half-float
+words per glyph, so the record stays 48 bytes) and appends decoration rectangles as
+one extra batch drawn after the glyphs, with edges filtered over one raster texel.
+One draw therefore renders every color. `TextDraw::color` is the default for unstyled
+glyphs; span colors replace its RGB, while its alpha and the draw opacity multiply
+everything, so fading needs no preparation. `TextDraw::span_colors(false)` draws all
+mask glyphs and decorations in the draw color, for example to recolor selected text
+with a second clipped draw. Intrinsic color glyphs keep their artwork. Changing a span
+reshapes its paragraphs and needs a new preparation; overlines, double/wavy lines and
+per-span OpenType features are not exposed.
 
 Layout includes selected font faces and glyph IDs, advances/offsets, line baselines,
 logical layout bounds, and source cluster ranges. Preserve line identity and UTF-8
@@ -302,8 +340,8 @@ and frame CPU total. Shaping and GPU completion waits are outside those interval
 GPU execution and color-atlas workloads are not measured by this initial benchmark.
 See the [GPU-text CPU baseline](performance/text-rendering.md) for three recorded runs
 and exact measurement boundaries. COLR currently uses palette zero and the rasterizer's
-default foreground; custom palettes/foreground, rich spans, LCD rendering, and
-text effects remain future work. See the separate distance-field fill contract below.
+default foreground; custom palettes/foreground, LCD rendering, and text effects
+remain future work. See the separate distance-field fill contract below.
 
 ## Painter integration
 

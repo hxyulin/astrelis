@@ -463,3 +463,168 @@ fn overflowing_blank_line_boxes_return_an_error_and_keep_old_snapshot() {
     buffer.set_style(style()).unwrap();
     assert_eq!(buffer.layout(&mut system).unwrap().size(), before.size());
 }
+
+#[test]
+fn rich_text_spans_merge_overrides_color_glyphs_and_scale_lines() {
+    let mut system = system();
+    let mut buffer = TextBuffer::new();
+    let red = [1., 0., 0., 1.];
+    let text = "plain bold red\nbig";
+    buffer
+        .set_rich_text(
+            text,
+            style(),
+            vec![
+                TextSpan::new(6..14).weight(700),
+                TextSpan::new(11..14).color(red),
+                TextSpan::new(15..18).font_size(40.),
+            ],
+        )
+        .unwrap();
+    let layout = buffer.layout(&mut system).unwrap();
+    valid_clusters(&layout);
+    for glyph in layout.glyphs() {
+        let weight = layout.fonts()[glyph.font_index].weight();
+        let cluster = glyph.cluster.start;
+        assert_eq!(weight, if (6..14).contains(&cluster) { 700 } else { 400 });
+        assert_eq!(
+            glyph.color,
+            (11..14).contains(&cluster).then_some(red),
+            "{cluster}"
+        );
+        near(glyph.font_size, if cluster >= 15 { 40. } else { 20. });
+    }
+    // Only the font size is set, so the line height scales from 28 to 56.
+    let lines = layout.lines();
+    near(lines[0].height, 28.);
+    near(lines[1].height, 56.);
+    for line in lines {
+        assert!(line.ascent > 0. && line.descent > 0.);
+        assert!(line.baseline - line.ascent >= line.top - 0.001);
+    }
+    assert!(lines[1].ascent > lines[0].ascent * 1.9);
+    // Identical input keeps the snapshot; a span change produces a new one.
+    let spans = buffer.spans().to_vec();
+    buffer.set_rich_text(text, style(), spans).unwrap();
+    assert!(Arc::ptr_eq(&layout, &buffer.layout(&mut system).unwrap()));
+    buffer
+        .set_rich_text(text, style(), vec![TextSpan::new(0..5).color(red)])
+        .unwrap();
+    let recolored = buffer.layout(&mut system).unwrap();
+    assert!(recolored.glyphs()[..5].iter().all(|g| g.color == Some(red)));
+    assert!(recolored.glyphs()[5..].iter().all(|g| g.color.is_none()));
+    // Plain set_text removes spans.
+    buffer.set_text(text, style()).unwrap();
+    assert!(buffer.spans().is_empty());
+    let plain = buffer.layout(&mut system).unwrap();
+    assert!(plain.glyphs().iter().all(|g| g.color.is_none()));
+    assert!(plain.decorations().is_empty());
+}
+
+#[test]
+fn rich_text_spans_cross_paragraphs_survive_edits_and_reject_invalid_ranges() {
+    let mut system = system();
+    let mut buffer = TextBuffer::new();
+    let green = [0., 1., 0., 1.];
+    buffer
+        .set_rich_text(
+            "ab\ncd\nef",
+            style(),
+            vec![TextSpan::new(1..4).color(green)],
+        )
+        .unwrap();
+    let layout = buffer.layout(&mut system).unwrap();
+    let colored: Vec<_> = layout
+        .glyphs()
+        .iter()
+        .filter(|g| g.color.is_some())
+        .map(|g| g.cluster.start)
+        .collect();
+    assert_eq!(colored, [1, 3]);
+    // Edits through the incremental paragraph path keep spans in whole-buffer bytes.
+    buffer
+        .set_rich_text(
+            "ab\ncd\neXf",
+            style(),
+            vec![TextSpan::new(7..8).color(green)],
+        )
+        .unwrap();
+    let edited = buffer.layout(&mut system).unwrap();
+    let colored: Vec<_> = edited
+        .glyphs()
+        .iter()
+        .filter(|g| g.color.is_some())
+        .map(|g| g.cluster.start)
+        .collect();
+    assert_eq!(colored, [7]);
+    let before = buffer.spans().to_vec();
+    for span in [
+        TextSpan::new(0..100),
+        TextSpan::new(3..1),
+        TextSpan::new(0..1).font_size(0.),
+        TextSpan::new(0..1).weight(0),
+        TextSpan::new(0..1).color([1., 1., 1., 2.]),
+        TextSpan::new(0..1).letter_spacing(f32::NAN),
+    ] {
+        assert_eq!(
+            buffer.set_rich_text("ab\ncd\neXf", style(), vec![span]),
+            Err(TextError::InvalidSpan)
+        );
+    }
+    assert_eq!(
+        buffer.set_rich_text("é", style(), vec![TextSpan::new(0..1)]),
+        Err(TextError::InvalidSpan)
+    );
+    assert_eq!(buffer.spans(), before);
+    assert_eq!(buffer.text(), "ab\ncd\neXf");
+}
+
+#[test]
+fn decorations_use_font_metrics_and_split_by_span_color() {
+    let mut system = system();
+    let mut buffer = TextBuffer::new();
+    let (red, blue) = ([1., 0., 0., 1.], [0., 0., 1., 1.]);
+    buffer
+        .set_rich_text(
+            "under strike",
+            style(),
+            vec![
+                TextSpan::new(0..5).underline(),
+                TextSpan::new(0..2).color(red),
+                TextSpan::new(2..5).color(blue),
+                TextSpan::new(6..12).strikethrough(),
+            ],
+        )
+        .unwrap();
+    let layout = buffer.layout(&mut system).unwrap();
+    let line = &layout.lines()[0];
+    let decorations = layout.decorations();
+    assert_eq!(decorations.len(), 3);
+    let advance = |range: std::ops::Range<usize>| -> f32 {
+        layout
+            .glyphs()
+            .iter()
+            .filter(|g| range.contains(&g.cluster.start))
+            .map(|g| g.advance)
+            .sum()
+    };
+    for (decoration, (kind, color, range)) in decorations.iter().zip([
+        (TextDecorationKind::Underline, Some(red), 0..2),
+        (TextDecorationKind::Underline, Some(blue), 2..5),
+        (TextDecorationKind::Strikethrough, None, 6..12),
+    ]) {
+        assert_eq!(decoration.kind, kind);
+        assert_eq!(decoration.color, color);
+        assert_eq!(decoration.line_index, 0);
+        near(decoration.rect.width, advance(range));
+        // Source Sans 3 metrics: underline below the baseline, strikeout near x-height.
+        assert!(decoration.rect.height > 0.5 && decoration.rect.height < 2.);
+        if kind == TextDecorationKind::Underline {
+            assert!(decoration.rect.y > line.baseline);
+        } else {
+            assert!(decoration.rect.bottom() < line.baseline - 2.);
+        }
+    }
+    // Adjacent colors share one continuous underline.
+    near(decorations[0].rect.right(), decorations[1].rect.x);
+}

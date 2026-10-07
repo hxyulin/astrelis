@@ -1,5 +1,8 @@
 //! Font loading, advanced CPU shaping/layout, and explicit GPU coverage/color and distance-field text.
 //!
+//! Rich text uses one [`TextBuffer`] with [`TextSpan`] overrides over byte ranges;
+//! span colors and underline/strikethrough decorations render in a single draw.
+//!
 //! Keep one [`TextSystem`] per application and one [`TextBuffer`] per retained text
 //! item. Font discovery is explicit. [`TextBuffer::layout`] evaluates dirty state
 //! and returns an immutable, shared [`TextLayout`]; an unchanged buffer returns
@@ -114,17 +117,19 @@ mod geometry;
 mod interaction;
 mod layout;
 mod renderer;
+mod span;
 mod style;
 mod system;
 
 pub use buffer::TextBuffer;
 pub use cosmic_text as cosmic;
 pub use interaction::{SelectionRects, TextAffinity, TextCaret, TextPosition};
-pub use layout::{TextFont, TextGlyph, TextLayout, TextLine};
+pub use layout::{TextDecoration, TextDecorationKind, TextFont, TextGlyph, TextLayout, TextLine};
 pub use renderer::{
     MtsdfOptions, PreparedText, TextDraw, TextPreparation, TextRasterOptions, TextRenderError,
     TextRenderer, TextRendererOptions, TextRendererStats,
 };
+pub use span::TextSpan;
 pub use style::{FontFamily, FontSlant, FontStretch, TextAlign, TextStyle, TextWrap};
 pub use system::{FontId, FontInfo, TextSystem};
 
@@ -146,6 +151,9 @@ pub enum TextError {
     LayoutOverflow,
     /// Selection endpoints must be ordered, in bounds, and at grapheme/paragraph-break boundaries.
     InvalidSelection,
+    /// Span ranges must be ordered and on `char` boundaries within the text, with
+    /// positive finite sizes, weight in `1..=1000`, finite tracking and valid colors.
+    InvalidSpan,
 }
 impl std::fmt::Display for TextError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -157,6 +165,7 @@ impl std::fmt::Display for TextError {
             Self::FontUnavailable => "selected font data is unavailable or invalid",
             Self::LayoutOverflow => "text layout positions or metrics exceed finite units",
             Self::InvalidSelection => "selection must use ordered valid text boundaries",
+            Self::InvalidSpan => "text spans must use ordered char boundaries within the text and valid style values",
         })
     }
 }

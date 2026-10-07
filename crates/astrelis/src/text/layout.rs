@@ -65,6 +65,33 @@ pub struct TextGlyph {
     /// Whether a renderer should synthesize italic slant for the selected upright face.
     /// Font fallback can require synthesis even when the requested style is italic.
     pub synthetic_italic: bool,
+    /// Linear, straight RGBA from a [`super::TextSpan`], or `None` for the draw color.
+    pub color: Option<[f32; 4]>,
+}
+
+/// Whether a [`TextDecoration`] is drawn below the baseline or through the glyphs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextDecorationKind {
+    /// A line below the baseline at the font's underline position.
+    Underline,
+    /// A line through the glyphs at the font's strikeout position.
+    Strikethrough,
+}
+
+/// One decoration line under or through a run of glyphs with the same span color.
+///
+/// Position and thickness come from the font's underline/strikeout metrics at the
+/// glyphs' size. Rendering draws these filled rectangles after the glyphs.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextDecoration {
+    /// Underline or strikethrough.
+    pub kind: TextDecorationKind,
+    /// Index in [`TextLayout::lines`].
+    pub line_index: usize,
+    /// Filled area in local units; width spans the glyph advances.
+    pub rect: crate::Rect,
+    /// Span color, or `None` for the draw color.
+    pub color: Option<[f32; 4]>,
 }
 
 /// One visual line, including empty lines and wrapped portions of a source paragraph.
@@ -80,6 +107,11 @@ pub struct TextLine {
     pub top: f32,
     /// Baseline Y in local units.
     pub baseline: f32,
+    /// Largest font ascent on the line, above the baseline, in local units. Editors
+    /// can size carets and selections from `baseline - ascent` to `baseline + descent`.
+    pub ascent: f32,
+    /// Largest font descent on the line, below the baseline, in local units.
+    pub descent: f32,
     /// Line box height in local units. Ink may exceed this box.
     pub height: f32,
     /// Advance width of the visual line, not its aligned position or ink bounds.
@@ -108,6 +140,7 @@ pub struct TextLayout {
     pub(crate) lines: Vec<TextLine>,
     pub(crate) fonts: Vec<TextFont>,
     pub(crate) missing: Vec<Range<usize>>,
+    pub(crate) decorations: Vec<super::TextDecoration>,
     pub(crate) size: [f32; 2],
     pub(super) interaction:
         OnceLock<Result<Box<super::interaction::Interaction>, super::TextError>>,
@@ -138,6 +171,10 @@ impl TextLayout {
     /// guaranteeing that every Unicode codepoint has a visible representation.
     pub fn missing_glyphs(&self) -> &[Range<usize>] {
         &self.missing
+    }
+    /// Underlines and strikethroughs from spans, in line order.
+    pub fn decorations(&self) -> &[super::TextDecoration] {
+        &self.decorations
     }
     /// `[maximum_line_advance, total_line_box_height]` in local units.
     pub fn size(&self) -> [f32; 2] {

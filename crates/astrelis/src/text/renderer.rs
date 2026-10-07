@@ -210,6 +210,10 @@ impl TextPreparation {
 /// Identity draws interpret these units as viewport-relative pixels. An explicit
 /// draw or Painter transform can convert application logical units to pixels.
 /// Raster density never applies another geometry scale.
+///
+/// `color` is the default for glyphs without a span color. Span colors replace its RGB
+/// unless [`Self::span_colors`] is disabled; `color`'s alpha and `opacity` multiply
+/// every glyph and decoration, so fading a rich text needs no new preparation.
 #[derive(Clone, Copy, Debug)]
 pub struct TextDraw {
     /// Origin offset before the affine transform.
@@ -220,6 +224,10 @@ pub struct TextDraw {
     pub opacity: f32,
     /// Transform of layout-unit geometry and origin; X right/Y down.
     pub transform: Transform2D,
+    /// Whether [`super::TextSpan`] colors replace `color`'s RGB for their glyphs and
+    /// decorations, the default. Disable to draw everything in `color`, for example
+    /// to recolor selected text with a second clipped draw.
+    pub span_colors: bool,
 }
 impl Default for TextDraw {
     fn default() -> Self {
@@ -234,7 +242,13 @@ impl TextDraw {
             color: [1.; 4],
             opacity: 1.,
             transform: Transform2D::IDENTITY,
+            span_colors: true,
         }
+    }
+    /// Selects whether span colors apply; disabled draws use `color` for every mask glyph.
+    pub const fn span_colors(mut self, value: bool) -> Self {
+        self.span_colors = value;
+        self
     }
     /// Selects linear straight RGBA; RGB affects masks, alpha affects all glyphs.
     pub const fn color(mut self, value: [f32; 4]) -> Self {
@@ -377,7 +391,42 @@ struct Cached {
 struct GlyphData {
     rect: [f32; 4],
     uv: [f32; 4],
-    kind: [f32; 4],
+    // [kind, red|green f16, blue|alpha f16, has color]. Kind 0 masks, 1 color images,
+    // 2 distance fields, 3 solid decoration rectangles with UVs over the true rectangle.
+    kind: [u32; 4],
+}
+impl GlyphData {
+    fn style(kind: u32, color: Option<[f32; 4]>) -> [u32; 4] {
+        let [r, g, b, a] = color.unwrap_or([0.; 4]).map(f16_bits);
+        [
+            kind,
+            u32::from(r) | u32::from(g) << 16,
+            u32::from(b) | u32::from(a) << 16,
+            u32::from(color.is_some()),
+        ]
+    }
+}
+/// IEEE binary16 bits of `value`, rounding to nearest even; out-of-range values
+/// become infinity. Matches WGSL `unpack2x16float`.
+fn f16_bits(value: f32) -> u16 {
+    let bits = value.to_bits();
+    let sign = ((bits >> 16) & 0x8000) as u16;
+    let magnitude = bits & 0x7fff_ffff;
+    if magnitude >= 0x4780_0000 {
+        // 65536 and above, infinity or NaN.
+        return sign
+            | if magnitude > 0x7f80_0000 {
+                0x7e00
+            } else {
+                0x7c00
+            };
+    }
+    if magnitude < 0x3880_0000 {
+        // Below the smallest normal half: a subnormal multiple of 2^-24.
+        return sign | (f32::from_bits(magnitude) * 16_777_216.).round_ties_even() as u16;
+    }
+    let rounded = magnitude + 0x0fff + ((magnitude >> 13) & 1);
+    sign | ((rounded - 0x3800_0000) >> 13) as u16
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -456,7 +505,7 @@ impl PreparedText {
     pub fn ink_bounds(&self) -> Option<Rect> {
         self.bounds
     }
-    /// Number of drawable glyph quads.
+    /// Number of drawable quads: glyph images plus decoration rectangles.
     pub fn glyph_count(&self) -> usize {
         self.glyph_count
     }
@@ -505,6 +554,7 @@ pub struct TextRenderer {
     next_page: u64,
     stats: TextRendererStats,
     geometry_pool: Arc<Mutex<GeometryPool>>,
+    solid: Option<Arc<Page>>,
 }
 impl std::fmt::Debug for TextRenderer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -576,7 +626,7 @@ impl TextRenderer {
             VertexLayout {
                 stride: 48,
                 step_mode: wgpu::VertexStepMode::Instance,
-                attributes: wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4]
+                attributes: wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Uint32x4]
                     .to_vec(),
             },
             VertexLayout {
@@ -630,6 +680,7 @@ impl TextRenderer {
             cache: HashMap::new(),
             pages: Vec::new(),
             geometry_pool: Arc::default(),
+            solid: None,
             budget: Arc::new(Budget {
                 pages: AtomicUsize::new(0),
                 bytes: AtomicUsize::new(0),
@@ -822,9 +873,10 @@ impl TextRenderer {
         }
         let inverse_scale = 1. / scale;
         let size = layout.size();
+        let quads = layout.glyphs().len() + layout.decorations().len();
         if size.iter().any(|v| !v.is_finite())
-            || (layout.glyphs().len() as u64) * 48 > self.graphics.device().limits().max_buffer_size
-            || layout.glyphs().len() > u32::MAX as usize
+            || (quads as u64) * 48 > self.graphics.device().limits().max_buffer_size
+            || quads > u32::MAX as usize
         {
             return Err(TextRenderError::InvalidOptions);
         }
@@ -899,16 +951,14 @@ impl TextRenderer {
             data.push(GlyphData {
                 rect: [x, y, w, h],
                 uv: image.uv,
-                kind: [
+                kind: GlyphData::style(
                     match image.page.kind {
-                        Kind::Mask => 0.,
-                        Kind::Color => 1.,
-                        Kind::Mtsdf => 2.,
+                        Kind::Mask => 0,
+                        Kind::Color => 1,
+                        Kind::Mtsdf => 2,
                     },
-                    0.,
-                    0.,
-                    0.,
-                ],
+                    glyph.color,
+                ),
             });
             if let Some(batch) = batches
                 .last_mut()
@@ -922,6 +972,51 @@ impl TextRenderer {
                 });
             }
         }
+        if !layout.decorations().is_empty() {
+            // Decorations follow every glyph in one batch on a 1x1 page. Quads extend
+            // by one raster texel so the shader can filter their edges.
+            let pad = inverse_scale;
+            let start = data.len() as u32;
+            for decoration in layout.decorations() {
+                let r = decoration.rect;
+                let quad = [
+                    r.x - pad,
+                    r.y - pad,
+                    r.width + 2. * pad,
+                    r.height + 2. * pad,
+                ];
+                if quad
+                    .iter()
+                    .chain(&[quad[0] + quad[2], quad[1] + quad[3]])
+                    .any(|v| !v.is_finite())
+                {
+                    return Err(TextRenderError::InvalidOptions);
+                }
+                bounds = Some(match bounds {
+                    None => [quad[0], quad[1], quad[0] + quad[2], quad[1] + quad[3]],
+                    Some(b) => [
+                        b[0].min(quad[0]),
+                        b[1].min(quad[1]),
+                        b[2].max(quad[0] + quad[2]),
+                        b[3].max(quad[1] + quad[3]),
+                    ],
+                });
+                data.push(GlyphData {
+                    rect: quad,
+                    uv: [
+                        -pad / r.width,
+                        -pad / r.height,
+                        quad[2] / r.width,
+                        quad[3] / r.height,
+                    ],
+                    kind: GlyphData::style(3, decoration.color),
+                });
+            }
+            batches.push(Batch {
+                page: self.solid_page(),
+                range: start..data.len() as u32,
+            });
+        }
         if bounds.is_some_and(|b| !(b[2] - b[0]).is_finite() || !(b[3] - b[1]).is_finite()) {
             return Err(TextRenderError::InvalidOptions);
         }
@@ -933,6 +1028,65 @@ impl TextRenderer {
             skipped,
             preparation,
         })
+    }
+    // A blank 1x1 page bound for decoration batches, which never sample it.
+    // Its allocation is outside the atlas budget.
+    fn solid_page(&mut self) -> Arc<Page> {
+        if let Some(page) = &self.solid {
+            return page.clone();
+        }
+        let texture = self
+            .graphics
+            .device()
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("Astrelis text decorations"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            });
+        let group = self.bind_page(&texture);
+        let page = Arc::new(Page {
+            id: 0,
+            kind: Kind::Mask,
+            texture,
+            group,
+            allocation: Arc::new(Allocation {
+                bytes: 0,
+                budget: Arc::new(Budget {
+                    pages: AtomicUsize::new(1),
+                    bytes: AtomicUsize::new(0),
+                }),
+            }),
+        });
+        self.solid = Some(page.clone());
+        page
+    }
+    fn bind_page(&self, texture: &wgpu::Texture) -> wgpu::BindGroup {
+        let view = texture.create_view(&Default::default());
+        self.graphics
+            .device()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Astrelis glyph atlas binding"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            })
     }
     fn upload_geometry(&mut self, glyphs: &[GlyphData]) -> Geometry {
         let (geometry, reused) = GeometryPool::upload(
@@ -1244,24 +1398,7 @@ impl TextRenderer {
                         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
                         view_formats: &[],
                     });
-                let view = texture.create_view(&Default::default());
-                let group = self
-                    .graphics
-                    .device()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("Astrelis glyph atlas binding"),
-                        layout: &self.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&self.sampler),
-                            },
-                        ],
-                    });
+                let group = self.bind_page(&texture);
                 let bytes = (size as usize) * (size as usize) * kind.bytes();
                 self.budget.pages.fetch_add(1, Ordering::Relaxed);
                 self.budget.bytes.fetch_add(bytes, Ordering::Relaxed);
@@ -1423,7 +1560,12 @@ fn draw_parameters(
             (a / vw) as f32,
             (b / vh) as f32,
         ],
-        axis_y: [(c / vw) as f32, (d / vh) as f32, 0., 0.],
+        axis_y: [
+            (c / vw) as f32,
+            (d / vh) as f32,
+            if draw.span_colors { 0. } else { 1. },
+            0.,
+        ],
         color: [
             draw.color[0],
             draw.color[1],

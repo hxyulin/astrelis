@@ -1,5 +1,5 @@
 //! CPU text stages only; fixture fonts and input are prepared outside timed stages.
-use astrelis::{TextBuffer, TextStyle, TextSystem};
+use astrelis::{TextBuffer, TextSpan, TextStyle, TextSystem};
 use std::{hint::black_box, sync::Arc, time::Instant};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -105,6 +105,41 @@ fn main() -> Result<()> {
                     Ok(())
                 },
                 1000,
+            )?,
+        );
+        // A styled run every 24 characters: alternating bold, color and underline.
+        let starts: Vec<usize> = content.char_indices().map(|(i, _)| i).collect();
+        let spans: Vec<TextSpan> = starts
+            .chunks(24)
+            .enumerate()
+            .filter_map(|(i, chunk)| {
+                let end = chunk.get(12).copied()?;
+                let span = TextSpan::new(chunk[0]..end);
+                Some(match i % 3 {
+                    0 => span.weight(700),
+                    1 => span.color([0.9, 0.2, 0.1, 1.]),
+                    _ => span.underline(),
+                })
+            })
+            .collect();
+        let mut rich = TextBuffer::new();
+        rich.set_rich_text(&content, style(), spans.clone())?;
+        rich.set_width(Some(320.))?;
+        let styled = rich.layout(&mut system)?;
+        assert_eq!(styled.size()[0] > 0., !content.is_empty());
+        row(
+            count,
+            styled.glyphs().len(),
+            "new_rich_buffer_shape_snapshot",
+            measure(
+                || {
+                    let mut rich = TextBuffer::new();
+                    rich.set_rich_text(black_box(&content), style(), spans.clone())?;
+                    rich.set_width(Some(320.))?;
+                    black_box(rich.layout(&mut system)?);
+                    Ok(())
+                },
+                1,
             )?,
         );
         let mut wide = false;

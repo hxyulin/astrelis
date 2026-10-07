@@ -1329,3 +1329,119 @@ fn caret_and_selection_updates_reuse_prepared_glyphs_and_geometry() {
         assert!(errors.pop().await.is_none());
     });
 }
+
+#[test]
+fn span_colors_and_decorations_render_in_one_draw() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut system = TextSystem::new();
+        system
+            .load_font(include_bytes!("../../tests/fonts/SourceSans3-Regular.otf"))
+            .unwrap();
+        let mut buffer = TextBuffer::new();
+        let (red, green) = ([1., 0., 0., 1.], [0., 1., 0., 1.]);
+        buffer
+            .set_rich_text(
+                "MM",
+                TextStyle::new()
+                    .family("Source Sans 3")
+                    .font_size(28.)
+                    .line_height(32.),
+                vec![
+                    super::super::TextSpan::new(0..1).color(red),
+                    super::super::TextSpan::new(1..2).color(green),
+                    super::super::TextSpan::new(0..2).underline(),
+                ],
+            )
+            .unwrap();
+        let layout = buffer.layout(&mut system).unwrap();
+        let underline = layout.decorations()[0].rect;
+        let mut renderer = TextRenderer::new(&g);
+        renderer.prepare(&t.render_format()).unwrap();
+        let text = renderer
+            .prepare_text(&layout, TextRasterOptions::new())
+            .unwrap();
+        // Two glyphs plus two underline segments; decorations extend the ink bounds.
+        assert_eq!(text.glyph_count(), 4);
+        assert!(text.ink_bounds().unwrap().bottom() >= underline.bottom());
+        let draws = renderer.stats().draw_calls;
+        let render = |renderer: &mut TextRenderer, t: &mut Framebuffer, draw: TextDraw| {
+            pixels(&g, t, |frame| {
+                let mut pass = frame.render_pass().begin().unwrap();
+                renderer.draw(&mut pass, &text, draw).unwrap();
+            })
+        };
+        let bytes = render(&mut renderer, &mut t, TextDraw::new([2., 2.]));
+        // One glyph batch and one decoration batch.
+        assert_eq!(renderer.stats().draw_calls - draws, 2);
+        let split = 2. + layout.glyphs()[1].advance_origin[0];
+        let (mut left, mut right) = ([0u32; 3], [0u32; 3]);
+        for y in 0..(2. + underline.y) as usize - 1 {
+            for x in 0..64 {
+                let p = pixel(&bytes, x, y);
+                let side = if (x as f32) < split {
+                    &mut left
+                } else {
+                    &mut right
+                };
+                for c in 0..3 {
+                    side[c] += u32::from(p[c]);
+                }
+            }
+        }
+        assert!(left[0] > 1000 && left[1] == 0 && left[2] == 0, "{left:?}");
+        assert!(
+            right[1] > 1000 && right[0] == 0 && right[2] == 0,
+            "{right:?}"
+        );
+        // The underline follows each span's color at the font's underline position.
+        let row = (2. + underline.y + underline.height * 0.5) as usize;
+        assert!(underline.height >= 1., "{underline:?}");
+        let (a, b) = (
+            pixel(&bytes, 4, row),
+            pixel(&bytes, split as usize + 4, row),
+        );
+        assert!(a[0] > 200 && a[1] == 0, "{a:?}");
+        assert!(b[1] > 200 && b[0] == 0, "{b:?}");
+        // Draw alpha multiplies span colors; disabling span colors uses the draw color.
+        let faded = render(
+            &mut renderer,
+            &mut t,
+            TextDraw::new([2., 2.]).color([0., 0., 1., 0.5]),
+        );
+        near(pixel(&faded, 4, row), [a[0] / 2, 0, 0, a[3] / 2]);
+        let plain = render(
+            &mut renderer,
+            &mut t,
+            TextDraw::new([2., 2.])
+                .color([0., 0., 1., 1.])
+                .span_colors(false),
+        );
+        let p = pixel(&plain, split as usize + 4, row);
+        assert!(p[2] > 200 && p[0] == 0 && p[1] == 0, "{p:?}");
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn half_precision_packing_matches_ieee_binary16() {
+    for (value, bits) in [
+        (0., 0),
+        (-0., 0x8000),
+        (1., 0x3c00),
+        (0.5, 0x3800),
+        (-2., 0xc000),
+        (65504., 0x7bff),
+        (65520., 0x7c00),
+        (5.960_464_5e-8, 1),
+        (6.103_515_6e-5, 0x0400),
+        (1.000_488_3, 0x3c00),
+        (1.000_977, 0x3c01),
+        (f32::INFINITY, 0x7c00),
+    ] {
+        assert_eq!(super::f16_bits(value), bits, "{value}");
+    }
+    assert_eq!(super::f16_bits(f32::NAN) & 0x7e00, 0x7e00);
+}

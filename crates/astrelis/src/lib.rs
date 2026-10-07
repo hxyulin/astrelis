@@ -496,10 +496,10 @@ pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRender
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use text::{
     FontFamily, FontId, FontInfo, FontSlant, FontStretch, MtsdfOptions, PreparedText,
-    SelectionRects, TextAffinity, TextAlign, TextBuffer, TextCaret, TextDraw, TextError, TextFont,
-    TextGlyph, TextLayout, TextLine, TextPosition, TextPreparation, TextRasterOptions,
-    TextRenderError, TextRenderer, TextRendererOptions, TextRendererStats, TextStyle, TextSystem,
-    TextWrap,
+    SelectionRects, TextAffinity, TextAlign, TextBuffer, TextCaret, TextDecoration,
+    TextDecorationKind, TextDraw, TextError, TextFont, TextGlyph, TextLayout, TextLine,
+    TextPosition, TextPreparation, TextRasterOptions, TextRenderError, TextRenderer,
+    TextRendererOptions, TextRendererStats, TextSpan, TextStyle, TextSystem, TextWrap,
 };
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{

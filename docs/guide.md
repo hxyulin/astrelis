@@ -504,9 +504,10 @@ complex-script support. Unchanged evaluation reuses its snapshot; width changes
 reuse shaped runs. Content edits preserve matching leading/trailing paragraphs.
 Snapshots retain text and font data across edits and font loading.
 Measurement requires no window/GPU and does not apply DPI or compute pixel ink bounds.
-This milestone provides one style per buffer; rich spans and text editing/hit testing
-follow separately. See the
-[text architecture and plan](text.md).
+`set_rich_text` adds `TextSpan` overrides (family, size, weight, slant, tracking,
+color, underline, strikethrough) over byte ranges of one buffer; span colors and
+decorations render in the same retained draw. See the
+[text architecture and rich spans](text.md#rich-text-spans).
 
 `TextRenderer` explicitly prepares coverage/color glyphs or outline distance fields, with immutable geometry:
 
