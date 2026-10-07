@@ -35,7 +35,7 @@ the recommendation is cosmic-text plus an Astrelis-owned GPU layer, reusing fram
 uploads and pass state restoration.
 
 The workspace now declares Rust 1.98.1, matching the installed compiler. The CPU
-dependency is pinned to cosmic-text 0.19.0 with `std` only. Its optional Swash
+dependency is cosmic-text 0.19 (0.19.0 in Cargo.lock) with `std` only. Its optional Swash
 rasterizer and optional backend shaped-string cache are disabled in cosmic-text.
 The GPU renderer uses Swash 0.2.10 directly against retained font bytes.
 Shaped runs are retained per TextBuffer. This keeps font-generation invalidation

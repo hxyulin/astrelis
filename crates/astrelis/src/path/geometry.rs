@@ -99,7 +99,7 @@ impl Tessellators {
             // public field directly: Lyon's convenience setter rejects values
             // below one, but its tessellator accepts the translated >= 0.5 range.
             // The limit-one/right-angle pixel test guards this version-specific
-            // conversion when updating the pinned dependency.
+            // conversion when Cargo.lock moves to another Lyon release.
             settings.miter_limit = stroke.miter_limit * 0.5;
             self.stroke
                 .tessellate_path(

@@ -83,7 +83,7 @@ fallback classification entries as well as image keys.
 
 ## Generator choice and performance
 
-The private generator uses pinned
+The private generator uses
 [bymsdfgen-core 0.1.1](https://docs.rs/bymsdfgen-core/0.1.1/bymsdfgen_core/).
 We consume Swash's selected weight-instance outlines and synthetic italic directly,
 so there is no second font parser. Linear, quadratic, and cubic contours preserve

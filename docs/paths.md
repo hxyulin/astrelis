@@ -24,7 +24,7 @@ extension divided by half-width, equivalent to the usual SVG ratio. A limit of
 one bevels a right-angle join. A tested conversion handles Lyon 1.0.22's internal
 full-width convention.
 
-Preparation uses the pinned `lyon_tessellation` 1.0.22 fill/stroke tessellators.
+Preparation uses `lyon_tessellation` 1.0 (1.0.22 in Cargo.lock) fill/stroke tessellators.
 Stroke triangles are consistently oriented and filled as a nonzero union, removing
 overlap before shading. Translucent crossings therefore blend once. This extra
 CPU preparation work is explicit, rather than an extra render pass or stencil
