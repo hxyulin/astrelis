@@ -2,6 +2,8 @@ struct Output {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec4<f32>,
     @location(1) coverage: f32,
+    @location(2) clip: vec4<f32>,
+    @location(3) @interpolate(flat) clip_radii: vec4<f32>,
 };
 
 fn safe_unit(v: vec2<f32>) -> vec2<f32> {
@@ -20,6 +22,9 @@ fn path_vertex(
     translation_viewport: vec4<f32>,
     color: vec4<f32>,
     style: vec4<f32>,
+    clip_axes: vec4<f32>,
+    clip_offset_half: vec4<f32>,
+    clip_radii: vec4<f32>,
 ) -> Output {
     let matrix = mat2x2(axes.xy, axes.zw);
     var pixel = matrix * position + translation_viewport.xy;
@@ -39,11 +44,14 @@ fn path_vertex(
     output.position = vec4(normalized.x * 2.0 - 1.0, 1.0 - normalized.y * 2.0, 0.0, 1.0);
     output.color = color;
     output.coverage = 1.0 - outer * style.x;
+    output.clip = clip_varying(normalized, clip_axes, clip_offset_half);
+    output.clip_radii = clip_radii;
     return output;
 }
 
 fn shade(input: Output) -> vec4<f32> {
-    let alpha = input.color.a * clamp(input.coverage, 0.0, 1.0);
+    let clip = clip_coverage(input.clip, input.clip_radii);
+    let alpha = input.color.a * clamp(input.coverage, 0.0, 1.0) * clip;
     return vec4(input.color.rgb * alpha, alpha);
 }
 @fragment
@@ -67,6 +75,10 @@ fn vertex_main(
     @location(5) translation_viewport: vec4<f32>,
     @location(6) color: vec4<f32>,
     @location(7) style: vec4<f32>,
+    @location(8) clip_axes: vec4<f32>,
+    @location(9) clip_offset_half: vec4<f32>,
+    @location(10) clip_radii: vec4<f32>,
 ) -> Output {
-    return path_vertex(position,incoming,outgoing,outer,axes,translation_viewport,color,style);
+    return path_vertex(position,incoming,outgoing,outer,axes,translation_viewport,color,style,
+        clip_axes,clip_offset_half,clip_radii);
 }

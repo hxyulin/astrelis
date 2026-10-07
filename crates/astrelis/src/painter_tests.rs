@@ -926,3 +926,315 @@ fn builtin_stencil_writes_follow_visible_coverage_and_readonly_passes_reject_wri
         assert!(errors.pop().await.is_none());
     });
 }
+
+#[test]
+fn clipped_scopes_intersect_map_through_transforms_and_restore_parent_scissor() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g);
+        let mut painter = Painter::new(&g);
+        painter.prepare(&t.render_format()).unwrap();
+        let full = Rect::new(0., 0., 64., 64.);
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            // Application scissor set before painting bounds every clip.
+            p.set_scissor_rect(0, 0, 60, 64).unwrap();
+            let mut paint = painter.begin(&mut p).unwrap();
+            {
+                let mut scaled = paint.transformed(Transform2D::scale(2., 2.)).unwrap();
+                // Local (2.25, 2, 10, 10) maps to pixels (4.5, 4, 20, 20): edges round outward.
+                let mut clip = scaled.clipped(Rect::new(2.25, 2., 10., 10.)).unwrap();
+                assert_eq!(clip.pass().scissor_rect(), [4, 4, 21, 20]);
+                clip.fill_rect(full, RED).unwrap();
+                {
+                    // Nested clips intersect with their parent.
+                    let mut inner = clip.clipped(Rect::new(8., 8., 20., 20.)).unwrap();
+                    assert_eq!(inner.pass().scissor_rect(), [16, 16, 9, 8]);
+                    inner.fill_rect(full, GREEN).unwrap();
+                    // Raw changes inside a child are undone with it.
+                    inner.pass().set_scissor_rect(0, 0, 1, 1).unwrap();
+                }
+                assert_eq!(clip.pass().scissor_rect(), [4, 4, 21, 20]);
+                // Entirely outside: an empty clip that records nothing and is not an error.
+                let mut outside = clip.clipped(Rect::new(100., 100., 5., 5.)).unwrap();
+                assert_eq!(outside.pass().scissor_rect()[2..], [0, 0]);
+                outside.fill_rect(full, BLUE).unwrap();
+            }
+            assert_eq!(paint.pass().scissor_rect(), [0, 0, 60, 64]);
+            // Rotation clips to the transformed rectangle's bounds; beyond the
+            // application scissor nothing is drawn.
+            let mut rotated = paint
+                .transformed(
+                    Transform2D::rotation(std::f32::consts::FRAC_PI_2)
+                        .then(Transform2D::translation(64., 40.)),
+                )
+                .unwrap();
+            let mut clip = rotated.clipped(Rect::new(0., 0., 8., 20.)).unwrap();
+            assert_eq!(clip.pass().scissor_rect(), [44, 40, 16, 8]);
+            clip.fill_rect(Rect::new(-100., -100., 200., 200.), BLUE)
+                .unwrap();
+            assert!(
+                clip.clipped(Rect::new(f32::NAN, 0., 1., 1.)).is_err()
+                    && clip.clipped(Rect::new(0., 0., -1., 1.)).is_err()
+            );
+        });
+        assert_eq!(pixel(&bytes, 4, 4), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 24, 6), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 3, 4), [0; 4]);
+        assert_eq!(pixel(&bytes, 25, 10), [0; 4]);
+        assert_eq!(pixel(&bytes, 4, 24), [0; 4]);
+        assert_eq!(pixel(&bytes, 16, 16), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 24, 23), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 24, 24), [0; 4]);
+        assert_eq!(pixel(&bytes, 50, 44), [0, 0, 255, 255]);
+        assert_eq!(pixel(&bytes, 61, 44), [0; 4]);
+        assert_eq!(pixel(&bytes, 50, 48), [0; 4]);
+        assert!(errors.pop().await.is_none());
+    });
+}
+#[test]
+fn clipped_scopes_follow_the_viewport_origin() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g);
+        let mut painter = Painter::new(&g);
+        painter.prepare(&t.render_format()).unwrap();
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            p.set_viewport(10., 20., 40., 40., 0., 1.).unwrap();
+            let mut paint = painter.begin(&mut p).unwrap();
+            let mut clip = paint.clipped(Rect::new(2., 2., 4., 4.)).unwrap();
+            assert_eq!(clip.pass().scissor_rect(), [12, 22, 4, 4]);
+            clip.fill_rect(Rect::new(0., 0., 40., 40.), RED).unwrap();
+        });
+        assert_eq!(pixel(&bytes, 12, 22), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 15, 25), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 16, 22), [0; 4]);
+        assert_eq!(pixel(&bytes, 11, 22), [0; 4]);
+    });
+}
+
+// CPU oracle for a rounded rectangle: signed distance in pixels at a pixel center.
+fn rounded_distance(x: usize, y: usize, rect: Rect, radius: f32) -> f32 {
+    let p = [
+        x as f32 + 0.5 - (rect.x + rect.width * 0.5),
+        y as f32 + 0.5 - (rect.y + rect.height * 0.5),
+    ];
+    let q = [
+        p[0].abs() - rect.width * 0.5 + radius,
+        p[1].abs() - rect.height * 0.5 + radius,
+    ];
+    q[0].max(0.).hypot(q[1].max(0.)) + q[0].max(q[1]).min(0.) - radius
+}
+
+#[test]
+fn rounded_clips_apply_to_every_built_in_2d_renderer_with_antialiased_edges() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g);
+        let mut painter = Painter::new(&g);
+        let format = t.render_format();
+        painter.prepare(&format).unwrap();
+        painter.prepare_brush(&format).unwrap();
+        let texture = g.create_texture(TextureOptions::new(1, 1)).unwrap();
+        texture.write(&[255; 4]).unwrap();
+        let image = painter
+            .create_image_binding(texture.view(), TextureBindingOptions::new())
+            .unwrap();
+        painter.prepare_image(&image, &format).unwrap();
+        let brush = g
+            .create_brush(crate::BrushOptions::solid([0., 0., 1., 1.]))
+            .unwrap();
+        let mut builder = crate::Path::builder();
+        builder
+            .move_to([0., 0.])
+            .line_to([64., 0.])
+            .line_to([64., 64.])
+            .line_to([0., 64.])
+            .close();
+        let square = painter
+            .prepare_path(&builder.build().unwrap(), crate::PathOptions::new())
+            .unwrap();
+        let mut fonts = crate::TextSystem::new();
+        fonts
+            .load_font(include_bytes!("../tests/fonts/SourceSans3-Regular.otf"))
+            .unwrap();
+        let mut buffer = crate::TextBuffer::new();
+        buffer
+            .set_text(
+                "MMMM\nMMMM",
+                crate::TextStyle::new()
+                    .family("Source Sans 3")
+                    .font_size(40.)
+                    .line_height(34.),
+            )
+            .unwrap();
+        let text = painter
+            .prepare_text(
+                &buffer.layout(&mut fonts).unwrap(),
+                TextRasterOptions::new(),
+            )
+            .unwrap();
+        let full = Rect::new(0., 0., 64., 64.);
+        let clip = Rect::new(8., 6., 50., 52.);
+        let radius = 14.;
+        type Draw<'a> = Box<dyn Fn(&mut PaintSession<'_, '_>) + 'a>;
+        let draws: [(&str, Draw<'_>); 6] = [
+            ("shape", Box::new(|s| s.fill_rect(full, RED).unwrap())),
+            (
+                "line",
+                Box::new(|s| {
+                    s.draw_line(LineDraw::new([0., 32.], [64., 32.], GREEN).width(64.))
+                        .unwrap()
+                }),
+            ),
+            (
+                "image",
+                Box::new(|s| s.draw_image(&image, TextureDraw::new(full)).unwrap()),
+            ),
+            (
+                "path",
+                Box::new(|s| s.draw_path(&square, crate::PathDraw::new(BLUE)).unwrap()),
+            ),
+            (
+                "brush",
+                Box::new(|s| {
+                    s.draw_shape_with_brush(&brush, ShapeDraw::rect(full, [1.; 4]))
+                        .unwrap()
+                }),
+            ),
+            (
+                "text",
+                Box::new(|s| s.draw_text(&text, TextDraw::new([-2., -6.])).unwrap()),
+            ),
+        ];
+        for (name, draw) in &draws {
+            let unclipped = pixels(&g, &mut t, |f| {
+                let mut p = f.render_pass().begin().unwrap();
+                draw(&mut painter.begin(&mut p).unwrap());
+            });
+            let clipped = pixels(&g, &mut t, |f| {
+                let mut p = f.render_pass().begin().unwrap();
+                let mut paint = painter.begin(&mut p).unwrap();
+                let mut child = paint
+                    .clipped_rounded(clip, crate::CornerRadii::uniform(radius))
+                    .unwrap();
+                draw(&mut child);
+            });
+            let (mut partial, mut removed) = (0, 0);
+            for y in 0..64 {
+                for x in 0..64 {
+                    let d = rounded_distance(x, y, clip, radius);
+                    let (a, b) = (pixel(&unclipped, x, y), pixel(&clipped, x, y));
+                    if d < -1. {
+                        assert_eq!(a, b, "{name} inside at {x},{y}");
+                    } else if d > 1. {
+                        assert_eq!(b, [0; 4], "{name} outside at {x},{y}");
+                        removed += usize::from(a[3] > 0);
+                    } else if a[3] == 255 && b[3] > 0 && b[3] < 255 {
+                        partial += 1;
+                    }
+                }
+            }
+            assert!(removed > 20, "{name} draws outside the clip: {removed}");
+            assert!(
+                *name == "text" || partial > 20,
+                "{name} edges are filtered: {partial}"
+            );
+        }
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn rounded_clips_nest_restore_follow_rotation_and_apply_to_direct_renderers() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g);
+        let mut painter = Painter::new(&g);
+        let mut shapes = ShapeRenderer::new(&g);
+        painter.prepare(&t.render_format()).unwrap();
+        let full = Rect::new(0., 0., 64., 64.);
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            {
+                let mut paint = painter.begin(&mut p).unwrap();
+                {
+                    let mut card = paint
+                        .clipped_rounded(
+                            Rect::new(0., 0., 32., 32.),
+                            crate::CornerRadii::uniform(12.),
+                        )
+                        .unwrap();
+                    {
+                        // A rectangular child keeps the card's rounded corners.
+                        let mut inner = card.clipped(Rect::new(0., 0., 16., 32.)).unwrap();
+                        assert!(inner.pass().rounded_clip().is_some());
+                        inner.fill_rect(full, RED).unwrap();
+                    }
+                    {
+                        // A nested rounded clip replaces the corners but keeps the scissor.
+                        let mut inner = card
+                            .clipped_rounded(Rect::new(16., 0., 32., 32.), crate::CornerRadii::ZERO)
+                            .unwrap();
+                        assert_eq!(inner.pass().scissor_rect(), [16, 0, 16, 32]);
+                        inner.fill_rect(full, GREEN).unwrap();
+                    }
+                    assert_eq!(
+                        card.pass().rounded_clip().unwrap().rect,
+                        Rect::new(0., 0., 32., 32.)
+                    );
+                }
+                assert!(paint.pass().rounded_clip().is_none());
+                assert_eq!(paint.pass().scissor_rect(), [0, 0, 64, 64]);
+                // An exact rotated clip, not just its scissor bounds.
+                let mut rotated = paint
+                    .transformed(
+                        Transform2D::rotation(std::f32::consts::FRAC_PI_4)
+                            .then(Transform2D::translation(48., 32.)),
+                    )
+                    .unwrap();
+                let mut diamond = rotated
+                    .clipped_rounded(Rect::new(-8., -8., 16., 16.), crate::CornerRadii::ZERO)
+                    .unwrap();
+                diamond
+                    .fill_rect(Rect::new(-50., -50., 100., 100.), BLUE)
+                    .unwrap();
+            }
+            // Direct renderers read the same pass state.
+            p.set_rounded_clip(Some(crate::RoundedClip::new(
+                Rect::new(0., 40., 24., 24.),
+                crate::CornerRadii::uniform(12.),
+            )))
+            .unwrap();
+            shapes.draw(&mut p, ShapeDraw::rect(full, RED)).unwrap();
+            assert!(matches!(
+                p.set_rounded_clip(Some(
+                    crate::RoundedClip::new(full, crate::CornerRadii::ZERO)
+                        .transform(Transform2D::scale(0., 1.))
+                )),
+                Err(Error::InvalidClip)
+            ));
+            assert!(p.rounded_clip().is_some());
+        });
+        // The red half keeps the card's top-left corner; green's corner is sharp.
+        assert_eq!(pixel(&bytes, 0, 0), [0; 4]);
+        assert_eq!(pixel(&bytes, 8, 16), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 31, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 31, 31), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 33, 16), [0; 4]);
+        // Diamond: inside its scissor bounds, but outside the rotated square.
+        assert_eq!(pixel(&bytes, 48, 32), [0, 0, 255, 255]);
+        assert_eq!(pixel(&bytes, 40, 25), [0; 4]);
+        assert_eq!(pixel(&bytes, 55, 39), [0; 4]);
+        assert_eq!(pixel(&bytes, 48, 22), [0, 0, 255, 255]);
+        // Direct shape renderer: a circle.
+        assert_eq!(pixel(&bytes, 12, 52), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 1, 41), [0; 4]);
+        assert_eq!(pixel(&bytes, 30, 52), [0; 4]);
+        assert!(errors.pop().await.is_none());
+    });
+}

@@ -1,9 +1,10 @@
 //! CPU recording experiments for primitives and an ordered mixed-renderer workload.
 //! References use direct Astrelis renderer calls; this is not a direct-wgpu benchmark.
 use astrelis::{
-    Frame, Framebuffer, FramebufferOptions, GraphicsContext, LineCap, LineDraw, LineRenderer, Mesh,
-    MeshRenderer, Painter, Rect, ShapeDraw, ShapeRenderer, Stroke, TextureBinding,
-    TextureBindingOptions, TextureDraw, TextureOptions, TextureRenderer, Vertex, wgpu,
+    CornerRadii, Frame, Framebuffer, FramebufferOptions, GraphicsContext, LineCap, LineDraw,
+    LineRenderer, Mesh, MeshRenderer, Painter, Rect, ShapeDraw, ShapeRenderer, Stroke,
+    TextureBinding, TextureBindingOptions, TextureDraw, TextureOptions, TextureRenderer, Vertex,
+    wgpu,
 };
 use std::{
     error::Error as StdError,
@@ -31,9 +32,11 @@ enum Mode {
     OutlinesScoped,
     OutlinesBatch,
     PainterOutlinesBatch,
+    PainterClippedMixed,
+    PainterRoundedClipBatch,
 }
 impl Mode {
-    const CASES: [Self; 11] = [
+    const CASES: [Self; 13] = [
         Self::ShapesScoped,
         Self::ShapesBatch,
         Self::LinesScoped,
@@ -45,6 +48,8 @@ impl Mode {
         Self::OutlinesScoped,
         Self::OutlinesBatch,
         Self::PainterOutlinesBatch,
+        Self::PainterClippedMixed,
+        Self::PainterRoundedClipBatch,
     ];
     fn name(self) -> &'static str {
         match self {
@@ -63,6 +68,8 @@ impl Mode {
             Self::OutlinesScoped => "fills_outlines_scoped",
             Self::OutlinesBatch => "fills_outlines_batch",
             Self::PainterOutlinesBatch => "painter_fills_outlines_batch",
+            Self::PainterClippedMixed => "painter_clipped_mixed",
+            Self::PainterRoundedClipBatch => "painter_rounded_clip_shapes_batch",
         }
     }
     fn reference(self) -> Self {
@@ -73,6 +80,10 @@ impl Mode {
             Self::PainterLinesBatch => Self::LinesBatch,
             Self::OutlinesScoped | Self::OutlinesBatch => Self::Outlines,
             Self::PainterOutlinesBatch => Self::OutlinesBatch,
+            // Scoped clips replace raw scissor calls; a rounded clip that encloses
+            // the target leaves pixels unchanged while paying for its evaluation.
+            Self::PainterClippedMixed => Self::PainterMixed,
+            Self::PainterRoundedClipBatch => Self::PainterShapesBatch,
             _ => Self::Mixed,
         }
     }
@@ -249,6 +260,24 @@ impl Work {
                     }
                 }
             }
+            Mode::PainterClippedMixed => {
+                let mut paint = self.painter.begin(&mut p)?;
+                for i in 0..self.rectangles.len() {
+                    let mut clip = paint.clipped(Rect::new(4., 4., 56., 56.))?;
+                    clip.draw_shape(self.rectangles[i])?;
+                    clip.draw_image(&self.image, self.placements[i])?;
+                    clip.draw_shape(self.markers[i])?;
+                    clip.draw_line(self.segments[i])?;
+                    if i % 16 == 0 {
+                        self.meshes.draw(clip.pass(), &self.mesh)?;
+                    }
+                }
+            }
+            Mode::PainterRoundedClipBatch => self
+                .painter
+                .begin(&mut p)?
+                .clipped_rounded(Rect::new(-16., -16., 96., 96.), CornerRadii::uniform(8.))?
+                .draw_shapes(black_box(&self.rectangles))?,
             Mode::Outlines => {
                 for &d in &self.outlines {
                     self.shapes.draw(&mut p, black_box(d))?;

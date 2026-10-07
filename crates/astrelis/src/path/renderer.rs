@@ -184,7 +184,9 @@ impl PathRenderer {
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Astrelis paths"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("path.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(
+                    crate::clip::shader(include_str!("path.wgsl")).into(),
+                ),
             });
         let layouts = [
             VertexLayout {
@@ -201,6 +203,7 @@ impl PathRenderer {
                     wgpu::vertex_attr_array![4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4]
                         .to_vec(),
             },
+            crate::clip::layout(8),
         ];
         let material = graphics.create_material(
             options.mesh(
@@ -296,7 +299,7 @@ impl PathRenderer {
                 .device()
                 .limits()
                 .max_inter_stage_shader_variables
-                < 3
+                < 5
             {
                 return Err(Error::UnsupportedBrushLimits);
             }
@@ -304,7 +307,7 @@ impl PathRenderer {
                 &self.graphics,
                 &self.material,
                 &self.material.vertex_layouts,
-                include_str!("path.wgsl"),
+                &crate::clip::shader(include_str!("path.wgsl")),
                 include_str!("brush.wgsl"),
             )?);
         }
@@ -555,6 +558,7 @@ fn record(
     } else {
         path.indices
     };
+    pass.bind_clip(2);
     for chunk in parameters.chunks(capacity) {
         let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk), 4);
         pass.set_vertex_buffer(1, &buffer, range);

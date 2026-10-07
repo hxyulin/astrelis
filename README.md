@@ -45,7 +45,7 @@ frame.finish()?;
 | Dense data | Polylines and markers for charts that stream and pan large point series |
 | Images | Prepared and dynamic texture draws with cropping, filtering and placement |
 | Text | Multilingual shaping and fallback, color glyphs, coverage or MTSDF rendering, hit testing and selection |
-| Painter | One immediate drawing session over all of the renderers above, with transform scopes |
+| Painter | One immediate drawing session over all of the renderers above, with transform and clip scopes, including anti-aliased rounded clips |
 | Windows | `astrelis-winit`: a window context for your own loop, or a desktop runner with redraw scheduling |
 
 Each feature ships with a benchmark, and the core draw paths are measured against

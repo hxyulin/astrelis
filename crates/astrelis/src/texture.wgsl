@@ -4,10 +4,14 @@ struct Output {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) tint: vec4<f32>,
+    @location(2) clip: vec4<f32>,
+    @location(3) @interpolate(flat) clip_radii: vec4<f32>,
 };
 @vertex fn vertex_main(@builtin(vertex_index) index: u32,
     @location(0) origin_axis_x: vec4<f32>, @location(1) axis_y: vec4<f32>,
-    @location(2) source: vec4<f32>, @location(3) tint: vec4<f32>) -> Output {
+    @location(2) source: vec4<f32>, @location(3) tint: vec4<f32>,
+    @location(7) clip_axes: vec4<f32>, @location(8) clip_offset_half: vec4<f32>,
+    @location(9) clip_radii: vec4<f32>) -> Output {
     let corners = array(vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 0.0),
                         vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0));
     let corner = corners[index];
@@ -16,6 +20,8 @@ struct Output {
     output.position = vec4(destination * vec2(2.0, -2.0) + vec2(-1.0, 1.0), 0.0, 1.0);
     output.uv = source.xy + corner * source.zw;
     output.tint = tint;
+    output.clip = clip_varying(destination, clip_axes, clip_offset_half);
+    output.clip_radii = clip_radii;
     return output;
 }
 // Retained instance positions stay immutable; the extra transform is per draw.
@@ -23,7 +29,9 @@ struct Output {
     @location(0) origin_axis_x: vec4<f32>, @location(1) axis_y: vec4<f32>,
     @location(2) source: vec4<f32>, @location(3) tint: vec4<f32>,
     @location(4) pixels: vec4<f32>, @location(5) normalized: vec4<f32>,
-    @location(6) translations: vec4<f32>) -> Output {
+    @location(6) translations: vec4<f32>,
+    @location(7) clip_axes: vec4<f32>, @location(8) clip_offset_half: vec4<f32>,
+    @location(9) clip_radii: vec4<f32>) -> Output {
     let corners = array(vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 0.0),
                         vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0));
     let corner = corners[index];
@@ -35,14 +43,18 @@ struct Output {
     output.position = vec4(destination * vec2(2.0, -2.0) + vec2(-1.0, 1.0), 0.0, 1.0);
     output.uv = source.xy + corner * source.zw;
     output.tint = tint;
+    output.clip = clip_varying(destination, clip_axes, clip_offset_half);
+    output.clip_radii = clip_radii;
     return output;
 }
-fn tinted(color: vec4<f32>, tint: vec4<f32>) -> vec4<f32> {
-    return vec4(color.rgb * tint.rgb * tint.a, color.a * tint.a);
+fn tinted(color: vec4<f32>, input: Output) -> vec4<f32> {
+    let tint = input.tint;
+    let result = vec4(color.rgb * tint.rgb * tint.a, color.a * tint.a);
+    return result * clip_coverage(input.clip, input.clip_radii);
 }
 fn shade_fragment_straight(input: Output) -> vec4<f32> {
     let color = textureSample(image, image_sampler, input.uv);
-    return tinted(vec4(color.rgb * color.a, color.a), input.tint);
+    return tinted(vec4(color.rgb * color.a, color.a), input);
 }
 // Linear filtering must interpolate premultiplied texels. Filtering straight RGB first
 // blends the colour of transparent texels into edges as dark fringes, so gather the
@@ -62,10 +74,10 @@ fn shade_fragment_straight_linear(input: Output) -> vec4<f32> {
     let weights = vec4((1.0 - f.x) * f.y, f.x * f.y, f.x * (1.0 - f.y), (1.0 - f.x) * (1.0 - f.y));
     let coverage = weights * a;
     let color = vec4(dot(r, coverage), dot(g, coverage), dot(b, coverage), dot(a, weights));
-    return tinted(color, input.tint);
+    return tinted(color, input);
 }
 fn shade_fragment_premultiplied(input: Output) -> vec4<f32> {
-    return tinted(textureSample(image, image_sampler, input.uv), input.tint);
+    return tinted(textureSample(image, image_sampler, input.uv), input);
 }
 
 @fragment fn fragment_straight(input: Output) -> @location(0) vec4<f32> {

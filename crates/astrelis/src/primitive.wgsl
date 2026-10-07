@@ -5,11 +5,14 @@ struct Output {
     @location(2) @interpolate(flat) style: vec2<f32>,
     @location(3) @interpolate(flat) color: vec4<f32>,
     @location(4) @interpolate(flat) radii: vec4<f32>,
+    @location(5) clip: vec4<f32>,
+    @location(6) @interpolate(flat) clip_radii: vec4<f32>,
 };
  fn primitive_vertex(index: u32,
     origin_axis_x: vec4<f32>, axis_y_min: vec4<f32>,
     span_style: vec4<f32>, geometry: vec4<f32>,
-    color: vec4<f32>, radii: vec4<f32>) -> Output {
+    color: vec4<f32>, radii: vec4<f32>,
+    clip_axes: vec4<f32>, clip_offset_half: vec4<f32>, clip_radii: vec4<f32>) -> Output {
     let corners = array(vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 0.0),
                         vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0));
     let local = axis_y_min.zw + corners[index] * span_style.xy;
@@ -21,6 +24,8 @@ struct Output {
     output.style = span_style.zw;
     output.color = color;
     output.radii = radii;
+    output.clip = clip_varying(position, clip_axes, clip_offset_half);
+    output.clip_radii = clip_radii;
     return output;
 }
 fn box_distance(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
@@ -141,7 +146,7 @@ fn shade_fragment_main(input: Output) -> vec4<f32> {
     let hard = select(0.0, 1.0, distance <= 0.0 && !(outlined && has_inner && inner_distance <= 0.0));
     let filtered = max(analytic - select(0.0, inner_coverage, outlined), 0.0);
     let coverage = select(hard, filtered, input.geometry.w > 0.0);
-    let alpha = input.color.a * coverage;
+    let alpha = input.color.a * coverage * clip_coverage(input.clip, input.clip_radii);
     return vec4(input.color.rgb * alpha, alpha);
 }
 
@@ -157,6 +162,9 @@ fn shade_fragment_main(input: Output) -> vec4<f32> {
 @vertex fn vertex_main(@builtin(vertex_index) index: u32,
     @location(0) origin_axis_x: vec4<f32>, @location(1) axis_y_min: vec4<f32>,
     @location(2) span_style: vec4<f32>, @location(3) geometry: vec4<f32>,
-    @location(4) color: vec4<f32>, @location(5) radii: vec4<f32>) -> Output {
-    return primitive_vertex(index,origin_axis_x,axis_y_min,span_style,geometry,color,radii);
+    @location(4) color: vec4<f32>, @location(5) radii: vec4<f32>,
+    @location(8) clip_axes: vec4<f32>, @location(9) clip_offset_half: vec4<f32>,
+    @location(10) clip_radii: vec4<f32>) -> Output {
+    return primitive_vertex(index,origin_axis_x,axis_y_min,span_style,geometry,color,radii,
+        clip_axes,clip_offset_half,clip_radii);
 }

@@ -329,6 +329,28 @@ window, frame, scene, or UI layout. There is no session flush or finish operatio
 and `markers()` expose them, and sessions offer `draw_polyline` / `draw_markers`.
 Shared transforms move their positions while widths/radii stay physical pixels.
 
+Clip scopes work like transform scopes. `paint.clipped(rect)` lends a child whose
+scissor is the pixel-aligned bounds of `rect` after the session transform,
+intersected with the current scissor; a rectangle outside the current clip gives an
+empty scissor rather than an error. `paint.clipped_rounded(rect, radii)` also sets an
+anti-aliased rounded clip that follows the transform exactly, including rotation.
+Dropping the child restores the parent's scissor and rounded clip. Raw
+`pass.set_scissor_rect` still works and bounds every later clip scope.
+
+```rust
+let mut card = paint.clipped_rounded(Rect::new(20., 20., 200., 120.), CornerRadii::uniform(12.))?;
+card.fill_rect(Rect::new(20., 20., 200., 32.), header)?; // Rounded top corners.
+let mut list = card.clipped(Rect::new(20., 52., 200., 88.))?; // Keeps the card's corners.
+let mut scrolled = list.transformed(Transform2D::translation(0., -scroll))?;
+scrolled.draw_text(&rows, TextDraw::new([28., 56.]))?;
+```
+
+The rounded clip is wrapped pass state (`pass.set_rounded_clip`), so direct renderers
+honour it too. Shapes, lines, paths, text and built-in image shading evaluate it; meshes,
+polylines and markers are limited by the scissor only. Only the innermost rounded clip
+is evaluated, intersected with every enclosing scissor. See the
+[clipping contract](renderer-api.md#clipping).
+
 ## Scoped drawing
 
 For consecutive draws that keep the same mesh/material or image/material, bind a

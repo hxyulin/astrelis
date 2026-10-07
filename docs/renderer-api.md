@@ -121,6 +121,42 @@ a fractional stencil value; use texture masks or actual multisampled mask geomet
 when soft clip coverage is needed.
 Default/read-only shading keeps its original fragment path.
 
+## Clipping
+
+Two pieces of wrapped pass state clip built-in drawing. The scissor is a physical
+rectangle that bounds rasterization for every renderer, including raw wgpu work. The
+optional `RoundedClip` is an anti-aliased rounded rectangle, given in clip-local units
+with a transform to viewport-relative pixels, and evaluated in the fragment shaders of
+shapes, lines, paths, text and built-in image shading:
+
+```rust,ignore
+pass.set_scissor_rect(x, y, width, height)?;
+pass.set_rounded_clip(Some(RoundedClip::new(rect, CornerRadii::uniform(8.)).transform(dpi)))?;
+shapes.draw(&mut pass, draw)?; // Clipped by both.
+pass.set_rounded_clip(None)?;
+```
+
+`PaintSession::clipped` and `clipped_rounded` derive both from a local rectangle and the
+session transform, intersect the scissor with the current one, clamp it to the
+attachment, and restore the parent's state when the child drops. An empty intersection
+records draws that produce no fragments; it is not an error.
+
+The rounded clip is analytic rather than a stencil mask. The renderers read one
+48-byte record per draw at stride zero: an affine map from viewport-normalized position
+to clip-local units, the half size and four radii. The vertex shader interpolates the
+clip-local position and the fragment shader multiplies coverage by a rounded-box
+distance filtered over about one pixel. This needs no depth/stencil attachment, mask
+pass, pipeline variant or reference bookkeeping, works on single-sampled targets, and
+gives fractional edge coverage where a stencil test is binary per sample. Without a
+rounded clip the renderers bind a shared, immutable disabled record, so ordinary drawing
+uploads nothing extra; a new clip uploads its record once per clip and viewport size.
+
+Limitations: only the innermost rounded clip is evaluated, so a nested rounded clip
+replaces its parent's corners (the scissors still intersect). Meshes, polylines and
+markers ignore it and are clipped by the scissor only; custom texture shaders receive
+the record at locations seven to nine and may evaluate it themselves. Use a stencil
+mask through `PipelineOptions` when arbitrary nested shapes must clip each other.
+
 ## Brushes on retained and analytic geometry
 
 `GraphicsContext::create_brush(BrushOptions)` uploads an immutable solid/linear/radial

@@ -27,6 +27,7 @@ pub struct GraphicsContext {
     queue: wgpu::Queue,
     pub(crate) submission_lock: std::sync::Arc<std::sync::Mutex<()>>,
     pub(crate) upload_pool: crate::uploads::UploadPool,
+    no_clip: std::sync::Arc<std::sync::OnceLock<wgpu::Buffer>>,
 }
 
 impl GraphicsContext {
@@ -46,6 +47,18 @@ impl GraphicsContext {
         crate::Brush::create(self, options)
     }
 
+    /// Immutable per-draw record that disables rounded clipping, shared by renderers.
+    pub(crate) fn no_clip(&self) -> &wgpu::Buffer {
+        self.no_clip.get_or_init(|| {
+            use wgpu::util::DeviceExt;
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Astrelis disabled clip"),
+                    contents: bytemuck::bytes_of(&crate::clip::DISABLED),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
+        })
+    }
     pub(crate) fn same_device(&self, other: &Self) -> bool {
         self.instance == other.instance && self.device == other.device
     }
@@ -241,6 +254,7 @@ impl GraphicsContext {
             queue,
             upload_pool: Default::default(),
             submission_lock: Default::default(),
+            no_clip: Default::default(),
         }
     }
 

@@ -316,16 +316,19 @@ impl PrimitiveRenderer {
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Astrelis solid primitives"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("primitive.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(
+                    crate::clip::shader(include_str!("primitive.wgsl")).into(),
+                ),
             });
         let layout=VertexLayout {stride:STRIDE,step_mode:wgpu::VertexStepMode::Instance,
             attributes:wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4].to_vec()};
+        let layouts = [layout, crate::clip::layout(8)];
         Self {
             graphics: g.clone(),
             material: g.create_material(
                 options.mesh(
                     MaterialOptions::new(&shader)
-                        .vertex_layouts(&[layout])
+                        .vertex_layouts(&layouts)
                         .entry_points(
                             "vertex_main",
                             if options.writes_attachment() {
@@ -363,10 +366,10 @@ impl PrimitiveRenderer {
     ) -> Result<wgpu::RenderPipeline, Error> {
         if brushed && self.brush_material.is_none() {
             let limits = self.graphics.device().limits();
-            if limits.max_vertex_attributes < 8
+            if limits.max_vertex_attributes < 11
                 || u64::from(limits.max_vertex_buffer_array_stride) < BRUSH_STRIDE
                 || limits.max_buffer_size < BRUSH_STRIDE
-                || limits.max_inter_stage_shader_variables < 6
+                || limits.max_inter_stage_shader_variables < 8
             {
                 return Err(Error::UnsupportedBrushLimits);
             }
@@ -374,8 +377,8 @@ impl PrimitiveRenderer {
             self.brush_material = Some(crate::brush::material(
                 &self.graphics,
                 &self.material,
-                &[layout],
-                include_str!("primitive.wgsl"),
+                &[layout, crate::clip::layout(8)],
+                &crate::clip::shader(include_str!("primitive.wgsl")),
                 include_str!("primitive_brush.wgsl"),
             )?);
         }
@@ -506,6 +509,7 @@ impl<'frame> Session<'_, 'frame> {
     }
 }
 fn record<T: Pod>(pass: &mut RenderPass<'_>, parameters: &[T], capacity: usize) {
+    pass.bind_clip(1);
     for chunk in parameters.chunks(capacity) {
         let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk), 4);
         pass.set_vertex_buffer(0, &buffer, range);

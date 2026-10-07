@@ -568,7 +568,9 @@ impl TextRenderer {
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Astrelis text"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("text.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(
+                    crate::clip::shader(include_str!("text.wgsl")).into(),
+                ),
             });
         let layouts = [
             VertexLayout {
@@ -583,6 +585,7 @@ impl TextRenderer {
                 attributes: wgpu::vertex_attr_array![3=>Float32x4,4=>Float32x4,5=>Float32x4]
                     .to_vec(),
             },
+            crate::clip::layout(6),
         ];
         let material = g.create_material(
             options.pipeline.mesh(
@@ -1036,6 +1039,7 @@ impl TextRenderer {
         pass.apply_raster_state();
         pass.set_vertex_buffer(0, &buffer.buffer, text.data.buffer_range.clone());
         pass.set_vertex_buffer(1, &draw_buffer, range);
+        pass.bind_clip(2);
         let mut previous = None;
         for batch in &text.data.batches {
             let field = batch.page.kind == Kind::Mtsdf;

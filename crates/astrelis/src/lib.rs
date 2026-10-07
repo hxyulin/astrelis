@@ -437,6 +437,7 @@
 
 mod attachments;
 mod brush;
+mod clip;
 mod context;
 mod depth_stencil;
 mod drawing;
@@ -462,6 +463,7 @@ pub use attachments::{
     RenderColorAttachment, RenderDepthStencilAttachment, RenderFormat, RenderPassDescriptor,
 };
 pub use brush::{Brush, BrushKind, BrushOptions, GradientSpread, GradientStop};
+pub use clip::RoundedClip;
 pub use context::GraphicsContext;
 pub mod text;
 pub use drawing::{

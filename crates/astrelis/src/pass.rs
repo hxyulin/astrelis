@@ -457,6 +457,9 @@ pub struct RenderPass<'frame> {
     uploads: Option<&'frame mut crate::uploads::DrawUploads>,
     color_formats: Vec<Option<wgpu::TextureFormat>>,
     additional_colors: Vec<wgpu::Texture>,
+    rounded_clip: Option<crate::RoundedClip>,
+    // The active clip's record for the current viewport size, uploaded on first use.
+    clip_upload: Option<(wgpu::Buffer, std::ops::Range<u64>)>,
 }
 
 impl<'frame> RenderPass<'frame> {
@@ -554,6 +557,8 @@ impl<'frame> RenderPass<'frame> {
             uploads,
             color_formats: vec![Some(format)],
             additional_colors: Vec::new(),
+            rounded_clip: None,
+            clip_upload: None,
         };
         pass.apply_raster_state();
         Ok(pass)
@@ -759,6 +764,8 @@ impl<'frame> RenderPass<'frame> {
                 })
                 .chain(descriptor.depth_stencil.map(|a| a.view.texture().clone()))
                 .collect(),
+            rounded_clip: None,
+            clip_upload: None,
         };
         pass.apply_raster_state();
         Ok(pass)
@@ -854,6 +861,9 @@ impl<'frame> RenderPass<'frame> {
     ) -> Result<(), Error> {
         let viewport = [x, y, width, height, min_depth, max_depth];
         validate_viewport(self.graphics.device(), viewport)?;
+        if self.viewport[2..4] != viewport[2..4] {
+            self.clip_upload = None;
+        }
         self.raster_dirty |= self.viewport != viewport;
         self.viewport = viewport;
         self.apply_raster_state();
@@ -880,6 +890,68 @@ impl<'frame> RenderPass<'frame> {
         self.scissor = scissor;
         self.apply_raster_state();
         Ok(())
+    }
+
+    /// Selects an anti-aliased rounded-rectangle clip for subsequent built-in 2D draws,
+    /// or removes it with `None`. Geometry is relative to the current viewport, like
+    /// pixel-space draws. The scissor is unchanged; see [`crate::RoundedClip`] for
+    /// which renderers evaluate the clip. Changing it creates no pipeline; the first
+    /// draw under a new clip or viewport size uploads one 48-byte record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidClip`] without changing state for nonfinite or negative
+    /// geometry/radii or a singular transform.
+    pub fn set_rounded_clip(&mut self, clip: Option<crate::RoundedClip>) -> Result<(), Error> {
+        if let Some(clip) = &clip {
+            clip.validate()?;
+        }
+        if self.rounded_clip != clip {
+            self.rounded_clip = clip;
+            self.clip_upload = None;
+        }
+        Ok(())
+    }
+
+    /// Returns the rounded clip applied by built-in 2D shading, if any.
+    pub fn rounded_clip(&self) -> Option<crate::RoundedClip> {
+        self.rounded_clip
+    }
+
+    // Binds the active clip record, or the shared disabled record, at `slot`.
+    pub(crate) fn bind_clip(&mut self, slot: u32) {
+        let Some(clip) = self.rounded_clip else {
+            let graphics = self.graphics;
+            self.set_vertex_buffer(slot, graphics.no_clip(), 0..crate::clip::SIZE);
+            return;
+        };
+        if self.clip_upload.is_none() {
+            let record = clip.record(self.viewport_size());
+            self.clip_upload = Some(self.upload_instances(bytemuck::bytes_of(&record), 4));
+        }
+        let (buffer, range) = self.clip_upload.clone().unwrap();
+        self.set_vertex_buffer(slot, &buffer, range);
+    }
+
+    // Restores a scissor that was valid for this pass's attachment.
+    pub(crate) fn restore_scissor(&mut self, scissor: [u32; 4]) {
+        debug_assert!(validate_scissor(self.size, scissor).is_ok());
+        self.raster_dirty |= self.scissor != scissor;
+        self.scissor = scissor;
+        self.apply_raster_state();
+    }
+
+    /// Physical scissor covering viewport-relative pixel `bounds`, intersected
+    /// with the current scissor. Disjoint bounds give an empty rectangle.
+    pub(crate) fn scissor_within(&self, bounds: crate::Rect) -> [u32; 4] {
+        let [sx, sy, sw, sh] = self.scissor.map(f64::from);
+        let x = f64::from(self.viewport[0]) + f64::from(bounds.x);
+        let y = f64::from(self.viewport[1]) + f64::from(bounds.y);
+        let left = x.floor().clamp(sx, sx + sw);
+        let top = y.floor().clamp(sy, sy + sh);
+        let right = (x + f64::from(bounds.width)).ceil().clamp(left, sx + sw);
+        let bottom = (y + f64::from(bounds.height)).ceil().clamp(top, sy + sh);
+        [left, top, right - left, bottom - top].map(|v| v as u32)
     }
 
     /// Changes stencil comparisons and replacement values for subsequent draws.

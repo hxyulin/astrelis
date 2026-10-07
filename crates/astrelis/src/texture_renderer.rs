@@ -293,6 +293,7 @@ impl<'draw, 'frame> PreparedTextureDrawSession<'draw, 'frame> {
                 .set_vertex_buffer(0, &self.draws.buffer, 0..self.draws.buffer.size());
             self.dirty = false;
         }
+        self.pass.bind_clip(2);
         self.pass.inner.draw(0..6, 0..self.draws.count);
         Ok(())
     }
@@ -315,6 +316,7 @@ fn validate_prepared_viewport(
     Ok(())
 }
 fn record_parameters(pass: &mut RenderPass<'_>, parameters: &[Parameters]) {
+    pass.bind_clip(2);
     for chunk in parameters.chunks(1024) {
         let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk), 64);
         pass.set_vertex_buffer(0, &buffer, 0..buffer.size());
@@ -440,6 +442,8 @@ pub struct TextureMaterialOptions<'a> {
     pub depth_stencil: Option<wgpu::DepthStencilState>,
     /// Optional custom shader. Uses the four vec4 instance attributes documented
     /// by [`TextureDraw`], and image/sampler at group zero bindings zero/one.
+    /// Locations seven to nine carry the pass's [`crate::RoundedClip`] record; a
+    /// custom shader may ignore them, in which case only the scissor clips it.
     pub shader: Option<&'a wgpu::ShaderModule>,
     /// Vertex entry point for a custom shader.
     pub vertex_entry: &'a str,
@@ -557,7 +561,9 @@ impl TextureRenderer {
             graphics: g.clone(),
             shader: device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Astrelis textures"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("texture.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(
+                    crate::clip::shader(include_str!("texture.wgsl")).into(),
+                ),
             }),
             nearest: binding_layout(device, false),
             linear: binding_layout(device, true),
@@ -839,6 +845,7 @@ impl TextureRenderer {
         pass.set_bind_group(0, &group, &[]);
         pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
         pass.set_vertex_buffer(1, &buffer, range);
+        pass.bind_clip(2);
         pass.inner.draw(0..6, 0..draws.count);
         Ok(())
     }
@@ -857,6 +864,7 @@ impl TextureRenderer {
         validate_prepared_viewport(pass, draws)?;
         self.setup_draw(pass, binding, material)?;
         pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
+        pass.bind_clip(2);
         pass.inner.draw(0..6, 0..draws.count);
         Ok(())
     }
@@ -1211,6 +1219,7 @@ impl TextureRenderer {
                             buffers: &[
                                 Some(parameter_layout()),
                                 transformed.then(transform_layout),
+                                Some(clip_layout()),
                             ],
                         },
                         fragment: Some(wgpu::FragmentState {
@@ -1281,6 +1290,15 @@ struct PreparedTransform {
     pixels: [f32; 4],
     normalized: [f32; 4],
     translations: [f32; 4],
+}
+fn clip_layout() -> wgpu::VertexBufferLayout<'static> {
+    const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![7=>Float32x4,8=>Float32x4,9=>Float32x4];
+    wgpu::VertexBufferLayout {
+        array_stride: 0,
+        step_mode: wgpu::VertexStepMode::Instance,
+        attributes: &ATTRIBUTES,
+    }
 }
 fn transform_layout() -> wgpu::VertexBufferLayout<'static> {
     const ATTRIBUTES: [wgpu::VertexAttribute; 3] =

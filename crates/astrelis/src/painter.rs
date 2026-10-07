@@ -240,6 +240,7 @@ impl Painter {
             painter: self,
             pass,
             transform: Transform2D::IDENTITY,
+            restore: None,
         })
     }
 }
@@ -251,8 +252,9 @@ impl Painter {
 /// plus an explicit scale for application logical coordinates; normalized draws
 /// still interpret translations/widths in viewport fractions. [`Self::transformed`]
 /// lends a child with additional local geometry transformation, preserving the
-/// parent's transform without a mutable save/restore stack. It does not save or
-/// restore pass clipping, viewport, or application bindings.
+/// parent's transform without a mutable save/restore stack. [`Self::clipped`]
+/// lends a child whose scissor is narrowed to a local rectangle and restored when
+/// the child drops. Neither saves or restores the viewport or application bindings.
 ///
 /// Pass access records in place with no flush required. Following paint calls
 /// restore the state their renderer needs. Application groups and chosen wrapped
@@ -274,6 +276,22 @@ pub struct PaintSession<'draw, 'frame> {
     painter: &'draw mut Painter,
     pass: &'draw mut RenderPass<'frame>,
     transform: Transform2D,
+    // Parent clip state, restored when a clipping child drops.
+    restore: Option<SavedClip>,
+}
+#[derive(Clone, Copy, Debug)]
+struct SavedClip {
+    scissor: [u32; 4],
+    rounded: Option<crate::RoundedClip>,
+}
+impl Drop for PaintSession<'_, '_> {
+    fn drop(&mut self) {
+        if let Some(saved) = self.restore.take() {
+            self.pass.restore_scissor(saved.scissor);
+            // The saved clip was validated when it was set.
+            let _ = self.pass.set_rounded_clip(saved.rounded);
+        }
+    }
 }
 impl<'frame> PaintSession<'_, 'frame> {
     /// Draws retained connected samples with the session transform applied on the GPU.
@@ -431,7 +449,76 @@ impl<'frame> PaintSession<'_, 'frame> {
             painter: self.painter,
             pass: self.pass,
             transform,
+            restore: None,
         })
+    }
+    /// Lends a child whose drawing is limited to `rect`, in this session's local
+    /// pixel units. The rectangle is mapped through the session transform; the
+    /// scissor becomes the pixel-aligned bounds of the result, intersected with the
+    /// pass's current scissor and the attachment. Rotation or shear clips to the
+    /// axis-aligned bounds, and fractional edges round outward to whole pixels;
+    /// [`Self::clipped_rounded`] clips exactly. A rectangle entirely outside the
+    /// current clip gives an empty scissor, so the child draws nothing.
+    ///
+    /// The parent's scissor and rounded clip are restored when the child drops,
+    /// including any the child set through [`Self::pass`]. Nested children intersect
+    /// their parents. The scissor applies to every renderer drawing into the pass,
+    /// including custom work.
+    pub fn clipped(&mut self, rect: Rect) -> Result<PaintSession<'_, 'frame>, Error> {
+        let scissor = self.clip_scissor(rect)?;
+        Ok(self.clip_child(scissor, None))
+    }
+    /// Lends a child clipped to a rounded rectangle in this session's local pixel
+    /// units, with anti-aliased edges that follow the session transform exactly,
+    /// including rotation. The scissor is narrowed as in [`Self::clipped`], and the
+    /// [`crate::RoundedClip`] is evaluated by shapes, lines, paths, text and built-in
+    /// image shading; meshes, polylines and markers are limited by the scissor only.
+    ///
+    /// Only the innermost rounded clip is evaluated: a nested rounded clip replaces
+    /// its parent's corners while the scissors still intersect, and a nested
+    /// [`Self::clipped`] keeps the parent's rounded clip. Zero radii give an exact,
+    /// anti-aliased rectangle clip. Both are restored when the child drops.
+    pub fn clipped_rounded(
+        &mut self,
+        rect: Rect,
+        radii: crate::CornerRadii,
+    ) -> Result<PaintSession<'_, 'frame>, Error> {
+        let clip = crate::RoundedClip::new(rect, radii).transform(self.transform);
+        clip.validate()?;
+        let scissor = self.clip_scissor(rect)?;
+        Ok(self.clip_child(scissor, Some(clip)))
+    }
+    fn clip_child(
+        &mut self,
+        scissor: [u32; 4],
+        rounded: Option<crate::RoundedClip>,
+    ) -> PaintSession<'_, 'frame> {
+        let saved = SavedClip {
+            scissor: self.pass.scissor_rect(),
+            rounded: self.pass.rounded_clip(),
+        };
+        self.pass.restore_scissor(scissor);
+        if rounded.is_some() {
+            // Validated by the caller.
+            let _ = self.pass.set_rounded_clip(rounded);
+        }
+        PaintSession {
+            painter: self.painter,
+            pass: self.pass,
+            transform: self.transform,
+            restore: Some(saved),
+        }
+    }
+    fn clip_scissor(&self, rect: Rect) -> Result<[u32; 4], Error> {
+        let bounds = self.transform.transform_bounds(rect);
+        if !rect.valid()
+            || !bounds.valid()
+            || !bounds.right().is_finite()
+            || !bounds.bottom().is_finite()
+        {
+            return Err(Error::InvalidClip);
+        }
+        Ok(self.pass.scissor_within(bounds))
     }
     /// Records a filled rectangle in pixels, using linear straight RGBA.
     #[inline]

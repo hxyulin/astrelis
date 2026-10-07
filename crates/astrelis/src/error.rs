@@ -221,6 +221,9 @@ pub enum Error {
     InvalidViewport,
     /// The scissor rectangle does not fit the pass attachment.
     InvalidScissorRect,
+    /// A clip rectangle, its corner radii, or the transform mapping it to the
+    /// viewport is nonfinite, negative, or singular.
+    InvalidClip,
     /// A first surface pass tried to load contents, or finish had no surface clear pass.
     UninitializedFrame,
 }
@@ -313,6 +316,7 @@ impl fmt::Display for Error {
             Self::InvalidClearColor => f.write_str("clear color must contain finite components"),
             Self::InvalidViewport => f.write_str("viewport must be finite and within device bounds with an ordered depth range in 0..=1"),
             Self::InvalidScissorRect => f.write_str("scissor rectangle must fit the pass attachment"),
+            Self::InvalidClip => f.write_str("clip rectangle/radii must be finite and nonnegative, with a finite invertible transform"),
             Self::UninitializedFrame => {
                 f.write_str("a frame must start with a clear pass before presentation")
             }

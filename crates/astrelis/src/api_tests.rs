@@ -414,7 +414,9 @@ fn checked_preparation_returns_diagnostics_without_caching_invalid_pipelines() {
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: None,
-                source: wgpu::ShaderSource::Wgsl(include_str!("texture.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(
+                    crate::clip::shader(include_str!("texture.wgsl")).into(),
+                ),
             });
         let mut o = TextureMaterialOptions::new();
         o.shader = Some(&shader);
