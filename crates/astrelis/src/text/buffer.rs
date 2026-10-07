@@ -18,6 +18,9 @@ use std::{collections::HashMap, sync::Arc};
 ///
 /// [`Self::set_rich_text`] adds [`TextSpan`] overrides of family, size, weight,
 /// slant, tracking, color and decorations over byte ranges of the same buffer.
+///
+/// [`Self::measure`] and [`Self::intrinsic_widths`] size the content at other widths
+/// from the same shaped runs, without changing the configured width or snapshot.
 #[derive(Debug)]
 pub struct TextBuffer {
     text: Arc<str>,
@@ -32,7 +35,11 @@ pub struct TextBuffer {
     text_dirty: bool,
     layout_dirty: bool,
     cached: Option<Arc<TextLayout>>,
+    // Sizes at other widths for the current snapshot, most recent last.
+    measured: Vec<(Option<u32>, [f32; 2])>,
 }
+// Layout engines usually ask for min-content, max-content and one available width.
+const MEASURE_CACHE: usize = 4;
 impl Default for TextBuffer {
     fn default() -> Self {
         Self::new()
@@ -59,6 +66,7 @@ impl TextBuffer {
             text_dirty: true,
             layout_dirty: true,
             cached: None,
+            measured: Vec::new(),
         }
     }
     /// Current original content; explicit line ending bytes are preserved.
@@ -238,10 +246,82 @@ impl TextBuffer {
         };
         let layout = Arc::new(layout);
         self.cached = Some(layout.clone());
+        self.measured.clear();
         self.evaluated_system = Some(source);
         self.text_dirty = false;
         self.layout_dirty = false;
         Ok(layout)
+    }
+}
+
+impl TextBuffer {
+    /// Content size `[width, height]` when wrapped at `width` (`None` is unconstrained),
+    /// matching [`TextLayout::size`] of a buffer configured with that width.
+    ///
+    /// Evaluates the configured snapshot first if needed (see [`Self::layout`]), then
+    /// lays out its shaped runs at `width` without reshaping, building glyph snapshots,
+    /// or changing [`Self::width`] or the snapshot returned by [`Self::layout`]. The
+    /// configured width reads the snapshot; the last few other widths are cached until
+    /// the next change. Wrapping and paragraph alignment apply as configured.
+    pub fn measure(
+        &mut self,
+        system: &mut TextSystem,
+        width: Option<f32>,
+    ) -> Result<[f32; 2], TextError> {
+        if width.is_some_and(|w| !w.is_finite() || w < 0.) {
+            return Err(TextError::InvalidWidth);
+        }
+        let layout = self.layout(system)?;
+        if width == self.width || system.backend.db().is_empty() {
+            // Blank snapshots have no shaped runs; their size does not depend on width.
+            return Ok(layout.size());
+        }
+        let key = width.map(f32::to_bits);
+        if let Some(index) = self.measured.iter().position(|(k, _)| *k == key) {
+            let entry = self.measured.remove(index);
+            self.measured.push(entry);
+            return Ok(entry.1);
+        }
+        profiling::scope!("astrelis::TextBuffer::measure");
+        let metrics = self.backend.metrics();
+        let scratch = &mut system.measure;
+        let mut size = [0f32, 0f32];
+        for line in &self.backend.lines {
+            let Some(shape) = line.shape_opt() else {
+                size[1] += metrics.line_height;
+                continue;
+            };
+            scratch.lines.clear();
+            shape.layout_to_buffer(
+                &mut scratch.shape,
+                metrics.font_size,
+                width,
+                self.wrap.backend(),
+                self.backend.ellipsize(),
+                line.align(),
+                &mut scratch.lines,
+                self.backend.monospace_width(),
+                self.backend.hinting(),
+            );
+            for laid in &scratch.lines {
+                size[0] = size[0].max(laid.w);
+                size[1] += laid.line_height_opt.unwrap_or(metrics.line_height);
+            }
+        }
+        if self.measured.len() == MEASURE_CACHE {
+            self.measured.remove(0);
+        }
+        self.measured.push((key, size));
+        Ok(size)
+    }
+    /// `[min_content, max_content]` widths: the narrowest width the wrap policy allows
+    /// (the widest word, or widest glyph for [`TextWrap::WordOrGlyph`]) and the width
+    /// with no wrapping. Both equal the unwrapped width for [`TextWrap::None`].
+    /// Uses [`Self::measure`], so repeated queries are cached.
+    pub fn intrinsic_widths(&mut self, system: &mut TextSystem) -> Result<[f32; 2], TextError> {
+        let min = self.measure(system, Some(0.))?[0];
+        let max = self.measure(system, None)?[0];
+        Ok([min, max])
     }
 }
 

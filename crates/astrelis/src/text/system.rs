@@ -48,6 +48,18 @@ pub struct TextSystem {
     pub(crate) backend: cosmic::FontSystem,
     pub(crate) id: u64,
     pub(crate) generation: u64,
+    pub(crate) measure: MeasureScratch,
+}
+/// Reused line-layout storage for [`super::TextBuffer::measure`].
+#[derive(Default)]
+pub(crate) struct MeasureScratch {
+    pub shape: cosmic::ShapeBuffer,
+    pub lines: Vec<cosmic::LayoutLine>,
+}
+impl std::fmt::Debug for MeasureScratch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MeasureScratch").finish_non_exhaustive()
+    }
 }
 impl Default for TextSystem {
     fn default() -> Self {
@@ -68,6 +80,7 @@ impl TextSystem {
             ),
             id: NEXT_SYSTEM.fetch_add(1, Ordering::Relaxed),
             generation: 0,
+            measure: MeasureScratch::default(),
         }
     }
     /// Copies font bytes once and loads all usable faces from a TTF/OTF/collection.

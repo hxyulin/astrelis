@@ -67,6 +67,25 @@ when neither content, relevant style/constraints, nor font database generation h
 changed. A buffer has one base style plus optional rich spans (below); fallback
 still produces multiple font/script runs within either.
 
+### Intrinsic measurement
+
+Layout engines ask one text for several widths: min-content, max-content and the
+available width. Reconfiguring `set_width` for each query rebuilds a glyph snapshot
+every time and replaces the Arc a renderer may have prepared. Instead,
+`measure(&mut system, width)` lays out the buffer's shaped runs at `width` and returns
+`[width, height]`, equal to `TextLayout::size()` of a buffer configured with that
+width. `intrinsic_widths(&mut system)` returns `[min_content, max_content]`, where
+min-content is `measure(Some(0.))` under the configured wrap policy (the widest word
+for `Word`, the widest glyph for `WordOrGlyph`) and max-content is unwrapped.
+
+Neither changes the configured width or the snapshot returned by `layout`. The
+configured width is answered from the snapshot. The last four other widths are
+cached until content, style, spans, constraints or fonts change, and line layout
+reuses scratch storage owned by the `TextSystem`. Benchmarks (`benches/text.rs`,
+M3 Pro, one run, 1,000 glyphs) take 148 µs to reconfigure and lay out at
+`[0, unwrapped, 280]`, 106 µs to measure the same three widths uncached, and 42 ns
+for three cached measurements.
+
 ## Rich text spans
 
 `TextBuffer::set_rich_text(text, style, spans)` applies `TextSpan` overrides over

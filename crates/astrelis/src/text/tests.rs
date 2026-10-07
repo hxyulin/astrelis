@@ -628,3 +628,76 @@ fn decorations_use_font_metrics_and_split_by_span_color() {
     // Adjacent colors share one continuous underline.
     near(decorations[0].rect.right(), decorations[1].rect.x);
 }
+
+#[test]
+fn measurement_matches_configured_widths_without_replacing_the_snapshot() {
+    let mut system = system();
+    let text = "Wrapped words and العربية text\n\nsecond paragraph wraps too";
+    let spans = vec![
+        TextSpan::new(0..7).font_size(30.),
+        TextSpan::new(8..13).weight(700),
+    ];
+    for wrap in [TextWrap::WordOrGlyph, TextWrap::Word, TextWrap::None] {
+        let mut buffer = TextBuffer::new();
+        buffer.set_rich_text(text, style(), spans.clone()).unwrap();
+        buffer.set_wrap(wrap);
+        buffer.set_width(Some(90.)).unwrap();
+        let snapshot = buffer.layout(&mut system).unwrap();
+        for width in [
+            Some(0.),
+            Some(45.),
+            Some(90.),
+            Some(160.),
+            Some(1000.),
+            None,
+        ] {
+            let mut fresh = TextBuffer::new();
+            fresh.set_rich_text(text, style(), spans.clone()).unwrap();
+            fresh.set_wrap(wrap);
+            fresh.set_width(width).unwrap();
+            let expected = fresh.layout(&mut system).unwrap().size();
+            for _ in 0..2 {
+                let size = buffer.measure(&mut system, width).unwrap();
+                near(size[0], expected[0]);
+                near(size[1], expected[1]);
+            }
+        }
+        assert_eq!(buffer.width(), Some(90.));
+        assert!(Arc::ptr_eq(&snapshot, &buffer.layout(&mut system).unwrap()));
+
+        let [min, max] = buffer.intrinsic_widths(&mut system).unwrap();
+        near(max, buffer.measure(&mut system, None).unwrap()[0]);
+        assert!(min > 0. && min <= max);
+        if wrap == TextWrap::None {
+            near(min, max);
+        } else {
+            // Min-content wraps more lines than max-content.
+            assert!(min < max);
+            assert!(
+                buffer.measure(&mut system, Some(min)).unwrap()[1]
+                    > buffer.measure(&mut system, Some(max)).unwrap()[1]
+            );
+        }
+        // Content edits invalidate cached measurements.
+        buffer.set_rich_text("x", style(), Vec::new()).unwrap();
+        let single = layout(&mut system, "x", style()).size();
+        let measured = buffer.measure(&mut system, Some(0.)).unwrap();
+        near(measured[0], single[0]);
+        near(measured[1], single[1]);
+    }
+    let mut buffer = TextBuffer::new();
+    assert!(matches!(
+        buffer.measure(&mut system, Some(-1.)),
+        Err(TextError::InvalidWidth)
+    ));
+    assert!(matches!(
+        buffer.measure(&mut system, Some(f32::NAN)),
+        Err(TextError::InvalidWidth)
+    ));
+    // Blank text needs no fonts and ignores width.
+    buffer.set_text("\n", style()).unwrap();
+    assert_eq!(
+        buffer.measure(&mut TextSystem::new(), Some(5.)).unwrap(),
+        [0., 56.]
+    );
+}

@@ -504,6 +504,9 @@ complex-script support. Unchanged evaluation reuses its snapshot; width changes
 reuse shaped runs. Content edits preserve matching leading/trailing paragraphs.
 Snapshots retain text and font data across edits and font loading.
 Measurement requires no window/GPU and does not apply DPI or compute pixel ink bounds.
+`label.measure(&mut text, Some(width))` and `label.intrinsic_widths(&mut text)` size the
+content at other widths without replacing the snapshot; see
+[intrinsic measurement](text.md#intrinsic-measurement).
 `set_rich_text` adds `TextSpan` overrides (family, size, weight, slant, tracking,
 color, underline, strikethrough) over byte ranges of one buffer; span colors and
 decorations render in the same retained draw. See the

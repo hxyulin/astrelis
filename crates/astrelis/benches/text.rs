@@ -157,6 +157,56 @@ fn main() -> Result<()> {
                 1,
             )?,
         );
+        // Intrinsic sizing queries min-content, max-content and an available width.
+        // Reconfiguring the width builds a snapshot per query; measure() lays out the
+        // shaped runs only, and repeats hit its width cache.
+        row(
+            count,
+            glyphs,
+            "intrinsic_reflow_three_snapshots",
+            measure(
+                || {
+                    for width in [Some(0.), None, Some(280.)] {
+                        retained.set_width(width)?;
+                        black_box(retained.layout(&mut system)?);
+                    }
+                    Ok(())
+                },
+                1,
+            )?,
+        );
+        let mut step = 0u32;
+        row(
+            count,
+            glyphs,
+            "measure_three_new_widths",
+            measure(
+                || {
+                    // The same three layouts under fresh cache keys.
+                    step += 1;
+                    let jitter = (step % 4096) as f32 * 1e-4;
+                    for width in [jitter, 1e6 + jitter * 1e3, 280. + jitter] {
+                        black_box(retained.measure(&mut system, Some(width))?);
+                    }
+                    Ok(())
+                },
+                1,
+            )?,
+        );
+        row(
+            count,
+            glyphs,
+            "measure_three_cached_widths",
+            measure(
+                || {
+                    for width in [Some(0.), None, Some(280.)] {
+                        black_box(retained.measure(&mut system, width)?);
+                    }
+                    Ok(())
+                },
+                1,
+            )?,
+        );
         let mut alternate = false;
         row(
             count,
