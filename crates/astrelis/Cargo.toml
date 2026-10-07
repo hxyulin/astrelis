@@ -77,3 +77,7 @@ harness = false
 [[bench]]
 name = "store_ops"
 harness = false
+
+[[bench]]
+name = "image_alpha"
+harness = false

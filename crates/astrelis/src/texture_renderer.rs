@@ -17,7 +17,9 @@ pub enum TextureAlpha {
     /// Texels are premultiplied before filtering, so the RGB of transparent texels
     /// never darkens edges. Linear filtering interpolates the view's first mip level
     /// with the sampler's address modes; use premultiplied data for mipmapped or
-    /// anisotropic sampling.
+    /// anisotropic sampling. Where neighbouring texels differ in alpha, this
+    /// filtering fetches four texels instead of one; premultiplied data is the
+    /// cheaper choice for large, layered or alpha-gradient images.
     #[default]
     Straight,
     /// RGB already contains alpha, as in built-in framebuffer rendering.

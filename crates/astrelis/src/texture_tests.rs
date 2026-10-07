@@ -683,3 +683,61 @@ fn straight_alpha_filters_premultiplied_texels() {
         assert!(scope.pop().await.is_none());
     });
 }
+
+#[test]
+fn straight_alpha_with_uniform_footprint_alpha_matches_premultiplied_filtering() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut r = TextureRenderer::new(&g);
+        let mut target = output(&g, 1);
+        let m =
+            g.create_texture_material(TextureMaterialOptions::new().blend(TextureBlend::Replace));
+        // Equal alpha across the footprint takes the single-sample path; it must
+        // match filtering the same texels stored premultiplied.
+        for (straight, premultiplied) in [
+            (
+                [255, 0, 0, 255, 0, 0, 255, 255],
+                [255, 0, 0, 255, 0, 0, 255, 255],
+            ),
+            (
+                [255, 0, 0, 128, 0, 0, 255, 128],
+                [128, 0, 0, 128, 0, 0, 128, 128],
+            ),
+        ] {
+            let mut rows = Vec::new();
+            for (bytes, alpha) in [
+                (straight, TextureAlpha::Straight),
+                (premultiplied, TextureAlpha::Premultiplied),
+            ] {
+                let t = image(&g, 2, 1, &bytes);
+                let b = r
+                    .create_binding(t.view(), TextureBindingOptions::new().alpha(alpha))
+                    .unwrap();
+                r.try_prepare_material(&b, &m, &target.render_format())
+                    .await
+                    .unwrap();
+                let bytes = pixels(&g, &mut target, |f| {
+                    r.draw_with_material(
+                        &mut f.render_pass().begin().unwrap(),
+                        &b,
+                        &m,
+                        TextureDraw::default(),
+                    )
+                    .unwrap()
+                });
+                rows.push((0..64).map(|x| pixel(&bytes, x, 32)).collect::<Vec<_>>());
+            }
+            for (a, b) in rows[0].iter().zip(&rows[1]) {
+                near(*a, *b);
+            }
+            // The middle blends both texels rather than snapping to one.
+            assert!(
+                rows[0][32][0] > 40 && rows[0][32][2] > 40,
+                "{:?}",
+                rows[0][32]
+            );
+        }
+        assert!(scope.pop().await.is_none());
+    });
+}

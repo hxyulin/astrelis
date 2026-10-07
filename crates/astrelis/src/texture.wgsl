@@ -59,6 +59,8 @@ fn shade_fragment_straight(input: Output) -> vec4<f32> {
 // Linear filtering must interpolate premultiplied texels. Filtering straight RGB first
 // blends the colour of transparent texels into edges as dark fringes, so gather the
 // bilinear footprint of the first level, premultiply each texel, then weight it.
+// Where the footprint's alpha is uniform (opaque or empty areas, most of a typical
+// image) the two orders agree, so one filtered sample replaces the colour gathers.
 fn shade_fragment_straight_linear(input: Output) -> vec4<f32> {
     let size = vec2<f32>(textureDimensions(image));
     let texel = input.uv * size - 0.5;
@@ -66,14 +68,18 @@ fn shade_fragment_straight_linear(input: Output) -> vec4<f32> {
     let f = texel - base;
     // Gathering at the footprint centre keeps the footprint consistent with `base`.
     let centre = (base + 1.0) / size;
-    let r = textureGather(0, image, image_sampler, centre);
-    let g = textureGather(1, image, image_sampler, centre);
-    let b = textureGather(2, image, image_sampler, centre);
     let a = textureGather(3, image, image_sampler, centre);
-    // Gathered components are ordered (u0, v1), (u1, v1), (u1, v0), (u0, v0).
-    let weights = vec4((1.0 - f.x) * f.y, f.x * f.y, f.x * (1.0 - f.y), (1.0 - f.x) * (1.0 - f.y));
-    let coverage = weights * a;
-    let color = vec4(dot(r, coverage), dot(g, coverage), dot(b, coverage), dot(a, weights));
+    let sampled = textureSampleLevel(image, image_sampler, input.uv, 0.0);
+    var color = vec4(sampled.rgb * a.x, a.x);
+    if any(a != a.xxxx) {
+        let r = textureGather(0, image, image_sampler, centre);
+        let g = textureGather(1, image, image_sampler, centre);
+        let b = textureGather(2, image, image_sampler, centre);
+        // Gathered components are ordered (u0, v1), (u1, v1), (u1, v0), (u0, v0).
+        let weights = vec4((1.0 - f.x) * f.y, f.x * f.y, f.x * (1.0 - f.y), (1.0 - f.x) * (1.0 - f.y));
+        let coverage = weights * a;
+        color = vec4(dot(r, coverage), dot(g, coverage), dot(b, coverage), dot(a, weights));
+    }
     return tinted(color, input);
 }
 fn shade_fragment_premultiplied(input: Output) -> vec4<f32> {
