@@ -164,6 +164,16 @@ impl Painter {
     ) -> Result<TextureBinding, Error> {
         self.textures.create_sampled_binding(source)
     }
+    /// Creates a live framebuffer binding with explicit alpha and filtering, for example
+    /// nearest-filtered premultiplied layers composited at their native pixel size.
+    pub fn create_sampled_binding_with_options(
+        &self,
+        source: &crate::SampledColor,
+        options: TextureBindingOptions,
+    ) -> Result<TextureBinding, Error> {
+        self.textures
+            .create_sampled_binding_with_options(source, options)
+    }
     /// Borrows the underlying renderer for direct preparation, drawing, or scopes.
     pub fn shapes(&mut self) -> &mut ShapeRenderer {
         &mut self.shapes

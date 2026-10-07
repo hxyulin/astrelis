@@ -1238,3 +1238,120 @@ fn rounded_clips_nest_restore_follow_rotation_and_apply_to_direct_renderers() {
         assert!(errors.pop().await.is_none());
     });
 }
+
+#[test]
+fn layer_formats_composite_nearest_sampled_layers_like_direct_painting() {
+    use wgpu::TextureFormat as F;
+    for (target, layer) in [
+        (F::Bgra8UnormSrgb, F::Rgba8UnormSrgb),
+        (F::Rgba8UnormSrgb, F::Rgba8UnormSrgb),
+        (F::Bgra8Unorm, F::Rgba8Unorm),
+        (F::Rgba8Unorm, F::Rgba8Unorm),
+        (F::Rgb10a2Unorm, F::Rgba16Float),
+        (F::Rgba16Float, F::Rgba16Float),
+        (F::R32Float, F::Rgba32Float),
+        (F::Rgba32Float, F::Rgba32Float),
+    ] {
+        assert_eq!(RenderFormat::layer_color(target), layer);
+    }
+    let msaa = RenderFormat {
+        colors: vec![Some(F::Bgra8Unorm)],
+        depth_stencil: Some(F::Depth24PlusStencil8),
+        sample_count: 4,
+    };
+    assert_eq!(msaa.layer().unwrap(), RenderFormat::color(F::Rgba8Unorm, 4));
+    let none = RenderFormat {
+        colors: vec![],
+        ..msaa
+    };
+    assert!(matches!(none.layer(), Err(Error::ExpectedSingleColor)));
+
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let scope = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut painter = Painter::new(&g);
+        let shapes = [
+            ShapeDraw::rect(Rect::new(4., 4., 40., 30.), [0.2, 0.5, 0.8, 0.5]),
+            ShapeDraw::ellipse(Rect::new(20., 20., 36., 36.), [1., 0.8, 0., 0.75]),
+        ];
+        for format in [F::Rgba8UnormSrgb, F::Bgra8Unorm] {
+            let mut direct = g
+                .create_framebuffer(
+                    FramebufferOptions::new(64, 64).format(format).usage(
+                        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    ),
+                )
+                .unwrap();
+            let target_format = direct.render_format();
+            let layer_format = target_format.layer().unwrap();
+            let mut layer = g
+                .create_framebuffer(
+                    FramebufferOptions::new(64, 64)
+                        .format(layer_format.colors[0].unwrap())
+                        .usage(
+                            wgpu::TextureUsages::RENDER_ATTACHMENT
+                                | wgpu::TextureUsages::TEXTURE_BINDING,
+                        ),
+                )
+                .unwrap();
+            painter.prepare(&target_format).unwrap();
+            painter.prepare(&layer_format).unwrap();
+            let expected = pixels(&g, &mut direct, |f| {
+                let mut pass = f
+                    .render_pass()
+                    .clear_color(wgpu::Color::BLUE)
+                    .begin()
+                    .unwrap();
+                painter
+                    .begin(&mut pass)
+                    .unwrap()
+                    .draw_shapes(&shapes)
+                    .unwrap();
+            });
+            {
+                let mut frame = layer.begin_frame().unwrap();
+                let mut pass = frame
+                    .render_pass()
+                    .clear_color(wgpu::Color::TRANSPARENT)
+                    .begin()
+                    .unwrap();
+                painter
+                    .begin(&mut pass)
+                    .unwrap()
+                    .draw_shapes(&shapes)
+                    .unwrap();
+                drop(pass);
+                frame.finish().unwrap();
+            }
+            let binding = painter
+                .create_sampled_binding_with_options(
+                    &layer.sampled_color(),
+                    TextureBindingOptions::new()
+                        .alpha(crate::TextureAlpha::Premultiplied)
+                        .filter(crate::TextureFilter::Nearest),
+                )
+                .unwrap();
+            painter.prepare_image(&binding, &target_format).unwrap();
+            let composited = pixels(&g, &mut direct, |f| {
+                let mut pass = f
+                    .render_pass()
+                    .clear_color(wgpu::Color::BLUE)
+                    .begin()
+                    .unwrap();
+                painter
+                    .begin(&mut pass)
+                    .unwrap()
+                    .draw_image(&binding, TextureDraw::default())
+                    .unwrap();
+            });
+            let worst = expected
+                .iter()
+                .zip(&composited)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap();
+            assert!(worst <= 2, "{format:?}: layer differs by {worst}");
+        }
+        assert!(scope.pop().await.is_none());
+    });
+}

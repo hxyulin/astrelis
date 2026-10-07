@@ -424,8 +424,16 @@ Framebuffer output is single-sampled and persists across submissions. A live
 `SampledColor` follows resize/MSAA replacements; its binding refreshes only when
 the output view changes. Suspended sources reject drawing. Live sources default
 to premultiplied alpha, matching built-in framebuffer shading. Custom shaders must
-declare the correct encoding through `create_sampled_binding_with_options`.
+declare the correct encoding through `create_sampled_binding_with_options`
+(also on `Painter`, e.g. nearest filtering for pixel-aligned layers).
 Snapshot bindings remain available through `create_binding` and explicit `rebind`.
+
+`RenderFormat::layer_color(target)` picks a layer color format that keeps the
+target's encoding and precision: sRGB targets get `Rgba8UnormSrgb`, 8-bit linear
+targets `Rgba8Unorm`, 32-bit float targets `Rgba32Float` (nearest-filtered and
+unblended without float32 features), and everything else `Rgba16Float`.
+`target.render_format().layer()?` returns that color with the target's sample count
+and no depth/stencil, ready for `Painter::prepare`.
 
 Managed attachment operations commit in submission order. Initial loads require a
 clear/store or explicitly recorded full write. External load dependencies are

@@ -29,6 +29,34 @@ impl RenderFormat {
             sample_count,
         }
     }
+
+    /// RGBA color format for an offscreen layer composited into a `target` color format.
+    ///
+    /// Keeps the target's encoding and precision so a layer round trip does not band or
+    /// clip: sRGB targets use `Rgba8UnormSrgb`, 8-bit linear targets `Rgba8Unorm`, 32-bit
+    /// float targets `Rgba32Float`, and every other target `Rgba16Float`. Layers are
+    /// RGBA even for BGRA or narrower targets because they are sampled, not presented.
+    /// `Rgba32Float` filters only with nearest sampling unless the device enables
+    /// `FLOAT32_FILTERABLE`, and blends only with `FLOAT32_BLENDABLE`.
+    pub fn layer_color(target: wgpu::TextureFormat) -> wgpu::TextureFormat {
+        use wgpu::TextureFormat as F;
+        match target {
+            f if f.is_srgb() => F::Rgba8UnormSrgb,
+            F::Rgba8Unorm | F::Bgra8Unorm => F::Rgba8Unorm,
+            F::Rgba32Float | F::Rg32Float | F::R32Float => F::Rgba32Float,
+            _ => F::Rgba16Float,
+        }
+    }
+
+    /// The single-color format of an offscreen layer for this target: its color mapped
+    /// by [`Self::layer_color`], the same sample count, and no depth/stencil.
+    /// Fails with `ExpectedSingleColor` unless this format has exactly one color.
+    pub fn layer(&self) -> Result<Self, crate::Error> {
+        Ok(Self::color(
+            Self::layer_color(self.single_color()?),
+            self.sample_count,
+        ))
+    }
 }
 
 /// A snapshot of a color attachment and its operations for a custom pass.
