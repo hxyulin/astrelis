@@ -255,7 +255,10 @@ with the resulting SubmissionIndex. submitted can arrange readback, GPU completi
 tracking or the next redraw after a successful submission, with mutable context
 available again. It reports queued GPU work and a presentation request; actual OS
 display completion is outside that callback. An error
-drops the recording without managed submission/presentation. During render,
+drops the recording without managed submission/presentation. A successful render
+must clear the surface; returning Ok without initializing it stops the runner with
+a Render handler error carrying UninitializedFrame, since presenting would show
+undefined contents. Use PrepareAction::Skip to draw nothing. During render,
 schedule via a proxy/native redraw request or schedule the next deadline in
 prepare/submitted; mutating the window registry is confined to context-bearing callbacks.
 

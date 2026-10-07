@@ -398,9 +398,16 @@ impl<H: Handler> Driver<'_, H> {
                 match rendered {
                     Ok(()) => {
                         info.window().pre_present_notify();
-                        frame
-                            .finish()
-                            .map_err(|source| RunError::Submission { window: id, source })
+                        frame.finish().map_err(|source| match source {
+                            // The surface was never cleared: a contract violation by
+                            // render, not a GPU submission failure. Name the callback.
+                            astrelis::Error::UninitializedFrame => RunError::Handler {
+                                callback: Callback::Render,
+                                window: Some(id),
+                                source: source.into(),
+                            },
+                            source => RunError::Submission { window: id, source },
+                        })
                     }
                     Err(source) => Err(RunError::Handler {
                         callback: Callback::Render,

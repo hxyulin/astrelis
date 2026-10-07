@@ -82,6 +82,13 @@ pub trait Handler {
     /// Records any number of application-selected passes or custom GPU commands.
     /// The runner notifies, submits and presents after success. Error abandons the
     /// frame. Registry mutation is available in the other context-bearing hooks.
+    ///
+    /// A successful render must initialize the surface, normally with a clearing
+    /// pass from `frame.render_pass()`. Returning `Ok` without one stops the runner
+    /// with [`crate::RunError::Handler`] for [`crate::Callback::Render`] carrying
+    /// [`astrelis::Error::UninitializedFrame`], because presenting would show undefined
+    /// contents. To draw nothing this time, return [`PrepareAction::Skip`] from
+    /// [`Self::prepare`] instead.
     fn render(
         &mut self,
         window: WindowInfo<'_>,
