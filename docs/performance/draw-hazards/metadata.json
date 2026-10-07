@@ -1,0 +1,25 @@
+{
+  "recorded": "2026-10-08",
+  "machine": "Apple M3 Pro / Metal, macOS 27.0.1 (arm64)",
+  "rust": "rustc 1.99.0 (b940084d7 2026-09-28)",
+  "profile": "cargo bench (release)",
+  "method": "before/after bench executables built separately and copied; three rounds of before then after in separate processes; tables use the median of the three per-run medians",
+  "gpu_execution_measured": false,
+  "comparisons": {
+    "primitives-fi": {"before": "c36a6b2", "after": "5d4b038", "command": "primitives --counts 1000 --samples 30 --warmup 6"},
+    "primitives-co": {"before": "5d4b038", "after": "cf91c23", "command": "primitives --counts 1000 --samples 30 --warmup 6"},
+    "primitives-shrink": {"before": "cf91c23", "after": "8167670", "command": "primitives --counts 10000 --samples 30 --warmup 6"},
+    "paths-fi": {"before": "c36a6b2 library with the f42278c bench fix", "after": "5d4b038", "command": "paths --counts 1000 --samples 30 --warmup 6"},
+    "paths-co": {"before": "5d4b038", "after": "cf91c23", "command": "paths --counts 1000 --samples 30 --warmup 6"},
+    "paths-scratch": {"before": "cf91c23", "after": "7bdc045", "command": "paths --counts 1 --samples 30 --warmup 6"},
+    "paths-pool2": {"before": "7bdc045", "after": "16473d5", "command": "paths --counts 1000 --samples 30 --warmup 6"},
+    "text_workloads-fi": {"before": "c36a6b2", "after": "5d4b038", "command": "text_workloads --no-timestamps"},
+    "text_workloads-zoom": {"before": "c13c196 library with the continuous_zoom bench case", "after": "59daef2", "command": "text_workloads --no-timestamps"},
+    "image_alpha-fast3": {"before": "eab9ac0 library with the image_alpha bench", "after": "f595232", "command": "image_alpha (60 samples, 10 warmups, 16 layers)"},
+    "store_ops": {"commit": "eab9ac0", "command": "store_ops --samples 150 --warmup 20"}
+  },
+  "notes": [
+    "paths --counts 1 measures only the preparation cases meaningfully; its drawing rows use one placement.",
+    "A write_buffer_with staging experiment for upload pages was measured against 8167670 and not committed."
+  ]
+}

@@ -92,13 +92,24 @@ retry now uses `trim()`, which keeps blank cache entries, instead of `clear_cach
 every glyph misses and evicts. Per-miss LRU scans made it 26.4 ms against 15.9 ms
 for `cold_unique` (M3 Pro, `--no-timestamps`, one run). Bulk quarter eviction and
 per-page cache reference counts bring it to 15.8 ms, the cost of the misses alone.
-Its rows are not yet in the tables below.
+
+`continuous_zoom` prepares the short string at a raster scale growing 0.3% per
+iteration (0.048 px at 16 px). Physical raster sizes round to a quarter pixel, so
+consecutive scales share rasters; before that change every iteration missed every glyph.
 
 | Preparation workload | Median CPU, μs |
 | --- | ---: |
 | 1,822 keys, cold | 14649.65–15578.25 |
 | Cached images, new geometry | 185.60–191.88 |
 | Raster-size pressure with explicit recovery | 173.71–179.44 |
+| 1,822 keys, 1,024-key cache (`evicting_unique`)¹ | 15511.08–16038.65 |
+| Continuous zoom, exact raster sizes (`continuous_zoom`)¹ | 133.02–144.85 |
+| Continuous zoom, quarter-pixel rasters¹ | 20.23–21.15 |
+
+¹ Measured 2026-10-08 (rustc 1.99.0, commits `c13c196` and `59daef2`, three runs each);
+the other rows are the original runs. `cold_unique` measured 15226.75–15559.54 in
+those runs. Raw CSVs: [draw-hazards](draw-hazards) `text_workloads-zoom-*`. Over 40
+measured iterations the zoom case missed 880 glyphs before rounding and 176 after.
 
 Cold preparation of this larger glyph vocabulary approaches a frame budget even
 though retained drawing is cheap. It belongs in explicit scene preparation or

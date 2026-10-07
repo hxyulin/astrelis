@@ -1,0 +1,13 @@
+msaa,workload,case,completion_median_us,completion_p95_us
+1,flat,default,444.9,584.4
+1,flat,store,446.1,540.4
+1,flat,discard,444.2,742.9
+1,edges,default,1479.0,1801.0
+1,edges,store,1487.1,1696.5
+1,edges,discard,1478.0,1738.6
+4,flat,default,465.8,506.6
+4,flat,store,468.2,505.3
+4,flat,discard,462.8,510.6
+4,edges,default,1644.7,1793.5
+4,edges,store,1664.4,1780.4
+4,edges,discard,1654.5,1841.9

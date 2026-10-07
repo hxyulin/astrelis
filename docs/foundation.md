@@ -132,7 +132,9 @@ live source replacement. These are targeted structural checks, not a full memory
 The [initial baseline](performance/baseline.md) established substantial recording
 cost in individual calls. The [scoped drawing experiment](performance/scoped-drawing.md)
 amortizes immutable checks and pipeline selection without removing the convenience
-API. Prepared scopes approach direct-wgpu recording cost; dynamic validation and
+API. The [per-draw hazard follow-up](performance/draw-hazards.md) addresses
+dynamic draws by first instance within upload pages and merges consecutive
+identical-state draws. Prepared scopes approach direct-wgpu recording cost; dynamic validation and
 individual convenience calls still have measurable overhead. See the measured
 ranges and outliers before treating the percentage target as universally passed.
 

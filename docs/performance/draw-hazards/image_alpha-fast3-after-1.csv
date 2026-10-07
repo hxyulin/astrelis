@@ -1,0 +1,7 @@
+layers,image,alpha,completion_median_us,completion_p95_us
+16,varying,straight,2006.7,2101.2
+16,varying,premultiplied,1288.0,1342.9
+16,icon,straight,1513.1,1600.2
+16,icon,premultiplied,1277.5,1372.4
+16,opaque,straight,1496.5,1734.8
+16,opaque,premultiplied,1277.9,1337.9
