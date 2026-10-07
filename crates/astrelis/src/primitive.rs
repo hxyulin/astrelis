@@ -517,10 +517,10 @@ impl<'frame> Session<'_, 'frame> {
 }
 fn record<T: Pod>(pass: &mut RenderPass<'_>, parameters: &[T], capacity: usize) {
     pass.bind_clip(1);
+    let stride = std::mem::size_of::<T>() as u64;
     for chunk in parameters.chunks(capacity) {
-        let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk), 4);
-        pass.set_vertex_buffer(0, &buffer, range);
-        pass.inner.draw(0..6, 0..chunk.len() as u32);
+        let first = pass.bind_instances(0, bytemuck::cast_slice(chunk), stride);
+        pass.inner.draw(0..6, first..first + chunk.len() as u32);
     }
 }
 

@@ -560,9 +560,9 @@ fn record(
     };
     pass.bind_clip(2);
     for chunk in parameters.chunks(capacity) {
-        let (buffer, range) = pass.upload_instances(bytemuck::cast_slice(chunk), 4);
-        pass.set_vertex_buffer(1, &buffer, range);
-        pass.inner.draw_indexed(0..count, 0, 0..chunk.len() as u32);
+        let first = pass.bind_instances(1, bytemuck::cast_slice(chunk), 64);
+        pass.inner
+            .draw_indexed(0..count, 0, first..first + chunk.len() as u32);
     }
 }
 

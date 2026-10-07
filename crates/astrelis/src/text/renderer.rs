@@ -1290,8 +1290,11 @@ impl TextRenderer {
             }
         }
         pass.apply_raster_state();
-        pass.set_vertex_buffer(0, &buffer.buffer, text.data.buffer_range.clone());
+        // Bind the whole geometry buffer so labels sharing it keep one binding;
+        // the text's offset into it moves to the first instance.
+        pass.set_vertex_buffer(0, &buffer.buffer, 0..buffer.buffer.size());
         pass.set_vertex_buffer(1, &draw_buffer, range);
+        let base = (text.data.buffer_range.start / 48) as u32;
         pass.bind_clip(2);
         let mut previous = None;
         for batch in &text.data.batches {
@@ -1305,7 +1308,8 @@ impl TextRenderer {
                 previous = Some(field);
             }
             pass.set_bind_group(0, &batch.page.group, &[]);
-            pass.inner.draw(0..6, batch.range.clone());
+            pass.inner
+                .draw(0..6, base + batch.range.start..base + batch.range.end);
             self.stats.draw_calls += 1;
         }
         Ok(())

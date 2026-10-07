@@ -798,6 +798,15 @@ impl<'frame> RenderPass<'frame> {
             .append(self.graphics, bytes, alignment)
     }
 
+    /// Appends `stride`-sized instance records, binds their whole upload page at
+    /// `slot`, and returns the index of the first record. Consecutive draws that
+    /// land in the same page keep one binding and differ only in first instance.
+    pub(crate) fn bind_instances(&mut self, slot: u32, bytes: &[u8], stride: u64) -> u32 {
+        let (buffer, range) = self.upload_instances(bytes, stride);
+        self.set_vertex_buffer(slot, &buffer, 0..buffer.size());
+        (range.start / stride) as u32
+    }
+
     pub(crate) fn viewport_size(&self) -> [f32; 2] {
         [self.viewport[2], self.viewport[3]]
     }

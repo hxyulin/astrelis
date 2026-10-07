@@ -490,9 +490,8 @@ impl Session<'_, '_> {
         self.pass.apply_raster_state();
         self.pass.set_pipeline(&self.pipeline);
         self.pass.set_bind_group(0, &self.points.group, &[]);
-        let (b, r) = self.pass.upload_instances(bytemuck::bytes_of(&p), 4);
-        self.pass.set_vertex_buffer(0, &b, r);
-        self.pass.inner.draw(0..vertices, 0..1);
+        let first = self.pass.bind_instances(0, bytemuck::bytes_of(&p), 80);
+        self.pass.inner.draw(0..vertices, first..first + 1);
     }
 }
 
