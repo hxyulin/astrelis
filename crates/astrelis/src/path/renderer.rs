@@ -246,6 +246,7 @@ impl PathRenderer {
         let index_bytes = bytemuck::cast_slice(&geometry.indices);
         let limit = self.graphics.device().limits().max_buffer_size;
         if vertex_bytes.len() as u64 > limit || index_bytes.len() as u64 > limit {
+            self.tessellators.recycle(geometry);
             return Err(Error::PathTooLarge);
         }
         let storage = if indices == 0 {
@@ -268,7 +269,7 @@ impl PathRenderer {
                 ),
             }))
         };
-        Ok(PreparedPath {
+        let prepared = PreparedPath {
             graphics: self.graphics.clone(),
             storage,
             bounds: geometry.bounds,
@@ -276,7 +277,9 @@ impl PathRenderer {
             indices,
             interior_indices: geometry.interior_indices,
             coordinate_extent: geometry.coordinate_extent,
-        })
+        };
+        self.tessellators.recycle(geometry);
+        Ok(prepared)
     }
     fn pipeline(&mut self, format: &RenderFormat) -> Result<wgpu::RenderPipeline, Error> {
         self.pipeline_for(

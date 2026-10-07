@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use lyon_tessellation::{
@@ -23,6 +23,22 @@ pub(super) struct Vertex {
 pub(super) struct Tessellators {
     fill: FillTessellator,
     stroke: StrokeTessellator,
+    scratch: Scratch,
+}
+
+// Working storage reused across preparations; only capacity survives a call.
+#[derive(Default)]
+struct Scratch {
+    triangles: VertexBuffers<[f32; 2], u32>,
+    positions: Vec<[f32; 2]>,
+    remap: Vec<u32>,
+    ids: HashMap<[u32; 2], u32>,
+    edges: Vec<((u32, u32), i32)>,
+    outgoing: Vec<Vec<u32>>,
+    incoming: Vec<Vec<u32>>,
+    boundary: Vec<(u32, u32)>,
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
 }
 impl std::fmt::Debug for Tessellators {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -60,9 +76,11 @@ fn cap(cap: LineCap) -> lyon_tessellation::LineCap {
 impl Tessellators {
     pub fn prepare(&mut self, path: &Path, options: PathOptions) -> Result<Geometry, Error> {
         options.validate()?;
-        let mut triangles: VertexBuffers<[f32; 2], u32> = VertexBuffers::new();
+        let scratch = &mut self.scratch;
+        scratch.triangles.vertices.clear();
+        scratch.triangles.indices.clear();
         if path.is_empty() || options.stroke.is_some_and(|stroke| stroke.width == 0.) {
-            return fringe(triangles);
+            return fringe(scratch);
         }
         if let Some(stroke) = options.stroke {
             let mut settings = StrokeOptions::default()
@@ -87,7 +105,7 @@ impl Tessellators {
                 .tessellate_path(
                     path.inner.as_ref(),
                     &settings,
-                    &mut BuffersBuilder::new(&mut triangles, |v: StrokeVertex<'_, '_>| {
+                    &mut BuffersBuilder::new(&mut scratch.triangles, |v: StrokeVertex<'_, '_>| {
                         v.position().to_array()
                     }),
                 )
@@ -95,9 +113,9 @@ impl Tessellators {
             // Stroke tessellation can overlap at crossings and tight joins. Fill
             // the union of its consistently oriented triangles before shading so
             // translucent strokes blend once, not once per overlapping segment.
-            let union = stroke_outline(&triangles)?;
-            triangles.vertices.clear();
-            triangles.indices.clear();
+            let union = stroke_outline(scratch)?;
+            scratch.triangles.vertices.clear();
+            scratch.triangles.indices.clear();
             self.fill
                 .tessellate_path(
                     &union,
@@ -105,7 +123,7 @@ impl Tessellators {
                         fill_rule: FillRule::NonZero,
                         ..options
                     }),
-                    &mut BuffersBuilder::new(&mut triangles, |v: FillVertex<'_>| {
+                    &mut BuffersBuilder::new(&mut scratch.triangles, |v: FillVertex<'_>| {
                         v.position().to_array()
                     }),
                 )
@@ -115,21 +133,62 @@ impl Tessellators {
                 .tessellate_path(
                     path.inner.as_ref(),
                     &fill_options(options),
-                    &mut BuffersBuilder::new(&mut triangles, |v: FillVertex<'_>| {
+                    &mut BuffersBuilder::new(&mut scratch.triangles, |v: FillVertex<'_>| {
                         v.position().to_array()
                     }),
                 )
                 .map_err(failed)?;
         }
-        fringe(triangles)
+        fringe(scratch)
+    }
+    /// Returns a prepared geometry's storage for the next preparation.
+    pub fn recycle(&mut self, geometry: Geometry) {
+        let scratch = &mut self.scratch;
+        if geometry.vertices.capacity() > scratch.vertices.capacity() {
+            scratch.vertices = geometry.vertices;
+        }
+        if geometry.indices.capacity() > scratch.indices.capacity() {
+            scratch.indices = geometry.indices;
+        }
     }
 }
 
-fn stroke_outline(
-    triangles: &VertexBuffers<[f32; 2], u32>,
-) -> Result<lyon_tessellation::path::Path, Error> {
-    let (positions, remap) = weld_positions(&triangles.vertices)?;
-    let mut edges = BTreeMap::<(u32, u32), i32>::new();
+// Sums signed counts per edge in key order, dropping the input order.
+fn sum_edges(edges: &mut Vec<((u32, u32), i32)>) {
+    edges.sort_unstable_by_key(|(edge, _)| *edge);
+    let mut write = 0;
+    for read in 0..edges.len() {
+        if write > 0 && edges[write - 1].0 == edges[read].0 {
+            edges[write - 1].1 += edges[read].1;
+        } else {
+            edges[write] = edges[read];
+            write += 1;
+        }
+    }
+    edges.truncate(write);
+}
+
+// Clears the first `count` adjacency lists, keeping their capacity.
+fn reset_lists(lists: &mut Vec<Vec<u32>>, count: usize) {
+    if lists.len() < count {
+        lists.resize_with(count, Vec::new);
+    }
+    for list in &mut lists[..count] {
+        list.clear();
+    }
+}
+
+fn stroke_outline(scratch: &mut Scratch) -> Result<lyon_tessellation::path::Path, Error> {
+    weld_positions(scratch)?;
+    let Scratch {
+        triangles,
+        positions,
+        remap,
+        edges,
+        outgoing,
+        ..
+    } = scratch;
+    edges.clear();
     for triangle in triangles.indices.as_chunks::<3>().0 {
         let [a, mut b, mut c] = triangle.map(|i| remap[i as usize]);
         let area = cross(
@@ -147,51 +206,52 @@ fn stroke_outline(
             std::mem::swap(&mut b, &mut c);
         }
         for (a, b) in [(a, b), (b, c), (c, a)] {
-            let (edge, sign) = if a < b { ((a, b), 1) } else { ((b, a), -1) };
-            *edges.entry(edge).or_default() += sign;
+            edges.push(if a < b { ((a, b), 1) } else { ((b, a), -1) });
         }
     }
+    sum_edges(edges);
     // Removing shared edges preserves the winding sum of all positive triangles,
     // but avoids submitting every internal diagonal as a fill intersection. The
     // remaining directed graph is balanced, so it decomposes into closed walks.
     // Walk orientation/overlap is left intact; the fill tessellator computes union.
-    let mut outgoing = BTreeMap::<u32, Vec<u32>>::new();
-    for ((a, b), count) in edges {
+    reset_lists(outgoing, positions.len());
+    for &((a, b), count) in edges.iter() {
         let (a, b) = if count > 0 { (a, b) } else { (b, a) };
-        outgoing
-            .entry(a)
-            .or_default()
-            .extend(std::iter::repeat_n(b, count.unsigned_abs() as usize));
+        outgoing[a as usize].extend(std::iter::repeat_n(b, count.unsigned_abs() as usize));
     }
     let mut path = lyon_tessellation::path::Path::builder();
-    while let Some((start, edges)) = outgoing
-        .first_entry()
-        .map(|entry| (*entry.key(), entry.into_mut()))
-    {
-        let Some(mut current) = edges.pop() else {
-            outgoing.remove(&start);
-            continue;
-        };
-        let p = positions[start as usize];
-        path.begin(point(p[0], p[1]));
-        while current != start {
-            let p = positions[current as usize];
-            path.line_to(point(p[0], p[1]));
-            current = outgoing
-                .get_mut(&current)
-                .and_then(Vec::pop)
-                .ok_or_else(|| failed("open stroke outline"))?;
+    // Walks start at the lowest vertex that still has an unused edge.
+    for start in 0..positions.len() as u32 {
+        while let Some(mut current) = outgoing[start as usize].pop() {
+            let p = positions[start as usize];
+            path.begin(point(p[0], p[1]));
+            while current != start {
+                let p = positions[current as usize];
+                path.line_to(point(p[0], p[1]));
+                current = outgoing[current as usize]
+                    .pop()
+                    .ok_or_else(|| failed("open stroke outline"))?;
+            }
+            path.end(true);
         }
-        path.end(true);
     }
     Ok(path.build())
 }
 
-fn weld_positions(input: &[[f32; 2]]) -> Result<(Vec<[f32; 2]>, Vec<u32>), Error> {
-    let mut positions = Vec::new();
-    let mut remap = Vec::with_capacity(input.len());
-    let mut ids = HashMap::new();
-    for &position in input {
+// Welds exactly equal triangle positions into `positions`, mapping each input
+// vertex through `remap`.
+fn weld_positions(scratch: &mut Scratch) -> Result<(), Error> {
+    let Scratch {
+        triangles,
+        positions,
+        remap,
+        ids,
+        ..
+    } = scratch;
+    positions.clear();
+    remap.clear();
+    ids.clear();
+    for &position in &triangles.vertices {
         if !position.into_iter().all(f32::is_finite) {
             return Err(failed("nonfinite tessellation geometry"));
         }
@@ -203,7 +263,7 @@ fn weld_positions(input: &[[f32; 2]]) -> Result<(Vec<[f32; 2]>, Vec<u32>), Error
         });
         remap.push(index);
     }
-    Ok((positions, remap))
+    Ok(())
 }
 fn cross(a: [f32; 2], b: [f32; 2], c: [f32; 2]) -> f64 {
     (f64::from(b[0]) - f64::from(a[0])) * (f64::from(c[1]) - f64::from(a[1]))
@@ -216,21 +276,31 @@ fn direction(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
     [(x / length) as f32, (y / length) as f32]
 }
 
-fn fringe(triangles: VertexBuffers<[f32; 2], u32>) -> Result<Geometry, Error> {
+fn fringe(scratch: &mut Scratch) -> Result<Geometry, Error> {
     // Exact welding removes duplicated tessellator vertices, including -0.0.
-    let (positions, remap) = weld_positions(&triangles.vertices)?;
-    let mut vertices: Vec<_> = positions
-        .into_iter()
-        .map(|position| Vertex {
-            position,
-            incoming: [0.; 2],
-            outgoing: [0.; 2],
-            outer: 0.,
-            padding: 0.,
-        })
-        .collect();
-    let mut indices = Vec::with_capacity(triangles.indices.len());
-    let mut edges = BTreeMap::<(u32, u32), i32>::new();
+    weld_positions(scratch)?;
+    let Scratch {
+        triangles,
+        positions,
+        remap,
+        edges,
+        outgoing,
+        incoming,
+        boundary,
+        vertices,
+        indices,
+        ..
+    } = scratch;
+    vertices.clear();
+    vertices.extend(positions.iter().map(|&position| Vertex {
+        position,
+        incoming: [0.; 2],
+        outgoing: [0.; 2],
+        outer: 0.,
+        padding: 0.,
+    }));
+    indices.clear();
+    edges.clear();
     for triangle in triangles.indices.as_chunks::<3>().0 {
         let [a, mut b, mut c] = [
             remap[triangle[0] as usize],
@@ -250,18 +320,15 @@ fn fringe(triangles: VertexBuffers<[f32; 2], u32>) -> Result<Geometry, Error> {
         }
         indices.extend([a, b, c]);
         for (a, b) in [(a, b), (b, c), (c, a)] {
-            if a < b {
-                *edges.entry((a, b)).or_default() += 1;
-            } else {
-                *edges.entry((b, a)).or_default() -= 1;
-            }
+            edges.push(if a < b { ((a, b), 1) } else { ((b, a), -1) });
         }
     }
+    sum_edges(edges);
     let interior_indices = u32::try_from(indices.len()).map_err(|_| Error::PathTooLarge)?;
     if indices.is_empty() {
         return Ok(Geometry {
             vertices: Vec::new(),
-            indices,
+            indices: Vec::new(),
             interior_indices: 0,
             bounds: None,
             coordinate_extent: [0.; 2],
@@ -269,7 +336,7 @@ fn fringe(triangles: VertexBuffers<[f32; 2], u32>) -> Result<Geometry, Error> {
     }
     let mut minimum = [f32::INFINITY; 2];
     let mut maximum = [f32::NEG_INFINITY; 2];
-    for &index in &indices {
+    for &index in indices.iter() {
         let p = vertices[index as usize].position;
         for axis in 0..2 {
             minimum[axis] = minimum[axis].min(p[axis]);
@@ -285,10 +352,10 @@ fn fringe(triangles: VertexBuffers<[f32; 2], u32>) -> Result<Geometry, Error> {
     if !bounds.valid() {
         return Err(failed("path bounds overflow"));
     }
-    let mut boundary = Vec::new();
-    let mut outgoing = HashMap::<u32, Vec<u32>>::new();
-    let mut incoming = HashMap::<u32, Vec<u32>>::new();
-    for ((a, b), count) in edges {
+    boundary.clear();
+    reset_lists(outgoing, vertices.len());
+    reset_lists(incoming, vertices.len());
+    for &((a, b), count) in edges.iter() {
         if count == 0 {
             continue;
         }
@@ -297,8 +364,8 @@ fn fringe(triangles: VertexBuffers<[f32; 2], u32>) -> Result<Geometry, Error> {
         }
         let (a, b) = if count > 0 { (a, b) } else { (b, a) };
         boundary.push((a, b));
-        outgoing.entry(a).or_default().push(b);
-        incoming.entry(b).or_default().push(a);
+        outgoing[a as usize].push(b);
+        incoming[b as usize].push(a);
     }
     // Pair edges around touching contours by following the interior on the left.
     let turn = |incoming: [f32; 2], outgoing: [f32; 2]| {
@@ -306,24 +373,20 @@ fn fringe(triangles: VertexBuffers<[f32; 2], u32>) -> Result<Geometry, Error> {
             - f64::from(outgoing[1]).atan2(f64::from(outgoing[0])))
         .rem_euclid(std::f64::consts::TAU)
     };
-    for (a, b) in boundary {
+    for &(a, b) in boundary.iter() {
         let p = vertices[a as usize].position;
         let q = vertices[b as usize].position;
         let edge = direction(p, q);
-        let previous = incoming
-            .get(&a)
-            .ok_or_else(|| failed("open tessellation boundary"))?
+        let previous = incoming[a as usize]
             .iter()
             .map(|&i| direction(vertices[i as usize].position, p))
             .min_by(|x, y| turn(*x, edge).total_cmp(&turn(*y, edge)))
-            .ok_or_else(|| failed("empty tessellation boundary"))?;
-        let next = outgoing
-            .get(&b)
-            .ok_or_else(|| failed("open tessellation boundary"))?
+            .ok_or_else(|| failed("open tessellation boundary"))?;
+        let next = outgoing[b as usize]
             .iter()
             .map(|&i| direction(q, vertices[i as usize].position))
             .min_by(|x, y| turn(edge, *x).total_cmp(&turn(edge, *y)))
-            .ok_or_else(|| failed("empty tessellation boundary"))?;
+            .ok_or_else(|| failed("open tessellation boundary"))?;
         vertices[a as usize].incoming = previous;
         vertices[a as usize].outgoing = edge;
         vertices[b as usize].incoming = edge;
@@ -350,8 +413,8 @@ fn fringe(triangles: VertexBuffers<[f32; 2], u32>) -> Result<Geometry, Error> {
         return Err(Error::PathTooLarge);
     }
     Ok(Geometry {
-        vertices,
-        indices,
+        vertices: std::mem::take(vertices),
+        indices: std::mem::take(indices),
         interior_indices,
         bounds: Some(bounds),
         coordinate_extent: [
