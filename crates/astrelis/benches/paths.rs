@@ -90,6 +90,7 @@ struct Work {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     pages: Vec<wgpu::Buffer>,
+    no_clip: wgpu::Buffer,
     packed: Vec<Parameters>,
     coverage: bool,
 }
@@ -157,12 +158,30 @@ impl Work {
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("raw matching path shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("../src/path/path.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(
+                    concat!(
+                        include_str!("../src/clip.wgsl"),
+                        "\n",
+                        include_str!("../src/path/path.wgsl")
+                    )
+                    .into(),
+                ),
             });
         let attributes =
             wgpu::vertex_attr_array![0=>Float32x2,1=>Float32x2,2=>Float32x2,3=>Float32];
         let instance_attributes =
             wgpu::vertex_attr_array![4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4];
+        let clip_attributes = wgpu::vertex_attr_array![8=>Float32x4,9=>Float32x4,10=>Float32x4];
+        // Disabled rounded clip: a negative half size turns clipping off.
+        let no_clip = g
+            .device()
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("raw disabled clip"),
+                contents: bytemuck::cast_slice(&[
+                    0f32, 0., 0., 0., 0., 0., -1., -1., 0., 0., 0., 0.,
+                ]),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
         let layout = g
             .device()
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -189,6 +208,11 @@ impl Work {
                             array_stride: 64,
                             step_mode: wgpu::VertexStepMode::Instance,
                             attributes: &instance_attributes,
+                        }),
+                        Some(wgpu::VertexBufferLayout {
+                            array_stride: 0,
+                            step_mode: wgpu::VertexStepMode::Instance,
+                            attributes: &clip_attributes,
                         }),
                     ],
                 },
@@ -241,6 +265,7 @@ impl Work {
             vertices,
             indices,
             pages,
+            no_clip,
             packed: Vec::with_capacity(count),
             coverage,
         })
@@ -276,6 +301,7 @@ impl Work {
                 pass.set_pipeline(&self.pipeline);
                 pass.set_vertex_buffer(0, self.vertices.slice(..));
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.set_vertex_buffer(2, self.no_clip.slice(..));
                 let indices = if self.coverage { 30 } else { 6 };
                 if matches!(mode, Mode::RawIndividual) {
                     for (i, &draw) in self.draws.iter().enumerate() {
