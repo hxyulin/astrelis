@@ -114,6 +114,8 @@ impl TextRasterOptions {
     }
     /// Selects image density without scaling geometry. Match the intended draw scale
     /// for sharp hinted coverage; a Painter/session transform applies geometry scaling.
+    /// Physical glyph sizes round to a quarter pixel, so continuously changing scales
+    /// reuse cached rasters; quads still cover the exact requested size.
     pub const fn raster_scale(mut self, value: f32) -> Self {
         self.raster_scale = value;
         self
@@ -983,13 +985,14 @@ impl TextRenderer {
         for (index, glyph) in layout.glyphs().iter().enumerate() {
             let font = &layout.fonts()[glyph.font_index];
             let physical_size = glyph.font_size * scale;
+            let raster_size = raster_size(physical_size, self.options.max_raster_size);
             let coverage = match preparation {
                 TextPreparation::Coverage(raster) => Representation::Coverage {
-                    size: physical_size.to_bits(),
+                    size: raster_size.to_bits(),
                     hint: raster.hinting,
                 },
                 TextPreparation::Mtsdf(_) => Representation::Coverage {
-                    size: physical_size.to_bits(),
+                    size: raster_size.to_bits(),
                     hint: true,
                 },
             };
@@ -1029,8 +1032,11 @@ impl TextRenderer {
                 && image.page.kind == Kind::Mtsdf
             {
                 glyph.font_size / pixels_per_em as f32
-            } else {
+            } else if raster_size == physical_size {
                 inverse_scale
+            } else {
+                // Map the rounded raster back to the requested size.
+                glyph.font_size / raster_size
             };
             let x = glyph.position[0] + image.left as f32 * factor;
             let y = glyph.position[1] - image.top as f32 * factor;
@@ -1606,6 +1612,21 @@ fn linearize_color(data: &mut [u8], premultiplied: bool) {
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+
+/// Steps per physical pixel at which coverage and color glyphs are rasterized.
+/// Continuous zoom then reuses each raster across a range of nearby sizes
+/// instead of creating a cache entry per frame; quads scale the image by less
+/// than 1/8 px to the exact size.
+const RASTER_STEPS_PER_PIXEL: f32 = 4.;
+
+fn raster_size(physical: f32, max: f32) -> f32 {
+    let rounded = (physical * RASTER_STEPS_PER_PIXEL).round() / RASTER_STEPS_PER_PIXEL;
+    if rounded > 0. && rounded <= max {
+        rounded
+    } else {
+        physical
+    }
+}
 
 fn validate_preparation(preparation: TextPreparation) -> Result<(), TextRenderError> {
     if let TextPreparation::Mtsdf(options) = preparation

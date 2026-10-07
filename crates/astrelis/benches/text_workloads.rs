@@ -436,6 +436,7 @@ fn preparation(g: &GraphicsContext, fonts: &mut TextSystem) -> Result<()> {
         "cached_unique",
         "evicting_unique",
         "raster_size_pressure",
+        "continuous_zoom",
     ] {
         let mut renderer = TextRenderer::with_options(
             g,
@@ -460,7 +461,7 @@ fn preparation(g: &GraphicsContext, fonts: &mut TextSystem) -> Result<()> {
             "Source Sans 3",
             None,
         )?;
-        let selected = if case == "raster_size_pressure" {
+        let selected = if matches!(case, "raster_size_pressure" | "continuous_zoom") {
             &small
         } else {
             &unique_layout
@@ -482,10 +483,11 @@ fn preparation(g: &GraphicsContext, fonts: &mut TextSystem) -> Result<()> {
                 renderer.clear_cache();
             }
             let before = renderer.stats();
-            let raster = TextRasterOptions::new().raster_scale(if case == "raster_size_pressure" {
-                1. + sample as f32 / 16.
-            } else {
-                1.
+            // Continuous zoom changes the physical size by 0.048 px per frame.
+            let raster = TextRasterOptions::new().raster_scale(match case {
+                "raster_size_pressure" => 1. + sample as f32 / 16.,
+                "continuous_zoom" => 1. + sample as f32 * 0.003,
+                _ => 1.,
             });
             let start = Instant::now();
             let prepared = match renderer.prepare_text(selected, raster) {

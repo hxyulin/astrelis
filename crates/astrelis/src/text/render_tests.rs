@@ -1559,3 +1559,28 @@ fn full_glyph_cache_evicts_least_recently_used_keys() {
         assert_eq!(renderer.stats().cached_glyphs, 4);
     });
 }
+
+#[test]
+fn nearby_raster_scales_share_quarter_pixel_rasters_and_keep_their_size() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = TextRenderer::new(&g);
+        let text = layout("M");
+        let base = renderer
+            .prepare_text(&text, TextRasterOptions::new().raster_scale(1.))
+            .unwrap();
+        let misses = renderer.stats().cache_misses;
+        // 20 px * 1.005 = 20.1 px rounds to the 20 px raster.
+        let zoomed = renderer
+            .prepare_text(&text, TextRasterOptions::new().raster_scale(1.005))
+            .unwrap();
+        assert_eq!(renderer.stats().cache_misses, misses);
+        // Quads stay in layout units: the shared raster covers the same area.
+        assert_eq!(base.bounds, zoomed.bounds);
+        // 20.2 px rounds to 20.25 px: a different raster.
+        renderer
+            .prepare_text(&text, TextRasterOptions::new().raster_scale(1.01))
+            .unwrap();
+        assert!(renderer.stats().cache_misses > misses);
+    });
+}

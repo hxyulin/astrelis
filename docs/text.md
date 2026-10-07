@@ -172,6 +172,13 @@ origins, and measurements retain layout units. Identity drawing treats those uni
 as pixels; a draw/session transform converts logical units to physical pixels.
 Raster density never applies another geometry scale.
 
+Coverage and color glyphs are rasterized at the physical size (font size times
+raster scale) rounded to a quarter pixel. A continuous zoom that changes the scale
+every frame therefore reuses each raster for a range of nearby sizes instead of
+adding cache entries per frame; the quad maps the shared raster to the exact
+requested size, a resampling of under 1/8 px. Sizes already on a quarter pixel,
+including integer sizes at integer DPI, are unchanged.
+
 ## Glyph representations
 
 | Representation | Proposed use | Initial scope |
