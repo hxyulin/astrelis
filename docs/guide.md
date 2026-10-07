@@ -428,6 +428,11 @@ declare the correct encoding through `create_sampled_binding_with_options`
 (also on `Painter`, e.g. nearest filtering for pixel-aligned layers).
 Snapshot bindings remain available through `create_binding` and explicit `rebind`.
 
+`framebuffer.read_rgba8()?` copies the submitted color output to tightly packed RGBA8
+rows (BGRA swizzled, sRGB bytes left encoded) and blocks until the copy completes.
+It needs `COPY_SRC` usage and an 8-bit RGBA/BGRA format, and is meant for tests,
+screenshots and tools rather than per-frame work.
+
 `RenderFormat::layer_color(target)` picks a layer color format that keeps the
 target's encoding and precision: sRGB targets get `Rgba8UnormSrgb`, 8-bit linear
 targets `Rgba8Unorm`, 32-bit float targets `Rgba32Float` (nearest-filtered and

@@ -679,55 +679,20 @@ fn batches_respect_application_buffer_limits_and_preserve_last_draw() {
         renderer.prepare(&target.render_format()).unwrap();
         let mut draws = vec![hard([1., 0., 0., 1.]).transform(Transform2D::scale(1., 0.125)); 1000];
         draws.last_mut().unwrap().color = [0., 0., 1., 1.];
-        let texture = target.color_texture().unwrap().clone();
-        let buffer = g.device().create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: 32,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
         let mut frame = target.begin_frame().unwrap();
         renderer
             .draw_many(&mut frame.render_pass().begin().unwrap(), &path, &draws)
             .unwrap();
-        frame.encoder().copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: Default::default(),
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: Default::default(),
-            },
-            texture.size(),
-        );
-        let index = frame.finish().unwrap();
-        let (tx, rx) = std::sync::mpsc::channel();
-        buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-            tx.send(r).unwrap();
-        });
-        g.device()
-            .poll(wgpu::PollType::Wait {
-                submission_index: Some(index),
-                timeout: Some(std::time::Duration::from_secs(10)),
-            })
-            .unwrap();
-        rx.recv_timeout(std::time::Duration::from_secs(10))
-            .unwrap()
-            .unwrap();
+        frame.finish().unwrap();
         assert!(
-            buffer
-                .slice(..)
-                .get_mapped_range()
+            target
+                .read_rgba8()
                 .unwrap()
                 .as_chunks::<4>()
                 .0
                 .iter()
                 .all(|p| *p == [0, 0, 255, 255])
         );
-        buffer.unmap();
         assert!(
             g.upload_pool
                 .lock()

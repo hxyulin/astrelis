@@ -1,5 +1,3 @@
-use std::{sync::mpsc, time::Duration};
-
 use crate::{
     Error, Frame, FrameError, Framebuffer, FramebufferOptions, GraphicsContext, MeshRenderer,
     RenderTarget, Vertex, wgpu,
@@ -14,54 +12,14 @@ fn options(count: u32) -> FramebufferOptions {
 }
 
 pub(crate) fn pixels(
-    graphics: &GraphicsContext,
+    _graphics: &GraphicsContext,
     target: &mut Framebuffer,
     record: impl FnOnce(&mut Frame<'_, '_>),
 ) -> Vec<u8> {
-    let texture = target.color_texture().unwrap().clone();
-    let buffer = graphics.device().create_buffer(&wgpu::BufferDescriptor {
-        label: Some("Framebuffer readback"),
-        size: 64 * 256,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
     let mut frame = target.begin_frame().unwrap();
     record(&mut frame);
-    frame.encoder().copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: Default::default(),
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buffer,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(256),
-                rows_per_image: Some(64),
-            },
-        },
-        texture.size(),
-    );
-    let submission = frame.finish().unwrap();
-    let (tx, rx) = mpsc::channel();
-    buffer
-        .slice(..)
-        .map_async(wgpu::MapMode::Read, move |result| {
-            tx.send(result).unwrap();
-        });
-    graphics
-        .device()
-        .poll(wgpu::PollType::Wait {
-            submission_index: Some(submission),
-            timeout: Some(Duration::from_secs(10)),
-        })
-        .unwrap();
-    rx.recv_timeout(Duration::from_secs(10)).unwrap().unwrap();
-    let pixels = buffer.slice(..).get_mapped_range().unwrap().to_vec();
-    buffer.unmap();
-    pixels
+    frame.finish().unwrap();
+    target.read_rgba8().unwrap()
 }
 
 #[test]
@@ -403,5 +361,81 @@ fn framebuffer_passes_share_submission_and_validate_destinations() {
             renderer.draw(&mut pass, &mesh),
             Err(Error::UnsupportedMeshFormat { .. })
         ));
+    });
+}
+
+#[test]
+fn rgba8_readback_unpads_rows_swizzles_bgra_and_rejects_unreadable_outputs() {
+    pollster::block_on(async {
+        let graphics = GraphicsContext::headless().await.unwrap();
+        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
+        let mut shapes = crate::ShapeRenderer::new(&graphics);
+        for format in [
+            wgpu::TextureFormat::Rgba8Unorm,
+            wgpu::TextureFormat::Bgra8Unorm,
+            wgpu::TextureFormat::Bgra8UnormSrgb,
+        ] {
+            // 70 texels per row pad to 512 bytes in the copy. Probes avoid antialiased edges.
+            let mut target = graphics
+                .create_framebuffer(FramebufferOptions::new(70, 8).format(format).usage(usage))
+                .unwrap();
+            assert!(matches!(
+                target.read_rgba8(),
+                Err(Error::UninitializedFramebuffer)
+            ));
+            shapes.prepare(&target.render_format()).unwrap();
+            let mut frame = target.begin_frame().unwrap();
+            {
+                let mut pass = frame
+                    .render_pass()
+                    .clear_color(wgpu::Color::RED)
+                    .begin()
+                    .unwrap();
+                shapes
+                    .draw(
+                        &mut pass,
+                        crate::ShapeDraw::rect(
+                            crate::Rect::new(30., 2., 40., 6.),
+                            [0., 0., 1., 1.],
+                        ),
+                    )
+                    .unwrap();
+            }
+            frame.finish().unwrap();
+            let pixels = target.read_rgba8().unwrap();
+            assert_eq!(pixels.len(), 70 * 8 * 4);
+            let at = |x: usize, y: usize| &pixels[(y * 70 + x) * 4..][..4];
+            for (x, y, expected) in [
+                (0, 0, [255, 0, 0, 255]),
+                (69, 0, [255, 0, 0, 255]),
+                (20, 7, [255, 0, 0, 255]),
+                (35, 4, [0, 0, 255, 255]),
+                (60, 5, [0, 0, 255, 255]),
+            ] {
+                assert_eq!(at(x, y), expected, "{format:?} at {x},{y}");
+            }
+        }
+        let mut unreadable = graphics
+            .create_framebuffer(FramebufferOptions::new(4, 4))
+            .unwrap();
+        assert!(matches!(
+            unreadable.read_rgba8(),
+            Err(Error::UnsupportedReadback { .. })
+        ));
+        let mut float = graphics
+            .create_framebuffer(
+                FramebufferOptions::new(4, 4)
+                    .format(wgpu::TextureFormat::Rgba16Float)
+                    .usage(usage),
+            )
+            .unwrap();
+        assert!(matches!(
+            float.read_rgba8(),
+            Err(Error::UnsupportedReadback { .. })
+        ));
+        let mut empty = graphics
+            .create_framebuffer(FramebufferOptions::new(0, 4).usage(usage))
+            .unwrap();
+        assert!(matches!(empty.read_rgba8(), Err(Error::TargetSuspended)));
     });
 }

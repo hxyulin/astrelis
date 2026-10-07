@@ -625,13 +625,6 @@ fn application_limits_reject_unsupported_brushes_and_split_primitive_pages() {
                     .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
             )
             .unwrap();
-        let texture = target.color_texture().unwrap().clone();
-        let buffer = g.device().create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: 32,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
         let mut frame = target.begin_frame().unwrap();
         shapes
             .draw_many_with_brush(
@@ -640,44 +633,16 @@ fn application_limits_reject_unsupported_brushes_and_split_primitive_pages() {
                 &vec![rect(0., 0., 8., 1.); 1000],
             )
             .unwrap();
-        frame.encoder().copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: Default::default(),
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: Default::default(),
-            },
-            texture.size(),
-        );
-        let index = frame.finish().unwrap();
-        let (tx, rx) = std::sync::mpsc::channel();
-        buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-            let _ = tx.send(r);
-        });
-        g.device()
-            .poll(wgpu::PollType::Wait {
-                submission_index: Some(index),
-                timeout: Some(std::time::Duration::from_secs(10)),
-            })
-            .unwrap();
-        rx.recv_timeout(std::time::Duration::from_secs(10))
-            .unwrap()
-            .unwrap();
+        frame.finish().unwrap();
         assert!(
-            buffer
-                .slice(..)
-                .get_mapped_range()
+            target
+                .read_rgba8()
                 .unwrap()
                 .as_chunks::<4>()
                 .0
                 .iter()
                 .all(|p| *p == [0, 0, 255, 255])
         );
-        buffer.unmap();
         assert!(errors.pop().await.is_none());
         let (device, queue) = base
             .adapter()

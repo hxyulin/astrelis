@@ -327,6 +327,84 @@ impl Framebuffer {
             .view)
     }
 
+    /// Copies the resolved color output to the CPU as tightly packed RGBA8 rows, top first.
+    ///
+    /// Submits a copy and blocks until the device finishes it (up to ten seconds), so use
+    /// it for tests, screenshots and tools rather than every frame; it needs a native
+    /// backend that can wait. Requires `COPY_SRC` usage and an `Rgba8`/`Bgra8` format,
+    /// optionally sRGB; BGRA is swizzled to RGBA and sRGB bytes stay encoded. The output
+    /// must hold submitted content, otherwise this returns `UninitializedFramebuffer`.
+    pub fn read_rgba8(&mut self) -> Result<Vec<u8>, Error> {
+        use wgpu::TextureFormat as F;
+        let (format, usage) = (self.format(), self.usage());
+        let bgra = match format {
+            F::Rgba8Unorm | F::Rgba8UnormSrgb => false,
+            F::Bgra8Unorm | F::Bgra8UnormSrgb => true,
+            _ => return Err(Error::UnsupportedReadback { format, usage }),
+        };
+        if !usage.contains(wgpu::TextureUsages::COPY_SRC) {
+            return Err(Error::UnsupportedReadback { format, usage });
+        }
+        let texture = self.color_texture()?;
+        if !self.initialized.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(Error::UninitializedFramebuffer);
+        }
+        let [width, height] = self.size();
+        let row = width * 4;
+        let padded = row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let device = self.graphics.device();
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Astrelis framebuffer readback"),
+            size: u64::from(padded) * u64::from(height),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(height),
+                },
+            },
+            texture.size(),
+        );
+        let submission = self.graphics.queue().submit([encoder.finish()]);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| drop(tx.send(result)));
+        let timeout = std::time::Duration::from_secs(10);
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: Some(timeout),
+            })
+            .map_err(|_| Error::ReadbackFailed)?;
+        rx.recv_timeout(timeout)
+            .map_err(|_| Error::ReadbackFailed)?
+            .map_err(|_| Error::ReadbackFailed)?;
+        let mapped = buffer
+            .slice(..)
+            .get_mapped_range()
+            .map_err(|_| Error::ReadbackFailed)?;
+        let mut pixels = Vec::with_capacity((row * height) as usize);
+        for line in mapped.chunks(padded as usize) {
+            pixels.extend_from_slice(&line[..row as usize]);
+        }
+        drop(mapped);
+        buffer.unmap();
+        if bgra {
+            for texel in pixels.as_chunks_mut::<4>().0 {
+                texel.swap(0, 2);
+            }
+        }
+        Ok(pixels)
+    }
+
     /// Returns a live sampled-color handle that follows resize and MSAA changes.
     /// Its default alpha interpretation is premultiplied, as produced by built-in renderers.
     /// Custom shaders must declare a different interpretation when appropriate.

@@ -232,6 +232,15 @@ pub enum Error {
     InvalidClip,
     /// A first surface pass tried to load contents, or finish had no surface clear pass.
     UninitializedFrame,
+    /// CPU readback needs `COPY_SRC` usage and an 8-bit RGBA or BGRA color format.
+    UnsupportedReadback {
+        /// Framebuffer color format.
+        format: wgpu::TextureFormat,
+        /// Framebuffer usages.
+        usage: wgpu::TextureUsages,
+    },
+    /// The device failed or timed out while mapping readback storage.
+    ReadbackFailed,
     /// Font loading, text layout or text interaction failed.
     Text(crate::TextError),
     /// Glyph atlas or text preparation failed; see [`crate::TextRenderError`].
@@ -343,6 +352,8 @@ impl fmt::Display for Error {
             Self::UninitializedFrame => {
                 f.write_str("a frame must start with a clear pass before presentation")
             }
+            Self::UnsupportedReadback { format, usage } => write!(f, "RGBA8 readback needs COPY_SRC and an 8-bit RGBA/BGRA format, got {format:?} with {usage:?}"),
+            Self::ReadbackFailed => f.write_str("the device failed or timed out mapping readback storage"),
             Self::Text(e) => e.fmt(f),
             Self::TextRender(e) => e.fmt(f),
         }
