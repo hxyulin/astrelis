@@ -2,6 +2,7 @@ use crate::{SurfaceSettings, WindowError, WindowMetrics};
 use astrelis::{Frame, FrameError, GraphicsContext, RenderFormat, RenderTarget};
 use std::sync::Arc;
 use winit::{
+    dpi::PhysicalSize,
     event::WindowEvent,
     window::{Window, WindowId},
 };
@@ -145,7 +146,20 @@ impl WindowContext {
                 Some(WindowMetrics::new(*size, self.metrics.scale_factor())?)
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                Some(WindowMetrics::new(self.window.inner_size(), *scale_factor)?)
+                // winit sends this before applying its suggested size, so inner_size()
+                // still reports the old size on Windows, and the writer cannot be read.
+                // Predict the platforms' suggestion: logical size is preserved unless
+                // maximized or fullscreen. A differing final size arrives as Resized.
+                let size = if self.window.is_maximized() || self.window.fullscreen().is_some() {
+                    self.metrics.physical_size()
+                } else {
+                    rescaled_size(
+                        self.metrics.physical_size(),
+                        self.metrics.scale_factor(),
+                        *scale_factor,
+                    )
+                };
+                Some(WindowMetrics::new(size, *scale_factor)?)
             }
             _ => None,
         };
@@ -319,5 +333,32 @@ impl WindowInfo<'_> {
     /// Surface replacement generation.
     pub fn surface_generation(&self) -> u64 {
         self.generation
+    }
+}
+
+/// Physical size preserving logical dimensions across a scale change, rounded
+/// like winit's default `ScaleFactorChanged` suggestion.
+fn rescaled_size(size: PhysicalSize<u32>, from: f64, to: f64) -> PhysicalSize<u32> {
+    size.to_logical::<f64>(from).to_physical(to)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scale_changes_preserve_logical_size() {
+        assert_eq!(
+            rescaled_size(PhysicalSize::new(1600, 1200), 2., 1.5),
+            PhysicalSize::new(1200, 900)
+        );
+        assert_eq!(
+            rescaled_size(PhysicalSize::new(801, 601), 1., 1.25),
+            PhysicalSize::new(1001, 751)
+        );
+        assert_eq!(
+            rescaled_size(PhysicalSize::new(0, 600), 1., 2.),
+            PhysicalSize::new(0, 1200)
+        );
     }
 }
