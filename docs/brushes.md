@@ -84,8 +84,8 @@ depends on stop count, covered pixels, and overdraw; CPU recording does not scan
 stops. Timing evidence is in [the brush performance report](performance/brushes.md).
 
 Paths keep their 64-byte placement records and prepared geometry. Shapes/lines
-add two coordinate-frame vectors for brush evaluation: 112 bytes instead of 80.
-This means up to 585 brushed primitive instances per 64 KiB page, versus 819
+add two coordinate-frame vectors for brush evaluation: 128 bytes instead of 96.
+This means up to 512 brushed primitive instances per 64 KiB page, versus 682
 ordinary ones, and up to 1,024 path instances. Smaller application device buffers
 reduce those capacities. CPU scratch and upload pages retain peak capacity for reuse.
 Ordinary color-only drawing does not create brush shaders/bindings or sample stops.

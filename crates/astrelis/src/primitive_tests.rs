@@ -690,3 +690,54 @@ fn zero_corner_radius_matches_sharp_rectangles_for_every_stroke_placement() {
         }
     });
 }
+
+#[test]
+fn independent_corner_radii_fill_and_outline_each_corner() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g, 1, false);
+        let mut shapes = ShapeRenderer::new(&g);
+        // Top-left 16, top-right sharp, bottom-right 8, bottom-left sharp.
+        let radii = crate::CornerRadii::new(16., 0., 8., 0.);
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut p = f.render_pass().begin().unwrap();
+            shapes
+                .draw_many(
+                    &mut p,
+                    &[
+                        ShapeDraw::rounded_rect_corners(Rect::new(0., 0., 32., 32.), radii, RED),
+                        ShapeDraw::rounded_rect_corners(Rect::new(32., 0., 32., 32.), radii, GREEN)
+                            .stroke(Stroke::new(2.).inside()),
+                        // Oversized radii scale together and stay within half the shorter side.
+                        ShapeDraw::rounded_rect_corners(
+                            Rect::new(0., 40., 64., 24.),
+                            crate::CornerRadii::new(48., 48., 0., 0.),
+                            BLUE,
+                        ),
+                    ],
+                )
+                .unwrap();
+        });
+        // Fill: rounded corners are open, sharp corners are covered.
+        assert_eq!(pixel(&bytes, 1, 1), [0; 4]);
+        assert_eq!(pixel(&bytes, 3, 3), [0; 4]);
+        assert_eq!(pixel(&bytes, 31, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 0, 31), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 31, 31), [0; 4]);
+        assert_eq!(pixel(&bytes, 28, 28), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 16, 16), [255, 0, 0, 255]);
+        // Outline: the sharp top-right corner stays square, rounded corners follow the arc.
+        assert_eq!(pixel(&bytes, 63, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 32, 31), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 33, 1), [0; 4]);
+        assert_eq!(pixel(&bytes, 48, 16), [0; 4]);
+        assert_eq!(pixel(&bytes, 48, 0), [0, 255, 0, 255]);
+        // Both top radii become 12, half the height; the bottom stays sharp.
+        assert_eq!(pixel(&bytes, 2, 42), [0; 4]);
+        assert_eq!(pixel(&bytes, 32, 41), [0, 0, 255, 255]);
+        assert_eq!(pixel(&bytes, 0, 63), [0, 0, 255, 255]);
+        assert_eq!(pixel(&bytes, 63, 63), [0, 0, 255, 255]);
+        assert!(errors.pop().await.is_none());
+    });
+}

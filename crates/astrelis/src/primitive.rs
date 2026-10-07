@@ -12,8 +12,12 @@ struct Parameters {
     span_style: [f32; 4],
     geometry: [f32; 4],
     color: [f32; 4],
+    // Per-corner radii [top-left, top-right, bottom-right, bottom-left] for rounded shapes.
+    radii: [f32; 4],
 }
-const PAGE_INSTANCES: usize = 819; // 80-byte records fit a 64 KiB upload page.
+const STRIDE: u64 = std::mem::size_of::<Parameters>() as u64;
+const BRUSH_STRIDE: u64 = std::mem::size_of::<BrushParameters>() as u64;
+const PAGE_INSTANCES: u64 = 64 * 1024 / STRIDE; // Records fit a 64 KiB upload page.
 
 trait PrimitiveData: Copy {
     fn parameters(self, viewport: [f32; 2]) -> Result<Parameters, Error>;
@@ -41,13 +45,14 @@ impl PrimitiveData for ShapeDraw {
         if width == 0. || height == 0. || self.stroke.is_some_and(|s| s.width == 0.) {
             return Ok(Parameters::zeroed());
         }
-        let (mut kind, mut radius) = match self.shape {
-            Shape::Rectangle => (0., 0.),
-            Shape::RoundedRectangle { radius } => {
-                let radius = radius.min(width.min(height) * 0.5);
-                (if radius == 0. { 0. } else { 1. }, radius)
+        let mut radius = 0.;
+        let (mut kind, mut radii) = match self.shape {
+            Shape::Rectangle => (0., [0.; 4]),
+            Shape::RoundedRectangle { radii } => {
+                let radii = radii.fitted(width, height);
+                (if radii == [0.; 4] { 0. } else { 1. }, radii)
             }
-            Shape::Ellipse => (2., 0.),
+            Shape::Ellipse => (2., [0.; 4]),
         };
         let half_size = [width * 0.5, height * 0.5];
         let mut bounds = half_size;
@@ -62,10 +67,9 @@ impl PrimitiveData for ShapeDraw {
             } else {
                 // Rectangle contours remain rectangles; rounded corner radii
                 // grow/shrink with the contour, clamping the inner radius to zero.
+                // Sharp corners stay sharp.
                 geometry = bounds;
-                if kind == 1. {
-                    radius += outset;
-                }
+                radii = radii.map(|r| if r > 0. { r + outset } else { 0. });
             }
             kind += 6.;
             stroke_width = stroke.width;
@@ -85,6 +89,7 @@ impl PrimitiveData for ShapeDraw {
             self.antialiasing,
             viewport,
         )
+        .map(|p| Parameters { radii, ..p })
         .ok_or(Error::InvalidShapeDraw)
     }
 }
@@ -269,6 +274,7 @@ fn pack(
             },
         ],
         color,
+        radii: [0.; 4],
     };
     if !bytemuck::cast_slice::<Parameters, f32>(&[p])
         .iter()
@@ -312,8 +318,8 @@ impl PrimitiveRenderer {
                 label: Some("Astrelis solid primitives"),
                 source: wgpu::ShaderSource::Wgsl(include_str!("primitive.wgsl").into()),
             });
-        let layout=VertexLayout {stride:80,step_mode:wgpu::VertexStepMode::Instance,
-            attributes:wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4,4=>Float32x4].to_vec()};
+        let layout=VertexLayout {stride:STRIDE,step_mode:wgpu::VertexStepMode::Instance,
+            attributes:wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4].to_vec()};
         Self {
             graphics: g.clone(),
             material: g.create_material(
@@ -334,9 +340,10 @@ impl PrimitiveRenderer {
             parameters: Vec::new(),
             brush_parameters: Vec::new(),
             brush_material: None,
-            page_capacity: (g.device().limits().max_buffer_size / 80)
-                .clamp(1, PAGE_INSTANCES as u64) as usize,
-            brush_page_capacity: (g.device().limits().max_buffer_size / 112).clamp(1, 585) as usize,
+            page_capacity: (g.device().limits().max_buffer_size / STRIDE).clamp(1, PAGE_INSTANCES)
+                as usize,
+            brush_page_capacity: (g.device().limits().max_buffer_size / BRUSH_STRIDE)
+                .clamp(1, 64 * 1024 / BRUSH_STRIDE) as usize,
         }
     }
     fn pipeline(&mut self, format: &RenderFormat) -> Result<wgpu::RenderPipeline, Error> {
@@ -356,14 +363,14 @@ impl PrimitiveRenderer {
     ) -> Result<wgpu::RenderPipeline, Error> {
         if brushed && self.brush_material.is_none() {
             let limits = self.graphics.device().limits();
-            if limits.max_vertex_attributes < 7
-                || limits.max_vertex_buffer_array_stride < 112
-                || limits.max_buffer_size < 112
-                || limits.max_inter_stage_shader_variables < 5
+            if limits.max_vertex_attributes < 8
+                || u64::from(limits.max_vertex_buffer_array_stride) < BRUSH_STRIDE
+                || limits.max_buffer_size < BRUSH_STRIDE
+                || limits.max_inter_stage_shader_variables < 6
             {
                 return Err(Error::UnsupportedBrushLimits);
             }
-            let layout=VertexLayout {stride:112,step_mode:wgpu::VertexStepMode::Instance,attributes:wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4].to_vec()};
+            let layout=VertexLayout {stride:BRUSH_STRIDE,step_mode:wgpu::VertexStepMode::Instance,attributes:wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4].to_vec()};
             self.brush_material = Some(crate::brush::material(
                 &self.graphics,
                 &self.material,
@@ -563,7 +570,7 @@ impl ShapeRenderer {
         self.bind_with_brush(pass, brush)?.draw(draw)
     }
     /// Validates the whole slice before recording ordered instances with one brush.
-    /// Uploads 112 bytes per placement; stops stay retained. Empty slices are a no-op.
+    /// Uploads 128 bytes per placement; stops stay retained. Empty slices are a no-op.
     pub fn draw_many_with_brush(
         &mut self,
         pass: &mut RenderPass<'_>,
@@ -694,7 +701,7 @@ impl LineRenderer {
         self.bind_with_brush(pass, brush)?.draw(draw)
     }
     /// Validates the whole slice before recording ordered instances with one brush.
-    /// Uploads 112 bytes per placement; stops stay retained. Empty slices are a no-op.
+    /// Uploads 128 bytes per placement; stops stay retained. Empty slices are a no-op.
     pub fn draw_many_with_brush(
         &mut self,
         pass: &mut RenderPass<'_>,

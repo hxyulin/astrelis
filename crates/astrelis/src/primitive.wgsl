@@ -4,11 +4,12 @@ struct Output {
     @location(1) @interpolate(flat) geometry: vec4<f32>,
     @location(2) @interpolate(flat) style: vec2<f32>,
     @location(3) @interpolate(flat) color: vec4<f32>,
+    @location(4) @interpolate(flat) radii: vec4<f32>,
 };
  fn primitive_vertex(index: u32,
     origin_axis_x: vec4<f32>, axis_y_min: vec4<f32>,
     span_style: vec4<f32>, geometry: vec4<f32>,
-    color: vec4<f32>) -> Output {
+    color: vec4<f32>, radii: vec4<f32>) -> Output {
     let corners = array(vec2(0.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 0.0),
                         vec2(1.0, 0.0), vec2(0.0, 1.0), vec2(1.0, 1.0));
     let local = axis_y_min.zw + corners[index] * span_style.xy;
@@ -19,11 +20,19 @@ struct Output {
     output.geometry = geometry;
     output.style = span_style.zw;
     output.color = color;
+    output.radii = radii;
     return output;
 }
 fn box_distance(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
     let q = abs(p) - half_size;
     return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0);
+}
+// Radii are [top-left, top-right, bottom-right, bottom-left] with Y down.
+fn rounded_box_distance(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
+    let top = select(radii.x, radii.y, p.x > 0.0);
+    let bottom = select(radii.w, radii.z, p.x > 0.0);
+    let radius = select(top, bottom, p.y > 0.0);
+    return box_distance(p, half_size - vec2(radius)) - radius;
 }
 // Closest-point distance to an ellipse, normalized by its major radius.
 // Solve the monotone Lagrange-multiplier equation with a bounded bisection.
@@ -90,7 +99,7 @@ fn shade_fragment_main(input: Output) -> vec4<f32> {
     var inner_bounds = vec2(0.0);
     var has_inner = false;
     if kind == 1u {
-        distance = box_distance(input.local, half_size - vec2(radius)) - radius;
+        distance = rounded_box_distance(input.local, half_size, input.radii);
     } else if kind == 2u {
         distance = length(input.local / max(half_size, vec2(0.000001))) - 1.0;
     } else if kind == 4u {
@@ -103,9 +112,9 @@ fn shade_fragment_main(input: Output) -> vec4<f32> {
         has_inner = all(inner_bounds > vec2(0.0));
         inner_distance = box_distance(input.local, inner_bounds);
         if kind == 7u {
-            distance = box_distance(input.local, half_size - vec2(radius)) - radius;
-            let inner_radius = min(max(radius - width, 0.0), min(inner_bounds.x, inner_bounds.y));
-            inner_distance = box_distance(input.local, inner_bounds - vec2(inner_radius)) - inner_radius;
+            distance = rounded_box_distance(input.local, half_size, input.radii);
+            let inner_radii = min(max(input.radii - vec4(width), vec4(0.0)), vec4(min(inner_bounds.x, inner_bounds.y)));
+            inner_distance = rounded_box_distance(input.local, inner_bounds, inner_radii);
         }
     } else if kind == 8u {
         let base_distance = ellipse_distance(input.local, half_size);
@@ -148,6 +157,6 @@ fn shade_fragment_main(input: Output) -> vec4<f32> {
 @vertex fn vertex_main(@builtin(vertex_index) index: u32,
     @location(0) origin_axis_x: vec4<f32>, @location(1) axis_y_min: vec4<f32>,
     @location(2) span_style: vec4<f32>, @location(3) geometry: vec4<f32>,
-    @location(4) color: vec4<f32>) -> Output {
-    return primitive_vertex(index,origin_axis_x,axis_y_min,span_style,geometry,color);
+    @location(4) color: vec4<f32>, @location(5) radii: vec4<f32>) -> Output {
+    return primitive_vertex(index,origin_axis_x,axis_y_min,span_style,geometry,color,radii);
 }

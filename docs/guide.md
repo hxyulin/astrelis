@@ -133,16 +133,21 @@ can be bound with `pass.set_bind_group(...)`.
 ## Shared 2D drawing semantics
 
 `Rect`, `DrawSpace`, and `Transform2D` describe geometry relative to the current
-viewport: X right, Y down, physical pixels by default. Normalized units scale each
+viewport: X right, Y down, physical pixels by default. `Rect` offers `intersect`,
+`union` and half-open `contains`; `Transform2D::invert` returns `None` for singular
+transforms, and `transform_bounds` gives a transformed rectangle's axis-aligned bounds. Normalized units scale each
 axis by the viewport size. Applications apply DPI scaling explicitly. Transforms
 act in the selected units before viewport conversion; `a.then(b)` applies `a`,
 then `b`. `TextureDraw::space` and `transform` use these same conventions.
 
-`ShapeDraw` describes filled or outlined rectangles, uniformly rounded rectangles,
-and ellipses. `.stroke(Stroke::new(width))` selects a centered outline; `.inside()`
+`ShapeDraw` describes filled or outlined rectangles, rounded rectangles, and
+ellipses. `ShapeDraw::rounded_rect` takes one radius; `rounded_rect_corners` takes
+`CornerRadii` clockwise from the top-left. Oversized radii scale together until
+adjacent corners fit, then each stays within half the shorter side; a zero corner
+stays sharp, also in outlines. `.stroke(Stroke::new(width))` selects a centered outline; `.inside()`
 and `.outside()` place all of its width on the chosen side of the boundary.
-Rectangle outlines have sharp corners; rounded rectangles offset their corner
-radii, clamping collapsed inner radii to zero. Ellipse outlines use a distance
+Rectangle outlines have sharp corners; rounded rectangles offset each nonzero corner
+radius, clamping collapsed inner radii to zero. Ellipse outlines use a distance
 offset of the original curve, with finite-precision shader calculations.
 Width uses the selected draw units and transforms with geometry. A stroke that
 consumes the interior becomes solid; zero width or zero extents draw nothing.
@@ -240,7 +245,7 @@ use `bind_with_brush` / `draw_many_with_brush`, preserving input order. They own
 bind group zero, which custom GPU work must establish again when needed.
 
 Stops upload once; path placements still upload 64 bytes, brushed shape/line
-placements upload 112 bytes. Existing color-only drawing keeps its smaller records
+placements upload 128 bytes. Existing color-only drawing keeps its smaller records
 and avoids gradient sampling. Brush creation checks fragment storage support and
 device buffer limits. There is no fixed stop cap, color-ramp texture, or hidden
 offscreen pass. Changing immutable brush settings creates a new brush resource.
