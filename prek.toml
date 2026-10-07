@@ -3,8 +3,8 @@
 
 default_install_hook_types = ["pre-commit", "pre-push"]
 
-# Benchmark output and third-party license texts are kept byte for byte.
-exclude = '^(docs/performance/.*\.(csv|log)|crates/astrelis/tests/fonts/.*-OFL\.(txt|md))$'
+# Benchmark inputs and output, and third-party license texts are kept byte for byte.
+exclude = '^(docs/performance/.*\.(csv|log|rs)|crates/astrelis/tests/fonts/.*-OFL\.(txt|md))$'
 
 [[repos]]
 repo = "builtin"
