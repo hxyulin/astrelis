@@ -181,6 +181,7 @@ impl<'target, 'window> Frame<'target, 'window> {
             ..Default::default()
         });
         let encoder = create_encoder(&target.graphics);
+        let uploads = crate::uploads::DrawUploads::new(&target.graphics.upload_pool);
         Self {
             encoder,
             target: FrameTarget::Surface {
@@ -191,19 +192,20 @@ impl<'target, 'window> Frame<'target, 'window> {
             },
             initialized: Arc::new(AtomicBool::new(false)),
             samples_initialized: Arc::new(AtomicBool::new(false)),
-            uploads: crate::uploads::DrawUploads::default(),
+            uploads,
             writes: AttachmentWrites::default(),
         }
     }
 
     pub(crate) fn for_framebuffer(target: &'target mut Framebuffer) -> Self {
         let encoder = create_encoder(&target.graphics);
+        let uploads = crate::uploads::DrawUploads::new(&target.graphics.upload_pool);
         Self {
             encoder,
             target: FrameTarget::Framebuffer(target),
             initialized: Arc::new(AtomicBool::new(false)),
             samples_initialized: Arc::new(AtomicBool::new(false)),
-            uploads: crate::uploads::DrawUploads::default(),
+            uploads,
             writes: AttachmentWrites::default(),
         }
     }
