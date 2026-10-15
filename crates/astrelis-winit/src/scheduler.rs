@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 pub(crate) struct Schedule {
     pub(crate) mode: RedrawMode,
     dirty: bool,
+    pub(super) invalidations: u64,
     queued: bool,
     deadline: Option<Instant>,
     retry: Option<Instant>,
@@ -16,6 +17,7 @@ impl Default for Schedule {
         Self {
             mode: RedrawMode::OnDemand,
             dirty: true,
+            invalidations: 0,
             queued: false,
             deadline: None,
             retry: None,
@@ -26,6 +28,7 @@ impl Default for Schedule {
 }
 impl Schedule {
     pub(crate) fn invalidate(&mut self) {
+        self.invalidations = self.invalidations.wrapping_add(1);
         self.dirty = true;
         self.blocked = false;
     }

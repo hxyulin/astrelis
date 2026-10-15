@@ -54,6 +54,7 @@ struct ManagedWindow {
     schedule: Schedule,
     closing: bool,
     was_eligible: bool,
+    trace: Option<crate::trace::FrameTrace>,
 }
 enum Operation {
     Created(WindowId),
@@ -77,6 +78,7 @@ impl State {
             id,
             ManagedWindow {
                 was_eligible: context.can_present(),
+                trace: crate::trace::FrameTrace::from_env(),
                 context,
                 schedule: Schedule::default(),
                 closing: false,
@@ -370,6 +372,10 @@ impl<H: Handler> Driver<'_, H> {
             }
             return;
         }
+        let trace_start = self.state.windows[&id]
+            .trace
+            .as_ref()
+            .map(|_| Instant::now());
         let action = {
             profiling::scope!("astrelis_winit::prepare");
             self.call(event_loop, Callback::Prepare, Some(id), |h, cx| {
@@ -386,9 +392,12 @@ impl<H: Handler> Driver<'_, H> {
             }
             return;
         }
+        let prepared_at = trace_start.map(|_| Instant::now());
+        let mut recorded_at = prepared_at;
         // These disjoint field borrows avoid cloning Arc/window-format metadata.
         let w = self.state.windows.get_mut(&id).expect("ready window");
         let acquired = w.context.info_and_frame();
+        let acquired_at = trace_start.map(|_| Instant::now());
         let outcome = match acquired {
             Ok((info, mut frame)) => {
                 let rendered = {
@@ -397,6 +406,7 @@ impl<H: Handler> Driver<'_, H> {
                 };
                 match rendered {
                     Ok(()) => {
+                        recorded_at = trace_start.map(|_| Instant::now());
                         info.window().pre_present_notify();
                         frame.finish().map_err(|source| match source {
                             // The surface was never cleared: a contract violation by
@@ -420,6 +430,21 @@ impl<H: Handler> Driver<'_, H> {
         };
         match outcome {
             Ok(submission) => {
+                if let Some(trace) = self
+                    .state
+                    .windows
+                    .get_mut(&id)
+                    .and_then(|w| w.trace.as_mut())
+                {
+                    trace.submitted(
+                        id,
+                        trace_start.unwrap(),
+                        prepared_at.unwrap(),
+                        acquired_at.unwrap(),
+                        recorded_at.unwrap(),
+                        Instant::now(),
+                    );
+                }
                 profiling::finish_frame!();
                 self.state
                     .windows
@@ -434,6 +459,9 @@ impl<H: Handler> Driver<'_, H> {
             }
             Err(RunError::Acquisition { source, .. }) => {
                 let w = self.state.windows.get_mut(&id).expect("acquisition window");
+                if let Some(trace) = &mut w.trace {
+                    trace.retry();
+                }
                 match source {
                     FrameError::Retry => w
                         .schedule
@@ -501,6 +529,21 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
         if self.failure.is_some() || event_loop.exiting() {
             return;
         }
+        let trace_input = self
+            .state
+            .windows
+            .get(&id)
+            .filter(|w| w.trace.is_some())
+            .and_then(|w| {
+                matches!(
+                    &event,
+                    WindowEvent::KeyboardInput { .. }
+                        | WindowEvent::Ime(_)
+                        | WindowEvent::MouseInput { .. }
+                        | WindowEvent::MouseWheel { .. }
+                )
+                .then(|| (Instant::now(), w.schedule.invalidations))
+            });
         let redraw = matches!(event, WindowEvent::RedrawRequested);
         let close = matches!(event, WindowEvent::CloseRequested);
         let destroyed = matches!(event, WindowEvent::Destroyed);
@@ -511,6 +554,9 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
         };
         if let Some(w) = self.state.windows.get_mut(&id).filter(|w| !w.closing) {
             if redraw {
+                if let Some(trace) = &mut w.trace {
+                    trace.received(Instant::now());
+                }
                 w.schedule.begin_redraw();
             }
             if let Err(source) = w.context.process_event(&event) {
@@ -530,6 +576,13 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
         self.drain(event_loop);
         if self.failure.is_some() || event_loop.exiting() {
             return;
+        }
+        if let Some((start, serial)) = trace_input
+            && let Some(w) = self.state.windows.get_mut(&id)
+            && w.schedule.invalidations != serial
+            && let Some(trace) = &mut w.trace
+        {
+            trace.input(start, Instant::now());
         }
         if close && self.state.windows.get(&id).is_some_and(|w| !w.closing) {
             let decision = self.call(event_loop, Callback::CloseRequested, Some(id), |h, cx| {
@@ -551,6 +604,7 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
             self.redraw(event_loop, id);
         }
     }
+
     fn user_event(&mut self, event_loop: &ActiveEventLoop, message: H::Message) {
         if self.failure.is_some() || event_loop.exiting() {
             return;
@@ -584,6 +638,9 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
             if std::mem::take(&mut w.context.availability_invalidated) || w.was_eligible != eligible
             {
                 w.was_eligible = eligible;
+                if let Some(trace) = &mut w.trace {
+                    trace.availability_changed();
+                }
                 w.schedule.availability_changed();
             }
             if std::mem::take(&mut w.context.invalidated) {
@@ -591,6 +648,9 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
             }
             w.schedule.advance(now);
             if w.schedule.request_native(now, eligible) {
+                if let Some(trace) = &mut w.trace {
+                    trace.requested(now);
+                }
                 w.context.window().request_redraw();
             }
             if let Some(at) = w.schedule.wake(eligible) {

@@ -86,6 +86,8 @@ mod scheduler;
     any(target_os = "macos", target_os = "windows", target_os = "linux")
 ))]
 mod scheduler_tests;
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+mod trace;
 mod window;
 
 pub use astrelis;
