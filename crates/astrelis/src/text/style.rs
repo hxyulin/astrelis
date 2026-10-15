@@ -89,6 +89,33 @@ impl TextShaping {
     }
 }
 
+/// Minimum vertical metrics for each laid-out line. Useful when a horizontal
+/// slice must preserve the baseline of a larger logical line.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextLineMetrics {
+    /// Minimum ascent above the baseline, in local units.
+    pub ascent: f32,
+    /// Minimum descent below the baseline, in local units.
+    pub descent: f32,
+    /// Minimum line-box height, in local units; leading is centered.
+    pub height: f32,
+}
+impl TextLineMetrics {
+    pub(crate) fn validate(self) -> Result<(), TextError> {
+        if !self.ascent.is_finite()
+            || self.ascent < 0.
+            || !self.descent.is_finite()
+            || self.descent < 0.
+            || !self.height.is_finite()
+            || self.height <= 0.
+            || !(self.ascent + self.descent).is_finite()
+        {
+            return Err(TextError::InvalidStyle);
+        }
+        Ok(())
+    }
+}
+
 /// Wrapping policy. Breaks are calculated by the shaping/layout backend.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextWrap {

@@ -725,3 +725,59 @@ fn shaping_strategy_changes_rebuild_paragraphs_and_retain_old_snapshots() {
     assert_eq!(advanced.text(), "office\nAV");
     assert_eq!(buffer.measure(&mut fonts, None).unwrap(), restored.size());
 }
+
+#[test]
+fn minimum_line_metrics_preserve_baselines_decorations_and_measurement() {
+    let mut fonts = system();
+    let mut buffer = TextBuffer::new();
+    buffer
+        .set_rich_text(
+            "hello world\nsecond line",
+            style(),
+            vec![TextSpan::new(0..5).strikethrough()],
+        )
+        .unwrap();
+    buffer.set_width(Some(80.)).unwrap();
+    let natural = buffer.layout(&mut fonts).unwrap();
+    let minimum = TextLineMetrics {
+        ascent: 40.,
+        descent: 10.,
+        height: 64.,
+    };
+    buffer.set_minimum_line_metrics(Some(minimum)).unwrap();
+    let expanded = buffer.layout(&mut fonts).unwrap();
+    assert_eq!(expanded.lines().len(), natural.lines().len());
+    for (old, new) in natural.lines().iter().zip(expanded.lines()) {
+        assert_eq!(new.height, 64.);
+        assert_eq!(new.baseline - new.top, 47.);
+        let delta = new.baseline - old.baseline;
+        for (a, b) in natural.glyphs()[old.glyph_range.clone()]
+            .iter()
+            .zip(&expanded.glyphs()[new.glyph_range.clone()])
+        {
+            assert_eq!(a.position[0], b.position[0]);
+            assert!((a.position[1] + delta - b.position[1]).abs() < 0.0001);
+        }
+    }
+    for (old, new) in natural.decorations().iter().zip(expanded.decorations()) {
+        let delta =
+            expanded.lines()[new.line_index].baseline - natural.lines()[old.line_index].baseline;
+        assert!((old.rect.y + delta - new.rect.y).abs() < 0.0001);
+    }
+    expanded.prepare_interaction().unwrap();
+    assert_eq!(expanded.caret(TextPosition::new(0)).unwrap().height, 64.);
+    assert_eq!(buffer.measure(&mut fonts, Some(40.)).unwrap()[1] % 64., 0.);
+    buffer.set_minimum_line_metrics(Some(minimum)).unwrap();
+    assert!(Arc::ptr_eq(&expanded, &buffer.layout(&mut fonts).unwrap()));
+    assert!(
+        buffer
+            .set_minimum_line_metrics(Some(TextLineMetrics {
+                height: f32::NAN,
+                ..minimum
+            }))
+            .is_err()
+    );
+    assert!(Arc::ptr_eq(&expanded, &buffer.layout(&mut fonts).unwrap()));
+    buffer.set_minimum_line_metrics(None).unwrap();
+    assert_eq!(buffer.layout(&mut fonts).unwrap().lines(), natural.lines());
+}

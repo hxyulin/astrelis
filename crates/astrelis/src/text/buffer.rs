@@ -1,6 +1,7 @@
 use super::{
     FontId, TextAlign, TextDecoration, TextDecorationKind, TextError, TextFont, TextGlyph,
-    TextLayout, TextLine, TextShaping, TextSpan, TextStyle, TextSystem, TextWrap, cosmic,
+    TextLayout, TextLine, TextLineMetrics, TextShaping, TextSpan, TextStyle, TextSystem, TextWrap,
+    cosmic,
     span::{Segment, paragraph_attrs, segments},
 };
 use crate::Rect;
@@ -31,6 +32,7 @@ pub struct TextBuffer {
     wrap: TextWrap,
     align: TextAlign,
     shaping: TextShaping,
+    minimum_line_metrics: Option<TextLineMetrics>,
     backend: cosmic::Buffer,
     evaluated_system: Option<(u64, u64)>,
     text_dirty: bool,
@@ -64,6 +66,7 @@ impl TextBuffer {
             wrap: TextWrap::default(),
             align: TextAlign::default(),
             shaping: TextShaping::default(),
+            minimum_line_metrics: None,
             evaluated_system: None,
             text_dirty: true,
             layout_dirty: true,
@@ -158,6 +161,22 @@ impl TextBuffer {
             self.layout_dirty = true;
         }
     }
+    /// Sets minimum ascent/descent/height for every visual line without reshaping.
+    /// `None` restores natural metrics. Validation is atomic, and unchanged input
+    /// retains the cached snapshot. Glyph and decoration baselines move together.
+    pub fn set_minimum_line_metrics(
+        &mut self,
+        metrics: Option<TextLineMetrics>,
+    ) -> Result<(), TextError> {
+        if let Some(metrics) = metrics {
+            metrics.validate()?;
+        }
+        if self.minimum_line_metrics != metrics {
+            self.minimum_line_metrics = metrics;
+            self.layout_dirty = true;
+        }
+        Ok(())
+    }
     /// Selects a finite nonnegative width or `None`. Zero width is supported;
     /// indivisible glyph clusters can exceed it. This does not clip or limit height.
     pub fn set_width(&mut self, width: Option<f32>) -> Result<(), TextError> {
@@ -238,7 +257,7 @@ impl TextBuffer {
                 line.set_align(self.align.backend());
             }
         }
-        let layout = if system.backend.db().is_empty() {
+        let mut layout = if system.backend.db().is_empty() {
             // cosmic-text requests a default face even for empty paragraphs.
             // Blank text needs only line boxes and must work without a font.
             blank_snapshot(
@@ -262,6 +281,41 @@ impl TextBuffer {
                     .map_or(0, |layout| layout.glyphs().len().min(self.text.len())),
             )?
         };
+        if let Some(minimum) = self.minimum_line_metrics {
+            let mut top = 0.;
+            let mut deltas = Vec::with_capacity(layout.lines.len());
+            for line in &mut layout.lines {
+                let ascent = line.ascent.max(minimum.ascent);
+                let descent = line.descent.max(minimum.descent);
+                let height = line.height.max(minimum.height);
+                let baseline = top + (height - ascent - descent) * 0.5 + ascent;
+                let delta = baseline - line.baseline;
+                if !baseline.is_finite() || !(top + height).is_finite() {
+                    return Err(TextError::LayoutOverflow);
+                }
+                for glyph in &mut layout.glyphs[line.glyph_range.clone()] {
+                    glyph.position[1] += delta;
+                    glyph.advance_origin[1] += delta;
+                    if !glyph.position[1].is_finite() || !glyph.advance_origin[1].is_finite() {
+                        return Err(TextError::LayoutOverflow);
+                    }
+                }
+                deltas.push(delta);
+                line.top = top;
+                line.baseline = baseline;
+                line.ascent = ascent;
+                line.descent = descent;
+                line.height = height;
+                top += height;
+            }
+            for decoration in &mut layout.decorations {
+                decoration.rect.y += deltas[decoration.line_index];
+                if !decoration.rect.y.is_finite() || !decoration.rect.bottom().is_finite() {
+                    return Err(TextError::LayoutOverflow);
+                }
+            }
+            layout.size[1] = top;
+        }
         let layout = Arc::new(layout);
         self.cached = Some(layout.clone());
         self.measured.clear();
@@ -306,7 +360,11 @@ impl TextBuffer {
         let mut size = [0f32, 0f32];
         for line in &self.backend.lines {
             let Some(shape) = line.shape_opt() else {
-                size[1] += metrics.line_height;
+                size[1] += self
+                    .minimum_line_metrics
+                    .map_or(metrics.line_height, |minimum| {
+                        metrics.line_height.max(minimum.height)
+                    });
                 continue;
             };
             scratch.lines.clear();
@@ -323,7 +381,10 @@ impl TextBuffer {
             );
             for laid in &scratch.lines {
                 size[0] = size[0].max(laid.w);
-                size[1] += laid.line_height_opt.unwrap_or(metrics.line_height);
+                size[1] += laid.line_height_opt.unwrap_or(metrics.line_height).max(
+                    self.minimum_line_metrics
+                        .map_or(0., |minimum| minimum.height),
+                );
             }
         }
         if self.measured.len() == MEASURE_CACHE {

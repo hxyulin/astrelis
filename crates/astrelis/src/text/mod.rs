@@ -18,6 +18,11 @@
 //! for text or fonts requiring those operations. Printable ASCII interaction
 //! indexing is accelerated independently of the shaping strategy.
 //!
+//! Horizontal slices can preserve offscreen typography with
+//! [`TextBuffer::set_minimum_line_metrics`] and [`TextLineMetrics`]. Minimum
+//! ascent/descent/height move glyph and decoration baselines together without
+//! changing horizontal shaping, and apply consistently to measurement and interaction.
+//!
 //! All metrics use application-selected local units, X right/Y down. Layout does
 //! not apply DPI, rasterize glyphs, or compute pixel ink bounds. Source clusters are
 //! UTF-8 byte ranges, not character indices or caret boundaries. Glyphs can combine
@@ -135,7 +140,10 @@ pub use renderer::{
     TextRenderer, TextRendererOptions, TextRendererStats, TextTrim,
 };
 pub use span::TextSpan;
-pub use style::{FontFamily, FontSlant, FontStretch, TextAlign, TextShaping, TextStyle, TextWrap};
+pub use style::{
+    FontFamily, FontSlant, FontStretch, TextAlign, TextLineMetrics, TextShaping, TextStyle,
+    TextWrap,
+};
 pub use system::{FontId, FontInfo, TextSystem};
 
 /// Font loading, paragraph layout, or text interaction failure. Rejected setters leave the buffer unchanged.

@@ -499,9 +499,9 @@ pub use text::{
     FontFamily, FontId, FontInfo, FontSlant, FontStretch, MtsdfOptions, PreparedText,
     SelectionRects, TextAffinity, TextAlign, TextBuffer, TextCaret, TextDecoration,
     TextDecorationKind, TextDraw, TextError, TextFont, TextGlyph, TextLayout, TextLine,
-    TextPosition, TextPreparation, TextRasterOptions, TextRenderError, TextRenderer,
-    TextRendererOptions, TextRendererStats, TextShaping, TextSpan, TextStyle, TextSystem, TextTrim,
-    TextWrap,
+    TextLineMetrics, TextPosition, TextPreparation, TextRasterOptions, TextRenderError,
+    TextRenderer, TextRendererOptions, TextRendererStats, TextShaping, TextSpan, TextStyle,
+    TextSystem, TextTrim, TextWrap,
 };
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{
