@@ -81,3 +81,7 @@ harness = false
 [[bench]]
 name = "image_alpha"
 harness = false
+
+[[bench]]
+name = "rich_text"
+harness = false

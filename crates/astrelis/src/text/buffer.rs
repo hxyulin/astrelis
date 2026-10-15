@@ -1,6 +1,6 @@
 use super::{
     FontId, TextAlign, TextDecoration, TextDecorationKind, TextError, TextFont, TextGlyph,
-    TextLayout, TextLine, TextSpan, TextStyle, TextSystem, TextWrap, cosmic,
+    TextLayout, TextLine, TextShaping, TextSpan, TextStyle, TextSystem, TextWrap, cosmic,
     span::{Segment, paragraph_attrs, segments},
 };
 use crate::Rect;
@@ -30,6 +30,7 @@ pub struct TextBuffer {
     width: Option<f32>,
     wrap: TextWrap,
     align: TextAlign,
+    shaping: TextShaping,
     backend: cosmic::Buffer,
     evaluated_system: Option<(u64, u64)>,
     text_dirty: bool,
@@ -62,6 +63,7 @@ impl TextBuffer {
             width: None,
             wrap: TextWrap::default(),
             align: TextAlign::default(),
+            shaping: TextShaping::default(),
             evaluated_system: None,
             text_dirty: true,
             layout_dirty: true,
@@ -142,6 +144,20 @@ impl TextBuffer {
             self.style = style;
         }
     }
+    /// Current CPU shaping strategy.
+    pub fn shaping(&self) -> TextShaping {
+        self.shaping
+    }
+    /// Selects CPU shaping. Changing strategy rebuilds backend paragraphs on the
+    /// next evaluation; existing snapshots remain valid. Identical input is free.
+    pub fn set_shaping(&mut self, shaping: TextShaping) {
+        if self.shaping != shaping {
+            self.shaping = shaping;
+            self.evaluated_system = None;
+            self.text_dirty = true;
+            self.layout_dirty = true;
+        }
+    }
     /// Selects a finite nonnegative width or `None`. Zero width is supported;
     /// indivisible glyph clusters can exceed it. This does not clip or limit height.
     pub fn set_width(&mut self, width: Option<f32>) -> Result<(), TextError> {
@@ -195,7 +211,7 @@ impl TextBuffer {
             self.backend.set_text(
                 &self.text,
                 &self.style.attrs(),
-                cosmic::Shaping::Advanced,
+                self.shaping.backend(),
                 self.align.backend(),
             );
             if !self.segments.is_empty() {
@@ -204,6 +220,7 @@ impl TextBuffer {
                     &self.text,
                     &self.style,
                     self.align,
+                    self.shaping,
                     &self.segments,
                 );
             }
@@ -213,6 +230,7 @@ impl TextBuffer {
                 &self.text,
                 &self.style,
                 self.align,
+                self.shaping,
                 &self.segments,
             );
         } else {
@@ -330,6 +348,7 @@ fn update_paragraphs(
     text: &str,
     style: &TextStyle,
     align: TextAlign,
+    shaping: TextShaping,
     segments: &[Segment],
 ) {
     let mut ranges: Vec<_> = cosmic::LineIter::new(text).collect();
@@ -379,7 +398,7 @@ fn update_paragraphs(
                     text,
                     ending,
                     cosmic::AttrsList::new(&attrs),
-                    cosmic::Shaping::Advanced,
+                    shaping.backend(),
                 )
             }),
         );

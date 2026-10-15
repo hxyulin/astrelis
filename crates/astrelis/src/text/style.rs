@@ -69,6 +69,26 @@ impl FontSlant {
 /// Requested width class from the backend's font matching types.
 pub use cosmic::Stretch as FontStretch;
 
+/// CPU shaping strategy. Advanced shaping remains the default.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextShaping {
+    /// OpenType shaping and font fallback for general Unicode text.
+    #[default]
+    Advanced,
+    /// Direct character-to-glyph mapping without OpenType substitutions or
+    /// positioning. Use only when the caller controls the text and font, such as
+    /// printable ASCII in a known monospace face. Complex scripts need Advanced.
+    Basic,
+}
+impl TextShaping {
+    pub(crate) fn backend(self) -> cosmic::Shaping {
+        match self {
+            Self::Advanced => cosmic::Shaping::Advanced,
+            Self::Basic => cosmic::Shaping::Basic,
+        }
+    }
+}
+
 /// Wrapping policy. Breaks are calculated by the shaping/layout backend.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TextWrap {

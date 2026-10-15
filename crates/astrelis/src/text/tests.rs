@@ -701,3 +701,27 @@ fn measurement_matches_configured_widths_without_replacing_the_snapshot() {
         [0., 56.]
     );
 }
+
+#[test]
+fn shaping_strategy_changes_rebuild_paragraphs_and_retain_old_snapshots() {
+    let mut fonts = system();
+    let mut buffer = TextBuffer::new();
+    buffer.set_text("office\nAV", style()).unwrap();
+    assert_eq!(buffer.shaping(), TextShaping::Advanced);
+    let advanced = buffer.layout(&mut fonts).unwrap();
+    buffer.set_shaping(TextShaping::Basic);
+    let basic = buffer.layout(&mut fonts).unwrap();
+    assert!(!Arc::ptr_eq(&advanced, &basic));
+    assert_eq!(basic.glyphs().len(), 8);
+    assert!(advanced.glyphs().len() < basic.glyphs().len());
+    buffer.set_shaping(TextShaping::Basic);
+    assert!(Arc::ptr_eq(&basic, &buffer.layout(&mut fonts).unwrap()));
+    buffer.set_text("office\nAV\nx", style()).unwrap();
+    let inserted = buffer.layout(&mut fonts).unwrap();
+    assert_eq!(inserted.glyphs().len(), 9);
+    buffer.set_shaping(TextShaping::Advanced);
+    let restored = buffer.layout(&mut fonts).unwrap();
+    assert!(restored.glyphs().len() < inserted.glyphs().len());
+    assert_eq!(advanced.text(), "office\nAV");
+    assert_eq!(buffer.measure(&mut fonts, None).unwrap(), restored.size());
+}

@@ -50,18 +50,18 @@ pub struct TextCaret {
     /// Line-box height, independent of glyph ink and raster density.
     pub height: f32,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 struct Cell {
     source: Range<usize>,
     edges: [f32; 2],
     line: usize,
 }
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 struct Line {
     cells: Range<usize>,
     stops: Range<usize>,
 }
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(super) struct Interaction {
     boundaries: Vec<usize>,
     cells: Vec<Cell>,
@@ -79,12 +79,26 @@ struct Group {
 }
 impl Interaction {
     fn build(layout: &TextLayout) -> Result<Self, TextError> {
-        let mut boundaries: Vec<_> = layout
+        let dense = layout
             .text()
-            .grapheme_indices(true)
-            .map(|(i, _)| i)
-            .collect();
-        boundaries.push(layout.text().len());
+            .bytes()
+            .all(|byte| (b' '..=b'~').contains(&byte));
+        Self::build_index(layout, dense)
+    }
+
+    fn build_index(layout: &TextLayout, dense: bool) -> Result<Self, TextError> {
+        // Printable ASCII has exactly one grapheme per byte, independently of
+        // shaping/ligatures. Cluster endpoints are direct boundary indices.
+        let mut boundaries: Vec<_> = if dense {
+            (0..=layout.text().len()).collect()
+        } else {
+            layout
+                .text()
+                .grapheme_indices(true)
+                .map(|(i, _)| i)
+                .chain([layout.text().len()])
+                .collect()
+        };
         // Preserve the backend's paired LFCR paragraph break as one boundary too.
         let breaks: Vec<_> = layout
             .lines
@@ -109,10 +123,16 @@ impl Interaction {
                 if glyph.cluster.is_empty() {
                     continue;
                 }
-                let begin = boundaries
-                    .partition_point(|&b| b <= glyph.cluster.start)
-                    .saturating_sub(1);
-                let end = boundaries.partition_point(|&b| b < glyph.cluster.end);
+                let (begin, end) = if dense {
+                    (glyph.cluster.start, glyph.cluster.end)
+                } else {
+                    (
+                        boundaries
+                            .partition_point(|&b| b <= glyph.cluster.start)
+                            .saturating_sub(1),
+                        boundaries.partition_point(|&b| b < glyph.cluster.end),
+                    )
+                };
                 if begin >= end {
                     continue;
                 }
@@ -487,5 +507,38 @@ impl Iterator for SelectionRects<'_> {
             self.cursor = 0;
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod ascii_tests {
+    use super::*;
+    use crate::{TextBuffer, TextStyle, TextSystem, TextWrap};
+    #[test]
+    fn dense_ascii_index_matches_general_index_including_ligatures_and_wraps() {
+        let mut fonts = TextSystem::new();
+        fonts
+            .load_font(include_bytes!("../../tests/fonts/SourceSans3-Regular.otf"))
+            .unwrap();
+        for text in [
+            "",
+            "office ffi AV",
+            "  spaces and punctuation !?  ",
+            "abcdefghij",
+        ] {
+            for width in [None, Some(30.)] {
+                let mut buffer = TextBuffer::new();
+                buffer
+                    .set_text(text, TextStyle::new().family("Source Sans 3"))
+                    .unwrap();
+                buffer.set_width(width).unwrap();
+                buffer.set_wrap(TextWrap::WordOrGlyph);
+                let layout = buffer.layout(&mut fonts).unwrap();
+                assert_eq!(
+                    Interaction::build(&layout).unwrap(),
+                    Interaction::build_index(&layout, false).unwrap()
+                );
+            }
+        }
     }
 }

@@ -1,4 +1,4 @@
-//! Font loading, advanced CPU shaping/layout, and explicit GPU coverage/color and distance-field text.
+//! Font loading, CPU shaping/layout, and explicit GPU coverage/color and distance-field text.
 //!
 //! Rich text uses one [`TextBuffer`] with [`TextSpan`] overrides over byte ranges;
 //! span colors and underline/strikethrough decorations render in a single draw.
@@ -11,6 +11,12 @@
 //! changed paragraphs; snapshots still traverse the full document. Snapshots own
 //! their source text and font references, so they survive later
 //! edits, font loading, and dropping the system. No GPU initialization is required.
+//!
+//! Advanced shaping is the default. [`TextBuffer::set_shaping`] can opt controlled
+//! text into [`TextShaping::Basic`], which maps characters directly to glyphs and
+//! skips OpenType substitution/positioning. Callers must retain advanced shaping
+//! for text or fonts requiring those operations. Printable ASCII interaction
+//! indexing is accelerated independently of the shaping strategy.
 //!
 //! All metrics use application-selected local units, X right/Y down. Layout does
 //! not apply DPI, rasterize glyphs, or compute pixel ink bounds. Source clusters are
@@ -129,7 +135,7 @@ pub use renderer::{
     TextRenderer, TextRendererOptions, TextRendererStats, TextTrim,
 };
 pub use span::TextSpan;
-pub use style::{FontFamily, FontSlant, FontStretch, TextAlign, TextStyle, TextWrap};
+pub use style::{FontFamily, FontSlant, FontStretch, TextAlign, TextShaping, TextStyle, TextWrap};
 pub use system::{FontId, FontInfo, TextSystem};
 
 /// Font loading, paragraph layout, or text interaction failure. Rejected setters leave the buffer unchanged.
