@@ -90,10 +90,23 @@ impl Painter {
     /// Does not shape text, rasterize glyphs, or upload prepared text geometry.
     /// Image variants also depend on a source binding; use [`Self::prepare_image`].
     pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), Error> {
-        self.shapes.prepare(format)?;
-        self.lines.prepare(format)?;
-        self.paths.prepare(format)?;
-        self.text.prepare(format)
+        profiling::scope!("astrelis::Painter::prepare");
+        {
+            profiling::scope!("astrelis::prepare_shape_pipeline");
+            self.shapes.prepare(format)?;
+        }
+        {
+            profiling::scope!("astrelis::prepare_line_pipeline");
+            self.lines.prepare(format)?;
+        }
+        {
+            profiling::scope!("astrelis::prepare_path_pipeline");
+            self.paths.prepare(format)?;
+        }
+        {
+            profiling::scope!("astrelis::prepare_text_pipelines");
+            self.text.prepare(format)
+        }
     }
     /// Warms brush shading for shapes, lines, and paths in these attachments/MSAA.
     /// Brushes are created separately on GraphicsContext; this uploads no stops or geometry.

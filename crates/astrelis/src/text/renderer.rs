@@ -836,8 +836,14 @@ impl TextRenderer {
     /// Prepares coverage and MTSDF pipelines without shaping or uploading glyphs.
     pub fn prepare(&mut self, format: &RenderFormat) -> Result<(), Error> {
         let color = format.single_color()?;
-        self.pipeline(color, format.sample_count, format.depth_stencil, false)?;
-        self.pipeline(color, format.sample_count, format.depth_stencil, true)?;
+        {
+            profiling::scope!("astrelis::prepare_coverage_text_pipeline");
+            self.pipeline(color, format.sample_count, format.depth_stencil, false)?;
+        }
+        {
+            profiling::scope!("astrelis::prepare_mtsdf_text_pipeline");
+            self.pipeline(color, format.sample_count, format.depth_stencil, true)?;
+        }
         Ok(())
     }
     /// Prepares a surface target's attachment variants, checking device identity.

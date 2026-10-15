@@ -435,6 +435,8 @@ pub(crate) fn pipeline<'cache>(
         Entry::Occupied(entry) => return Ok(entry.into_mut()),
         Entry::Vacant(entry) => entry,
     };
+    // Cache hits return above; only new variants pay for these timing scopes.
+    profiling::scope!("astrelis::create_mesh_pipeline");
     let features = crate::target::format_features(graphics, format);
     if format.is_depth_stencil_format()
         || format.is_multi_planar_format()
@@ -493,6 +495,7 @@ pub(crate) fn pipeline<'cache>(
         .iter()
         .map(|l| Some(l.as_wgpu()))
         .collect();
+    profiling::scope!("astrelis::wgpu::create_render_pipeline");
     Ok(entry.insert(
         graphics
             .device()
