@@ -1584,3 +1584,372 @@ fn nearby_raster_scales_share_quarter_pixel_rasters_and_keep_their_size() {
         assert!(renderer.stats().cache_misses > misses);
     });
 }
+
+fn small_latin() -> Arc<TextLayout> {
+    let mut system = TextSystem::new();
+    system
+        .load_font(include_bytes!("../../tests/fonts/SourceSans3-Regular.otf"))
+        .unwrap();
+    let mut buffer = TextBuffer::new();
+    buffer
+        .set_text(
+            "ill MW",
+            TextStyle::new()
+                .family("Source Sans 3")
+                .font_size(13.13)
+                .line_height(17.),
+        )
+        .unwrap();
+    buffer.layout(&mut system).unwrap()
+}
+
+// Independent reference: directly composite Swash's phased coverage bytes on the
+// physical pixel grid. No atlas, quad resampling, or renderer geometry is involved.
+fn direct_coverage(layout: &TextLayout, scale: f32, origin: [f32; 2]) -> Vec<u8> {
+    let mut expected = vec![0u8; 64 * 64];
+    let mut context = ScaleContext::new();
+    for glyph in layout.glyphs() {
+        let font = &layout.fonts()[glyph.font_index];
+        let font_ref = swash::FontRef::from_index(font.data(), font.face_index() as usize).unwrap();
+        let mut scaler = context
+            .builder(font_ref)
+            .size(glyph.font_size * scale)
+            .hint(true)
+            .build();
+        let xy = std::array::from_fn::<_, 2, _>(|i| {
+            ((glyph.position[i] * scale + origin[i]) * 4. + 0.5).floor() / 4.
+        });
+        let Some(image) = Render::new(&[Source::Outline])
+            .format(swash::zeno::Format::Alpha)
+            .offset(swash::zeno::Vector::new(
+                xy[0] - xy[0].floor(),
+                xy[1] - xy[1].floor(),
+            ))
+            .render(&mut scaler, glyph.glyph_id)
+        else {
+            continue;
+        };
+        for y in 0..image.placement.height as usize {
+            for x in 0..image.placement.width as usize {
+                let dx = xy[0].floor() as i32 + image.placement.left + x as i32;
+                let dy = xy[1].floor() as i32 - image.placement.top + y as i32;
+                if (0..64).contains(&dx) && (0..64).contains(&dy) {
+                    let alpha = image.data[y * image.placement.width as usize + x] as f32 / 255.;
+                    let dest = &mut expected[dy as usize * 64 + dx as usize];
+                    *dest = (alpha * 255. + f32::from(*dest) * (1. - alpha)).round() as u8;
+                }
+            }
+        }
+    }
+    expected
+}
+
+#[test]
+fn phased_coverage_matches_direct_raster_at_final_physical_origin() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let mut renderer = TextRenderer::new(&g);
+        let layout = small_latin();
+        let original_glyphs = layout.glyphs().to_vec();
+        let mut worst_legacy_error = 0;
+        for scale in [1., 2., 1.25] {
+            // Include negative coordinates, phase rollover, both axes, and origins
+            // whose phase changes after DPI scaling. Translation is in the transform.
+            for origin in [
+                [4., 3.],
+                [4.37, 3.62],
+                [-0.13, -0.38],
+                [4.9, 3.9],
+                [-0.125, -0.375],
+                [0.125, 0.375],
+            ] {
+                let options = TextRasterOptions::new()
+                    .raster_scale(scale)
+                    .physical_origin(origin);
+                let text = renderer.prepare_text(&layout, options).unwrap();
+                assert_eq!(text.size(), layout.size());
+                let before = renderer.stats();
+                let again = renderer.prepare_text(&layout, options).unwrap();
+                assert_eq!(renderer.stats().cache_misses, before.cache_misses);
+                let draw = TextDraw::new([1.25, 0.75]).transform(
+                    Transform2D::scale(scale, scale).then(Transform2D::translation(
+                        origin[0] - 1.25 * scale,
+                        origin[1] - 0.75 * scale,
+                    )),
+                );
+                let render =
+                    |r: &mut TextRenderer, t: &mut Framebuffer, text: &PreparedText, draw| {
+                        pixels(&g, t, |frame| {
+                            let mut pass = frame.render_pass().begin().unwrap();
+                            r.draw(&mut pass, text, draw).unwrap();
+                        })
+                    };
+                let actual = render(&mut renderer, &mut t, &text, draw);
+                let expected = direct_coverage(&layout, scale, origin);
+                let max_error = actual
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .zip(&expected)
+                    .map(|(p, &e)| p[3].abs_diff(e))
+                    .max()
+                    .unwrap();
+                assert!(
+                    max_error <= 1,
+                    "scale={scale}, origin={origin:?}, error={max_error}"
+                );
+                assert_eq!(actual, render(&mut renderer, &mut t, &again, draw));
+                let after = renderer.stats();
+                assert_eq!(after.cache_misses, before.cache_misses);
+                let legacy = renderer
+                    .prepare_text(&layout, TextRasterOptions::new().raster_scale(scale))
+                    .unwrap();
+                let legacy_bytes = render(&mut renderer, &mut t, &legacy, draw);
+                worst_legacy_error = worst_legacy_error.max(
+                    legacy_bytes
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .zip(&expected)
+                        .map(|(p, &e)| p[3].abs_diff(e))
+                        .max()
+                        .unwrap(),
+                );
+                // Integer physical translation can reuse the same prepared geometry.
+                let shifted = TextDraw {
+                    transform: draw.transform.then(Transform2D::translation(1., 1.)),
+                    ..draw
+                };
+                let moved = render(&mut renderer, &mut t, &text, shifted);
+                for y in 1..64 {
+                    for x in 1..64 {
+                        assert_eq!(pixel(&moved, x, y), pixel(&actual, x - 1, y - 1));
+                    }
+                }
+                renderer.clear_cache();
+                assert_eq!(actual, render(&mut renderer, &mut t, &text, draw));
+            }
+        }
+        assert!(
+            worst_legacy_error > 20,
+            "comparison must exercise placement blur"
+        );
+        eprintln!(
+            "direct coverage reference: legacy max alpha error={worst_legacy_error}/255; phased <=1/255"
+        );
+        assert_eq!(layout.glyphs(), original_glyphs);
+        for origin in [[f32::NAN, 0.], [0., f32::INFINITY]] {
+            assert!(matches!(
+                renderer.prepare_text(&layout, TextRasterOptions::new().physical_origin(origin)),
+                Err(TextRenderError::InvalidOptions)
+            ));
+        }
+    });
+}
+
+#[test]
+fn phased_preparation_preserves_artwork_and_filtered_transform_fallback() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let mut renderer = TextRenderer::new(&g);
+        let artwork = layout("😀😁");
+        let normal = renderer
+            .prepare_text(&artwork, TextRasterOptions::new())
+            .unwrap();
+        let phased = renderer
+            .prepare_text(
+                &artwork,
+                TextRasterOptions::new().physical_origin([0.37, 0.62]),
+            )
+            .unwrap();
+        for transform in [
+            Transform2D::IDENTITY,
+            Transform2D::rotation(0.15),
+            Transform2D::scale(-0.8, 1.2).then(Transform2D::translation(45., 0.)),
+        ] {
+            let mut render = |text| {
+                pixels(&g, &mut t, |frame| {
+                    let mut pass = frame.render_pass().begin().unwrap();
+                    renderer
+                        .draw(
+                            &mut pass,
+                            text,
+                            TextDraw::new([0.37, 0.62]).transform(transform),
+                        )
+                        .unwrap();
+                })
+            };
+            assert_eq!(render(&normal), render(&phased));
+        }
+        let text = renderer
+            .prepare_text(
+                &small_latin(),
+                TextRasterOptions::new().physical_origin([0., 0.]),
+            )
+            .unwrap();
+        let before = renderer.stats();
+        let bytes = pixels(&g, &mut t, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(
+                    &mut pass,
+                    &text,
+                    TextDraw::new([4.37, 2.62]).transform(Transform2D::rotation(0.1)),
+                )
+                .unwrap();
+        });
+        assert!(bytes.as_chunks::<4>().0.iter().any(|p| p[3] > 0));
+        assert_eq!(renderer.stats().cache_misses, before.cache_misses);
+        assert_eq!(renderer.stats().geometry_bytes, before.geometry_bytes);
+    });
+}
+
+#[test]
+fn phased_scroll_variants_obey_existing_cache_budget() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                max_cached_glyphs: 12,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let layout = small_latin();
+        for step in 0..80 {
+            // More origin values than bins; no cache keys contain the origin itself.
+            let origin = [step as f32 * 0.071, step as f32 * 0.113];
+            let text = renderer
+                .prepare_text(&layout, TextRasterOptions::new().physical_origin(origin))
+                .unwrap();
+            assert_eq!(text.size(), layout.size());
+            assert!(renderer.stats().cached_glyphs <= 12);
+            assert!(renderer.stats().live_pages <= 8);
+        }
+    });
+}
+
+/// Deterministic diagnostic, deliberately excluded from ordinary test runs.
+/// Writes raw RGB PPM pairs to target/text-coverage for lossless PNG conversion.
+#[test]
+#[ignore = "writes matched coverage comparison images"]
+fn capture_coverage_comparison() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        eprintln!("{:?}", g.adapter().get_info());
+        let mut t = g
+            .create_framebuffer(
+                FramebufferOptions::new(640, 256)
+                    .usage(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
+            )
+            .unwrap();
+        let mut renderer = TextRenderer::new(&g);
+        let mut system = TextSystem::new();
+        system
+            .load_font(include_bytes!("../../tests/fonts/SourceSans3-Regular.otf"))
+            .unwrap();
+        let mut buffer = TextBuffer::new();
+        buffer.set_text("src / editor / document.rs    128 items\nlet coverage = glyph.position * display_scale;", TextStyle::new().family("Source Sans 3").font_size(13.).line_height(18.)).unwrap();
+        let layout = buffer.layout(&mut system).unwrap();
+        let directory =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/text-coverage");
+        std::fs::create_dir_all(&directory).unwrap();
+        for phased in [false, true] {
+            let mut rows = Vec::new();
+            for (scale, origin) in [
+                (1., [8., 4.]),
+                (1., [8.375, 48.625]),
+                (2., [8., 96.]),
+                (2., [8.375, 174.625]),
+            ] {
+                let options = TextRasterOptions::new().raster_scale(scale);
+                let options = if phased {
+                    options.physical_origin(origin)
+                } else {
+                    options
+                };
+                rows.push((
+                    renderer.prepare_text(&layout, options).unwrap(),
+                    TextDraw::new([0., 0.])
+                        .color([0.85, 0.85, 0.85, 1.])
+                        .transform(
+                            Transform2D::scale(scale, scale)
+                                .then(Transform2D::translation(origin[0], origin[1])),
+                        ),
+                ));
+            }
+            let bytes = pixels(&g, &mut t, |frame| {
+                let mut pass = frame
+                    .render_pass()
+                    .clear_color(wgpu::Color {
+                        r: 0.025,
+                        g: 0.025,
+                        b: 0.025,
+                        a: 1.,
+                    })
+                    .begin()
+                    .unwrap();
+                for (text, draw) in &rows {
+                    renderer.draw(&mut pass, text, *draw).unwrap();
+                }
+            });
+            let mut ppm = b"P6\n640 256\n255\n".to_vec();
+            for pixel in bytes.as_chunks::<4>().0 {
+                ppm.extend_from_slice(&pixel[..3]);
+            }
+            std::fs::write(
+                directory.join(if phased { "after.ppm" } else { "before.ppm" }),
+                ppm,
+            )
+            .unwrap();
+        }
+    });
+}
+
+#[test]
+fn phased_coverage_uses_composed_painter_origin_and_density() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let mut painter = crate::Painter::new(&g);
+        let layout = small_latin();
+        let dpi = Transform2D::scale(2., 2.);
+        let session_translation = Transform2D::translation(0.37, 0.62);
+        let draw = TextDraw::new([1.25, 0.75]).transform(Transform2D::translation(0.125, 0.25));
+        let origin = draw
+            .transform
+            .then(dpi)
+            .then(session_translation)
+            .transform_point(draw.origin);
+        let prepared = painter
+            .prepare_text(
+                &layout,
+                TextRasterOptions::new()
+                    .raster_scale(2.)
+                    .physical_origin(origin),
+            )
+            .unwrap();
+        let actual = pixels(&g, &mut t, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            let mut paint = painter.begin(&mut pass).unwrap();
+            let mut translated = paint.transformed(session_translation).unwrap();
+            translated
+                .transformed(dpi)
+                .unwrap()
+                .draw_text(&prepared, draw)
+                .unwrap();
+        });
+        let expected = direct_coverage(&layout, 2., origin);
+        assert!(
+            actual
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .zip(expected)
+                .all(|(p, e)| p[3].abs_diff(e) <= 1)
+        );
+    });
+}

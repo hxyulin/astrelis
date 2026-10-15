@@ -172,12 +172,57 @@ origins, and measurements retain layout units. Identity drawing treats those uni
 as pixels; a draw/session transform converts logical units to physical pixels.
 Raster density never applies another geometry scale.
 
-Coverage and color glyphs are rasterized at the physical size (font size times
+With default filtered preparation, coverage and color glyphs are rasterized at the physical size (font size times
 raster scale) rounded to a quarter pixel. A continuous zoom that changes the scale
 every frame therefore reuses each raster for a range of nearby sizes instead of
 adding cache entries per frame; the quad maps the shared raster to the exact
 requested size, a resampling of under 1/8 px. Sizes already on a quarter pixel,
 including integer sizes at integer DPI, are unchanged.
+
+### Crisp axis-aligned coverage
+
+For small UI/editor text, supply the **final physical origin** explicitly:
+
+```rust,no_run
+# use astrelis::{TextRenderer, TextLayout, TextRasterOptions, TextRenderError};
+# fn prepare(renderer: &mut TextRenderer, layout: &TextLayout) -> Result<(), TextRenderError> {
+let dpi = 2.0;
+// For a final transform [dpi, 0, 0, dpi, tx, ty] and logical draw origin [x, y]:
+let (x, y, tx, ty) = (20.25, 30.125, 0.0, 0.0);
+let prepared = renderer.prepare_text(layout, TextRasterOptions::new()
+    .raster_scale(dpi)
+    .physical_origin([dpi * x + tx, dpi * y + ty]))?;
+# Ok(()) }
+```
+
+The origin is viewport-relative after composing the draw and Painter/session
+transforms. The final linear transform must be positive uniform scale equal to
+`raster_scale` for crisp sampling. This policy rasterizes monochrome outlines at
+the exact physical font size with one of four phases on each axis, and places
+mask quads on physical pixel boundaries. It removes the extra linear-filter shift
+of a zero-phase bitmap. Phase rounding moves ink by at most 1/8 physical pixel;
+layout advances, measurement, caret placement and hit testing stay fractional.
+
+RXUI must include the final widget/layout origin, centering, scroll offsets and
+session translation when computing this origin. Retain the prepared resource for
+unchanged content, density and fractional origin; integer physical translations
+can reuse it. Reprepare geometry when any fractional translation changes (even
+within a phase bin), or when density/font/layout changes. Existing atlas masks
+are reused across positions within each bin. Smooth scrolling uses quarter-pixel
+ink steps, rather than whole-pixel snapping. If this quantization is undesirable
+during an animation, use default filtered preparation for that animation.
+
+Arbitrary rotation, reflection, shear, nonuniform scaling, or moving an existing
+prepared resource to another fractional origin still draws through the existing
+filtered path; the original phase-adjusted geometry is transformed normally, but
+crispness is no longer guaranteed. Choose default preparation for general affine
+animation or MTSDF for scalable outlines. No draw-time rasterization or geometry
+uploads are introduced. Intrinsic color/bitmap artwork and MTSDF are unchanged;
+atlas filtering remains linear. The exact-size/phase keys share the existing
+bounded glyph and page budgets; continuously changing zoom can churn this cache
+more than the default quarter-size policy.
+
+See the [matched Metal comparison and reproduction](text-coverage/README.md).
 
 ## Glyph representations
 
@@ -222,7 +267,8 @@ Glyph cache identity includes font source/face and applicable instance settings,
 glyph ID, physical raster size, raster phase, and raster settings. Later distance
 fields also key generation resolution/range. Text content/constraints invalidate
 layout; raster-size changes invalidate coverage preparation; origin/default color/
-opacity and pass clipping affect draw parameters. Repeated prepared draws perform
+opacity and pass clipping affect draw parameters. Explicit phase-aware coverage
+additionally requires preparation when fractional physical origin changes. Repeated prepared draws perform
 no shaping, rasterization, atlas uploads or pipeline creation after preparation.
 An immutable prepared path should also avoid re-uploading all glyph instances.
 
@@ -409,7 +455,9 @@ report atlas exhaustion or font rasterization failures.
 Text retains layout units. Use one session DPI transform for text and other 2D
 geometry. DPI changes can require new coverage/color images for quality; outline
 fields reuse their image keys. Geometry scaling itself remains a draw operation.
-Color, opacity, and placement changes reuse the same prepared resource.
+Color and opacity changes reuse the same prepared resource. Default filtered
+preparation also permits arbitrary placement reuse; explicit phase-aware coverage
+requires geometry preparation again when fractional physical placement changes.
 
 `Painter::text()` exposes cache statistics, clearing, and direct renderer methods
 outside active sessions. Custom budgets can be selected by replacing it with

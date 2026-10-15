@@ -90,7 +90,7 @@ impl Default for TextRendererOptions {
         }
     }
 }
-/// Explicit raster scale and hinting, independent of shaping and draw placement.
+/// Explicit raster scale, hinting and optional physical placement, independent of shaping.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextRasterOptions {
     /// Positive finite raster texels per layout unit, default 1.
@@ -98,6 +98,10 @@ pub struct TextRasterOptions {
     pub raster_scale: f32,
     /// Rasterizer hinting at the chosen physical size, enabled by default.
     pub hinting: bool,
+    /// Final viewport-relative physical origin for phase-aware outline coverage.
+    /// `None` (default) retains freely transformed, filtered image placement.
+    /// See [`Self::physical_origin`] for the draw/reuse contract.
+    pub physical_origin: Option<[f32; 2]>,
 }
 impl Default for TextRasterOptions {
     fn default() -> Self {
@@ -110,14 +114,36 @@ impl TextRasterOptions {
         Self {
             raster_scale: 1.,
             hinting: true,
+            physical_origin: None,
         }
     }
     /// Selects image density without scaling geometry. Match the intended draw scale
     /// for sharp hinted coverage; a Painter/session transform applies geometry scaling.
-    /// Physical glyph sizes round to a quarter pixel, so continuously changing scales
-    /// reuse cached rasters; quads still cover the exact requested size.
+    /// With default filtered placement, physical glyph sizes round to a quarter pixel,
+    /// so continuously changing scales reuse cached rasters; quads still cover the
+    /// exact requested size.
     pub const fn raster_scale(mut self, value: f32) -> Self {
         self.raster_scale = value;
+        self
+    }
+    /// Prepares crisp axis-aligned outline masks for a known physical draw origin.
+    ///
+    /// Pass the final origin **after** the draw and Painter/session transforms,
+    /// relative to the viewport. The final transform must be a positive uniform
+    /// scale equal to `raster_scale`. Glyph baselines are rounded to quarter-pixel
+    /// phases (at most 1/8 physical pixel error); masks use integer pixel quads and
+    /// the exact physical font size, without rescaling a size-quantized bitmap.
+    /// Layout advances, measurement and hit testing are unchanged.
+    ///
+    /// Reuse at the same origin or an integer physical-pixel translation is sharp.
+    /// Reprepare when the origin's fractional phase or scale changes, including
+    /// during smooth scrolling; quarter-pixel phases avoid whole-pixel stepping.
+    /// Other draws remain valid but filter the prepared images and do not guarantee
+    /// pixel alignment. Use the default preparation for arbitrary animation,
+    /// rotation, shear or nonuniform scale. Color and bitmap artwork is unchanged.
+    /// Phase variants share the renderer's existing bounded cache/page budgets.
+    pub const fn physical_origin(mut self, origin: [f32; 2]) -> Self {
+        self.physical_origin = Some(origin);
         self
     }
     /// Enables or disables hinting.
@@ -377,8 +403,15 @@ struct Key {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Representation {
-    Coverage { size: u32, hint: bool },
-    Mtsdf { pixels_per_em: u32, range_em: u32 },
+    Coverage {
+        size: u32,
+        hint: bool,
+        phase: [u8; 2],
+    },
+    Mtsdf {
+        pixels_per_em: u32,
+        range_em: u32,
+    },
 }
 #[derive(Clone, Debug)]
 enum GlyphSource {
@@ -391,6 +424,7 @@ enum GlyphSource {
 struct GlyphImage {
     page: Arc<Page>,
     uv: [f32; 4],
+    outline_mask: bool,
     left: i32,
     top: i32,
     width: u32,
@@ -996,10 +1030,12 @@ impl TextRenderer {
                 TextPreparation::Coverage(raster) => Representation::Coverage {
                     size: raster_size.to_bits(),
                     hint: raster.hinting,
+                    phase: [0; 2],
                 },
                 TextPreparation::Mtsdf(_) => Representation::Coverage {
                     size: raster_size.to_bits(),
                     hint: true,
+                    phase: [0; 2],
                 },
             };
             let key = Key {
@@ -1030,11 +1066,51 @@ impl TextRenderer {
             } else {
                 source
             };
-            let GlyphSource::Image(image) = source else {
+            let GlyphSource::Image(mut image) = source else {
                 skipped.push(index);
                 continue;
             };
-            let factor = if let Representation::Mtsdf { pixels_per_em, .. } = key.representation
+            let mut position = glyph.position;
+            let mut phased = false;
+            if image.outline_mask
+                && let TextPreparation::Coverage(raster) = preparation
+                && let Some(origin) = raster.physical_origin
+            {
+                // Integer translation cannot affect the phase. Reduce it first to
+                // avoid cancellation when placing reusable text far from the origin.
+                let origin = origin.map(|v| v.rem_euclid(1.));
+                let physical =
+                    std::array::from_fn::<_, 2, _>(|i| glyph.position[i] * scale + origin[i]);
+                if physical.iter().any(|v| !v.is_finite()) {
+                    return Err(TextRenderError::InvalidOptions);
+                }
+                let (x, px) = coverage_phase(physical[0]);
+                let (y, py) = coverage_phase(physical[1]);
+                let source = self.image(
+                    Key {
+                        representation: Representation::Coverage {
+                            size: physical_size.to_bits(),
+                            hint: raster.hinting,
+                            phase: [px, py],
+                        },
+                        ..key
+                    },
+                    font,
+                )?;
+                let GlyphSource::Image(phased_image) = source else {
+                    skipped.push(index);
+                    continue;
+                };
+                image = phased_image;
+                position = [
+                    (x - origin[0]) * inverse_scale,
+                    (y - origin[1]) * inverse_scale,
+                ];
+                phased = true;
+            }
+            let factor = if phased {
+                inverse_scale
+            } else if let Representation::Mtsdf { pixels_per_em, .. } = key.representation
                 && image.page.kind == Kind::Mtsdf
             {
                 glyph.font_size / pixels_per_em as f32
@@ -1044,8 +1120,8 @@ impl TextRenderer {
                 // Map the rounded raster back to the requested size.
                 glyph.font_size / raster_size
             };
-            let x = glyph.position[0] + image.left as f32 * factor;
-            let y = glyph.position[1] - image.top as f32 * factor;
+            let x = position[0] + image.left as f32 * factor;
+            let y = position[1] - image.top as f32 * factor;
             let w = image.width as f32 * factor;
             let h = image.height as f32 * factor;
             if [x, y, x + w, y + h].iter().any(|v| !v.is_finite()) {
@@ -1348,7 +1424,7 @@ impl TextRenderer {
             .variations()
             .normalized_coords([(weight, f32::from(key.weight))]);
         let (size, hint) = match key.representation {
-            Representation::Coverage { size, hint } => (f32::from_bits(size), hint),
+            Representation::Coverage { size, hint, .. } => (f32::from_bits(size), hint),
             Representation::Mtsdf { pixels_per_em, .. } => (pixels_per_em as f32, false),
         };
         let mut scaler = self
@@ -1398,7 +1474,7 @@ impl TextRenderer {
                     GlyphSource::Blank
                 }
             }
-            Representation::Coverage { .. } => {
+            Representation::Coverage { phase, .. } => {
                 // Check outline dimensions before Swash allocates its output image.
                 // Bitmap dimensions are validated after decoding; Swash owns decode scratch.
                 if let Some(mut outline) = scaler
@@ -1424,6 +1500,14 @@ impl TextRenderer {
                 ]);
                 render.format(swash::zeno::Format::Alpha);
                 render.transform(slant);
+                // Nonzero phases are requested only after the zero-phase probe
+                // classified a monochrome outline. Intrinsic artwork keeps phase zero.
+                if phase != [0; 2] {
+                    render.offset(swash::zeno::Vector::new(
+                        f32::from(phase[0]) * 0.25,
+                        f32::from(phase[1]) * 0.25,
+                    ));
+                }
                 match render.render(&mut scaler, glyph) {
                     Some(image) if image.placement.width > 0 && image.placement.height > 0 => {
                         GlyphSource::Image(self.upload_image(image)?)
@@ -1563,6 +1647,7 @@ impl TextRenderer {
         self.stats.uploaded_bytes += image.data.len() as u64;
         let s = size as f32;
         Ok(GlyphImage {
+            outline_mask: kind == Kind::Mask && matches!(image.source, Source::Outline),
             page,
             uv: [
                 pos[0] as f32 / s,
@@ -1634,6 +1719,14 @@ fn raster_size(physical: f32, max: f32) -> f32 {
     }
 }
 
+// Ties round toward positive infinity, so integer translations preserve phases
+// even at negative half-bin boundaries. Euclidean floor handles phase rollover.
+fn coverage_phase(position: f32) -> (f32, u8) {
+    let quantized = (f64::from(position) * 4. + 0.5).floor() * 0.25;
+    let pixel = quantized.floor();
+    (pixel as f32, ((quantized - pixel) * 4.) as u8)
+}
+
 fn validate_preparation(preparation: TextPreparation) -> Result<(), TextRenderError> {
     if let TextPreparation::Mtsdf(options) = preparation
         && (!(16..=256).contains(&options.pixels_per_em)
@@ -1641,6 +1734,13 @@ fn validate_preparation(preparation: TextPreparation) -> Result<(), TextRenderEr
             || options.range_em <= 0.
             || options.range_em > 1.
             || options.range_em * (options.pixels_per_em as f32) < 2.)
+    {
+        return Err(TextRenderError::InvalidOptions);
+    }
+    if let TextPreparation::Coverage(options) = preparation
+        && options
+            .physical_origin
+            .is_some_and(|p| p.iter().any(|v| !v.is_finite()))
     {
         return Err(TextRenderError::InvalidOptions);
     }
