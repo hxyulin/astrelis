@@ -111,6 +111,16 @@ covers setup, the checks to run and what to include in a pull request. For a
 rendering bug, include the smallest reproducing code, your GPU and backend, and
 a screenshot.
 
+## Native frame profiling
+
+Set `ASTRELIS_PROFILE=1` when running a desktop application through `Runner` to
+print CPU timing stages for submitted frames: invalidating input callbacks,
+redraw queue/delivery, preparation, surface acquisition, recording, and submission.
+The log also counts acquisition retries and presentation-availability changes.
+Input timestamps begin at native event dispatch and the log contains no input
+text. GPU completion and actual display presentation are not measured. Profiling
+is opt-in; ordinary on-demand scheduling and presentation settings are unchanged.
+
 ## License
 
 Astrelis is available under either the [MIT license](LICENSE-MIT) or the
