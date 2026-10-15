@@ -541,6 +541,7 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
                         | WindowEvent::Ime(_)
                         | WindowEvent::MouseInput { .. }
                         | WindowEvent::MouseWheel { .. }
+                        | WindowEvent::CursorMoved { .. }
                 )
                 .then(|| (Instant::now(), w.schedule.invalidations))
             });

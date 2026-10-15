@@ -117,6 +117,9 @@ Set `ASTRELIS_PROFILE=1` when running a desktop application through `Runner` to
 print CPU timing stages for submitted frames: invalidating input callbacks,
 redraw queue/delivery, preparation, surface acquisition, recording, and submission.
 The log also counts acquisition retries and presentation-availability changes.
+Both oldest and newest coalesced input latency are reported through preparation
+and submission. Pointer motion is included when its callback invalidates the
+window, so dragging and hover changes can be investigated as well as typing.
 Input timestamps begin at native event dispatch and the log contains no input
 text. GPU completion and actual display presentation are not measured. Profiling
 is opt-in; ordinary on-demand scheduling and presentation settings are unchanged.

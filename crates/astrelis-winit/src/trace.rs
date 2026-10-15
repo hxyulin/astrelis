@@ -30,6 +30,7 @@ struct Report {
     record_ms: f64,
     submit_ms: f64,
     input_to_submit_ms: Option<f64>,
+    last_input_to_submit_ms: Option<f64>,
 }
 fn ms(a: Instant, b: Instant) -> f64 {
     b.saturating_duration_since(a).as_secs_f64() * 1000.
@@ -81,6 +82,7 @@ impl FrameTrace {
             record_ms: ms(acquired, recorded),
             submit_ms: ms(recorded, submitted),
             input_to_submit_ms: self.first_input.map(|at| ms(at, submitted)),
+            last_input_to_submit_ms: self.last_input.map(|at| ms(at, submitted)),
         };
         self.retries = 0;
         self.availability_changes = 0;
@@ -109,7 +111,7 @@ impl fmt::Display for Report {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "frame={}, inputs={}, acquisition_retries={}, availability_changes={}, input_to_prepare_ms={:?}, last_input_to_prepare_ms={:?}, event_cpu_ms={:.6}, request_to_redraw_ms={:?}, input_to_request_ms={:?}, redraw_to_prepare_ms={:?}, prepare_ms={:.6}, acquire_ms={:.6}, record_ms={:.6}, submit_ms={:.6}, input_to_submit_ms={:?}",
+            "frame={}, inputs={}, acquisition_retries={}, availability_changes={}, input_to_prepare_ms={:?}, last_input_to_prepare_ms={:?}, event_cpu_ms={:.6}, request_to_redraw_ms={:?}, input_to_request_ms={:?}, redraw_to_prepare_ms={:?}, prepare_ms={:.6}, acquire_ms={:.6}, record_ms={:.6}, submit_ms={:.6}, input_to_submit_ms={:?}, last_input_to_submit_ms={:?}",
             self.frame,
             self.inputs,
             self.acquisition_retries,
@@ -124,7 +126,8 @@ impl fmt::Display for Report {
             self.acquire_ms,
             self.record_ms,
             self.submit_ms,
-            self.input_to_submit_ms
+            self.input_to_submit_ms,
+            self.last_input_to_submit_ms
         )
     }
 }
@@ -150,9 +153,11 @@ mod tests {
         assert_eq!(report.redraw_to_prepare_ms, Some(2.));
         assert_eq!(report.acquire_ms, 3.);
         assert_eq!(report.input_to_submit_ms, Some(15.));
+        assert_eq!(report.last_input_to_submit_ms, Some(13.));
         let idle = trace.report(t(20), t(21), t(22), t(23), t(24));
         assert_eq!(idle.inputs, 0);
         assert_eq!(idle.input_to_prepare_ms, None);
+        assert_eq!(idle.last_input_to_submit_ms, None);
         assert_eq!(idle.request_to_redraw_ms, None);
         assert_eq!(idle.frame, 2);
     }
