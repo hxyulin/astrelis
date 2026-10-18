@@ -71,7 +71,8 @@
 //! Retryable acquisition is paced; known occlusion, zero size, and suspension wait
 //! for availability. Renderers and settings belong to the application and targets,
 //! respectively. The runner introduces no default pass, clear color, or explicit GPU completion wait.
-//! Device loss and asynchronous initialization cancellation remain application policy.
+//! Device diagnostics reach Handler::error; device loss ends the run cleanly.
+//! Asynchronous initialization cancellation remains application policy.
 
 mod error;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -93,7 +94,7 @@ mod window;
 pub use astrelis;
 pub use error::{Callback, RunError, UnknownWindow, WindowError};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-pub use handler::{Handler, PrepareAction};
+pub use handler::{ErrorAction, Handler, PrepareAction};
 pub use policy::{CloseResponse, InvalidWindowMetrics, RedrawMode, SurfaceSettings, WindowMetrics};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub use runner::{AppContext, Runner, RunnerOptions};

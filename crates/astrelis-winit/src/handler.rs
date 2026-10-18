@@ -1,4 +1,4 @@
-use crate::{AppContext, CloseResponse, WindowInfo};
+use crate::{AppContext, CloseResponse, RunError, WindowInfo};
 use astrelis::{Frame, wgpu};
 use winit::{
     event::{DeviceEvent, DeviceId, WindowEvent},
@@ -15,18 +15,43 @@ pub enum PrepareAction {
     Skip,
 }
 
+/// Decision after a reported runner error.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ErrorAction {
+    /// Stop the loop and return the original error.
+    #[default]
+    Exit,
+    /// Abandon failed work and continue. Fatal device/loop failures still exit.
+    Continue,
+}
+
 /// Application hooks for the native runner, with static dispatch and owned events.
 ///
 /// Applications own renderers, layout, and models. Prepare uploads and pipeline
 /// variants before acquisition; render opens application-selected passes in a
 /// borrowed core frame. Successful recording is submitted once by the runner.
-/// Errors terminate the run; the original error is boxed only on failure.
+/// Errors are reported to [`Self::error`]; the original error is boxed only on failure.
 /// A handler is borrowed by run and remains available after native shutdown.
 pub trait Handler {
     /// Actual winit user-event type, also accepted by the native EventLoopProxy.
     type Message: 'static;
     /// Convertible application error; `Box<dyn Error>` is supported directly.
     type Error: Into<Box<dyn std::error::Error>>;
+    /// Reports failed work after frame borrows end, before deciding whether to exit.
+    /// Default policy retries transient acquisition/loss and exits on other errors.
+    /// Return Continue for per-frame errors to skip and retry with runner pacing.
+    /// Device loss and out-of-memory remain fatal even if Continue is returned.
+    /// The context permits queuing closes, redraws, or application messages.
+    fn error(&mut self, _cx: &mut AppContext<'_, Self::Message>, error: &RunError) -> ErrorAction {
+        match error {
+            RunError::SurfaceRecovery { .. } => ErrorAction::Continue,
+            RunError::Acquisition {
+                source: astrelis::FrameError::Retry | astrelis::FrameError::SurfaceLost,
+                ..
+            } => ErrorAction::Continue,
+            _ => ErrorAction::Exit,
+        }
+    }
     /// Called after existing presentation targets are restored. May repeat.
     fn resumed(&mut self, _cx: &mut AppContext<'_, Self::Message>) -> Result<(), Self::Error> {
         Ok(())
@@ -84,7 +109,7 @@ pub trait Handler {
     /// frame. Registry mutation is available in the other context-bearing hooks.
     ///
     /// A successful render must initialize the surface, normally with a clearing
-    /// pass from `frame.render_pass()`. Returning `Ok` without one stops the runner
+    /// pass from `frame.render_pass()`. Returning `Ok` without one reports an error
     /// with [`crate::RunError::Handler`] for [`crate::Callback::Render`] carrying
     /// [`astrelis::Error::UninitializedFrame`], because presenting would show undefined
     /// contents. To draw nothing this time, return [`PrepareAction::Skip`] from

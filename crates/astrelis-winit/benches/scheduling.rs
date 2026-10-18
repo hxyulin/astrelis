@@ -33,8 +33,8 @@ fn main() {
     cold.suspended();
     cold.unavailable();
     cold.invalidate();
-    cold.retry(now, Duration::from_millis(16));
     assert!(cold.lost(3));
+    cold.retry(now, cold.recovery_delay(Duration::from_millis(16), 3));
     println!("windows,samples,iterations_per_sample,median_ns,p95_ns");
     for count in [1, 4, 16, 256] {
         let mut windows: HashMap<_, _> = (0..count)

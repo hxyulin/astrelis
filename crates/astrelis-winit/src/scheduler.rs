@@ -76,6 +76,12 @@ impl Schedule {
         self.recoveries = next;
         self.recoveries <= limit
     }
+    pub(crate) fn recovery_delay(&self, delay: Duration, fast_attempts: u32) -> Duration {
+        let shift = self.recoveries.saturating_sub(fast_attempts).min(16);
+        delay
+            .saturating_mul(1 << shift)
+            .min(delay.max(Duration::from_secs(1)))
+    }
     pub(crate) fn submitted(&mut self) {
         self.recoveries = 0;
         if self.mode == RedrawMode::Continuous {

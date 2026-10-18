@@ -123,10 +123,24 @@ pub enum RunError {
         /// Original acquisition failure.
         source: astrelis::FrameError,
     },
-    /// Consecutive surface losses exceeded the configured limit.
+    /// Surface recreation failed; the runner will retry with backoff by default.
+    SurfaceRecovery {
+        /// Associated native window.
+        window: WindowId,
+        /// Original window error.
+        source: WindowError,
+    },
+    /// Legacy recovery-limit failure; the runner now backs off instead of emitting it.
     RecoveryLimit {
         /// Associated native window.
         window: WindowId,
+    },
+    /// Asynchronous GPU diagnostic on the window's shared device.
+    Graphics {
+        /// Window whose context delivered the diagnostic; other windows may share it.
+        window: WindowId,
+        /// Original diagnostic. Device loss and out-of-memory are fatal.
+        source: astrelis::GpuEvent,
     },
     /// Finishing and submitting the recorded frame failed.
     Submission {
@@ -148,7 +162,9 @@ impl fmt::Display for RunError {
                 window,
                 source,
             } => write!(f, "{callback:?} callback for {window:?} failed: {source}"),
-            Self::Window { window, source } => write!(f, "window {window:?}: {source}"),
+            Self::Window { window, source } | Self::SurfaceRecovery { window, source } => {
+                write!(f, "window {window:?}: {source}")
+            }
             Self::Acquisition { window, source } => {
                 write!(f, "window {window:?} acquisition: {source}")
             }
@@ -156,6 +172,7 @@ impl fmt::Display for RunError {
                 f,
                 "window {window:?} exceeded consecutive surface recovery limit"
             ),
+            Self::Graphics { window, source } => write!(f, "window {window:?} GPU: {source}"),
             Self::Submission { window, source } => {
                 write!(f, "window {window:?} submission: {source}")
             }
@@ -167,10 +184,69 @@ impl Error for RunError {
         match self {
             Self::EventLoop(e) => Some(e),
             Self::Handler { source, .. } => Some(source.as_ref()),
-            Self::Window { source, .. } => Some(source),
+            Self::Window { source, .. } | Self::SurfaceRecovery { source, .. } => Some(source),
             Self::Acquisition { source, .. } => Some(source),
             Self::Submission { source, .. } => Some(source),
+            Self::Graphics { source, .. } => Some(source),
             _ => None,
         }
+    }
+}
+
+impl RunError {
+    /// Whether continuing can use the current device and event loop safely.
+    /// Continuation skips failed work; it does not undo submitted commands.
+    pub fn can_continue(&self) -> bool {
+        match self {
+            Self::InvalidOptions | Self::EventLoop(_) => false,
+            Self::Graphics { source, .. } => matches!(
+                source,
+                astrelis::GpuEvent::Validation(_) | astrelis::GpuEvent::Internal(_)
+            ),
+            _ => true,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_failures_can_continue_but_dead_devices_cannot() {
+        let window = WindowId::from(1_u64);
+        for source in [
+            astrelis::FrameError::Retry,
+            astrelis::FrameError::Validation,
+            astrelis::FrameError::SurfaceLost,
+        ] {
+            assert!(RunError::Acquisition { window, source }.can_continue());
+        }
+        for callback in [Callback::Prepare, Callback::Render, Callback::Submitted] {
+            assert!(
+                RunError::Handler {
+                    callback,
+                    window: Some(window),
+                    source: std::io::Error::other("bad frame").into()
+                }
+                .can_continue()
+            );
+        }
+        for source in [
+            astrelis::GpuEvent::Validation("bad frame".into()),
+            astrelis::GpuEvent::Internal("transient".into()),
+        ] {
+            assert!(RunError::Graphics { window, source }.can_continue());
+        }
+        for source in [
+            astrelis::GpuEvent::OutOfMemory("allocation".into()),
+            astrelis::GpuEvent::DeviceLost {
+                reason: astrelis::wgpu::DeviceLostReason::Unknown,
+                message: "lost".into(),
+            },
+        ] {
+            assert!(!RunError::Graphics { window, source }.can_continue());
+        }
+        assert!(!RunError::InvalidOptions.can_continue());
     }
 }

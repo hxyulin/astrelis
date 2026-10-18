@@ -762,3 +762,21 @@ These examples are separate, copyable files without shared support code or smoke
 test modes. The convenience runner targets macOS, Windows, and Linux; its first
 window may block during initial GPU setup. Browser/mobile event-loop drivers and
 RXUI integration remain separate work.
+
+## Runtime diagnostics and backend selection
+
+Graphics contexts install non-panicking wgpu callbacks and log through the `log`
+facade without selecting a logger. Custom loops drain `take_gpu_events()` and
+poll the device regularly. Device loss requires a new context and rebuilding every
+GPU resource; CPU models, text layouts and fonts can be reused. Adopting raw handles
+with `from_wgpu` replaces their previous error/loss callbacks. See [winit](winit.md)
+for runner error policy, bounded surface-recovery pacing and the resource rebuild
+checklist, and [text](text.md) for atlas-pressure glyph omission and retry.
+
+The optional `gles` feature forwards to `wgpu/gles`. Native GL presentation needs
+an instance with the window's display connection: use `WindowContext::with_display`
+or `GraphicsContext::with_surface_instance`; the runner supplies this automatically.
+Instances Astrelis creates honour `WGPU_BACKEND` and wgpu backend environment options;
+adapter selection honours `WGPU_POWER_PREF` and native `WGPU_ADAPTER_NAME`.
+`SurfaceOptions::desired_maximum_frame_latency` and `SurfaceSettings`' matching
+builder expose desired queued frames (default 2, minimum 1, clamped by wgpu).

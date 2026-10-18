@@ -1,6 +1,6 @@
 use crate::{
-    Callback, CloseResponse, Handler, PrepareAction, RedrawMode, RunError, SurfaceSettings,
-    UnknownWindow, WindowContext, WindowError, scheduler::Schedule,
+    Callback, CloseResponse, ErrorAction, Handler, PrepareAction, RedrawMode, RunError,
+    SurfaceSettings, UnknownWindow, WindowContext, WindowError, scheduler::Schedule,
 };
 use astrelis::{FrameError, GraphicsContext};
 use std::{
@@ -22,8 +22,9 @@ pub struct RunnerOptions {
     pub exit_on_last_window: bool,
     /// Delay between retryable acquisitions; must be positive and representable.
     pub retry_delay: Duration,
-    /// Allowed consecutive surface recreations before a successful presentation.
-    /// Must be nonzero; device loss remains application policy.
+    /// Consecutive surface losses at the base retry delay, before exponential backoff.
+    /// Must be nonzero. Retries continue with a delay capped at max(retry_delay, 1s).
+    /// Retains the original field name for source compatibility; no terminal limit.
     pub maximum_consecutive_surface_recoveries: u32,
 }
 impl Default for RunnerOptions {
@@ -54,6 +55,7 @@ struct ManagedWindow {
     schedule: Schedule,
     closing: bool,
     was_eligible: bool,
+    recovering: bool,
     trace: Option<crate::trace::FrameTrace>,
 }
 enum Operation {
@@ -78,6 +80,7 @@ impl State {
             id,
             ManagedWindow {
                 was_eligible: context.can_present(),
+                recovering: false,
                 trace: crate::trace::FrameTrace::from_env(),
                 context,
                 schedule: Schedule::default(),
@@ -126,7 +129,11 @@ impl<Message: 'static> AppContext<'_, Message> {
         let mut context = if let Some(graphics) = &self.state.graphics {
             WindowContext::with_graphics(graphics, window, settings)?
         } else {
-            let context = pollster::block_on(WindowContext::new(window, settings))?;
+            let context = pollster::block_on(WindowContext::with_display(
+                window,
+                settings,
+                self.event_loop.owned_display_handle(),
+            ))?;
             self.state.graphics = Some(context.graphics().clone());
             context
         };
@@ -288,6 +295,28 @@ struct Driver<'a, H: Handler> {
 }
 impl<H: Handler> Driver<'_, H> {
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: RunError) {
+        if matches!(
+            error,
+            RunError::Acquisition {
+                source: FrameError::Retry,
+                ..
+            }
+        ) {
+            log::debug!("{error}");
+        } else {
+            log::warn!("{error}");
+        }
+        let action = self.handler.error(
+            &mut AppContext {
+                event_loop,
+                proxy: &self.proxy,
+                state: &mut self.state,
+            },
+            &error,
+        );
+        if error.can_continue() && action == ErrorAction::Continue {
+            return;
+        }
         if self.failure.is_none() {
             self.failure = Some(error);
         }
@@ -365,7 +394,72 @@ impl<H: Handler> Driver<'_, H> {
                 .get(&id)
                 .is_some_and(|w| !w.closing && w.context.can_present())
     }
+    fn retry_frame(&mut self, id: WindowId) {
+        if let Some(w) = self.state.windows.get_mut(&id) {
+            w.schedule
+                .retry(Instant::now(), self.state.options.retry_delay);
+        }
+    }
+    fn gpu_events(&mut self, event_loop: &ActiveEventLoop) {
+        let events: Vec<_> = self
+            .state
+            .windows
+            .iter()
+            .flat_map(|(id, w)| {
+                // Poll is nonblocking and drives completion leases/callbacks while idle too.
+                if let Err(error) = w
+                    .context
+                    .graphics()
+                    .device()
+                    .poll(astrelis::wgpu::PollType::Poll)
+                {
+                    log::warn!("device poll failed: {error}");
+                }
+                w.context
+                    .graphics()
+                    .take_gpu_events()
+                    .into_iter()
+                    .map(|e| (*id, e))
+            })
+            .collect();
+        for (window, source) in events {
+            self.fail(event_loop, RunError::Graphics { window, source });
+            if self.failure.is_some() || event_loop.exiting() {
+                break;
+            }
+        }
+        self.drain(event_loop);
+    }
     fn redraw(&mut self, event_loop: &ActiveEventLoop, id: WindowId) {
+        self.gpu_events(event_loop);
+        if self.failure.is_some() || event_loop.exiting() {
+            return;
+        }
+        if let Some(w) = self
+            .state
+            .windows
+            .get_mut(&id)
+            .filter(|w| w.recovering && !w.closing)
+        {
+            if !self.state.active || !w.context.can_recover() {
+                return;
+            }
+            if let Err(source) = w.context.recreate() {
+                w.schedule
+                    .lost(self.state.options.maximum_consecutive_surface_recoveries);
+                let delay = w.schedule.recovery_delay(
+                    self.state.options.retry_delay,
+                    self.state.options.maximum_consecutive_surface_recoveries,
+                );
+                w.schedule.retry(Instant::now(), delay);
+                self.fail(event_loop, RunError::SurfaceRecovery { window: id, source });
+                return;
+            }
+            w.recovering = false;
+            // Successful recreation must not erase the consecutive-loss count.
+            w.context.invalidated = false;
+            w.context.availability_invalidated = false;
+        }
         if !self.ready(id, event_loop) {
             if let Some(w) = self.state.windows.get_mut(&id) {
                 w.schedule.unavailable();
@@ -384,6 +478,9 @@ impl<H: Handler> Driver<'_, H> {
         };
         self.drain(event_loop);
         if action != Some(PrepareAction::Render) {
+            if action.is_none() {
+                self.retry_frame(id);
+            }
             return;
         }
         if !self.ready(id, event_loop) {
@@ -452,9 +549,14 @@ impl<H: Handler> Driver<'_, H> {
                     .expect("recorded window")
                     .schedule
                     .submitted();
-                self.call(event_loop, Callback::Submitted, Some(id), |h, cx| {
-                    h.submitted(cx, id, submission)
-                });
+                if self
+                    .call(event_loop, Callback::Submitted, Some(id), |h, cx| {
+                        h.submitted(cx, id, submission)
+                    })
+                    .is_none()
+                {
+                    self.retry_frame(id);
+                }
                 self.drain(event_loop);
             }
             Err(RunError::Acquisition { source, .. }) => {
@@ -463,31 +565,26 @@ impl<H: Handler> Driver<'_, H> {
                     trace.retry();
                 }
                 match source {
-                    FrameError::Retry => w
-                        .schedule
-                        .retry(Instant::now(), self.state.options.retry_delay),
                     FrameError::Suspended => w.schedule.suspended(),
-                    FrameError::SurfaceLost => {
-                        if !w
-                            .schedule
-                            .lost(self.state.options.maximum_consecutive_surface_recoveries)
-                        {
-                            self.fail(event_loop, RunError::RecoveryLimit { window: id });
-                        } else if let Err(source) = w.context.recreate() {
-                            self.fail(event_loop, RunError::Window { window: id, source });
-                        } else {
-                            // Recreation's invalidation must not bypass retry pacing.
-                            w.context.invalidated = false;
-                            w.context.availability_invalidated = false;
+                    source => {
+                        if matches!(source, FrameError::SurfaceLost) {
+                            w.recovering = true;
                             w.schedule
-                                .retry(Instant::now(), self.state.options.retry_delay);
+                                .lost(self.state.options.maximum_consecutive_surface_recoveries);
                         }
+                        let delay = w.schedule.recovery_delay(
+                            self.state.options.retry_delay,
+                            self.state.options.maximum_consecutive_surface_recoveries,
+                        );
+                        w.schedule.retry(Instant::now(), delay);
+                        self.fail(event_loop, RunError::Acquisition { window: id, source });
                     }
-                    // Validation and future terminal outcomes stop the runner.
-                    _ => self.fail(event_loop, RunError::Acquisition { window: id, source }),
                 }
             }
-            Err(error) => self.fail(event_loop, error),
+            Err(error) => {
+                self.retry_frame(id);
+                self.fail(event_loop, error);
+            }
         }
     }
 }
@@ -497,16 +594,28 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
             return;
         }
         self.state.active = true;
+        let mut failures = Vec::new();
         for (id, w) in &mut self.state.windows {
+            w.schedule.availability_changed();
             if let Err(source) = w.context.resume() {
-                let error = RunError::Window {
-                    window: *id,
-                    source,
-                };
-                self.fail(event_loop, error);
+                w.recovering = true;
+                w.schedule
+                    .lost(self.state.options.maximum_consecutive_surface_recoveries);
+                let delay = w.schedule.recovery_delay(
+                    self.state.options.retry_delay,
+                    self.state.options.maximum_consecutive_surface_recoveries,
+                );
+                w.schedule.retry(Instant::now(), delay);
+                failures.push((*id, source));
+            } else {
+                w.recovering = false;
+            }
+        }
+        for (window, source) in failures {
+            self.fail(event_loop, RunError::SurfaceRecovery { window, source });
+            if self.failure.is_some() || event_loop.exiting() {
                 return;
             }
-            w.schedule.availability_changed();
         }
         self.call(event_loop, Callback::Resumed, None, |h, cx| h.resumed(cx));
         self.drain(event_loop);
@@ -565,7 +674,7 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
                 return;
             }
         }
-        self.call(event_loop, Callback::WindowEvent, Some(id), |h, cx| {
+        let forwarded = self.call(event_loop, Callback::WindowEvent, Some(id), |h, cx| {
             h.window_event(cx, id, event)
         });
         // A forced destruction notification is delivered even if raw-event handling fails.
@@ -601,8 +710,10 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
             }
             self.drain(event_loop);
         }
-        if redraw {
+        if redraw && forwarded.is_some() {
             self.redraw(event_loop, id);
+        } else if redraw {
+            self.retry_frame(id);
         }
     }
 
@@ -632,10 +743,16 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
         if event_loop.exiting() {
             return;
         }
+        self.gpu_events(event_loop);
+        if self.failure.is_some() || event_loop.exiting() {
+            return;
+        }
         let now = Instant::now();
-        let mut wake = None;
+        // Wgpu callbacks may run on worker threads, outside native event delivery.
+        let mut wake = (!self.state.windows.is_empty()).then(|| now + Duration::from_millis(100));
         for w in self.state.windows.values_mut().filter(|w| !w.closing) {
-            let eligible = self.state.active && w.context.can_present();
+            let eligible = self.state.active
+                && (w.context.can_present() || (w.recovering && w.context.can_recover()));
             if std::mem::take(&mut w.context.availability_invalidated) || w.was_eligible != eligible
             {
                 w.was_eligible = eligible;
