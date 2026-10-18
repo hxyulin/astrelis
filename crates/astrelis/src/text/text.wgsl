@@ -23,12 +23,28 @@ struct Output {
     output.uv = uv.xy + corner * uv.zw;
     // Span colors replace the draw RGB unless the draw disables them (axis_y.z).
     // The draw alpha already includes opacity and multiplies every glyph.
-    let span = vec4(unpack2x16float(kind.y), unpack2x16float(kind.z));
+    let span = vec4(unpack_half2(kind.y), unpack_half2(kind.z));
     output.color = select(color, vec4(span.rgb, span.a * color.a), kind.w != 0u && axis_y.z == 0.0);
     output.kind = f32(kind.x);
     output.clip = clip_varying(destination, clip_axes, clip_offset_half);
     output.clip_radii = clip_radii;
     return output;
+}
+// Bit-exact `unpack2x16float` without Naga's SHADER_FLOAT16_IN_FLOAT32
+// requirement, which wgpu withholds on adapters without shaderFloat16 (lavapipe).
+fn unpack_half(bits: u32) -> f32 {
+    let sign = (bits & 0x8000u) << 16u;
+    let exponent = (bits >> 10u) & 0x1fu;
+    let mantissa = bits & 0x3ffu;
+    if exponent == 0u {
+        let magnitude = f32(mantissa) * exp2(-24.0);
+        return select(magnitude, -magnitude, sign != 0u);
+    }
+    let biased = select(exponent + 112u, 255u, exponent == 31u);
+    return bitcast<f32>(sign | (biased << 23u) | (mantissa << 13u));
+}
+fn unpack_half2(bits: u32) -> vec2<f32> {
+    return vec2(unpack_half(bits & 0xffffu), unpack_half(bits >> 16u));
 }
 // Filtered coverage of the unit square in a decoration quad's UV space.
 fn solid_coverage(uv: vec2<f32>) -> f32 {
