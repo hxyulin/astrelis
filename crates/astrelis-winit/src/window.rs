@@ -58,6 +58,26 @@ impl WindowContext {
         .await?;
         Self::from_target(graphics, window, settings, target)
     }
+    /// Selects graphics using a native display connection, required for GLES presentation.
+    pub async fn with_display(
+        window: Arc<Window>,
+        settings: SurfaceSettings,
+        display: winit::event_loop::OwnedDisplayHandle,
+    ) -> Result<Self, WindowError> {
+        let metrics = WindowMetrics::from_window(&window)?;
+        let instance = astrelis::wgpu::Instance::new(
+            astrelis::wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display))
+                .with_env(),
+        );
+        let (graphics, target) = GraphicsContext::with_surface_instance(
+            &instance,
+            window.clone(),
+            settings.surface_options(metrics.physical_size()),
+        )
+        .await?;
+        Self::from_target(graphics, window, settings, target)
+    }
+
     /// Creates another window surface on an explicitly selected/shared device.
     /// Incompatible surfaces fail rather than silently selecting another device.
     pub fn with_graphics(
@@ -131,11 +151,10 @@ impl WindowContext {
     }
     /// Cached native eligibility, without attempting swapchain acquisition.
     pub fn can_present(&self) -> bool {
-        self.active
-            && self.visible
-            && !self.occluded
-            && self.metrics.has_area()
-            && self.target.is_some()
+        self.can_recover() && self.target.is_some()
+    }
+    pub(crate) fn can_recover(&self) -> bool {
+        self.active && self.visible && !self.occluded && self.metrics.has_area()
     }
     /// Updates cached resize/DPI/occlusion state before forwarding a native event.
     /// Unchanged size notifications do not replace attachments.
@@ -199,11 +218,12 @@ impl WindowContext {
         self.availability_invalidated = true;
     }
     /// Restores presentation after suspension; repeated active calls are harmless.
+    /// A failed recreation leaves the lifecycle active, with no presentation target.
     pub fn resume(&mut self) -> Result<(), WindowError> {
+        self.active = true;
         if self.target.is_none() {
             self.recreate()?;
         }
-        self.active = true;
         Ok(())
     }
     pub(crate) fn recreate(&mut self) -> Result<(), WindowError> {

@@ -466,7 +466,7 @@ pub use attachments::{
 };
 pub use brush::{Brush, BrushKind, BrushOptions, GradientSpread, GradientStop};
 pub use clip::RoundedClip;
-pub use context::GraphicsContext;
+pub use context::{GpuEvent, GraphicsContext};
 pub mod text;
 pub use drawing::{
     BoxShadow, CornerRadii, DrawSpace, EdgeAntialiasing, LineCap, LineDraw, Rect, Shape, ShapeDraw,
