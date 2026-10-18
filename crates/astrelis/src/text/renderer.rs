@@ -28,12 +28,10 @@ pub enum TextRenderError {
     InvalidOptions,
     /// A padded glyph image exceeds the configured atlas page size.
     GlyphTooLarge,
-    /// Every page in the budget is leased by prepared texts, recordings, or pending GPU work.
-    ///
-    /// Recoverable: the renderer and earlier prepared texts stay valid. Drop unused prepared
-    /// texts, finish frames and poll the device so completions release their leases, then
-    /// retry; [`TextRenderer::trim`] also releases unleased cached pages at once, and
-    /// [`TextRenderer::set_max_pages`] raises the budget.
+    /// Internal atlas allocation exhausted its safe page budget.
+    /// Preparation handles this by omitting affected glyphs, reporting their indices
+    /// through [`PreparedText::skipped_glyphs`], and retrying on later preparation.
+    /// Retained for source compatibility; ordinary preparation no longer returns it.
     AtlasFull,
     /// The backend could not parse a retained font or returned inconsistent image data.
     InvalidRaster,
@@ -417,6 +415,8 @@ enum Representation {
 enum GlyphSource {
     Image(GlyphImage),
     Blank,
+    // Temporary atlas pressure; never cached.
+    Unavailable,
     // Cached outline-source classification; image lookup uses a size-dependent coverage key.
     RasterFallback,
 }
@@ -516,6 +516,7 @@ struct TextDraft {
     size: [f32; 2],
     bounds: Option<Rect>,
     skipped: Vec<usize>,
+    atlas_full: bool,
     preparation: TextPreparation,
 }
 
@@ -566,6 +567,7 @@ pub struct PreparedText {
     bounds: Option<Rect>,
     glyph_count: usize,
     skipped: Arc<[usize]>,
+    atlas_full: bool,
     preparation: TextPreparation,
 }
 impl PreparedText {
@@ -583,7 +585,14 @@ impl PreparedText {
     pub fn glyph_count(&self) -> usize {
         self.glyph_count
     }
-    /// Original layout glyph indexes with no raster image, including blank spaces and unsupported sources.
+    /// Whether atlas pressure omitted any glyphs during this preparation.
+    /// Prepare again after releasing obsolete text and driving device progress.
+    /// Blank/unsupported glyphs alone do not set this flag.
+    pub fn atlas_full(&self) -> bool {
+        self.atlas_full
+    }
+    /// Original layout glyph indexes with no raster image, including blank spaces,
+    /// unsupported sources, and glyphs omitted under atlas pressure.
     pub fn skipped_glyphs(&self) -> &[usize] {
         &self.skipped
     }
@@ -606,8 +615,10 @@ impl PreparedText {
 /// Only consecutive glyphs on the same page are instanced together, preserving layout order.
 /// Leased pages are never evicted or overwritten. A full cache evicts its least recently used
 /// quarter at once, and a full page budget reclaims the least recently used unleased page, so
-/// neither scans the cache per glyph. Budget exhaustion returns a recoverable `AtlasFull`
-/// without waiting; callers control dropping resources, device polling, [`Self::trim`] and
+/// neither scans the cache per glyph. When every page is leased, preparation omits
+/// glyphs that need new space and records them in [`PreparedText::skipped_glyphs`].
+/// Later preparation retries them without invalidating earlier text or waiting.
+/// Callers control dropping resources, device polling, [`Self::trim`] and
 /// [`Self::set_max_pages`]. Font-size/raster limits bound
 /// image work, while Swash keeps a fixed eight-entry scaler cache and no CPU glyph-image cache.
 /// Changed text can reuse released geometry buffers. Recycling is bounded to 64
@@ -628,6 +639,7 @@ pub struct TextRenderer {
     pages: Vec<Shelf>,
     budget: Arc<Budget>,
     clock: u64,
+    atlas_full: bool,
     stats: TextRendererStats,
     geometry_pool: Arc<Mutex<GeometryPool>>,
     solid: Option<Arc<Page>>,
@@ -779,6 +791,7 @@ impl TextRenderer {
                 bytes: AtomicUsize::new(0),
             }),
             clock: 0,
+            atlas_full: false,
             stats: Default::default(),
         }
     }
@@ -795,9 +808,9 @@ impl TextRenderer {
     pub fn options(&self) -> &TextRendererOptions {
         &self.options
     }
-    /// Changes the live page budget. Raising it lets a preparation that returned
-    /// `AtlasFull` succeed on retry. Lowering it below the live count releases nothing
-    /// immediately; new pages wait until reclaim, [`Self::trim`] or lease release makes room.
+    /// Changes the live page budget. Raising it lets omitted glyphs fit on later preparation.
+    /// Lowering it below the live count releases nothing immediately; new pages wait
+    /// until reclaim, [`Self::trim`] or lease release makes room.
     pub fn set_max_pages(&mut self, max_pages: usize) -> Result<(), TextRenderError> {
         if max_pages == 0 {
             return Err(TextRenderError::InvalidOptions);
@@ -807,7 +820,7 @@ impl TextRenderer {
     }
     /// Releases every atlas page that no prepared text, recording or pending GPU work holds,
     /// with the cache entries that point into them. Leased pages and blank/fallback entries
-    /// stay cached. Use it after `AtlasFull`, or to return memory when text goes idle.
+    /// stay cached. Use it after atlas pressure, or to return memory when text goes idle.
     /// Costs one pass over the pages plus one over the cache when anything is released.
     pub fn trim(&mut self) -> TextTrim {
         let mut trim = TextTrim::default();
@@ -1021,6 +1034,7 @@ impl TextRenderer {
         let mut data = Vec::with_capacity(layout.glyphs().len());
         let mut batches: Vec<Batch> = Vec::new();
         let mut skipped = Vec::new();
+        let mut atlas_full = false;
         let mut bounds: Option<[f32; 4]> = None;
         for (index, glyph) in layout.glyphs().iter().enumerate() {
             let font = &layout.fonts()[glyph.font_index];
@@ -1067,6 +1081,7 @@ impl TextRenderer {
                 source
             };
             let GlyphSource::Image(mut image) = source else {
+                atlas_full |= matches!(source, GlyphSource::Unavailable);
                 skipped.push(index);
                 continue;
             };
@@ -1098,6 +1113,7 @@ impl TextRenderer {
                     font,
                 )?;
                 let GlyphSource::Image(phased_image) = source else {
+                    atlas_full |= matches!(source, GlyphSource::Unavailable);
                     skipped.push(index);
                     continue;
                 };
@@ -1210,6 +1226,7 @@ impl TextRenderer {
             size,
             bounds: bounds.map(|b| Rect::new(b[0], b[1], b[2] - b[0], b[3] - b[1])),
             skipped,
+            atlas_full,
             preparation,
         })
     }
@@ -1321,6 +1338,7 @@ impl TextRenderer {
             bounds: draft.bounds,
             glyph_count,
             skipped: draft.skipped.into(),
+            atlas_full: draft.atlas_full,
             preparation: draft.preparation,
         }
     }
@@ -1402,6 +1420,21 @@ impl TextRenderer {
         Ok(())
     }
     fn image(&mut self, key: Key, font: &TextFont) -> Result<GlyphSource, TextRenderError> {
+        match self.try_image(key, font) {
+            Err(TextRenderError::AtlasFull) => {
+                if !self.atlas_full {
+                    log::warn!(
+                        "text atlas is fully leased; omitting glyphs until space is available"
+                    );
+                    self.atlas_full = true;
+                }
+                // Do not cache this as blank: later preparation must retry the glyph.
+                Ok(GlyphSource::Unavailable)
+            }
+            result => result,
+        }
+    }
+    fn try_image(&mut self, key: Key, font: &TextFont) -> Result<GlyphSource, TextRenderError> {
         self.clock += 1;
         if let Some(cached) = self.cache.get_mut(&key) {
             self.stats.cache_hits += 1;
@@ -1646,6 +1679,7 @@ impl TextRenderer {
         );
         self.stats.uploaded_bytes += image.data.len() as u64;
         let s = size as f32;
+        self.atlas_full = false;
         Ok(GlyphImage {
             outline_mask: kind == Kind::Mask && matches!(image.source, Source::Outline),
             page,

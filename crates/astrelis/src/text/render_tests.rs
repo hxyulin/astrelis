@@ -241,6 +241,7 @@ fn atlas_exhaustion_abandonment_and_completion_release_leases() {
         let prepared = renderer
             .prepare_text(&cpu, TextRasterOptions::new())
             .unwrap();
+        assert!(prepared.skipped_glyphs().is_empty());
         let mut frame = target.begin_frame().unwrap();
         {
             let mut pass = frame.render_pass().begin().unwrap();
@@ -251,15 +252,18 @@ fn atlas_exhaustion_abandonment_and_completion_release_leases() {
         drop(prepared);
         renderer.clear_cache();
         assert_eq!(renderer.stats().live_pages, 1);
-        assert!(matches!(
-            renderer.prepare_text(&cpu, TextRasterOptions::new()),
-            Err(TextRenderError::AtlasFull)
-        ));
+        let omitted = renderer
+            .prepare_text(&cpu, TextRasterOptions::new())
+            .unwrap();
+        assert_eq!(omitted.skipped_glyphs(), [0]);
+        assert!(omitted.atlas_full());
+        assert_eq!(omitted.glyph_count(), 0);
         drop(frame);
         assert_eq!(renderer.stats().live_pages, 0);
         let prepared = renderer
             .prepare_text(&cpu, TextRasterOptions::new())
             .unwrap();
+        assert!(prepared.skipped_glyphs().is_empty());
         let mut frame = target.begin_frame().unwrap();
         {
             let mut pass = frame.render_pass().begin().unwrap();
@@ -389,10 +393,12 @@ fn ordered_mask_color_batches_and_unleased_page_eviction_work() {
         let mask = limited
             .prepare_text(&layout("M"), TextRasterOptions::new())
             .unwrap();
-        assert!(matches!(
-            limited.prepare_text(&layout("😀"), TextRasterOptions::new()),
-            Err(TextRenderError::AtlasFull)
-        ));
+        assert!(
+            limited
+                .prepare_text(&layout("😀"), TextRasterOptions::new())
+                .unwrap()
+                .atlas_full()
+        );
         drop(mask);
         let color = limited
             .prepare_text(&layout("😀"), TextRasterOptions::new())
@@ -624,10 +630,12 @@ fn mtsdf_page_leases_survive_cache_clear_and_release_on_gpu_completion() {
         drop(prepared);
         renderer.clear_cache();
         assert_eq!(renderer.stats().live_pages, 1);
-        assert!(matches!(
-            renderer.prepare_text(&cpu, MtsdfOptions::new()),
-            Err(TextRenderError::AtlasFull)
-        ));
+        assert!(
+            renderer
+                .prepare_text(&cpu, MtsdfOptions::new())
+                .unwrap()
+                .atlas_full()
+        );
         let submission = frame.finish().unwrap();
         g.device()
             .poll(wgpu::PollType::Wait {
@@ -681,10 +689,12 @@ fn mtsdf_invalid_options_and_page_pressure_leave_retained_resources_usable() {
             renderer.prepare_text(&cpu, options.pixels_per_em(256)),
             Err(TextRenderError::GlyphTooLarge)
         ));
-        assert!(matches!(
-            renderer.prepare_text(&layout("😀"), options),
-            Err(TextRenderError::AtlasFull)
-        ));
+        assert!(
+            renderer
+                .prepare_text(&layout("😀"), options)
+                .unwrap()
+                .atlas_full()
+        );
         let mut t = target(&g, 1);
         let mut painter = crate::Painter::new(&g);
         let bytes = pixels(&g, &mut t, |frame| {
@@ -1138,10 +1148,12 @@ fn failed_and_empty_batches_preserve_existing_resources_and_painter_usage() {
         )
         .unwrap();
         let old = small.prepare_text(&cpu, TextRasterOptions::new()).unwrap();
-        assert!(matches!(
-            small.prepare_texts([cpu.clone(), layout("😀")], TextRasterOptions::new()),
-            Err(TextRenderError::AtlasFull)
-        ));
+        let partial = small
+            .prepare_texts([cpu.clone(), layout("😀")], TextRasterOptions::new())
+            .unwrap();
+        assert!(!partial[0].atlas_full());
+        assert!(partial[1].atlas_full());
+        assert_eq!(partial[1].skipped_glyphs(), [0]);
         assert_eq!(old.glyph_count(), 1);
         let actual = pixels(&g, &mut target, |frame| {
             let mut pass = frame.render_pass().begin().unwrap();
@@ -1465,10 +1477,12 @@ fn trim_and_budget_growth_recover_from_atlas_full_without_touching_leased_pages(
         let m = layout("M");
         let mask = renderer.prepare_text(&m, raster).unwrap();
         // The only page is leased by `mask`; a color glyph needs a second page.
-        assert!(matches!(
-            renderer.prepare_text(&layout("😀"), raster),
-            Err(TextRenderError::AtlasFull)
-        ));
+        assert!(
+            renderer
+                .prepare_text(&layout("😀"), raster)
+                .unwrap()
+                .atlas_full()
+        );
         assert_eq!(renderer.trim(), TextTrim::default());
         assert!(matches!(
             renderer.set_max_pages(0),
@@ -1951,5 +1965,52 @@ fn phased_coverage_uses_composed_painter_origin_and_density() {
                 .zip(expected)
                 .all(|(p, e)| p[3].abs_diff(e) <= 1)
         );
+    });
+}
+
+#[test]
+fn changing_text_reclaims_pages_without_losing_retained_images() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let mut renderer = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                page_size: 32,
+                max_pages: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        renderer.prepare(&t.render_format()).unwrap();
+        let mask = layout("M");
+        let color = layout("😀");
+        for index in 0..12 {
+            let is_mask = index % 2 == 0;
+            let prepared = renderer
+                .prepare_text(
+                    if is_mask { &mask } else { &color },
+                    TextRasterOptions::new(),
+                )
+                .unwrap();
+            assert!(!prepared.atlas_full());
+            assert!(prepared.skipped_glyphs().is_empty());
+            let actual = pixels(&g, &mut t, |frame| {
+                let mut pass = frame.render_pass().begin().unwrap();
+                renderer
+                    .draw(&mut pass, &prepared, TextDraw::default())
+                    .unwrap();
+            });
+            near(
+                pixel(&actual, 5, 10),
+                if is_mask { [255; 4] } else { [254, 0, 0, 254] },
+            );
+            assert_eq!(renderer.stats().live_pages, 1);
+            // Completion is driven by readback; dropping this text allows page eviction.
+        }
+        let blank = renderer
+            .prepare_text(&layout(" "), TextRasterOptions::new())
+            .unwrap();
+        assert!(!blank.atlas_full());
     });
 }
