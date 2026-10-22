@@ -1,0 +1,18 @@
+2026-10-22T17:45:47.700854+00:00
+ 1:45  up 14 days,  4:44, 3 users, load averages: 9.55 17.90 36.60
+  PID  %CPU %MEM COMM
+36181  98.5  0.0 ./j
+91577  96.0  0.5 /tmp/keel-unnamed-f81f2635/build/debug/deps/x86_unnamed_aggregate-cf3a09a8a5784817
+ 4653  86.4  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 4655  84.8  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 4657  84.6  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 4654  84.0  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 4676  75.9  0.0 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustfmt
+ 4677  71.1  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/clippy-driver
+ 4679  69.7  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/clippy-driver
+  378  31.6  0.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds
+  610  17.0  0.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores
+64717  12.8  0.4 /Applications/T3 Code (Nightly).app/Contents/Frameworks/T3 Code (Nightly) Helper (Renderer).app/Contents/MacOS/T3 Code (Nightly) Helper (Renderer)
+64718  11.8  0.6 /Applications/T3 Code (Nightly).app/Contents/MacOS/T3 Code (Nightly)
+ 4691  10.7  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 4689  10.4  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared

@@ -1,0 +1,18 @@
+2026-10-22T17:46:22.183707+00:00
+ 1:46  up 14 days,  4:45, 3 users, load averages: 35.24 23.11 37.73
+  PID  %CPU %MEM COMM
+ 6504 228.8  0.4 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 6538 222.3  0.3 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 6284 115.9  0.4 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 6581 112.2  0.3 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 9643  87.9  0.3 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+64717  59.0  0.4 /Applications/T3 Code (Nightly).app/Contents/Frameworks/T3 Code (Nightly) Helper (Renderer).app/Contents/MacOS/T3 Code (Nightly) Helper (Renderer)
+ 9716  33.1  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 9212  32.5  0.1 nix
+ 6580  30.7  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 9712  29.9  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 9728  29.6  0.1 (clippy-driver)
+ 9729  29.5  0.0 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/clippy-driver
+ 9730  29.4  0.0 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/clippy-driver
+ 9577  29.3  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 9727  29.3  0.0 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/clippy-driver

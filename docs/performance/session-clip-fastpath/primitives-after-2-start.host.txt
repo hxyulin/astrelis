@@ -1,0 +1,18 @@
+2026-10-22T17:46:01.627176+00:00
+ 1:46  up 14 days,  4:45, 3 users, load averages: 17.24 19.16 36.72
+  PID  %CPU %MEM COMM
+36181  79.8  0.0 ./j
+ 5916  78.0  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 5712  78.0  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 5805  76.5  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 6162  74.1  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+91577  73.1  0.5 /tmp/keel-unnamed-f81f2635/build/debug/deps/x86_unnamed_aggregate-cf3a09a8a5784817
+ 5711  73.0  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 6116  71.3  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 6019  71.1  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 5927  69.9  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 5264  65.4  0.3 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 6165  63.1  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 6178  52.1  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 6007  43.6  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+64718   7.0  0.6 /Applications/T3 Code (Nightly).app/Contents/MacOS/T3 Code (Nightly)

@@ -1,0 +1,18 @@
+2026-10-22T17:47:08.876894+00:00
+ 1:47  up 14 days,  4:46, 3 users, load averages: 33.00 24.71 37.60
+  PID  %CPU %MEM COMM
+19053 195.3  0.1 /Users/hxyulin/dev/projects/flux-lang/.claude/worktrees/agent-a7f2c24ee11c552b7/target/debug/deps/mir-9288d13c3df745e9
+  610 135.8  1.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores
+36181  98.2  0.0 ./j
+91577  98.1  0.5 /tmp/keel-unnamed-f81f2635/build/debug/deps/x86_unnamed_aggregate-cf3a09a8a5784817
+19340  94.0  0.1 /Users/hxyulin/.t3/worktrees/flux-lang/t3-c987f162/target/debug/flux
+  378  64.5  0.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds
+18096  49.9  0.2 /Users/hxyulin/dev/RM/rm-simulator-angular-noise/target/nix/debug/rm-simulator-server
+19496  34.3  0.1 /Users/hxyulin/.t3/worktrees/flux-lang/t3-6fc057a1/target/release/flux
+  390  16.3  0.0 /usr/libexec/opendirectoryd
+18044  11.4  0.1 /Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python
+19510  11.1  0.1 (rustc)
+19446  10.5  0.0 /System/Library/PrivateFrameworks/OSAnalyticsPrivate.framework/XPCServices/ReportCrashService.xpc/Contents/MacOS/ReportCrashService
+57265   7.0  2.3 codex
+19416   6.2  0.0 /System/Library/PrivateFrameworks/OSAnalyticsPrivate.framework/XPCServices/ReportCrashService.xpc/Contents/MacOS/ReportCrashService
+64718   4.7  0.6 /Applications/T3 Code (Nightly).app/Contents/MacOS/T3 Code (Nightly)

@@ -915,3 +915,220 @@ fn consecutive_draws_merge_in_order_and_flush_before_other_commands() {
         assert!(errors.pop().await.is_none());
     });
 }
+
+#[test]
+fn session_clips_restore_after_pass_raw_custom_and_nested_scope_access() {
+    pollster::block_on(async {
+        let base = GraphicsContext::headless().await.unwrap();
+        for capacity in [0, 2, crate::MAX_ROUNDED_CLIPS] {
+            let g = if capacity == crate::MAX_ROUNDED_CLIPS {
+                base.clone()
+            } else {
+                let (device, queue) = base
+                    .adapter()
+                    .request_device(&wgpu::DeviceDescriptor {
+                        required_limits: wgpu::Limits {
+                            max_uniform_buffer_binding_size: 128,
+                            max_uniform_buffers_per_shader_stage: if capacity == 0 { 1 } else { 2 },
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+                GraphicsContext::from_wgpu(
+                    base.instance().clone(),
+                    base.adapter().clone(),
+                    device,
+                    queue,
+                )
+            };
+            assert_eq!(g.rounded_clip_capacity(), capacity);
+            let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+            let mut t = target(&g, 1, false);
+            let mut renderer = PrimitiveRenderer::new(&g, Default::default());
+            let mut painter = crate::Painter::new(&g);
+            let brush = g
+                .create_brush(crate::BrushOptions::solid([0.3, 0.8, 1., 1.]))
+                .unwrap();
+            let other_brush = g.create_brush(crate::BrushOptions::solid(RED)).unwrap();
+            let stride = g.device().limits().min_uniform_buffer_offset_alignment as u64;
+            let buffer = g.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("session application dynamic uniform"),
+                size: stride + 16,
+                usage: wgpu::BufferUsages::UNIFORM,
+                mapped_at_creation: false,
+            });
+            let layout = g
+                .device()
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: None,
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: true,
+                            min_binding_size: std::num::NonZeroU64::new(16),
+                        },
+                        count: None,
+                    }],
+                });
+            let group = g.device().create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffer,
+                        offset: 0,
+                        size: std::num::NonZeroU64::new(16),
+                    }),
+                }],
+            });
+            let shader = g.device().create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("session custom renderer"),
+                source: wgpu::ShaderSource::Wgsl("@vertex fn vs(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32>{return vec4(p,1.0);}\n@fragment fn fs()->@location(0) vec4<f32>{return vec4(0.0,0.0,1.0,0.1);}".into()),
+            });
+            let material =
+                g.create_material(MaterialOptions::new(&shader).entry_points("vs", "fs"));
+            let mesh = g
+                .create_mesh(
+                    &[
+                        Vertex::new([-1., -1., 0.], BLUE),
+                        Vertex::new([3., -1., 0.], BLUE),
+                        Vertex::new([-1., 3., 0.], BLUE),
+                    ],
+                    &[0, 1, 2],
+                )
+                .unwrap();
+            let mut meshes = MeshRenderer::new(&g);
+            for brushed in [false, true] {
+                for line in [false, true] {
+                    let mut render = |f: &mut crate::Frame<'_, '_>, disrupt: bool| {
+                        let mut pass = f.render_pass().begin().unwrap();
+                        if capacity > 0 {
+                            pass.set_rounded_clips(&[crate::RoundedClip::new(
+                                Rect::new(4., 4., 56., 56.),
+                                crate::CornerRadii::uniform(16.),
+                            )])
+                            .unwrap();
+                        }
+                        let before = g.upload_stats();
+                        let mut s = renderer.bind(&mut pass, brushed.then_some(&brush)).unwrap();
+                        // No clip uploads or binding creation on empty/invalid work,
+                        // including after pass access has invalidated the session.
+                        for _ in 0..2 {
+                            s.draw_many::<ShapeDraw>(&[]).unwrap();
+                            assert!(
+                                s.draw(ShapeDraw::rect(Rect::new(0., 0., -1., 1.), RED))
+                                    .is_err()
+                            );
+                            assert!(
+                                s.draw_many(&[
+                                    ShapeDraw::rect(Rect::new(0., 0., 8., 8.), RED),
+                                    ShapeDraw::ellipse(Rect::new(0., 0., -1., 1.), RED),
+                                ])
+                                .is_err()
+                            );
+                            assert_eq!(
+                                g.upload_stats().clip_bindings_created,
+                                before.clip_bindings_created
+                            );
+                            s.pass();
+                        }
+                        for phase in 0..4 {
+                            s.pass()
+                                .set_viewport(
+                                    0.,
+                                    0.,
+                                    if phase % 2 == 0 { 64. } else { 60. },
+                                    64.,
+                                    0.,
+                                    1.,
+                                )
+                                .unwrap();
+                            let clip = crate::RoundedClip::new(
+                                Rect::new(4., 4., 56., 56.),
+                                crate::CornerRadii::uniform(16.),
+                            );
+                            s.pass()
+                                .set_rounded_clips(&vec![
+                                    clip;
+                                    if capacity == 0 {
+                                        0
+                                    } else {
+                                        [0, 2, 1, 0][phase]
+                                    }
+                                ])
+                                .unwrap();
+                            // A custom material changes pipeline/vertex state, while
+                            // a nested Painter scope temporarily changes the stack.
+                            meshes
+                                .draw_with_material(s.pass(), &mesh, &material)
+                                .unwrap();
+                            if capacity > 0 && phase != 1 {
+                                let mut paint = painter.begin(s.pass()).unwrap();
+                                let mut child = paint
+                                    .clipped_rounded(
+                                        Rect::new(12., 12., 40., 40.),
+                                        crate::CornerRadii::uniform(8.),
+                                    )
+                                    .unwrap();
+                                child.fill_rect(Rect::new(16., 16., 8., 8.), GREEN).unwrap();
+                            }
+                            for i in 0..4 {
+                                if disrupt {
+                                    let p = s.pass();
+                                    match i {
+                                        0 | 1 => p.set_bind_group(
+                                            1,
+                                            &group,
+                                            &[if i == 0 { 0 } else { stride as u32 }],
+                                        ),
+                                        2 => {
+                                            p.as_wgpu().set_bind_group(1, &group, &[0]);
+                                            p.as_wgpu().set_vertex_buffer(1, g.no_clip().slice(..));
+                                            p.as_wgpu().set_scissor_rect(0, 0, 1, 1);
+                                        }
+                                        _ => other_brush.bind(p),
+                                    }
+                                }
+                                let color = [0.2, 0.4, 0.8, 0.4];
+                                // Two draws per restoration exercise the amortized path
+                                // and translucent order across clip transitions.
+                                for j in 0..2 {
+                                    if !disrupt {
+                                        // Reference explicitly binds both clip interfaces
+                                        // for every draw, independently of Session caching.
+                                        s.pass().bind_clip(1);
+                                        s.pass().bind_rounded_clips();
+                                    }
+                                    let x = (phase * 16 + i * 3 + j) as f32;
+                                    if line {
+                                        s.draw(LineDraw::new([x, 0.], [x, 64.], color).width(5.))
+                                            .unwrap();
+                                    } else {
+                                        s.draw(ShapeDraw::rect(Rect::new(x, 0., 5., 64.), color))
+                                            .unwrap();
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    let expected = pixels(&g, &mut t, |f| render(f, false));
+                    let actual = pixels(&g, &mut t, |f| render(f, true));
+                    assert_eq!(
+                        actual, expected,
+                        "capacity={capacity} brushed={brushed} line={line}"
+                    );
+                    assert!(pixel(&actual, 50, 32)[3] > 0);
+                    if capacity > 0 {
+                        assert_ne!(pixel(&actual, 25, 0), pixel(&actual, 25, 32));
+                    }
+                }
+            }
+            assert!(errors.pop().await.is_none(), "capacity={capacity}");
+        }
+    });
+}

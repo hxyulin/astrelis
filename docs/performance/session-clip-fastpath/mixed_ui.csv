@@ -1,0 +1,13 @@
+phase,cpu_stage,samples,p50_us,p95_us,p99_us,max_us
+warm_static,backpressure,360,0.250,0.958,814.834,3078.958
+warm_static,update_prepare,360,0.042,0.084,0.084,0.167
+warm_static,record_upload_submit,360,568.500,788.250,938.375,2729.958
+warm_static,frame_wall,360,569.209,809.791,1496.625,4007.916
+changing_churn,backpressure,360,0.250,2.000,63.667,87.625
+changing_churn,update_prepare,360,163.375,254.292,306.584,417.084
+changing_churn,record_upload_submit,360,588.042,752.375,848.541,1711.291
+changing_churn,frame_wall,360,754.917,970.000,1067.916,1838.208
+recovery_static,backpressure,360,0.209,0.792,1.500,655.333
+recovery_static,update_prepare,360,0.041,0.083,0.084,0.125
+recovery_static,record_upload_submit,360,562.167,699.375,787.666,883.375
+recovery_static,frame_wall,360,562.334,702.500,806.250,1318.000

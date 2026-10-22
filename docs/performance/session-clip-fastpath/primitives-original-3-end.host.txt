@@ -1,0 +1,18 @@
+2026-10-22T17:47:06.641675+00:00
+ 1:47  up 14 days,  4:46, 3 users, load averages: 33.00 24.71 37.60
+  PID  %CPU %MEM COMM
+18096 122.9  0.2 /Users/hxyulin/dev/RM/rm-simulator-angular-noise/target/nix/debug/rm-simulator-server
+  610 117.8  1.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores
+36181  98.5  0.0 ./j
+91577  98.2  0.6 /tmp/keel-unnamed-f81f2635/build/debug/deps/x86_unnamed_aggregate-cf3a09a8a5784817
+18440  78.2  0.0 leaks
+  378  32.7  0.2 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds
+18113  30.7  0.1 /Users/hxyulin/dev/projects/flux-lang/.claude/worktrees/agent-a7f2c24ee11c552b7/target/debug/deps/scaling-27722c57fc4725fe
+18044  27.7  0.1 /Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Resources/Python.app/Contents/MacOS/Python
+18974  19.6  0.1 (rustc)
+18985  15.7  0.0 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo
+64717   7.5  0.4 /Applications/T3 Code (Nightly).app/Contents/Frameworks/T3 Code (Nightly) Helper (Renderer).app/Contents/MacOS/T3 Code (Nightly) Helper (Renderer)
+  390   4.1  0.0 /usr/libexec/opendirectoryd
+  415   2.6  0.0 /usr/sbin/notifyd
+    1   2.5  0.0 /sbin/launchd
+18990   2.2  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc

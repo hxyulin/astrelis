@@ -1,0 +1,18 @@
+2026-10-22T17:45:47.640711+00:00
+ 1:45  up 14 days,  4:44, 3 users, load averages: 9.55 17.90 36.60
+  PID  %CPU %MEM COMM
+36181  96.1  0.0 ./j
+91577  94.8  0.5 /tmp/keel-unnamed-f81f2635/build/debug/deps/x86_unnamed_aggregate-cf3a09a8a5784817
+ 4653  75.8  0.2 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 4655  74.6  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 4657  74.0  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 4654  72.0  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc
+ 4676  64.0  0.0 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustfmt
+ 4677  56.1  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/clippy-driver
+ 4679  52.0  0.1 /Users/hxyulin/.rustup/toolchains/stable-aarch64-apple-darwin/bin/clippy-driver
+  378  31.6  0.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds
+  610  17.0  0.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores
+ 4650   4.2  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+ 4660   4.0  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+ 4662   4.0  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+ 4665   4.0  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared

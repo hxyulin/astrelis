@@ -1,5 +1,9 @@
 # Rounded clip recording fast path
 
+Follow-up: [primitive session clip binding](session-clip-fastpath.md) adds lazy
+session restoration and a new bounded comparison against `856caef` and original.
+The verdict below describes this earlier experiment.
+
 Push-blocker verdict: **not cleared**. The focused fix removes the repeated
 immutable-limit query and redundant binding clones. Three paired runs improve
 median scoped recording versus merged parent `adb79c6`, especially outlines.

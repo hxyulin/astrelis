@@ -1,0 +1,5 @@
+    Checking astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-e8cfb18e/crates/astrelis)
+ Documenting astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-e8cfb18e/crates/astrelis)
+ Documenting astrelis-winit v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-e8cfb18e/crates/astrelis-winit)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.37s
+   Generated /Users/hxyulin/.t3/worktrees/astrelis/t3-e8cfb18e/target/doc/astrelis/index.html and 1 other file

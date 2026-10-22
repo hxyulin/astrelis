@@ -1,0 +1,18 @@
+2026-10-22T17:45:39.470405+00:00
+ 1:45  up 14 days,  4:44, 3 users, load averages: 8.29 17.80 36.68
+  PID  %CPU %MEM COMM
+36181 100.0  0.0 ./j
+91577  99.2  0.5 /tmp/keel-unnamed-f81f2635/build/debug/deps/x86_unnamed_aggregate-cf3a09a8a5784817
+  378  47.9  0.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds
+64718   9.9  0.6 /Applications/T3 Code (Nightly).app/Contents/MacOS/T3 Code (Nightly)
+64717   8.5  0.4 /Applications/T3 Code (Nightly).app/Contents/Frameworks/T3 Code (Nightly) Helper (Renderer).app/Contents/MacOS/T3 Code (Nightly) Helper (Renderer)
+36157   5.6  0.1 /Library/SystemExtensions/AC4C8EBB-2710-49F9-8F80-58FBDCF03105/ch.protonvpn.mac.WireGuard-Extension.systemextension/Contents/MacOS/ch.protonvpn.mac.WireGuard-Extension
+  610   5.0  0.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores
+57265   3.6  2.3 codex
+  613   3.5  0.0 /System/Library/DriverExtensions/AppleCentauriAlpha.dext/AppleCentauriAlpha
+73319   3.4  0.1 /Applications/T3 Code (Nightly).app/Contents/Frameworks/T3 Code (Nightly) Helper (Renderer).app/Contents/MacOS/T3 Code (Nightly) Helper (Renderer)
+  705   1.9  0.2 /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder
+61236   1.0  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+95100   0.9  0.0 /usr/libexec/trustd
+61732   0.9  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+61344   0.9  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared

@@ -1,0 +1,275 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-e8cfb18e/crates/astrelis)
+   Compiling astrelis-winit v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-e8cfb18e/crates/astrelis-winit)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.34s
+     Running unittests src/lib.rs (target/debug/deps/astrelis-91c2e706018d4677)
+
+running 200 tests
+test api_tests::text_errors_convert_into_the_crate_error_with_question_mark ... ok
+test brush::tests::descriptions_validate_stops_geometry_and_inverse_mapping ... ok
+test api_tests::checked_preparation_returns_diagnostics_without_caching_invalid_pipelines ... ok
+test api_tests::line_strip_restart_supports_uint16_indices ... ok
+test api_tests::scoped_live_images_snapshot_storage_and_new_scopes_follow_replacement ... ok
+test api_tests::scoped_mesh_restores_geometry_and_raster_after_other_renderers_and_raw_access ... ok
+test api_tests::custom_copy_initializes_managed_color_for_later_loads ... ok
+test context::tests::diagnostics_are_bounded_and_reserve_fatal_delivery ... ok
+test api_tests::msaa_can_resolve_only_last_pass_and_discard_samples_independently ... ok
+test context::tests::required_metal_hardware_is_available ... ok
+test drawing::tests::invalid_geometry_and_colors_are_rejected ... ok
+test drawing::tests::inverse_bounds_and_rectangle_helpers ... ok
+test drawing::tests::transform_order_and_y_down_rotation ... ok
+test api_tests::custom_streams_uint16_instances_ranges_updates_and_imports_render ... ok
+test api_tests::attachment_effects_follow_submission_order_and_load_dependencies_are_rechecked ... ok
+test api_tests::managed_custom_passes_support_depth_only_mrt_and_imported_mips ... ok
+test api_tests::scoped_bindings_reject_foreign_resources_feedback_and_read_only_depth ... ok
+test mesh::tests::rejects_malformed_meshes_before_gpu_upload ... ok
+test api_tests::scoped_custom_meshes_keep_application_bindings_and_instance_bounds ... ok
+test api_tests::scoped_dynamic_textures_validate_batches_and_restore_image_after_pass_access ... ok
+test context::tests::uncaptured_validation_and_device_loss_are_reported_without_panicking ... ok
+test api_tests::prepared_scopes_revalidate_pixel_viewports_and_restore_parent_and_raw_state ... ok
+test context::tests::loss_callback_marks_all_clones_before_notification ... ok
+test geometry_pool::tests::idle_geometry_storage_is_bounded_and_large_buffers_are_released ... ok
+test mesh_renderer::depth_stencil_tests::depth_stencil_validation_discard_and_abandonment_preserve_initialization ... ok
+test framebuffer::tests::framebuffer_contents_persist_only_after_submission ... ok
+test framebuffer::tests::framebuffer_passes_share_submission_and_validate_destinations ... ok
+test brush::tests::brush_storage_and_parameter_pages_are_retained_across_frames_and_owner_drop ... ok
+test mesh_renderer::depth_stencil_tests::stencil_write_masks_preserve_independent_bit_flags ... ok
+test mesh_renderer::depth_stencil_tests::depth_stencil_targets_validate_capabilities_and_replace_attachment_generations ... ok
+test mesh_renderer::material_tests::custom_integer_material_renders_to_integer_framebuffer ... ok
+test mesh_renderer::tests::checked_preparation_tracks_validation_provenance_and_eviction ... ok
+test mesh_renderer::tests::pipeline_cache_eviction_preserves_mesh_scope_and_recorded_draws ... ok
+test mesh_renderer::material_tests::materials_bind_dynamic_uniforms_and_reuse_prepared_pipelines ... ok
+test brush::tests::gradients_render_exact_stops_hard_edges_and_premultiplied_tints ... ok
+test mesh_renderer::depth_stencil_tests::stencil_masks_dynamic_references_and_read_only_passes_clip_meshes ... ok
+test mesh_renderer::material_tests::material_state_validation_and_device_checks_leave_recording_usable ... ok
+test framebuffer::tests::rgba8_readback_unpads_rows_swizzles_bgra_and_rejects_unreadable_outputs ... ok
+test mesh_renderer::tests::renderers_share_passes_preserve_order_and_validate_devices ... ok
+test mesh_renderer::depth_stencil_tests::depth_tests_occlude_independent_of_order_and_persist_across_passes ... ok
+test brush::tests::msaa_viewport_reflection_and_normalized_brush_coordinates_are_consistent ... ok
+test brush::tests::application_limits_reject_unsupported_brushes_and_split_primitive_pages ... ok
+test mesh_renderer::tests::multisampling_resolves_edges_and_preserves_samples_across_passes ... ok
+test brush::tests::invalid_batches_devices_and_overflow_record_no_draws ... ok
+test brush::tests::transparent_brush_fragments_do_not_write_stencil_and_read_only_is_validated ... ok
+test painter::tests::clipped_scopes_intersect_map_through_transforms_and_restore_parent_scissor ... ok
+test painter::tests::clipped_scopes_follow_the_viewport_origin ... ok
+test brush::tests::spread_and_radial_geometry_follow_brush_and_draw_transforms ... ok
+test painter::tests::custom_mesh_shader_consumes_complete_rounded_intersection ... ok
+test painter::tests::nested_transform_scopes_preserve_parent_state_and_coordinate_units ... ok
+test painter::tests::raster_density_does_not_double_scale_text_in_logical_painter_sessions ... ok
+test painter::tests::builtin_stencil_writes_follow_visible_coverage_and_readonly_passes_reject_writers ... ok
+test painter::tests::painter_outline_helpers_match_direct_shapes_under_affine_transforms ... ok
+test painter::tests::invalid_children_batches_devices_and_feedback_leave_session_usable ... ok
+test painter::tests::rounded_clip_binding_tracks_viewport_changes_and_raw_group_overrides ... ok
+test painter::tests::layer_formats_composite_nearest_sampled_layers_like_direct_painting ... ok
+test painter::tests::repeated_rounded_bindings_restore_after_application_dynamic_offsets ... ok
+test painter::tests::intersecting_rounded_clips_match_transformed_pixel_oracle_for_points_and_msaa ... ok
+test painter::tests::rejected_painter_text_draws_leave_session_and_cached_resources_usable ... ok
+test path::tests::command_validation_and_empty_paths_are_explicit ... ok
+test painter::tests::painter_matches_direct_renderers_with_custom_pass_access ... ok
+test path::tests::curve_tolerance_and_stroke_union_affect_only_preparation ... ok
+test path::renderer::tests::reprepared_paths_reuse_geometry_only_after_recorded_use_completes ... ok
+test path::tests::fill_rules_holes_open_contours_and_intersections_tessellate ... ok
+test mesh_renderer::tests::material_pipeline_cache_churn_retains_clones_and_reuses_live_variants ... ok
+test painter::tests::prepared_images_match_dynamic_placements_under_nested_transforms_and_pass_access ... ok
+test path::renderer::tests::warmed_paths_reuse_storage_and_recordings_keep_dropped_geometry_valid ... ok
+test path::tests::batches_respect_application_buffer_limits_and_preserve_last_draw ... ok
+test path::tests::coverage_transforms_viewport_clipping_and_msaa_work ... ok
+test path::tests::filled_holes_and_translucent_strokes_have_expected_pixels ... ok
+test painter::tests::rounded_stack_restoration_and_capacity_errors_are_atomic ... ok
+test painter::tests::rounded_clips_nest_restore_follow_rotation_and_apply_to_direct_renderers ... ok
+test path::tests::open_caps_connected_joins_and_miter_limits_have_expected_pixels ... ok
+test path::tests::draw_errors_are_atomic_and_prepared_paths_are_device_bound ... ok
+test path::tests::stencil_policy_and_read_only_validation_apply_to_paths ... ok
+test point_renderer::tests::ring_updates_preserve_logical_order_and_failed_updates_are_atomic ... ok
+test painter::tests::warm_clip_bindings_preserve_pixels_and_unsubmitted_recording_isolation ... ok
+test painter::tests::transformed_batches_match_individual_painting_and_reuse_scratch ... ok
+test point_renderer::tests::connected_joins_do_not_double_blend_and_miter_limit_bevels ... ok
+test brush::tests::batches_painter_and_scopes_preserve_pixels_order_and_bindings ... ok
+test primitive::tests::consecutive_draws_merge_in_order_and_flush_before_other_commands ... ok
+test primitive::tests::box_shadows_match_gaussian_blur_and_follow_offset_spread_and_corners ... ok
+test primitive::tests::independent_corner_radii_fill_and_outline_each_corner ... ok
+test point_renderer::tests::ranges_ring_order_widths_and_marker_radii_are_fixed_under_zoom ... ok
+test point_renderer::tests::straight_lines_caps_gaps_and_marker_shapes_render ... ok
+test painter::tests::rounded_clips_apply_to_every_built_in_2d_renderer_with_antialiased_edges ... ok
+test primitive::tests::batches_match_individual_draws_and_preserve_translucent_order ... ok
+test point_renderer::tests::warm_recording_reuses_resources_and_updates_have_queue_not_snapshot_semantics ... ok
+test primitive::tests::outlines_place_width_and_preserve_translucent_corners ... ok
+test primitive::tests::mixed_fill_outline_batches_are_atomic_reuse_storage_and_match_single_draws ... ok
+test target::tests::presentation_accepts_automatic_and_offered_modes_only ... ok
+test target::tests::surface_formats_render_to_srgb_views ... ok
+test painter::tests::rounded_clip_capacity_respects_application_uniform_limits ... ok
+test text::interaction::ascii_tests::dense_ascii_index_matches_general_index_including_ligatures_and_wraps ... ok
+test text::interaction_tests::blank_lines_alignment_and_paired_breaks_need_no_fonts ... ok
+test primitive::tests::mixed_instance_strides ... ok
+test text::interaction_tests::invalid_queries_and_empty_ranges_are_explicit_and_snapshot_reuse_is_unchanged ... ok
+test text::interaction_tests::ligature_advance_is_subdivided_once_and_combining_marks_are_atomic ... ok
+test text::interaction_tests::lazy_index_survives_owners_and_has_all_unicode_boundaries ... ok
+test text::interaction_tests::rtl_ligatures_and_mixed_bidi_selection_follow_visual_positions ... ok
+test text::interaction_tests::visual_navigation_crosses_paragraph_direction_changes_at_logical_edges ... ok
+test text::interaction_tests::wrap_affinity_resolves_both_lines_and_hits_round_trip_geometry ... ok
+test primitive::tests::invalid_batches_are_atomic_and_warm_resources_are_reused ... ok
+test path::tests::batches_scopes_and_painter_match_and_restore_after_other_renderers ... ok
+test primitive::tests::viewport_transforms_clipping_and_fractional_edges_are_consistent ... ok
+test text::renderer::tests::capture_coverage_comparison ... ignored, writes matched coverage comparison images
+test primitive::tests::scoped_restoration_shares_mesh_texture_msaa_and_readonly_depth ... ok
+test primitive::tests::zero_corner_radius_matches_sharp_rectangles_for_every_stroke_placement ... ok
+test text::renderer::tests::atlas_exhaustion_abandonment_and_completion_release_leases ... ok
+test primitive::tests::shapes_and_line_caps_have_expected_coverage ... ok
+test primitive::tests::subpixel_geometry_does_not_become_a_half_opaque_pixel ... ok
+test painter::tests::stencil_clips_all_painter_renderers_and_reference_changes_take_effect ... ok
+test text::renderer::tests::half_precision_packing_matches_ieee_binary16 ... ok
+test text::renderer::tests::batch_chunks_keep_storage_and_atlas_ownership_independent ... ok
+test text::renderer::tests::batching_and_capacity_buckets_respect_application_device_limits ... ok
+test text::renderer::tests::full_glyph_cache_evicts_least_recently_used_keys ... ok
+test point_renderer::tests::low_device_limits_and_stencil_policy_fail_before_drawing ... ok
+test text::renderer::tests::coverage_color_and_bitmap_blend_in_linear_premultiplied_space ... ok
+test painter::tests::painter_text_matches_direct_layers_nested_transforms_and_pass_state ... ok
+test text::renderer::tests::changing_text_reclaims_pages_without_losing_retained_images ... ok
+test text::renderer::tests::nearby_raster_scales_share_quarter_pixel_rasters_and_keep_their_size ... ok
+test point_renderer::tests::scopes_painter_and_invalid_draws_restore_state_without_point_uploads ... ok
+test text::renderer::tests::dpi_clipping_msaa_transforms_and_interleaving_preserve_order ... ok
+test text::renderer::tests::invalid_preparation_and_draws_leave_existing_text_and_pass_usable ... ok
+test text::interaction_tests::narrow_wrapping_and_control_clusters_have_finite_complete_caret_geometry ... ok
+test text::renderer::tests::caret_and_selection_updates_reuse_prepared_glyphs_and_geometry ... ok
+test text::renderer::tests::geometry_reuse_preserves_clones_recordings_and_submitted_draws ... ok
+test text::renderer::tests::prepared_texts_cache_clearing_and_overlapping_recordings_keep_their_images ... ok
+test text::renderer::tests::real_multilingual_layout_rasterizes_fallback_without_new_shaping ... ok
+test text::renderer::tests::ordered_mask_color_batches_and_unleased_page_eviction_work ... ok
+test text::renderer::tests::shared_geometry_is_reused_only_after_submitted_work_completes ... ok
+test text::renderer::tests::phased_preparation_preserves_artwork_and_filtered_transform_fallback ... ok
+test text::renderer::tests::failed_and_empty_batches_preserve_existing_resources_and_painter_usage ... ok
+test text::renderer::tests::mtsdf_reuses_fields_across_font_sizes_dpi_and_keeps_explicit_metadata ... ok
+test text::renderer::tests::trim_and_budget_growth_recover_from_atlas_full_without_touching_leased_pages ... ok
+test text::renderer::tests::span_colors_and_decorations_render_in_one_draw ... ok
+test text::renderer::tests::phased_scroll_variants_obey_existing_cache_budget ... ok
+test text::tests::accepts_a_two_face_opentype_collection ... ok
+test text::tests::arabic_joins_and_mixed_bidi_uses_fallback ... ok
+test text::tests::combining_marks_preserve_clusters_and_position ... ok
+test text::tests::decorations_use_font_metrics_and_split_by_span_color ... ok
+test text::tests::empty_and_blank_paragraphs_do_not_require_fonts ... ok
+test text::renderer::tests::phased_coverage_uses_composed_painter_origin_and_density ... ok
+test text::tests::invalid_font_loading_is_atomic ... ok
+test text::tests::invalid_style_and_width_changes_are_atomic ... ok
+test text::tests::distinct_systems_cannot_alias_font_or_layout_identity ... ok
+test text::tests::loads_otf_and_variable_ttf_with_face_metadata ... ok
+test text::tests::font_generation_retries_fallback_and_retains_old_fonts ... ok
+test text::tests::overflowing_blank_line_boxes_return_an_error_and_keep_old_snapshot ... ok
+test text::renderer::tests::worker_commit_retries_sync_omissions_without_losing_committed_leases ... ok
+test text::tests::kerning_and_ligature_features_affect_advanced_shaping ... ok
+test text::tests::minimum_line_metrics_preserve_baselines_decorations_and_measurement ... ok
+test text::tests::reports_missing_source_clusters_without_rejecting_layout ... ok
+test text::tests::rich_text_spans_cross_paragraphs_survive_edits_and_reject_invalid_ranges ... ok
+test text::tests::shaping_strategy_changes_rebuild_paragraphs_and_retain_old_snapshots ... ok
+test text::tests::selected_instances_retain_weight_and_synthetic_italic ... ok
+test text::tests::rich_text_spans_merge_overrides_color_glyphs_and_scale_lines ... ok
+test text::tests::shared_font_bytes_and_layout_survive_their_owners ... ok
+test text::tests::start_and_end_alignment_follow_rtl_direction ... ok
+test text::renderer::tests::mtsdf_and_intrinsic_artwork_preserve_order_color_opacity_and_msaa ... ok
+test text::tests::whole_buffer_clusters_preserve_all_line_ending_bytes ... ok
+test text::tests::unchanged_evaluation_and_idempotent_setters_reuse_the_snapshot ... ok
+test text::tests::wrapping_alignment_and_metrics_invalidate_layout ... ok
+test text::tests::zero_width_and_word_wrapping_keep_indivisible_clusters ... ok
+test text::viewport_tests::empty_lines_no_fonts_invalid_ranges_and_partial_interaction ... ok
+test text::tests::paragraph_edits_insertions_and_deletions_match_fresh_layouts ... ok
+test text::renderer::tests::mtsdf_page_leases_survive_cache_clear_and_release_on_gpu_completion ... ok
+test text::viewport_tests::viewport_first_edits_and_font_generation_keep_stable_document_offsets ... ok
+test text::tests::measurement_matches_configured_widths_without_replacing_the_snapshot ... ok
+test text::renderer::tests::mtsdf_invalid_options_and_page_pressure_leave_retained_resources_usable ... ok
+test texture_renderer::tests::checked_preparation_tracks_validation_provenance_and_eviction ... ok
+test texture_renderer::tests::changing_draws_reuse_binding_and_preserve_pixels_and_parameters ... ok
+test text::renderer::tests::batched_text_matches_individual_metadata_pixels_and_order ... ok
+test texture_renderer::tests::independent_recordings_lease_upload_pages_until_submission ... ok
+test texture_renderer::tests::filtering_srgb_alpha_and_material_blending ... ok
+test texture_renderer::tests::fixed_workload_reuses_upload_pages_and_prepared_pipeline_after_warmup ... ok
+test texture_renderer::tests::pipeline_cache_eviction_preserves_prepared_texture_scope_and_deferred_recording ... ok
+test texture_renderer::tests::invalid_sources_feedback_and_devices_are_rejected ... ok
+test text::viewport_tests::viewport_matches_full_scroll_wrap_bidi_decorations_and_metrics ... ok
+test texture_renderer::tests::live_sources_follow_resize_and_snapshot_bindings_retain_recorded_views ... ok
+test texture_renderer::tests::prepared_draws_reuse_static_instance_storage_and_validate_pixel_viewports ... ok
+test uploads::tests::recording_leases_deduplicate_small_and_large_collections ... ok
+test uploads::tests::clip_binding_retention_is_bounded_and_expires_with_its_page ... ok
+test texture_renderer::tests::straight_alpha_filters_premultiplied_texels ... ok
+test texture_renderer::tests::uploads_validate_and_regions_preserve_other_texels ... ok
+test texture_renderer::tests::texture_stencil_clipping_and_raw_state_restoration ... ok
+test texture_renderer::tests::straight_alpha_with_uniform_footprint_alpha_matches_premultiplied_filtering ... ok
+test text::span::sweep_tests::sweep_matches_reference_for_overlaps_and_field_precedence ... ok
+test text::viewport_tests::viewport_preparation_and_worker_draw_match_full_pixels ... ok
+test text::renderer::tests::phased_coverage_matches_direct_raster_at_final_physical_origin ... ok
+test uploads::tests::spike_pages_are_released_after_idle_recordings_and_steady_pages_kept ... ok
+test text::renderer::tests::worker_limits_staleness_dedup_and_retry_preserve_ownership ... ok
+test primitive::tests::session_clips_restore_after_pass_raw_custom_and_nested_scope_access ... ok
+test text::renderer::tests::worker_generation_matches_sync_pixels_phases_artwork_and_cache_eviction ... ok
+test painter::tests::imported_restricted_devices_preserve_unclipped_draws_and_custom_clip_api ... ok
+test texture_renderer::tests::material_pipeline_cache_churn_retains_clones_and_reuses_live_variants ... ok
+test text::renderer::tests::mtsdf_multilingual_cff_variable_weight_and_italic_match_unhinted_coverage ... ok
+test text::renderer::tests::worker_font_instances_and_blank_results_are_independent ... ok
+test text::viewport_tests::large_document_snapshot_has_only_visible_geometry ... ok
+test primitive::tests::ellipse_outlines_offset_by_distance_including_axis_points_and_eccentricity ... ok
+
+test result: ok. 199 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 6.25s
+
+     Running unittests src/lib.rs (target/debug/deps/astrelis_winit-69b54bde6ed6ad13)
+
+running 16 tests
+test scheduler_tests::callback_invalidations_survive_submission_and_skip ... ok
+test policy::tests::metrics_validate_scale_overflow_and_zero_sized_windows ... ok
+test runner::tests::reject_unpaced_retries_and_unbounded_recovery_configuration ... ok
+test policy::tests::surface_settings_carry_presentation_modes_into_options ... ok
+test scheduler_tests::recovery_counter_cannot_wrap_even_at_maximum_limit ... ok
+test trace::tests::phases_separate_coalesced_input_and_reset_after_submission ... ok
+test window::tests::scale_changes_preserve_logical_size ... ok
+test scheduler_tests::independent_windows_do_not_inherit_continuous_mode_or_deadlines ... ok
+test scheduler_tests::retries_are_paced_and_recovery_guard_resets_only_on_submission ... ok
+test scheduler_tests::unavailable_windows_keep_work_without_timed_spinning ... ok
+test window::tests::device_loss_survives_os_resume_and_failed_replacement ... ok
+test scheduler_tests::deadline_is_earliest_one_shot_and_independent_of_immediate_draw ... ok
+test scheduler_tests::persistent_surface_loss_backs_off_but_stays_schedulable ... ok
+test window::tests::shared_loss_blocks_continuous_windows_and_expired_retries ... ok
+test error::tests::frame_failures_can_continue_but_dead_devices_cannot ... ok
+test runner::tests::deferred_loss_is_drained_before_classifying_acquisition_but_never_masks_handler_errors ... ok
+
+test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests astrelis
+
+running 28 tests
+test crates/astrelis/src/lib.rs - (line 349) - compile ... ok
+test crates/astrelis/src/brush.rs - brush::Brush (line 157) - compile ... ok
+test crates/astrelis/src/lib.rs - (line 214) - compile ... ok
+test crates/astrelis/src/lib.rs - (line 224) - compile ... ok
+test crates/astrelis/src/painter.rs - painter::PaintSession (line 281) - compile fail ... ok
+test crates/astrelis/src/lib.rs - (line 91) - compile ... ok
+test crates/astrelis/src/lib.rs - (line 301) - compile ... ok
+test crates/astrelis/src/lib.rs - (line 285) - compile ... ok
+test crates/astrelis/src/lib.rs - (line 121) - compile ... ok
+test crates/astrelis/src/lib.rs - (line 256) - compile ... ok
+test crates/astrelis/src/lib.rs - (line 408) - compile ... ok
+test crates/astrelis/src/frame.rs - frame::Frame (line 140) - compile fail ... ok
+test crates/astrelis/src/frame.rs - frame::Frame<'target,'window>::encoder (line 367) - compile fail ... ok
+test crates/astrelis/src/frame.rs - frame::Frame<'target,'window>::render_to (line 261) - compile fail ... ok
+test crates/astrelis/src/mesh_renderer.rs - mesh_renderer::MeshDrawSession (line 406) - compile fail ... ok
+test crates/astrelis/src/frame.rs - frame::Frame (line 152) - compile fail ... ok
+test crates/astrelis/src/lib.rs - (line 382) - compile ... ok
+test crates/astrelis/src/lib.rs - (line 38) - compile ... ok
+test crates/astrelis/src/path/renderer.rs - path::renderer::PathRenderer (line 153) - compile ... ok
+test crates/astrelis/src/painter.rs - painter::Painter (line 28) - compile ... ok
+test crates/astrelis/src/text/mod.rs - text (line 120) - compile ... ok
+test crates/astrelis/src/text/renderer.rs - text::renderer::TextRenderer::prepare_texts (line 969) - compile ... ok
+test crates/astrelis/src/text/mod.rs - text (line 98) - compile ... ok
+test crates/astrelis/src/text/preparation.rs - text::renderer::preparation::TextRenderer::request_glyphs (line 385) - compile ... ok
+test crates/astrelis/src/path.rs - path::Path (line 20) ... ok
+test crates/astrelis/src/text/buffer.rs - text::buffer::TextBuffer::layout_viewport (line 233) ... ok
+test crates/astrelis/src/text/mod.rs - text (line 34) ... ok
+test crates/astrelis/src/text/mod.rs - text (line 59) ... ok
+
+test result: ok. 28 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.32s
+
+all doctests ran in 0.39s; merged doctests compilation took 0.07s
+   Doc-tests astrelis_winit
+
+running 2 tests
+test crates/astrelis-winit/src/lib.rs - (line 32) - compile ... ok
+test crates/astrelis-winit/src/lib.rs - (line 19) ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+all doctests ran in 0.32s; merged doctests compilation took 0.32s

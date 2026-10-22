@@ -441,6 +441,7 @@ impl PrimitiveRenderer {
             pipeline,
             parameters: &mut self.parameters,
             dirty: false,
+            clips_bound: false,
             brush,
             graphics: &self.graphics,
             brush_parameters: &mut self.brush_parameters,
@@ -455,6 +456,7 @@ struct Session<'draw, 'frame> {
     pipeline: wgpu::RenderPipeline,
     parameters: &'draw mut Vec<Parameters>,
     dirty: bool,
+    clips_bound: bool,
     brush: Option<&'draw crate::Brush>,
     graphics: &'draw GraphicsContext,
     brush_parameters: &'draw mut Vec<BrushParameters>,
@@ -467,6 +469,14 @@ impl<'frame> Session<'_, 'frame> {
             self.pass.apply_raster_state();
             self.pass.set_pipeline(&self.pipeline);
             self.dirty = false;
+        }
+        // The session exclusively borrows the pass. Only pass() can expose clip,
+        // viewport, or binding changes; it invalidates this state. Keep binding
+        // lazy so empty/rejected draws never upload clips or replace app bindings.
+        if !self.clips_bound {
+            self.pass.bind_clip(1);
+            self.pass.bind_rounded_clips();
+            self.clips_bound = true;
         }
     }
     fn draw<T: PrimitiveData>(&mut self, draw: T) -> Result<(), Error> {
@@ -517,12 +527,11 @@ impl<'frame> Session<'_, 'frame> {
     }
     fn pass(&mut self) -> &mut RenderPass<'frame> {
         self.dirty = true;
+        self.clips_bound = false;
         self.pass
     }
 }
 fn record<T: Pod>(pass: &mut RenderPass<'_>, parameters: &[T], capacity: usize) {
-    pass.bind_clip(1);
-    pass.bind_rounded_clips();
     let stride = std::mem::size_of::<T>() as u64;
     for chunk in parameters.chunks(capacity) {
         let first = pass.bind_instances(0, bytemuck::cast_slice(chunk), stride);

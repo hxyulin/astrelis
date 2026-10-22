@@ -1,0 +1,18 @@
+2026-10-22T17:46:36.016198+00:00
+ 1:46  up 14 days,  4:45, 3 users, load averages: 40.49 24.95 38.14
+  PID  %CPU %MEM COMM
+  610 158.2  0.9 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds_stores
+  378 154.5  0.1 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mds
+91577  98.8  0.5 /tmp/keel-unnamed-f81f2635/build/debug/deps/x86_unnamed_aggregate-cf3a09a8a5784817
+36181  98.7  0.0 ./j
+11257  67.5  0.0 /Users/hxyulin/.t3/worktrees/flux-lang/t3-c987f162/target/debug/flux
+  705  55.7  0.2 /System/Library/CoreServices/Finder.app/Contents/MacOS/Finder
+15466  45.7  1.3 /Applications/Zen.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container
+ 5148  13.2  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+  388  12.2  0.0 /System/Library/PrivateFrameworks/CoreDuetContext.framework/Resources/contextstored
+ 5146  12.0  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+11321  11.9  0.1 (flux)
+ 4474  11.7  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+ 4705  11.7  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+ 4650  11.6  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared
+ 4703  11.4  0.0 /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared

@@ -1,0 +1,22 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-e8cfb18e/crates/astrelis)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.76s
+     Running unittests src/lib.rs (target/debug/deps/astrelis-91c2e706018d4677)
+
+running 1 test
+test primitive::tests::session_clips_restore_after_pass_raw_custom_and_nested_scope_access ... FAILED
+
+failures:
+
+---- primitive::tests::session_clips_restore_after_pass_raw_custom_and_nested_scope_access stdout ----
+
+thread 'primitive::tests::session_clips_restore_after_pass_raw_custom_and_nested_scope_access' (217389281) panicked at crates/astrelis/src/primitive_tests.rs:1124:13:
+capacity=2
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    primitive::tests::session_clips_restore_after_pass_raw_custom_and_nested_scope_access
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 199 filtered out; finished in 0.15s
+
+error: test failed, to rerun pass `-p astrelis --lib`
