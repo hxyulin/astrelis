@@ -1,5 +1,8 @@
 //! Retained dense-data update/recording/GPU-pass costs against matched direct wgpu.
 //! Completion waits are separate; the same point buffers, shader, and geometry are used.
+#[path = "support/clipping.rs"]
+mod clipping;
+
 use astrelis::{
     Framebuffer, FramebufferOptions, GraphicsContext, MarkerDraw, MarkerRenderer, Point2D,
     PointBuffer, PointBufferOptions, PolylineDraw, PolylineRenderer, RenderPass,
@@ -80,6 +83,7 @@ struct Work {
     markers: MarkerRenderer,
     pipeline: wgpu::RenderPipeline,
     group: wgpu::BindGroup,
+    clips: clipping::DisabledClips,
     parameters: wgpu::Buffer,
     marker: bool,
     packed: Option<Parameters>,
@@ -120,13 +124,16 @@ impl Work {
             .device()
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Matched dense points"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("../src/points.wgsl").into()),
+                source: wgpu::ShaderSource::Wgsl(
+                    clipping::shader(g, include_str!("../src/points.wgsl")).into(),
+                ),
             });
+        let clips = clipping::DisabledClips::new(g);
         let pipeline_layout = g
             .device()
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[Some(&layout)],
+                bind_group_layouts: &[Some(&layout), Some(&clips.layout)],
                 immediate_size: 0,
             });
         let attrs = wgpu::vertex_attr_array![0=>Float32x4,1=>Float32x4,2=>Float32x4,3=>Float32x4,4=>Uint32x4];
@@ -180,6 +187,7 @@ impl Work {
             markers,
             pipeline,
             group,
+            clips,
             parameters,
             marker,
             packed: None,
@@ -232,6 +240,7 @@ impl Work {
             let p = p.as_wgpu();
             p.set_pipeline(&self.pipeline);
             p.set_bind_group(0, &self.group, &[]);
+            p.set_bind_group(1, &self.clips.group, &[]);
             p.set_vertex_buffer(0, self.parameters.slice(..));
             p.draw(0..(count as u32 - u32::from(!self.marker)) * stride, 0..1);
         } else if self.marker {

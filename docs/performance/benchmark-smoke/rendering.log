@@ -1,0 +1,31 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-0412243d/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 4.48s
+     Running benches/rendering.rs (target/release/deps/rendering-2e642130629ed6d6)
+adapter=AdapterInfo { name: "Apple M5 Max", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; os=macos; arch=aarch64; debug_assertions=false; validation=wgpu_defaults
+context_initialization_us=24504.958
+wrapped_resources_us=1600.417
+wrapped_mesh_pipeline_prepare_us=466.916
+wrapped_texture_pipeline_prepare_us=596.542
+raw_mesh_pipeline_prepare_us=114.291
+raw_texture_resources_and_pipeline_us=1076.708; preparation_times_are_single_observations=true
+counts=[1, 1025]; samples=5; warmup=1; gpu_execution_timing=not_measured
+data_preparation_us count=1: 137.792
+checked and measured mesh_same count=1
+checked and measured mesh_alternating count=1
+checked and measured texture_prepared count=1
+checked and measured texture_dynamic count=1
+checked and measured texture_batch count=1
+checked and measured mesh_scoped count=1
+checked and measured texture_prepared_scoped count=1
+checked and measured texture_dynamic_scoped count=1
+checked and measured texture_batch_scoped count=1
+data_preparation_us count=1025: 95.375
+checked and measured mesh_same count=1025
+checked and measured mesh_alternating count=1025
+checked and measured texture_prepared count=1025
+checked and measured texture_dynamic count=1025
+checked and measured texture_batch count=1025
+checked and measured mesh_scoped count=1025
+checked and measured texture_prepared_scoped count=1025
+checked and measured texture_dynamic_scoped count=1025
+checked and measured texture_batch_scoped count=1025

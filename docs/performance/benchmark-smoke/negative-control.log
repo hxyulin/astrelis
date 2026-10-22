@@ -1,0 +1,19 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-0412243d/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 5.28s
+     Running benches/rendering.rs (target/release/deps/rendering-2e642130629ed6d6)
+adapter=AdapterInfo { name: "Apple M5 Max", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; os=macos; arch=aarch64; debug_assertions=false; validation=wgpu_defaults
+context_initialization_us=56121.250
+wrapped_resources_us=1787.958
+wrapped_mesh_pipeline_prepare_us=480.625
+wrapped_texture_pipeline_prepare_us=649.250
+raw_mesh_pipeline_prepare_us=125.792
+raw_texture_resources_and_pipeline_us=265355.584; preparation_times_are_single_observations=true
+counts=[1]; samples=5; warmup=1; gpu_execution_timing=not_measured
+data_preparation_us count=1: 123.083
+checked and measured mesh_same count=1
+checked and measured mesh_alternating count=1
+Error: "pixel equivalence failed: texture_prepared count=1"
+error: bench failed, to rerun pass `-p astrelis --bench rendering`
+
+Caused by:
+  process didn't exit successfully: `/Users/hxyulin/.t3/worktrees/astrelis/t3-0412243d/target/release/deps/rendering-2e642130629ed6d6 --counts 1 --samples 5 --warmup 1 --bench` (exit status: 1)

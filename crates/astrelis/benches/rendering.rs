@@ -2,6 +2,9 @@
 //! Run with `cargo bench -p astrelis --bench rendering -- --help`.
 //! CSV goes to stdout; adapter, settings, preparation times, and checks go to stderr.
 
+#[path = "support/clipping.rs"]
+mod clipping;
+
 use astrelis::{
     Framebuffer, FramebufferOptions, GraphicsContext, Mesh, MeshRenderer, PreparedTextureDraw,
     Rect, TextureBinding, TextureBindingOptions, TextureDraw, TextureOptions, TextureRenderer,
@@ -215,6 +218,8 @@ struct Rig {
     mesh_pipeline: wgpu::RenderPipeline,
     texture_pipeline: wgpu::RenderPipeline,
     group: wgpu::BindGroup,
+    clips: clipping::DisabledClips,
+    no_clip: wgpu::Buffer,
 }
 impl Rig {
     async fn new() -> Result<Self> {
@@ -251,7 +256,11 @@ impl Rig {
         ];
         let mut meshes_renderer = MeshRenderer::new(&graphics);
         let image = graphics.create_texture(TextureOptions::new(2, 2))?;
-        image.write(&[255; 16])?;
+        // Vary color and alpha so equivalence also catches a mismatched linear
+        // straight-alpha fragment entry point (opaque white cannot detect it).
+        image.write(&[
+            255, 32, 16, 255, 16, 255, 32, 0, 32, 16, 255, 128, 255, 255, 255, 64,
+        ])?;
         let mut textures = TextureRenderer::new(&graphics);
         let binding = textures.create_binding(image.view(), TextureBindingOptions::new())?;
         eprintln!("wrapped_resources_us={:.3}", micros(start.elapsed()));
@@ -275,7 +284,7 @@ impl Rig {
             meshes_renderer.default_material().pipeline_layout(),
             meshes_renderer.default_material().shader(),
             "fragment_main",
-            &Vertex::layout(),
+            &[Some(Vertex::layout())],
         );
         eprintln!(
             "raw_mesh_pipeline_prepare_us={:.3}",
@@ -324,25 +333,42 @@ impl Rig {
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("raw matching texture shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("../src/texture.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                clipping::shader(&graphics, include_str!("../src/texture.wgsl")).into(),
+            ),
+        });
+        let clips = clipping::DisabledClips::new(&graphics);
+        let no_clip = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("raw disabled clip vertex attributes"),
+            contents: bytemuck::cast_slice(&[0f32, 0., 0., 0., 0., 0., -1., -1., 0., 0., 0., 0.]),
+            usage: wgpu::BufferUsages::VERTEX,
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("raw texture pipeline layout"),
-            bind_group_layouts: &[Some(&layout)],
+            bind_group_layouts: &[Some(&layout), Some(&clips.layout)],
             immediate_size: 0,
         });
         let attributes = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4];
+        let clip_attributes = wgpu::vertex_attr_array![7=>Float32x4,8=>Float32x4,9=>Float32x4];
         let texture_pipeline = pipeline(
             device,
             target.format(),
             &pipeline_layout,
             &shader,
-            "fragment_straight",
-            &wgpu::VertexBufferLayout {
-                array_stride: 64,
-                step_mode: wgpu::VertexStepMode::Instance,
-                attributes: &attributes,
-            },
+            "fragment_straight_linear",
+            &[
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: 64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &attributes,
+                }),
+                None,
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: 0,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &clip_attributes,
+                }),
+            ],
         );
         eprintln!(
             "raw_texture_resources_and_pipeline_us={:.3}; preparation_times_are_single_observations=true",
@@ -363,6 +389,8 @@ impl Rig {
             mesh_pipeline,
             texture_pipeline,
             group,
+            clips,
+            no_clip,
         })
     }
     fn wrapped(&mut self, workload: Workload, data: &Data) -> Result<Sample> {
@@ -475,6 +503,8 @@ impl Rig {
         } else {
             pass.set_pipeline(&self.texture_pipeline);
             pass.set_bind_group(0, &self.group, &[]);
+            pass.set_bind_group(1, &self.clips.group, &[]);
+            pass.set_vertex_buffer(2, self.no_clip.slice(..));
             if matches!(
                 workload,
                 Workload::TexturePrepared | Workload::TexturePreparedScoped
@@ -580,7 +610,7 @@ fn pipeline(
     layout: &wgpu::PipelineLayout,
     shader: &wgpu::ShaderModule,
     fragment: &str,
-    vertices: &wgpu::VertexBufferLayout<'_>,
+    vertices: &[Option<wgpu::VertexBufferLayout<'_>>],
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("benchmark reference pipeline"),
@@ -589,7 +619,7 @@ fn pipeline(
             module: shader,
             entry_point: Some("vertex_main"),
             compilation_options: Default::default(),
-            buffers: &[Some(vertices.clone())],
+            buffers: vertices,
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,

@@ -1,5 +1,8 @@
 //! Matched path recording against direct wgpu, plus explicit preparation costs.
 //! Small RGBA8 target isolates CPU costs. Completion waits are outside timing.
+#[path = "support/clipping.rs"]
+mod clipping;
+
 use astrelis::{
     EdgeAntialiasing, Frame, Framebuffer, FramebufferOptions, GraphicsContext, LineCap, LineJoin,
     Painter, Path, PathDraw, PathOptions, PathRenderer, PathStroke, PreparedPath, Transform2D,
@@ -91,6 +94,7 @@ struct Work {
     indices: wgpu::Buffer,
     pages: Vec<wgpu::Buffer>,
     no_clip: wgpu::Buffer,
+    clips: clipping::DisabledClips,
     packed: Vec<Parameters>,
     coverage: bool,
 }
@@ -159,12 +163,7 @@ impl Work {
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("raw matching path shader"),
                 source: wgpu::ShaderSource::Wgsl(
-                    concat!(
-                        include_str!("../src/clip.wgsl"),
-                        "\n",
-                        include_str!("../src/path/path.wgsl")
-                    )
-                    .into(),
+                    clipping::shader(g, include_str!("../src/path/path.wgsl")).into(),
                 ),
             });
         let attributes =
@@ -182,11 +181,12 @@ impl Work {
                 ]),
                 usage: wgpu::BufferUsages::VERTEX,
             });
+        let clips = clipping::DisabledClips::new(g);
         let layout = g
             .device()
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: None,
-                bind_group_layouts: &[],
+                bind_group_layouts: &[None, Some(&clips.layout)],
                 immediate_size: 0,
             });
         let pipeline = g
@@ -266,6 +266,7 @@ impl Work {
             indices,
             pages,
             no_clip,
+            clips,
             packed: Vec::with_capacity(count),
             coverage,
         })
@@ -299,6 +300,7 @@ impl Work {
                 self.packed.clear();
                 let pass = pass.as_wgpu();
                 pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(1, &self.clips.group, &[]);
                 pass.set_vertex_buffer(0, self.vertices.slice(..));
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.set_vertex_buffer(2, self.no_clip.slice(..));
