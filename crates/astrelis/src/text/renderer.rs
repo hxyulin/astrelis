@@ -1,3 +1,5 @@
+#[path = "preparation.rs"]
+mod preparation;
 use super::{FontId, TextFont, TextLayout};
 use crate::{
     Error, GraphicsContext, Material, MaterialOptions, Rect, RenderFormat, RenderPass, Transform2D,
@@ -5,6 +7,11 @@ use crate::{
     geometry_pool::{Geometry, GeometryPool},
 };
 use bytemuck::{Pod, Zeroable};
+use preparation::{CpuGlyph, GlyphGenerator};
+pub use preparation::{
+    GeneratedGlyphs, GlyphPreparationLimits, GlyphPreparationRequest, GlyphUploadBudget,
+    GlyphUploadProgress, TextUpload,
+};
 use std::{
     collections::HashMap,
     ops::Range,
@@ -37,6 +44,12 @@ pub enum TextRenderError {
     AtlasFull,
     /// The backend could not parse a retained font or returned inconsistent image data.
     InvalidRaster,
+    /// A worker request/result belongs to another renderer or predates `clear_cache`.
+    StalePreparation,
+    /// Generated entries, retained image bytes, or final geometry exceed an explicit limit.
+    PreparationLimit,
+    /// Commit still has pending entries; finalization performs no implicit generation/upload.
+    PreparationIncomplete,
 }
 impl From<Error> for TextRenderError {
     fn from(value: Error) -> Self {
@@ -52,6 +65,9 @@ impl std::fmt::Display for TextRenderError {
             }
             Self::GlyphTooLarge => f.write_str("glyph image exceeds atlas page size"),
             Self::AtlasFull => f.write_str("text atlas budget is occupied by leased pages"),
+            Self::StalePreparation => f.write_str("stale or foreign glyph preparation"),
+            Self::PreparationLimit => f.write_str("glyph preparation limit exceeded"),
+            Self::PreparationIncomplete => f.write_str("glyph preparation has pending entries"),
             Self::InvalidRaster => f.write_str("invalid retained font or raster image"),
         }
     }
@@ -602,7 +618,7 @@ impl PreparedText {
 /// Uses R8 coverage, linear premultiplied RGBA8 color, and linear RGBA8 MTSDF pages.
 /// One-texel gutters separate images; fields include additional distance-range padding.
 /// Coverage/color draws use a separate fragment shader without field reconstruction.
-/// Raster phase is always zero; fractional movement filters existing images without rerasterizing.
+/// Default placement filters fractional movement; explicit physical origins select phased coverage.
 /// Only consecutive glyphs on the same page are instanced together, preserving layout order.
 /// Leased pages are never evicted or overwritten. A full cache evicts its least recently used
 /// quarter at once, and a full page budget reclaims the least recently used unleased page, so
@@ -622,8 +638,8 @@ pub struct TextRenderer {
     material: Material,
     field_material: Material,
     pipelines: crate::mesh_renderer::Pipelines,
-    scale: ScaleContext,
-    fonts: HashMap<FontId, swash::CacheKey>,
+    generator: GlyphGenerator,
+    preparation_epoch: Arc<()>,
     cache: HashMap<Key, Cached>,
     pages: Vec<Shelf>,
     budget: Arc<Budget>,
@@ -762,14 +778,14 @@ impl TextRenderer {
         );
         Self {
             graphics: g.clone(),
-            options,
+            options: options.clone(),
             layout,
             sampler,
             material,
             field_material,
             pipelines: Default::default(),
-            scale: ScaleContext::new(),
-            fonts: HashMap::new(),
+            generator: GlyphGenerator::new(options.page_size),
+            preparation_epoch: Arc::new(()),
             cache: HashMap::new(),
             pages: Vec::new(),
             geometry_pool: Arc::default(),
@@ -832,13 +848,14 @@ impl TextRenderer {
         trim
     }
     /// Releases lookup caches, page ownership, and recycled geometry storage.
-    /// Existing prepared texts/recordings remain usable.
+    /// Existing prepared texts/recordings remain usable. Outstanding worker requests
+    /// and incremental uploads become stale and cannot repopulate the cleared cache.
     /// Live leased pages continue counting against this renderer's budget until dropped/completed.
     pub fn clear_cache(&mut self) {
         self.cache.clear();
         self.pages.clear();
-        self.fonts.clear();
-        self.scale = ScaleContext::new();
+        self.generator = GlyphGenerator::new(self.options.page_size);
+        self.preparation_epoch = Arc::new(());
         self.geometry_pool = Arc::default();
     }
     fn pipeline(
@@ -890,7 +907,8 @@ impl TextRenderer {
     /// Generates missing glyph images and creates immutable geometry. Coverage is size-dependent;
     /// MTSDF outlines reuse images across font sizes/DPI while color/bitmap fallback remains
     /// size-dependent. Pass either `TextRasterOptions` or `MtsdfOptions` directly.
-    /// Cold field generation can be expensive: prepare ahead of drawing or stage groups of labels.
+    /// Cold field generation can be expensive: use [`Self::request_glyphs`] for application-worker
+    /// generation and explicitly bounded commits, or prepare ahead of drawing.
     /// No TextSystem borrow is
     /// needed: layouts retain font sources. Preparation can populate/evict caches even on failure;
     /// previous prepared texts remain valid. Repeated preparation reuses atlas images but creates
@@ -904,7 +922,7 @@ impl TextRenderer {
         preparation: impl Into<TextPreparation>,
     ) -> Result<PreparedText, TextRenderError> {
         profiling::scope!("astrelis::prepare_text");
-        let draft = self.prepare_geometry(layout, preparation.into())?;
+        let draft = self.prepare_geometry(layout, preparation.into(), None)?;
         let bytes = draft.glyphs.len() as u64 * 48;
         let geometry = (!draft.glyphs.is_empty())
             .then(|| GeometryBuffer::Dedicated(self.upload_geometry(&draft.glyphs)));
@@ -953,7 +971,7 @@ impl TextRenderer {
         let mut glyphs = Vec::new();
         let chunk_bytes = (64 * 1024).min(self.graphics.device().limits().max_buffer_size);
         for layout in layouts {
-            let mut draft = self.prepare_geometry(layout.as_ref(), preparation)?;
+            let mut draft = self.prepare_geometry(layout.as_ref(), preparation, None)?;
             let bytes = draft.glyphs.len() as u64 * 48;
             if bytes > chunk_bytes {
                 self.flush_texts(&mut result, &mut pending, &mut glyphs);
@@ -994,6 +1012,7 @@ impl TextRenderer {
         &mut self,
         layout: &TextLayout,
         preparation: TextPreparation,
+        resolved: Option<&HashMap<Key, GlyphSource>>,
     ) -> Result<TextDraft, TextRenderError> {
         validate_preparation(preparation)?;
         let scale = preparation.raster_scale();
@@ -1051,17 +1070,18 @@ impl TextRenderer {
                 },
                 italic: glyph.synthetic_italic,
             };
-            let source = self.image(key, font)?;
+            let source = self.resolve_image(key, font, resolved)?;
             let source = if matches!(source, GlyphSource::RasterFallback) {
                 if physical_size > self.options.max_raster_size {
                     return Err(TextRenderError::InvalidOptions);
                 }
-                self.image(
+                self.resolve_image(
                     Key {
                         representation: coverage,
                         ..key
                     },
                     font,
+                    resolved,
                 )?
             } else {
                 source
@@ -1086,7 +1106,7 @@ impl TextRenderer {
                 }
                 let (x, px) = coverage_phase(physical[0]);
                 let (y, py) = coverage_phase(physical[1]);
-                let source = self.image(
+                let source = self.resolve_image(
                     Key {
                         representation: Representation::Coverage {
                             size: physical_size.to_bits(),
@@ -1096,6 +1116,7 @@ impl TextRenderer {
                         ..key
                     },
                     font,
+                    resolved,
                 )?;
                 let GlyphSource::Image(phased_image) = source else {
                     skipped.push(index);
@@ -1401,6 +1422,20 @@ impl TextRenderer {
         }
         Ok(())
     }
+    fn resolve_image(
+        &mut self,
+        key: Key,
+        font: &TextFont,
+        resolved: Option<&HashMap<Key, GlyphSource>>,
+    ) -> Result<GlyphSource, TextRenderError> {
+        match resolved {
+            Some(images) => images
+                .get(&key)
+                .cloned()
+                .ok_or(TextRenderError::PreparationIncomplete),
+            None => self.image(key, font),
+        }
+    }
     fn image(&mut self, key: Key, font: &TextFont) -> Result<GlyphSource, TextRenderError> {
         self.clock += 1;
         if let Some(cached) = self.cache.get_mut(&key) {
@@ -1412,110 +1447,8 @@ impl TextRenderer {
             return Ok(cached.source.clone());
         }
         self.stats.cache_misses += 1;
-        profiling::scope!("astrelis::rasterize_glyph");
-        let mut font_ref = swash::FontRef::from_index(font.data(), font.face_index() as usize)
-            .ok_or(TextRenderError::InvalidRaster)?;
-        if !self.fonts.contains_key(&font.id()) && self.fonts.len() >= 64 {
-            self.fonts.clear();
-        }
-        font_ref.key = *self.fonts.entry(font.id()).or_default();
-        let weight = swash::Tag::from_be_bytes(*b"wght");
-        let coords = font_ref
-            .variations()
-            .normalized_coords([(weight, f32::from(key.weight))]);
-        let (size, hint) = match key.representation {
-            Representation::Coverage { size, hint, .. } => (f32::from_bits(size), hint),
-            Representation::Mtsdf { pixels_per_em, .. } => (pixels_per_em as f32, false),
-        };
-        let mut scaler = self
-            .scale
-            .builder(font_ref)
-            .size(size)
-            .hint(hint)
-            .normalized_coords(coords)
-            .build();
-        let glyph = key.glyph;
-        let slant = key.italic.then(|| {
-            swash::zeno::Transform::skew(
-                swash::zeno::Angle::from_degrees(14.),
-                swash::zeno::Angle::from_degrees(0.),
-            )
-        });
-        let source = match key.representation {
-            Representation::Mtsdf {
-                pixels_per_em,
-                range_em,
-            } => {
-                // Probe artwork before monochrome outlines: some color glyphs have both.
-                // Classification is size independent. Raster fallback is generated separately
-                // at the requested physical size, preserving the existing source priority.
-                if scaler.scale_color_outline(glyph).is_some()
-                    || scaler
-                        .scale_color_bitmap(glyph, StrikeWith::BestFit)
-                        .is_some()
-                {
-                    GlyphSource::RasterFallback
-                } else if let Some(mut outline) = scaler.scale_outline(glyph) {
-                    if let Some(t) = &slant {
-                        outline.transform(t);
-                    }
-                    match super::distance_field::generate(
-                        &outline,
-                        pixels_per_em,
-                        f32::from_bits(range_em),
-                        self.options.page_size,
-                    )? {
-                        Some(image) => GlyphSource::Image(self.upload(image, Kind::Mtsdf)?),
-                        None => GlyphSource::Blank,
-                    }
-                } else if scaler.scale_bitmap(glyph, StrikeWith::BestFit).is_some() {
-                    GlyphSource::RasterFallback
-                } else {
-                    GlyphSource::Blank
-                }
-            }
-            Representation::Coverage { phase, .. } => {
-                // Check outline dimensions before Swash allocates its output image.
-                // Bitmap dimensions are validated after decoding; Swash owns decode scratch.
-                if let Some(mut outline) = scaler
-                    .scale_color_outline(glyph)
-                    .or_else(|| scaler.scale_outline(glyph))
-                {
-                    if let Some(t) = &slant {
-                        outline.transform(t);
-                    }
-                    let bounds = outline.bounds();
-                    if [bounds.width(), bounds.height()]
-                        .iter()
-                        .any(|v| !v.is_finite() || v.ceil() + 4. > self.options.page_size as f32)
-                    {
-                        return Err(TextRenderError::GlyphTooLarge);
-                    }
-                }
-                let mut render = Render::new(&[
-                    Source::ColorOutline(0),
-                    Source::ColorBitmap(StrikeWith::BestFit),
-                    Source::Outline,
-                    Source::Bitmap(StrikeWith::BestFit),
-                ]);
-                render.format(swash::zeno::Format::Alpha);
-                render.transform(slant);
-                // Nonzero phases are requested only after the zero-phase probe
-                // classified a monochrome outline. Intrinsic artwork keeps phase zero.
-                if phase != [0; 2] {
-                    render.offset(swash::zeno::Vector::new(
-                        f32::from(phase[0]) * 0.25,
-                        f32::from(phase[1]) * 0.25,
-                    ));
-                }
-                match render.render(&mut scaler, glyph) {
-                    Some(image) if image.placement.width > 0 && image.placement.height > 0 => {
-                        GlyphSource::Image(self.upload_image(image)?)
-                    }
-                    _ => GlyphSource::Blank,
-                }
-            }
-        };
+        let generated = self.generator.generate(key, font)?;
+        let source = self.upload_generated(&generated)?;
         if self.cache.len() >= self.options.max_cached_glyphs {
             self.evict_glyphs();
         }
@@ -1533,22 +1466,14 @@ impl TextRenderer {
         let (_, &mut threshold, _) = ages.select_nth_unstable(count - 1);
         self.cache.retain(|_, v| v.last > threshold);
     }
-    fn upload_image(&mut self, mut image: Image) -> Result<GlyphImage, TextRenderError> {
-        let kind = match image.content {
-            Content::Mask => Kind::Mask,
-            Content::Color => Kind::Color,
-            Content::SubpixelMask => return Err(TextRenderError::InvalidRaster),
-        };
-        if kind == Kind::Color {
-            // COLR layers are premultiplied sRGB; PNG bitmap images are straight sRGB.
-            linearize_color(
-                &mut image.data,
-                matches!(image.source, Source::ColorOutline(_)),
-            );
-        }
-        self.upload(image, kind)
+    fn upload_generated(&mut self, generated: &CpuGlyph) -> Result<GlyphSource, TextRenderError> {
+        Ok(match generated {
+            CpuGlyph::Image(image, kind) => GlyphSource::Image(self.upload(image, *kind)?),
+            CpuGlyph::Blank => GlyphSource::Blank,
+            CpuGlyph::RasterFallback => GlyphSource::RasterFallback,
+        })
     }
-    fn upload(&mut self, image: Image, kind: Kind) -> Result<GlyphImage, TextRenderError> {
+    fn upload(&mut self, image: &Image, kind: Kind) -> Result<GlyphImage, TextRenderError> {
         let (w, h) = (image.placement.width, image.placement.height);
         let size = self.options.page_size;
         if w.checked_add(2).is_none_or(|v| v > size) || h.checked_add(2).is_none_or(|v| v > size) {

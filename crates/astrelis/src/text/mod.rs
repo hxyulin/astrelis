@@ -89,6 +89,9 @@
 //! Cache budgets include prepared texts, recordings, and GPU completion leases.
 //! [`crate::Painter`] exposes the same explicit preparation and drawing contract.
 //! Select [`MtsdfOptions`] for scalable outline fill; coverage remains the default.
+//! [`TextRenderer::request_glyphs`] captures CPU-only work for application workers.
+//! [`TextRenderer::commit_glyphs`] uploads under explicit key/byte limits while
+//! existing prepared text remains drawable; no runtime-owned executor is introduced.
 //!
 //! ```no_run
 //! use astrelis::{GraphicsContext, FramebufferOptions, TextSystem, TextBuffer,
@@ -136,8 +139,9 @@ pub use cosmic_text as cosmic;
 pub use interaction::{SelectionRects, TextAffinity, TextCaret, TextPosition};
 pub use layout::{TextDecoration, TextDecorationKind, TextFont, TextGlyph, TextLayout, TextLine};
 pub use renderer::{
-    MtsdfOptions, PreparedText, TextDraw, TextPreparation, TextRasterOptions, TextRenderError,
-    TextRenderer, TextRendererOptions, TextRendererStats, TextTrim,
+    GeneratedGlyphs, GlyphPreparationLimits, GlyphPreparationRequest, GlyphUploadBudget,
+    GlyphUploadProgress, MtsdfOptions, PreparedText, TextDraw, TextPreparation, TextRasterOptions,
+    TextRenderError, TextRenderer, TextRendererOptions, TextRendererStats, TextTrim, TextUpload,
 };
 pub use span::TextSpan;
 pub use style::{

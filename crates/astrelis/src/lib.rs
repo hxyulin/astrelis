@@ -496,12 +496,13 @@ pub use points::{Point2D, PointAppend, PointBuffer, PointBufferOptions};
 pub use primitive::{LineDrawSession, LineRenderer, ShapeDrawSession, ShapeRenderer};
 pub use target::{RenderTarget, SurfaceOptions, SurfaceTarget};
 pub use text::{
-    FontFamily, FontId, FontInfo, FontSlant, FontStretch, MtsdfOptions, PreparedText,
+    FontFamily, FontId, FontInfo, FontSlant, FontStretch, GeneratedGlyphs, GlyphPreparationLimits,
+    GlyphPreparationRequest, GlyphUploadBudget, GlyphUploadProgress, MtsdfOptions, PreparedText,
     SelectionRects, TextAffinity, TextAlign, TextBuffer, TextCaret, TextDecoration,
     TextDecorationKind, TextDraw, TextError, TextFont, TextGlyph, TextLayout, TextLine,
     TextLineMetrics, TextPosition, TextPreparation, TextRasterOptions, TextRenderError,
     TextRenderer, TextRendererOptions, TextRendererStats, TextShaping, TextSpan, TextStyle,
-    TextSystem, TextTrim, TextWrap,
+    TextSystem, TextTrim, TextUpload, TextWrap,
 };
 pub use texture::{Texture, TextureOptions};
 pub use texture_renderer::{

@@ -1953,3 +1953,443 @@ fn phased_coverage_uses_composed_painter_origin_and_density() {
         );
     });
 }
+
+#[test]
+fn worker_generation_matches_sync_pixels_phases_artwork_and_cache_eviction() {
+    fn assert_send<T: Send + 'static>() {}
+    assert_send::<GlyphPreparationRequest>();
+    assert_send::<GeneratedGlyphs>();
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g, 1);
+        let mut sync = TextRenderer::new(&g);
+        let mut staged = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                max_cached_glyphs: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let retained = staged
+            .prepare_text(&layout("M"), TextRasterOptions::new())
+            .unwrap();
+        for cpu in [layout("M😀😁 M"), small_latin()] {
+            for options in [
+                TextPreparation::Coverage(TextRasterOptions::new()),
+                TextRasterOptions::new()
+                    .raster_scale(1.13)
+                    .physical_origin([0.375, -0.625])
+                    .into(),
+                MtsdfOptions::new().into(),
+            ] {
+                let expected = sync.prepare_text(&cpu, options).unwrap();
+                let request = staged
+                    .request_glyphs(cpu.clone(), options, GlyphPreparationLimits::default())
+                    .unwrap();
+                let before = staged.stats();
+                let worker = std::thread::spawn(move || request.generate());
+                // Application owns drawing while the worker owns CPU work. No renderer borrow crosses threads.
+                let old = pixels(&g, &mut t, |frame| {
+                    let mut pass = frame.render_pass().begin().unwrap();
+                    staged
+                        .draw(&mut pass, &retained, TextDraw::new([0., 0.]))
+                        .unwrap();
+                });
+                assert!(old.iter().any(|&v| v != 0));
+                let generated = worker.join().unwrap().unwrap();
+                assert_eq!(staged.stats().uploaded_bytes, before.uploaded_bytes);
+                assert_eq!(staged.stats().geometry_bytes, before.geometry_bytes);
+                let count = generated.glyph_count();
+                let mut upload = staged.begin_glyph_upload(generated).unwrap();
+                assert!(matches!(
+                    staged.finish_glyph_upload(&upload, u64::MAX),
+                    Err(TextRenderError::PreparationIncomplete)
+                ));
+                let zero = staged
+                    .commit_glyphs(
+                        &mut upload,
+                        GlyphUploadBudget {
+                            max_glyphs: 0,
+                            max_bytes: usize::MAX,
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(zero.glyphs, 0);
+                assert_eq!(zero.remaining, count);
+                while upload.remaining() != 0 {
+                    let step = staged
+                        .commit_glyphs(
+                            &mut upload,
+                            GlyphUploadBudget {
+                                max_glyphs: 1,
+                                max_bytes: 1024 * 1024,
+                            },
+                        )
+                        .unwrap();
+                    assert_eq!(step.glyphs, 1);
+                    assert!(step.uploaded_bytes <= 1024 * 1024);
+                }
+                assert!(matches!(
+                    staged.finish_glyph_upload(&upload, 0),
+                    Err(TextRenderError::PreparationLimit)
+                ));
+                let actual = staged.finish_glyph_upload(&upload, u64::MAX).unwrap();
+                drop(upload); // PreparedText owns the leases independently.
+                assert_eq!(actual.size(), expected.size());
+                assert_eq!(actual.ink_bounds(), expected.ink_bounds());
+                assert_eq!(actual.skipped_glyphs(), expected.skipped_glyphs());
+                assert_eq!(actual.glyph_count(), expected.glyph_count());
+                staged.clear_cache();
+                let a = pixels(&g, &mut t, |frame| {
+                    let mut pass = frame.render_pass().begin().unwrap();
+                    staged
+                        .draw(&mut pass, &actual, TextDraw::new([0., 0.]))
+                        .unwrap();
+                });
+                let b = pixels(&g, &mut t, |frame| {
+                    let mut pass = frame.render_pass().begin().unwrap();
+                    sync.draw(&mut pass, &expected, TextDraw::new([0., 0.]))
+                        .unwrap();
+                });
+                assert_eq!(a, b);
+            }
+        }
+    });
+}
+
+#[test]
+fn worker_limits_staleness_dedup_and_retry_preserve_ownership() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                page_size: 128,
+                max_pages: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut other = TextRenderer::new(&g);
+        let cpu = layout("M");
+        let generate = |r: &TextRenderer| {
+            r.request_glyphs(
+                cpu.clone(),
+                MtsdfOptions::new(),
+                GlyphPreparationLimits::default(),
+            )
+            .unwrap()
+            .generate()
+            .unwrap()
+        };
+        let stale = generate(&renderer);
+        assert!(matches!(
+            other.begin_glyph_upload(stale),
+            Err(TextRenderError::StalePreparation)
+        ));
+        for limits in [
+            GlyphPreparationLimits {
+                max_glyphs: 0,
+                max_image_bytes: usize::MAX,
+            },
+            GlyphPreparationLimits {
+                max_glyphs: 10,
+                max_image_bytes: 0,
+            },
+        ] {
+            assert!(matches!(
+                renderer
+                    .request_glyphs(cpu.clone(), MtsdfOptions::new(), limits)
+                    .unwrap()
+                    .generate(),
+                Err(TextRenderError::PreparationLimit)
+            ));
+        }
+        let held = renderer
+            .prepare_text(&cpu, TextRasterOptions::new())
+            .unwrap();
+        let generated = generate(&renderer);
+        let bytes = generated.image_bytes();
+        let mut upload = renderer.begin_glyph_upload(generated).unwrap();
+        assert_eq!(upload.next_image_bytes(), Some(bytes));
+        let under = renderer
+            .commit_glyphs(
+                &mut upload,
+                GlyphUploadBudget {
+                    max_glyphs: 1,
+                    max_bytes: bytes - 1,
+                },
+            )
+            .unwrap();
+        assert_eq!(under.glyphs, 0);
+        assert_eq!(upload.remaining(), 1);
+        assert!(matches!(
+            renderer.commit_glyphs(
+                &mut upload,
+                GlyphUploadBudget {
+                    max_glyphs: 1,
+                    max_bytes: bytes
+                }
+            ),
+            Err(TextRenderError::AtlasFull)
+        ));
+        assert_eq!(upload.remaining(), 1);
+        renderer.set_max_pages(2).unwrap();
+        let done = renderer
+            .commit_glyphs(
+                &mut upload,
+                GlyphUploadBudget {
+                    max_glyphs: 1,
+                    max_bytes: bytes,
+                },
+            )
+            .unwrap();
+        assert_eq!(done.uploaded_bytes, bytes);
+        assert_eq!(done.remaining, 0);
+        assert_eq!(upload.next_image_bytes(), None);
+        let field = renderer.finish_glyph_upload(&upload, 48).unwrap();
+        let mut duplicate = renderer.begin_glyph_upload(generate(&renderer)).unwrap();
+        let reused = renderer
+            .commit_glyphs(
+                &mut duplicate,
+                GlyphUploadBudget {
+                    max_glyphs: 1,
+                    max_bytes: 0,
+                },
+            )
+            .unwrap();
+        assert_eq!(reused.uploaded_bytes, 0);
+        assert_eq!(reused.remaining, 0);
+        // Cache clear invalidates in-flight jobs but leaves completed resources drawable.
+        renderer.clear_cache();
+        assert!(matches!(
+            renderer.commit_glyphs(
+                &mut duplicate,
+                GlyphUploadBudget {
+                    max_glyphs: 1,
+                    max_bytes: 0
+                }
+            ),
+            Err(TextRenderError::StalePreparation)
+        ));
+        assert!(matches!(
+            renderer.finish_glyph_upload(&upload, 48),
+            Err(TextRenderError::StalePreparation)
+        ));
+        let mut t = target(&g, 1);
+        let p = pixels(&g, &mut t, |frame| {
+            let mut pass = frame.render_pass().begin().unwrap();
+            renderer
+                .draw(&mut pass, &held, TextDraw::new([0., 0.]))
+                .unwrap();
+            renderer
+                .draw(&mut pass, &field, TextDraw::new([24., 0.]))
+                .unwrap();
+        });
+        assert!(p.iter().any(|&v| v != 0));
+        // A later failure preserves prior commits, including classification entries.
+        let mut partial = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                page_size: 128,
+                max_pages: 1,
+                max_cached_glyphs: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let generated = partial
+            .request_glyphs(
+                layout("M😀"),
+                MtsdfOptions::new(),
+                GlyphPreparationLimits::default(),
+            )
+            .unwrap()
+            .generate()
+            .unwrap();
+        assert_eq!(generated.glyph_count(), 3);
+        let mut pending = partial.begin_glyph_upload(generated).unwrap();
+        let budget = GlyphUploadBudget {
+            max_glyphs: 10,
+            max_bytes: 1024 * 1024,
+        };
+        assert!(matches!(
+            partial.commit_glyphs(&mut pending, budget),
+            Err(TextRenderError::AtlasFull)
+        ));
+        assert_eq!(pending.remaining(), 1);
+        partial.set_max_pages(2).unwrap();
+        assert_eq!(
+            partial.commit_glyphs(&mut pending, budget).unwrap().glyphs,
+            1
+        );
+        let finished = partial.finish_glyph_upload(&pending, 96).unwrap();
+        assert_eq!(finished.glyph_count(), 2);
+        drop(pending);
+        assert_eq!(partial.trim().pages, 0, "finished text owns both pages");
+        drop(finished);
+        assert_eq!(partial.trim().pages, 2);
+        // A request may generate after clear, but cannot repopulate the new cache epoch.
+        let request = other
+            .request_glyphs(cpu, MtsdfOptions::new(), GlyphPreparationLimits::default())
+            .unwrap();
+        other.clear_cache();
+        assert!(matches!(
+            other.begin_glyph_upload(request.generate().unwrap()),
+            Err(TextRenderError::StalePreparation)
+        ));
+    });
+}
+
+#[test]
+fn worker_font_instances_and_blank_results_are_independent() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut staged = TextRenderer::new(&g);
+        let mut synchronous = TextRenderer::new(&g);
+        let mut t = target(&g, 1);
+        let mut ids = Vec::new();
+        for _ in 0..2 {
+            let mut system = TextSystem::new();
+            system
+                .load_font(include_bytes!("../../tests/fonts/SourceSans3-Regular.otf"))
+                .unwrap();
+            system
+                .load_font(include_bytes!("../../tests/fonts/NotoSansArabic.ttf"))
+                .unwrap();
+            let mut buffer = TextBuffer::new();
+            for (family, content, weight, slant) in [
+                ("Source Sans 3", "MW", 400, super::super::FontSlant::Normal),
+                ("Source Sans 3", "MW", 400, super::super::FontSlant::Italic),
+                (
+                    "Noto Sans Arabic",
+                    "مب",
+                    400,
+                    super::super::FontSlant::Normal,
+                ),
+                (
+                    "Noto Sans Arabic",
+                    "مب",
+                    700,
+                    super::super::FontSlant::Normal,
+                ),
+            ] {
+                buffer
+                    .set_text(
+                        content,
+                        TextStyle::new()
+                            .family(family)
+                            .font_size(20.)
+                            .line_height(24.)
+                            .weight(weight)
+                            .slant(slant),
+                    )
+                    .unwrap();
+                let cpu = buffer.layout(&mut system).unwrap();
+                ids.push(cpu.fonts()[0].id());
+                let settings = MtsdfOptions::new();
+                let expected = synchronous.prepare_text(&cpu, settings).unwrap();
+                let generated = staged
+                    .request_glyphs(cpu, settings, GlyphPreparationLimits::default())
+                    .unwrap()
+                    .generate()
+                    .unwrap();
+                let mut upload = staged.begin_glyph_upload(generated).unwrap();
+                staged
+                    .commit_glyphs(
+                        &mut upload,
+                        GlyphUploadBudget {
+                            max_glyphs: 100,
+                            max_bytes: 1024 * 1024,
+                        },
+                    )
+                    .unwrap();
+                let actual = staged.finish_glyph_upload(&upload, 1024).unwrap();
+                let a = pixels(&g, &mut t, |frame| {
+                    let mut pass = frame.render_pass().begin().unwrap();
+                    staged
+                        .draw(&mut pass, &actual, TextDraw::new([0., 0.]))
+                        .unwrap();
+                });
+                let b = pixels(&g, &mut t, |frame| {
+                    let mut pass = frame.render_pass().begin().unwrap();
+                    synchronous
+                        .draw(&mut pass, &expected, TextDraw::new([0., 0.]))
+                        .unwrap();
+                });
+                assert_eq!(a, b);
+            }
+        }
+        assert_ne!(
+            ids[0], ids[4],
+            "font identities must include their text system"
+        );
+        // Empty and blank work succeeds with no pixel-byte budget and retains skipped indexes.
+        for text in ["", " "] {
+            let generated = staged
+                .request_glyphs(
+                    layout(text),
+                    MtsdfOptions::new(),
+                    GlyphPreparationLimits {
+                        max_glyphs: 1,
+                        max_image_bytes: 0,
+                    },
+                )
+                .unwrap()
+                .generate()
+                .unwrap();
+            assert_eq!(generated.image_bytes(), 0);
+            let mut upload = staged.begin_glyph_upload(generated).unwrap();
+            let step = staged
+                .commit_glyphs(
+                    &mut upload,
+                    GlyphUploadBudget {
+                        max_glyphs: 1,
+                        max_bytes: 0,
+                    },
+                )
+                .unwrap();
+            assert_eq!(step.remaining, 0);
+            let actual = staged.finish_glyph_upload(&upload, 48).unwrap();
+            assert_eq!(actual.glyph_count(), 0);
+            assert_eq!(actual.skipped_glyphs().len(), usize::from(!text.is_empty()));
+        }
+        let too_small = TextRenderer::with_options(
+            &g,
+            TextRendererOptions {
+                page_size: 8,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            too_small
+                .request_glyphs(
+                    layout("M"),
+                    MtsdfOptions::new(),
+                    GlyphPreparationLimits::default()
+                )
+                .unwrap()
+                .generate(),
+            Err(TextRenderError::GlyphTooLarge)
+        ));
+        let generated = staged
+            .request_glyphs(
+                layout("MMM"),
+                MtsdfOptions::new(),
+                GlyphPreparationLimits {
+                    max_glyphs: 1,
+                    max_image_bytes: 1024 * 1024,
+                },
+            )
+            .unwrap()
+            .generate()
+            .unwrap();
+        assert_eq!(
+            generated.glyph_count(),
+            1,
+            "repeated glyphs deduplicate on the worker"
+        );
+    });
+}
