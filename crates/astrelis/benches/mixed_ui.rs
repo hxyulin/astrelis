@@ -106,7 +106,11 @@ impl Scene {
             )?;
             self.texts[i] = next;
         }
-        self.image = image(g, &mut self.painter, if frame % 2 == 0 { 256 } else { 32 })?;
+        self.image = image(
+            g,
+            &mut self.painter,
+            if frame.is_multiple_of(2) { 256 } else { 32 },
+        )?;
         self.path = path(&mut self.painter, (frame % 8) as f32)?;
         self.points.replace(
             &(0..64)
@@ -234,7 +238,7 @@ fn row(phase: &str, stage: &str, values: &mut [f64]) {
     );
 }
 fn main() -> Result<()> {
-    let mut frames = 360usize;
+    let mut frames = 1800usize;
     let mut warmup = 60usize;
     let mut flight = 3usize;
     let mut args = std::env::args().skip(1);
@@ -282,6 +286,8 @@ fn main() -> Result<()> {
     for phase in ["warm_static", "changing_churn", "recovery_static"] {
         let mut pending = VecDeque::new();
         let mut stages = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let before = g.upload_stats();
+        eprintln!("phase={phase}; upload_before={before:?}");
         let phase_start = Instant::now();
         for frame in 0..frames {
             let start = Instant::now();
@@ -327,6 +333,28 @@ fn main() -> Result<()> {
             frames as f64 / elapsed,
             scene.painter.text().stats()
         );
+        let after = g.upload_stats();
+        eprintln!("phase={phase}; upload_after={after:?}");
+        if phase == "warm_static" && warmup >= 4 {
+            assert_eq!(
+                before.pages_created, after.pages_created,
+                "warm page allocation"
+            );
+            assert_eq!(
+                before.clip_bindings_created, after.clip_bindings_created,
+                "warm clip binding creation"
+            );
+        }
+        if phase == "recovery_static" && frames > 121 {
+            assert!(
+                after.pages_released > before.pages_released,
+                "spike pages did not expire"
+            );
+            assert!(
+                after.idle_buffer_bytes < before.idle_buffer_bytes,
+                "spike capacity did not recover"
+            );
+        }
         read(&g, &mut target)?;
     }
     wait(&g, g.queue().submit([]))?;

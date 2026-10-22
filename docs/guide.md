@@ -707,6 +707,14 @@ smoke-test mode. Completion waits are reported separately from CPU work and are 
 GPU execution measurements. See the [initial baseline](performance/baseline.md)
 and [scoped drawing results](performance/scoped-drawing.md).
 
+The [sustained mixed UI benchmark](performance/mixed-ui.md) measures a screen-sized
+scene of shapes, images, text, paths, points and nested clips with bounded multiple
+submissions in flight, then exercises resource churn and recovery. It reports CPU
+phase/tail distributions and drained throughput; GPU execution is not measured.
+`graphics.upload_stats()` snapshots cumulative page/binding allocation counters
+and idle upload capacities without polling the GPU. These logical counters help
+check warm reuse and idle-page expiry; they do not report driver or process memory.
+
 `text_quality` compares whole/fractional pixel placement, small sizes, hinting,
 DPI preparation, magnification, rotation, multilingual fallback, and color glyphs.
 Space toggles MSAA; Z toggles 2x/4x magnification. See the

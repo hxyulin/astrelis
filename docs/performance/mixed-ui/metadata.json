@@ -1,0 +1,96 @@
+{
+  "captured_utc": "2026-10-22T17:01:12.186162+00:00",
+  "checkout": "/Users/hxyulin/.t3/worktrees/astrelis/t3-94b6276d",
+  "baseline_commit": "f9e8a0d469948ccc303fda990bb50a09913dc3f7",
+  "final_source": "Commit containing this metadata; exact final source hashes below. Test/comment refinements and the equivalent Clippy is_multiple_of spelling were made after timing; explicit measured workload settings and production behavior are unchanged.",
+  "commands": {
+    "before-360": "cargo bench -p astrelis --bench mixed_ui --locked -- --frames 360 --warmup 60 --in-flight 3",
+    "after-360": "cargo bench -p astrelis --bench mixed_ui --locked -- --frames 360 --warmup 60 --in-flight 3",
+    "sustained-1800": "cargo bench -p astrelis --bench mixed_ui --locked -- --frames 1800 --warmup 60 --in-flight 3",
+    "smoke": "cargo bench -p astrelis --bench mixed_ui --locked -- --frames 8 --warmup 2 --in-flight 3"
+  },
+  "environment": [
+    {
+      "command": [
+        "rustc",
+        "-Vv"
+      ],
+      "exit_code": 0,
+      "stdout": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: aarch64-apple-darwin\nrelease: 1.99.0\nLLVM version: 23.1.1",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "cargo",
+        "-V"
+      ],
+      "exit_code": 0,
+      "stdout": "cargo 1.99.0 (5f94df478 2026-08-27)",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "sw_vers"
+      ],
+      "exit_code": 0,
+      "stdout": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "uname",
+        "-a"
+      ],
+      "exit_code": 0,
+      "stdout": "Darwin axiom 27.0.0 Darwin Kernel Version 27.0.0: Tue Aug 11 21:06:40 PDT 2026; root:xnu-13432.1.9~1/RELEASE_ARM64_T6050 arm64",
+      "stderr": ""
+    },
+    {
+      "command": [
+        "sysctl",
+        "-n",
+        "hw.model",
+        "hw.memsize",
+        "machdep.cpu.brand_string"
+      ],
+      "exit_code": 0,
+      "stdout": "Mac17,7\n137438953472\nApple M5 Max",
+      "stderr": ""
+    }
+  ],
+  "source_sha256": {
+    "Cargo.lock": "45929a1d4bee476c092e351ecbbe5dd554dc7d166229dad90d453ecdf1a743e2",
+    "Cargo.toml": "0c5501071d59da7eef7a7bdfc7120c5b4703949419a3c8ccdbd310f3effb5289",
+    "crates/astrelis/Cargo.toml": "9fc8e46efe1c790972b5666904c414631407afe605aaef0d36bd90efbf3c4c47",
+    "crates/astrelis/benches/mixed_ui.rs": "6dc67198ed38dc46566c8cc33389248077457a0675a6565d3c670359d803f9c5",
+    "crates/astrelis/src/clip.rs": "b9b8b9fc002e90655cfe0f1b1a24381a92f9dd73e7793e0e7e585e966ba11297",
+    "crates/astrelis/src/context.rs": "684679756341f8c771fbb51be920b63c39da44cc522d238072404469ee7a258b",
+    "crates/astrelis/src/lib.rs": "859f2932228e0d523dffa956e98fbcc4085f123cba43564a36e444ceaa08ba71",
+    "crates/astrelis/src/painter.rs": "daa97bbeff3b61a6d077dd92d6746b32188d280b1eed834a614343db7f5940bb",
+    "crates/astrelis/src/painter_tests.rs": "2d057a6174c0ba87ac4aa862b492339ca5026568bb9b3abda3fbb0c98b19917a",
+    "crates/astrelis/src/pass.rs": "2a9bd950a46043d19b0cff7bb228b57b9b0fc1e5f4e93d93651148c719c6a620",
+    "crates/astrelis/src/uploads.rs": "d50ccf359fdd456c9a9d97fc7c71fb65a20699f0a68e0b214a5f332f548d3a95",
+    "crates/astrelis/tests/fonts/SourceSans3-Regular.otf": "08df266400933d3178d081a45f94a08814c3e55b4b7dd2e0ff69cb1329f13ab6"
+  },
+  "conditions": "Sequential local measurements, no concurrent builds/tests initiated by this agent during timed execution; other agents/builds active on shared machine. Large tails retained. One short before/after pair plus one longer final baseline; no isolated or remote claims.",
+  "gpu_timing": "Not measured; no timestamp queries or completion-time substitute.",
+  "memory": "Logical upload-pool and text resource counters only; not RSS/driver/physical GPU memory.",
+  "measured_executable": {
+    "path": "target/release/deps/mixed_ui-2affa147ee6e98c1",
+    "sha256": "b7d039a9732922280ff6be2232d23d552d194d2577efb159208f55c872a137f3",
+    "note": "SHA captured after the 1800-frame run, before final smoke rebuild; path subsequently overwritten by cargo."
+  },
+  "smoke_executable": {
+    "path": "target/release/deps/mixed_ui-2affa147ee6e98c1",
+    "sha256": "09bd12da3bcebd9e1859a1ca648f417b5b34c1138f56cd3f2013c3372898e07f"
+  },
+  "checks": {
+    "cargo test --workspace --locked": "passed: 181 astrelis + 14 astrelis-winit tests; 27 + 2 doctests; 1 ignored",
+    "cargo clippy --workspace --all-targets --locked -- -D warnings": "passed",
+    "RUSTDOCFLAGS=\"-D warnings\" cargo doc --workspace --no-deps --locked": "passed",
+    "cargo check -p astrelis --all-targets --locked": "passed",
+    "cargo fmt --all -- --check": "passed",
+    "prek run --all-files": "passed, including final staged files",
+    "release_runs": "before 360, after 360, sustained 1800 frames/phase and final 8-frame smoke all passed pixel verification and validation; final full runs passed warm allocation and page expiry assertions"
+  }
+}

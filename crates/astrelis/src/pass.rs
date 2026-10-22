@@ -988,6 +988,17 @@ impl<'frame> RenderPass<'frame> {
         Ok(())
     }
 
+    pub(crate) fn push_rounded_clip(&mut self, clip: crate::RoundedClip) -> Result<(), Error> {
+        if self.rounded_clips.len() >= self.graphics.rounded_clip_capacity() {
+            return Err(Error::ClipStackFull);
+        }
+        clip.validate()?;
+        self.rounded_clips.push(clip);
+        self.clip_upload = None;
+        self.clip_stack_upload = None;
+        Ok(())
+    }
+
     /// Binds the complete analytic intersection at group one for custom shaders
     /// using [`crate::GraphicsContext::rounded_clip_shader`] and the context's rounded clip layout.
     /// Call after changing clips/viewport or interleaving other work. Custom work
@@ -1025,9 +1036,12 @@ impl<'frame> RenderPass<'frame> {
                     .device()
                     .limits()
                     .min_uniform_buffer_offset_alignment as u64;
-                let (buffer, range) = self.upload_instances(&bytes, alignment);
-                self.clip_stack_upload =
-                    Some(self.graphics.clip_group(Some((&buffer, range.start))));
+                self.clip_stack_upload = Some(
+                    self.uploads
+                        .as_mut()
+                        .expect("clip uploads require a frame-owned pass")
+                        .append_clips(self.graphics, &bytes, alignment),
+                );
             }
             self.clip_stack_upload.clone().unwrap()
         };

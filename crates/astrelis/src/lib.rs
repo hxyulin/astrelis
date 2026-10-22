@@ -513,6 +513,8 @@ pub use texture_renderer::{
     TextureMaterial, TextureMaterialOptions, TextureRenderer, UvRect,
 };
 
+pub use uploads::UploadStats;
+
 /// The exact wgpu version used by Astrelis, available for GPU interoperability.
 pub use wgpu;
 

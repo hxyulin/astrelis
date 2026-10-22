@@ -167,24 +167,28 @@ impl crate::GraphicsContext {
     }
 
     /// Uniform layout for [`Self::rounded_clip_shader`] at shader group one.
-    /// Compatible layouts may be retained and reused across custom materials.
+    /// Shared by clones of this context; may be retained and reused across custom materials.
     pub fn rounded_clip_layout(&self) -> wgpu::BindGroupLayout {
-        let capacity = self.rounded_clip_capacity();
-        let entries = (capacity > 0).then(|| wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: std::num::NonZeroU64::new(stack_size(capacity)),
-            },
-            count: None,
-        });
-        self.device()
-            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("Astrelis rounded clip stack"),
-                entries: entries.as_slice(),
+        self.clip_layout
+            .get_or_init(|| {
+                let capacity = self.rounded_clip_capacity();
+                let entries = (capacity > 0).then(|| wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: std::num::NonZeroU64::new(stack_size(capacity)),
+                    },
+                    count: None,
+                });
+                self.device()
+                    .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                        label: Some("Astrelis rounded clip stack"),
+                        entries: entries.as_slice(),
+                    })
             })
+            .clone()
     }
     pub(crate) fn clip_group(&self, buffer: Option<(&wgpu::Buffer, u64)>) -> wgpu::BindGroup {
         let entry = buffer.map(|(buffer, offset)| wgpu::BindGroupEntry {

@@ -515,9 +515,7 @@ impl<'frame> PaintSession<'_, 'frame> {
             rounded: self.pass.rounded_clips().to_vec(),
         };
         if let Some(clip) = rounded {
-            let mut clips = saved.rounded.clone();
-            clips.push(clip);
-            self.pass.set_rounded_clips(&clips)?;
+            self.pass.push_rounded_clip(clip)?;
         }
         self.pass.restore_scissor(scissor);
         Ok(PaintSession {

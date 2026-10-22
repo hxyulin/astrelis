@@ -29,6 +29,7 @@ pub struct GraphicsContext {
     pub(crate) upload_pool: crate::uploads::UploadPool,
     device_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub(crate) no_clip_stack: std::sync::Arc<std::sync::OnceLock<wgpu::BindGroup>>,
+    pub(crate) clip_layout: std::sync::Arc<std::sync::OnceLock<wgpu::BindGroupLayout>>,
     no_clip: std::sync::Arc<std::sync::OnceLock<wgpu::Buffer>>,
 }
 
@@ -260,6 +261,7 @@ impl GraphicsContext {
             no_clip: Default::default(),
             device_lost: Default::default(),
             no_clip_stack: Default::default(),
+            clip_layout: Default::default(),
         }
     }
 

@@ -1778,3 +1778,67 @@ fn rounded_clip_capacity_respects_application_uniform_limits() {
         }
     });
 }
+
+#[test]
+fn warm_clip_bindings_preserve_pixels_and_unsubmitted_recording_isolation() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut a = target(&g);
+        let mut b = target(&g);
+        let mut painter = Painter::new(&g);
+        let clips = [
+            crate::RoundedClip::new(
+                Rect::new(4., 4., 48., 48.),
+                crate::CornerRadii::uniform(12.),
+            ),
+            crate::RoundedClip::new(
+                Rect::new(20., 0., 40., 60.),
+                crate::CornerRadii::uniform(10.),
+            ),
+        ];
+        let mut record = |pass: &mut RenderPass<'_>, shifted: bool| {
+            pass.set_rounded_clips(&clips).unwrap();
+            if shifted {
+                pass.set_viewport(8., 0., 56., 64., 0., 1.).unwrap();
+            }
+            painter
+                .begin(pass)
+                .unwrap()
+                .fill_rect(Rect::new(0., 0., 64., 64.), RED)
+                .unwrap();
+        };
+        let expected = pixels(&g, &mut a, |frame| {
+            record(&mut frame.render_pass().begin().unwrap(), false)
+        });
+        assert_eq!(pixel(&expected, 28, 28), [255, 0, 0, 255]);
+        assert_eq!(pixel(&expected, 10, 28), [0; 4]);
+        let shifted = pixels(&g, &mut a, |frame| {
+            record(&mut frame.render_pass().begin().unwrap(), true)
+        });
+        assert_ne!(expected, shifted);
+        // Submit B before A, while A still leases its original upload page.
+        let actual = pixels(&g, &mut a, |frame| {
+            record(&mut frame.render_pass().begin().unwrap(), false);
+            let mut other = b.begin_frame().unwrap();
+            record(&mut other.render_pass().begin().unwrap(), true);
+            other.finish().unwrap();
+        });
+        assert_eq!(actual, expected);
+        let before = g.upload_stats();
+        for shifted_frame in [false, true, false, true] {
+            let actual = pixels(&g, &mut a, |frame| {
+                record(&mut frame.render_pass().begin().unwrap(), shifted_frame)
+            });
+            assert_eq!(
+                actual,
+                if shifted_frame { &shifted } else { &expected }.clone()
+            );
+        }
+        let after = g.upload_stats();
+        assert_eq!(before.pages_created, after.pages_created);
+        assert_eq!(before.clip_bindings_created, after.clip_bindings_created);
+        assert!(after.pages_reused > before.pages_reused);
+        assert!(errors.pop().await.is_none());
+    });
+}
