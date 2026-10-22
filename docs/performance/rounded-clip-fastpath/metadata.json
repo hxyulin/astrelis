@@ -1,0 +1,196 @@
+{
+  "baseline": "adb79c6ef98ec210df2fcac465b0e47198a599e4",
+  "original": "5e5ea9df12f3539661b8d487a83b907e63641bfa",
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434\n",
+  "hardware": "hw.model: Mac17,7\nhw.memsize: 137438953472\nhw.ncpu: 18\nmachdep.cpu.brand_string: Apple M5 Max\n",
+  "rust": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: aarch64-apple-darwin\nrelease: 1.99.0\nLLVM version: 23.1.1\n",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)\n",
+  "binary_sha256": {
+    "mixed_ui": "aef684f295dfd228db96cb43c9877586ed6db7aa3d24a7e8c47b9e2ab0835c27",
+    "primitives-after": "e6e70742edfcd8a06790485d4ce9927b0f97a93f7380dd0e5490eb79640dcfef",
+    "primitives-original": "3d20db238da557daf0683075de8da9bab10671636ebebd213b232cb1f775bcca",
+    "primitives-before": "ad3765cc40af829526c9b156ce60a1a32a229d1724bbe17eade456321aa76d71",
+    "paths": "c6b0b2628414de4722e7c02a981f54d1a1c060c979751a88a98a08b37794ea41",
+    "points": "c2fb69a439ac548ba3e0b7605e89247997dec0b03570e2f36d8a15743d50f39d",
+    "rendering": "1c89c7a050fcd446207c4b87ffec9b86ee66ecf88aff4531a107e9d194715fb9"
+  },
+  "source_sha256": {
+    "Cargo.lock": "d1138cd5b69d9d4cb3941295b388dce9dba311eb2abbfa6ddb9276ac0bb964c6",
+    "crates/astrelis/benches/primitives.rs": "c1f81c30ab36a6ea3c304d9678c73a227022a4a44eee6e1a1a3c0615b46c0dc5",
+    "crates/astrelis/benches/mixed_ui.rs": "6dc67198ed38dc46566c8cc33389248077457a0675a6565d3c670359d803f9c5",
+    "crates/astrelis/src/context.rs": "b3ead2cc8303f00d66821d4461de8d3951ee020ecb7ee7aca31a53586b713e45",
+    "crates/astrelis/src/clip.rs": "9d7e037e609caff5e7abdebfbf1fb8b3952b599fc759715a68ae4468b6b6c28f",
+    "crates/astrelis/src/pass.rs": "67db63b77d34099aee18f3469227f5f507af88fa360403760280ddf8c2f8b8f9"
+  },
+  "original_normalized_lock_sha256": "45929a1d4bee476c092e351ecbbe5dd554dc7d166229dad90d453ecdf1a743e2",
+  "runs": [
+    {
+      "name": "primitives-before-1",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/primitives-before",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "primitives-after-1",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/primitives-after",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "primitives-original-1",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/primitives-original",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "primitives-after-2",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/primitives-after",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "primitives-before-2",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/primitives-before",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "primitives-original-2",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/primitives-original",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "primitives-before-3",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/primitives-before",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "primitives-after-3",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/primitives-after",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "primitives-original-3",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/primitives-original",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "mixed_ui",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/mixed_ui",
+        "--frames",
+        "360",
+        "--warmup",
+        "60",
+        "--in-flight",
+        "3"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "rendering",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/rendering",
+        "--counts",
+        "1,1025",
+        "--samples",
+        "5",
+        "--warmup",
+        "1"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "paths",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/paths",
+        "--counts",
+        "1,1025",
+        "--samples",
+        "5",
+        "--warmup",
+        "1"
+      ],
+      "exit": 0
+    },
+    {
+      "name": "points",
+      "command": [
+        "/tmp/astrelis-clip-fastpath-bin/points",
+        "--counts",
+        "256,4097",
+        "--samples",
+        "5"
+      ],
+      "exit": 0
+    }
+  ]
+}

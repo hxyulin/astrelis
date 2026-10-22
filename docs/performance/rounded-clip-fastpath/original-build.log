@@ -1,0 +1,3 @@
+   Compiling astrelis v0.4.0-dev.0 (/tmp/astrelis-clip-fastpath-original/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 6.15s
+  Executable benches/primitives.rs (target/release/deps/primitives-8159e6c74c4df76e)

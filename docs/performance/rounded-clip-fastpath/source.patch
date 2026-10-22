@@ -1,0 +1,221 @@
+diff --git a/crates/astrelis/src/clip.rs b/crates/astrelis/src/clip.rs
+index a597a40..46ad2e1 100644
+--- a/crates/astrelis/src/clip.rs
++++ b/crates/astrelis/src/clip.rs
+@@ -155,17 +155,9 @@ impl crate::GraphicsContext {
+     /// buffers disables clipping (one uniform is reserved for brushes).
+     /// Zero means analytic clipping is unavailable; unclipped
+     /// drawing still works. Excess clips return [`Error::ClipStackFull`].
++    /// Computed once from the imported device limits; context clones preserve it.
+     pub fn rounded_clip_capacity(&self) -> usize {
+-        let limits = self.device().limits();
+-        // Reserve one fragment uniform for brush resources so every built-in
+-        // renderer can use the same clipping capability and shader interface.
+-        if limits.max_bind_groups < 2 || limits.max_uniform_buffers_per_shader_stage < 2 {
+-            return 0;
+-        }
+-        let bytes = limits
+-            .max_buffer_size
+-            .min(limits.max_uniform_buffer_binding_size);
+-        ((bytes.saturating_sub(16) / SIZE) as usize).min(MAX_ROUNDED_CLIPS)
++        self.rounded_clip_capacity
+     }
+ 
+     /// WGSL for custom fragment shaders, sized for this device's enabled limits.
+@@ -228,3 +220,17 @@ impl crate::GraphicsContext {
+         })
+     }
+ }
++
++// Device limits are immutable. Evaluate once for each created/imported context,
++// rather than querying wgpu on every primitive record.
++pub(crate) fn capacity(limits: &wgpu::Limits) -> usize {
++    // Reserve one fragment uniform for brush resources so every built-in
++    // renderer can use the same clipping capability and shader interface.
++    if limits.max_bind_groups < 2 || limits.max_uniform_buffers_per_shader_stage < 2 {
++        return 0;
++    }
++    let bytes = limits
++        .max_buffer_size
++        .min(limits.max_uniform_buffer_binding_size);
++    ((bytes.saturating_sub(16) / SIZE) as usize).min(MAX_ROUNDED_CLIPS)
++}
+diff --git a/crates/astrelis/src/context.rs b/crates/astrelis/src/context.rs
+index ec6d5fc..f879e79 100644
+--- a/crates/astrelis/src/context.rs
++++ b/crates/astrelis/src/context.rs
+@@ -78,6 +78,7 @@ pub struct GraphicsContext {
+     pub(crate) submission_lock: std::sync::Arc<std::sync::Mutex<()>>,
+     pub(crate) upload_pool: crate::uploads::UploadPool,
+     device_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
++    pub(crate) rounded_clip_capacity: usize,
+     pub(crate) no_clip_stack: std::sync::Arc<std::sync::OnceLock<wgpu::BindGroup>>,
+     pub(crate) clip_layout: std::sync::Arc<std::sync::OnceLock<wgpu::BindGroupLayout>>,
+     no_clip: std::sync::Arc<std::sync::OnceLock<wgpu::Buffer>>,
+@@ -375,7 +376,9 @@ impl GraphicsContext {
+                 .unwrap_or_else(|e| e.into_inner())
+                 .push(GpuEvent::DeviceLost { reason, message });
+         });
++        let rounded_clip_capacity = crate::clip::capacity(&device.limits());
+         Self {
++            rounded_clip_capacity,
+             events,
+             instance,
+             adapter,
+diff --git a/crates/astrelis/src/painter_tests.rs b/crates/astrelis/src/painter_tests.rs
+index c75c506..6c12f6c 100644
+--- a/crates/astrelis/src/painter_tests.rs
++++ b/crates/astrelis/src/painter_tests.rs
+@@ -1728,6 +1728,8 @@ fn rounded_clip_capacity_respects_application_uniform_limits() {
+             let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+             let capacity = if uniforms < 2 { 0 } else { 2 };
+             assert_eq!(g.rounded_clip_capacity(), capacity);
++            assert_eq!(g.clone().rounded_clip_capacity(), capacity);
++            assert_eq!(base.rounded_clip_capacity(), crate::MAX_ROUNDED_CLIPS);
+             let mut t = g
+                 .create_framebuffer(
+                     FramebufferOptions::new(8, 1).usage(
+@@ -2086,3 +2088,86 @@ fn imported_restricted_devices_preserve_unclipped_draws_and_custom_clip_api() {
+         }
+     });
+ }
++
++#[test]
++fn repeated_rounded_bindings_restore_after_application_dynamic_offsets() {
++    pollster::block_on(async {
++        let g = GraphicsContext::headless().await.unwrap();
++        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
++        let mut t = target(&g);
++        let mut painter = Painter::new(&g);
++        let stride = g.device().limits().min_uniform_buffer_offset_alignment as u64;
++        let buffer = g.device().create_buffer(&wgpu::BufferDescriptor {
++            label: Some("application dynamic uniform"),
++            size: stride + 16,
++            usage: wgpu::BufferUsages::UNIFORM,
++            mapped_at_creation: false,
++        });
++        let layout = g
++            .device()
++            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
++                label: None,
++                entries: &[wgpu::BindGroupLayoutEntry {
++                    binding: 0,
++                    visibility: wgpu::ShaderStages::FRAGMENT,
++                    ty: wgpu::BindingType::Buffer {
++                        ty: wgpu::BufferBindingType::Uniform,
++                        has_dynamic_offset: true,
++                        min_binding_size: std::num::NonZeroU64::new(16),
++                    },
++                    count: None,
++                }],
++            });
++        let group = g.device().create_bind_group(&wgpu::BindGroupDescriptor {
++            label: None,
++            layout: &layout,
++            entries: &[wgpu::BindGroupEntry {
++                binding: 0,
++                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
++                    buffer: &buffer,
++                    offset: 0,
++                    size: std::num::NonZeroU64::new(16),
++                }),
++            }],
++        });
++        let render = |pass: &mut RenderPass<'_>, painter: &mut Painter, override_groups: bool| {
++            // Reuse each disabled/active binding repeatedly, then change the full
++            // stack and return to disabled. Application group one must be restored
++            // even when its layout or dynamic offsets differ from the clip layout.
++            for clips in [0, 2, 1, 0] {
++                let clip = crate::RoundedClip::new(
++                    Rect::new(4., 4., 56., 56.),
++                    crate::CornerRadii::uniform(16.),
++                );
++                pass.set_rounded_clips(&vec![clip; clips]).unwrap();
++                for i in 0..3 {
++                    pass.bind_rounded_clips();
++                    pass.bind_rounded_clips();
++                    if override_groups {
++                        pass.set_bind_group(
++                            1,
++                            &group,
++                            &[if i % 2 == 0 { 0 } else { stride as u32 }],
++                        );
++                    }
++                    painter
++                        .begin(pass)
++                        .unwrap()
++                        .fill_rect(Rect::new((clips * 16 + i * 4) as f32, 0., 4., 64.), RED)
++                        .unwrap();
++                }
++            }
++        };
++        let expected = pixels(&g, &mut t, |f| {
++            render(&mut f.render_pass().begin().unwrap(), &mut painter, false);
++        });
++        let actual = pixels(&g, &mut t, |f| {
++            render(&mut f.render_pass().begin().unwrap(), &mut painter, true);
++        });
++        assert_eq!(actual, expected);
++        assert_eq!(pixel(&actual, 0, 0), [255, 0, 0, 255]);
++        assert_eq!(pixel(&actual, 32, 0), [0; 4]);
++        assert_eq!(pixel(&actual, 32, 32), [255, 0, 0, 255]);
++        assert!(errors.pop().await.is_none());
++    });
++}
+diff --git a/crates/astrelis/src/pass.rs b/crates/astrelis/src/pass.rs
+index f664f75..dcf6771 100644
+--- a/crates/astrelis/src/pass.rs
++++ b/crates/astrelis/src/pass.rs
+@@ -1010,21 +1010,19 @@ impl<'frame> RenderPass<'frame> {
+             return;
+         }
+         let group = if self.rounded_clips.is_empty() {
+-            self.graphics
+-                .no_clip_stack
+-                .get_or_init(|| {
+-                    use wgpu::util::DeviceExt;
+-                    let capacity = self.graphics.rounded_clip_capacity();
+-                    let buffer = self.graphics.device().create_buffer_init(
+-                        &wgpu::util::BufferInitDescriptor {
++            self.graphics.no_clip_stack.get_or_init(|| {
++                use wgpu::util::DeviceExt;
++                let capacity = self.graphics.rounded_clip_capacity();
++                let buffer =
++                    self.graphics
++                        .device()
++                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                             label: Some("Astrelis disabled rounded stack"),
+                             contents: &crate::clip::stack_bytes(&[], [0.; 6], capacity),
+                             usage: wgpu::BufferUsages::UNIFORM,
+-                        },
+-                    );
+-                    self.graphics.clip_group(Some((&buffer, 0)))
+-                })
+-                .clone()
++                        });
++                self.graphics.clip_group(Some((&buffer, 0)))
++            })
+         } else {
+             if self.clip_stack_upload.is_none() {
+                 let bytes = crate::clip::stack_bytes(
+@@ -1044,9 +1042,18 @@ impl<'frame> RenderPass<'frame> {
+                         .append_clips(self.graphics, &bytes, alignment),
+                 );
+             }
+-            self.clip_stack_upload.clone().unwrap()
++            self.clip_stack_upload.as_ref().unwrap()
+         };
+-        self.set_bind_group(1, &group, &[]);
++        // Compare borrowed bindings before cloning: this runs for every primitive,
++        // even when the disabled/active stack is already bound. group_one is also
++        // invalidated by raw access and application bindings with dynamic offsets.
++        if self.group_one.as_ref() == Some(group) {
++            return;
++        }
++        self.group_one = Some(group.clone());
++        self.flush();
++        self.inner
++            .set_bind_group(1, self.group_one.as_ref().unwrap(), &[]);
+     }
+ 
+     // Binds the active clip record, or the shared disabled record, at `slot`.

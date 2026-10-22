@@ -155,17 +155,9 @@ impl crate::GraphicsContext {
     /// buffers disables clipping (one uniform is reserved for brushes).
     /// Zero means analytic clipping is unavailable; unclipped
     /// drawing still works. Excess clips return [`Error::ClipStackFull`].
+    /// Computed once from the imported device limits; context clones preserve it.
     pub fn rounded_clip_capacity(&self) -> usize {
-        let limits = self.device().limits();
-        // Reserve one fragment uniform for brush resources so every built-in
-        // renderer can use the same clipping capability and shader interface.
-        if limits.max_bind_groups < 2 || limits.max_uniform_buffers_per_shader_stage < 2 {
-            return 0;
-        }
-        let bytes = limits
-            .max_buffer_size
-            .min(limits.max_uniform_buffer_binding_size);
-        ((bytes.saturating_sub(16) / SIZE) as usize).min(MAX_ROUNDED_CLIPS)
+        self.rounded_clip_capacity
     }
 
     /// WGSL for custom fragment shaders, sized for this device's enabled limits.
@@ -227,4 +219,18 @@ impl crate::GraphicsContext {
             entries: entry.as_slice(),
         })
     }
+}
+
+// Device limits are immutable. Evaluate once for each created/imported context,
+// rather than querying wgpu on every primitive record.
+pub(crate) fn capacity(limits: &wgpu::Limits) -> usize {
+    // Reserve one fragment uniform for brush resources so every built-in
+    // renderer can use the same clipping capability and shader interface.
+    if limits.max_bind_groups < 2 || limits.max_uniform_buffers_per_shader_stage < 2 {
+        return 0;
+    }
+    let bytes = limits
+        .max_buffer_size
+        .min(limits.max_uniform_buffer_binding_size);
+    ((bytes.saturating_sub(16) / SIZE) as usize).min(MAX_ROUNDED_CLIPS)
 }

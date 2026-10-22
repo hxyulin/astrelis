@@ -1010,21 +1010,19 @@ impl<'frame> RenderPass<'frame> {
             return;
         }
         let group = if self.rounded_clips.is_empty() {
-            self.graphics
-                .no_clip_stack
-                .get_or_init(|| {
-                    use wgpu::util::DeviceExt;
-                    let capacity = self.graphics.rounded_clip_capacity();
-                    let buffer = self.graphics.device().create_buffer_init(
-                        &wgpu::util::BufferInitDescriptor {
+            self.graphics.no_clip_stack.get_or_init(|| {
+                use wgpu::util::DeviceExt;
+                let capacity = self.graphics.rounded_clip_capacity();
+                let buffer =
+                    self.graphics
+                        .device()
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                             label: Some("Astrelis disabled rounded stack"),
                             contents: &crate::clip::stack_bytes(&[], [0.; 6], capacity),
                             usage: wgpu::BufferUsages::UNIFORM,
-                        },
-                    );
-                    self.graphics.clip_group(Some((&buffer, 0)))
-                })
-                .clone()
+                        });
+                self.graphics.clip_group(Some((&buffer, 0)))
+            })
         } else {
             if self.clip_stack_upload.is_none() {
                 let bytes = crate::clip::stack_bytes(
@@ -1044,9 +1042,18 @@ impl<'frame> RenderPass<'frame> {
                         .append_clips(self.graphics, &bytes, alignment),
                 );
             }
-            self.clip_stack_upload.clone().unwrap()
+            self.clip_stack_upload.as_ref().unwrap()
         };
-        self.set_bind_group(1, &group, &[]);
+        // Compare borrowed bindings before cloning: this runs for every primitive,
+        // even when the disabled/active stack is already bound. group_one is also
+        // invalidated by raw access and application bindings with dynamic offsets.
+        if self.group_one.as_ref() == Some(group) {
+            return;
+        }
+        self.group_one = Some(group.clone());
+        self.flush();
+        self.inner
+            .set_bind_group(1, self.group_one.as_ref().unwrap(), &[]);
     }
 
     // Binds the active clip record, or the shared disabled record, at `slot`.

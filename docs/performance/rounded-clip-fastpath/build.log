@@ -1,0 +1,7 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-f830ae6c/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 7.43s
+  Executable benches/mixed_ui.rs (target/release/deps/mixed_ui-d94f03a84ef36447)
+  Executable benches/paths.rs (target/release/deps/paths-2c9962a3fa8e2882)
+  Executable benches/points.rs (target/release/deps/points-274ffa6fe5e712c4)
+  Executable benches/primitives.rs (target/release/deps/primitives-61b93ddc1317c400)
+  Executable benches/rendering.rs (target/release/deps/rendering-783e60f498f1a5a1)

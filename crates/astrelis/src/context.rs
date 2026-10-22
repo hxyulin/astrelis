@@ -78,6 +78,7 @@ pub struct GraphicsContext {
     pub(crate) submission_lock: std::sync::Arc<std::sync::Mutex<()>>,
     pub(crate) upload_pool: crate::uploads::UploadPool,
     device_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) rounded_clip_capacity: usize,
     pub(crate) no_clip_stack: std::sync::Arc<std::sync::OnceLock<wgpu::BindGroup>>,
     pub(crate) clip_layout: std::sync::Arc<std::sync::OnceLock<wgpu::BindGroupLayout>>,
     no_clip: std::sync::Arc<std::sync::OnceLock<wgpu::Buffer>>,
@@ -375,7 +376,9 @@ impl GraphicsContext {
                 .unwrap_or_else(|e| e.into_inner())
                 .push(GpuEvent::DeviceLost { reason, message });
         });
+        let rounded_clip_capacity = crate::clip::capacity(&device.limits());
         Self {
+            rounded_clip_capacity,
             events,
             instance,
             adapter,

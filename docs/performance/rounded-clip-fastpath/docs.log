@@ -1,0 +1,6 @@
+    Blocking waiting for file lock on build directory
+    Checking astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-f830ae6c/crates/astrelis)
+ Documenting astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-f830ae6c/crates/astrelis)
+ Documenting astrelis-winit v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-f830ae6c/crates/astrelis-winit)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 28.43s
+   Generated /Users/hxyulin/.t3/worktrees/astrelis/t3-f830ae6c/target/doc/astrelis/index.html and 1 other file

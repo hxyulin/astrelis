@@ -1728,6 +1728,8 @@ fn rounded_clip_capacity_respects_application_uniform_limits() {
             let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
             let capacity = if uniforms < 2 { 0 } else { 2 };
             assert_eq!(g.rounded_clip_capacity(), capacity);
+            assert_eq!(g.clone().rounded_clip_capacity(), capacity);
+            assert_eq!(base.rounded_clip_capacity(), crate::MAX_ROUNDED_CLIPS);
             let mut t = g
                 .create_framebuffer(
                     FramebufferOptions::new(8, 1).usage(
@@ -2084,5 +2086,88 @@ fn imported_restricted_devices_preserve_unclipped_draws_and_custom_clip_api() {
                 "groups={groups} uniforms={uniforms}"
             );
         }
+    });
+}
+
+#[test]
+fn repeated_rounded_bindings_restore_after_application_dynamic_offsets() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g);
+        let mut painter = Painter::new(&g);
+        let stride = g.device().limits().min_uniform_buffer_offset_alignment as u64;
+        let buffer = g.device().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("application dynamic uniform"),
+            size: stride + 16,
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        });
+        let layout = g
+            .device()
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: std::num::NonZeroU64::new(16),
+                    },
+                    count: None,
+                }],
+            });
+        let group = g.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &buffer,
+                    offset: 0,
+                    size: std::num::NonZeroU64::new(16),
+                }),
+            }],
+        });
+        let render = |pass: &mut RenderPass<'_>, painter: &mut Painter, override_groups: bool| {
+            // Reuse each disabled/active binding repeatedly, then change the full
+            // stack and return to disabled. Application group one must be restored
+            // even when its layout or dynamic offsets differ from the clip layout.
+            for clips in [0, 2, 1, 0] {
+                let clip = crate::RoundedClip::new(
+                    Rect::new(4., 4., 56., 56.),
+                    crate::CornerRadii::uniform(16.),
+                );
+                pass.set_rounded_clips(&vec![clip; clips]).unwrap();
+                for i in 0..3 {
+                    pass.bind_rounded_clips();
+                    pass.bind_rounded_clips();
+                    if override_groups {
+                        pass.set_bind_group(
+                            1,
+                            &group,
+                            &[if i % 2 == 0 { 0 } else { stride as u32 }],
+                        );
+                    }
+                    painter
+                        .begin(pass)
+                        .unwrap()
+                        .fill_rect(Rect::new((clips * 16 + i * 4) as f32, 0., 4., 64.), RED)
+                        .unwrap();
+                }
+            }
+        };
+        let expected = pixels(&g, &mut t, |f| {
+            render(&mut f.render_pass().begin().unwrap(), &mut painter, false);
+        });
+        let actual = pixels(&g, &mut t, |f| {
+            render(&mut f.render_pass().begin().unwrap(), &mut painter, true);
+        });
+        assert_eq!(actual, expected);
+        assert_eq!(pixel(&actual, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&actual, 32, 0), [0; 4]);
+        assert_eq!(pixel(&actual, 32, 32), [255, 0, 0, 255]);
+        assert!(errors.pop().await.is_none());
     });
 }
