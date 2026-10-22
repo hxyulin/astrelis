@@ -11,18 +11,18 @@ authors = ["hxyulin <hxyulin@proton.me>"]
 repository = "https://github.com/hxyulin/astrelis"
 
 [workspace.dependencies]
-bytemuck = { version = "1", features = ["derive"] }
+bytemuck = { version = "1.25.2", features = ["derive"] }
 cosmic-text = { version = "0.19.0", default-features = false, features = ["std", "swash"] }
 bymsdfgen-core = { version = "0.1.1", default-features = false }
 swash = { version = "0.2.10", default-features = false, features = ["std", "scale", "render"] }
-log = "0.4"
+log = "0.4.34"
 profiling = { version = "1.0.18", default-features = false }
-lyon_tessellation = "1.0.22"
+lyon_tessellation = "1.0.23"
 unicode-segmentation = "1.13.3"
 wgpu = { version = "30.0.1", default-features = false, features = [
     "std", "parking_lot", "wgsl", "metal", "vulkan", "dx12", "webgpu",
 ] }
-pollster = "0.4"
+pollster = "1.0.1"
 winit = "0.30.13"
 
 [workspace.lints.rust]

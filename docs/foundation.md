@@ -51,7 +51,7 @@ Space changes surface MSAA between 1x and 4x when supported; P pauses animation.
 Geometry, materials, and bind groups persist across frames.
 
 These are rendering workloads, not a widget framework or scene framework. They
-require only astrelis, winit 0.30, and pollster 0.4 when copied into an application.
+require only astrelis, winit 0.30, and pollster 1.0 when copied into an application.
 Each owns its lifecycle and error handling. Neither contains smoke-test flags or
 shared example infrastructure.
 

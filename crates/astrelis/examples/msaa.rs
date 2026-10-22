@@ -1,5 +1,5 @@
 //! Multisampled triangle edges. Press Space to cycle usable sample counts.
-//! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
+//! Copy this file into a binary using astrelis, winit 0.30, and pollster 1.0.
 
 use std::{
     error::Error as StdError,

@@ -2,7 +2,7 @@
 //! 1/2/3 selects 10K/100K/1M samples. Wheel zooms; drag pans; F follows the tail.
 //! D toggles explicit reduction, M markers, P pause, A coverage, Space supported MSAA.
 //! Run in release mode. This file owns its window, data policy, and event loop.
-//! Copy into a binary with astrelis, winit 0.30, and pollster 0.4.
+//! Copy into a binary with astrelis, winit 0.30, and pollster 1.0.
 
 use std::{
     error::Error as StdError,

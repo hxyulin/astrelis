@@ -1,6 +1,6 @@
 //! Mix solid shapes, capped lines, images, and custom mesh draws in explicit order.
 //! Space toggles layer MSAA when 4x is supported; P pauses animation. Resize freely.
-//! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
+//! Copy this file into a binary using astrelis, winit 0.30, and pollster 1.0.
 
 use std::{
     error::Error as StdError,

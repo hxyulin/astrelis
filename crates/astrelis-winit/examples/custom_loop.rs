@@ -1,5 +1,5 @@
 //! Application-owned winit loop using only WindowContext for surface lifecycle.
-//! Copy this file into a desktop binary using astrelis-winit and pollster 0.4.
+//! Copy this file into a desktop binary using astrelis-winit and pollster 1.0.
 use astrelis_winit::{
     SurfaceSettings, WindowContext,
     astrelis::{FrameError, Mesh, MeshRenderer, Vertex, wgpu},

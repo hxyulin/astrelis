@@ -1,6 +1,6 @@
 //! A diamond stencil mask clips mesh shading and built-in Painter shapes/lines.
 //! Press Space to toggle stencil clipping.
-//! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
+//! Copy this file into a binary using astrelis, winit 0.30, and pollster 1.0.
 
 use std::{
     error::Error as StdError,

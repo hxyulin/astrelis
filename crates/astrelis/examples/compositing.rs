@@ -1,6 +1,6 @@
 //! Composite a cropped 4x MSAA framebuffer into a clipped window region in one submission.
 //! Space switches the offscreen target between 1x and 4x MSAA without manually rebuilding source bindings.
-//! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
+//! Copy this file into a binary using astrelis, winit 0.30, and pollster 1.0.
 
 use std::{
     error::Error as StdError,

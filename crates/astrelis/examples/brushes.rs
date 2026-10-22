@@ -2,7 +2,7 @@
 //! Top: linear color, hard stops, a gradient heart. Middle: circle/ellipse radial,
 //! and transparency. Bottom: repeat, reflect, and an independent gradient line.
 //! A toggles edge coverage; Space toggles supported target MSAA.
-//! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
+//! Copy this file into a binary using astrelis, winit 0.30, and pollster 1.0.
 
 use std::{
     error::Error as StdError,

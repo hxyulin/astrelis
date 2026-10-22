@@ -1,5 +1,5 @@
 //! Two independent renderers draw overlapping meshes into one pass.
-//! Copy this file into a binary using astrelis, winit 0.30, and pollster 0.4.
+//! Copy this file into a binary using astrelis, winit 0.30, and pollster 1.0.
 
 use std::{
     error::Error as StdError,
