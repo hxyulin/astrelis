@@ -328,6 +328,8 @@ impl MeshRenderer {
     }
 
     /// Captures wgpu validation diagnostics and caches only a successfully prepared pipeline.
+    /// Reuses variants verified by this method; unchecked variants are recreated
+    /// under validation. A failed variant is removed from the cache.
     /// Shader modules and layouts can be checked separately with wgpu error scopes.
     pub async fn try_prepare_material(
         &mut self,
@@ -345,14 +347,17 @@ impl MeshRenderer {
             None
         }
         .ok_or(Error::ExpectedSingleColor)?;
-        if self.pipelines.contains_key(&(
+        let key = (
             material.id,
             color,
             format.sample_count,
             format.depth_stencil,
-        )) {
+        );
+        if self.pipelines.get(&key).is_some_and(|p| p.is_validated()) {
             return self.prepare_material(material, format);
         }
+        // An unchecked handle may be invalid even if synchronous preparation returned Ok.
+        self.pipelines.remove(&key);
         let scope = self
             .graphics
             .device()
@@ -372,6 +377,9 @@ impl MeshRenderer {
             return Err(Error::Validation(error));
         }
         result?;
+        for pipeline in prepared.values_mut() {
+            pipeline.mark_validated();
+        }
         self.pipelines.extend(prepared);
         Ok(())
     }

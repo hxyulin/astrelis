@@ -22,7 +22,13 @@ MSAA count, and optional depth/stencil format, and works for framebuffer/custom
 passes without acquiring a frame. Mesh material preparation uses
 `prepare_material(&material, &format)`; `try_prepare_material` captures shader
 validation errors asynchronously. Texture preparation additionally takes a source
-binding because filtering/alpha mode affect its variant.
+binding because filtering/alpha mode affect its variant. Checked preparation reuses
+a variant only after a successful checked call. A variant created by synchronous
+preparation or drawing is recreated under validation on its first checked call,
+even if an application error scope previously accepted it. Failed checked variants
+are removed; unrelated cached variants remain available. Clearing or pruning a
+variant also discards its validation status. Synchronous preparation and drawing
+continue to report shader diagnostics through wgpu error scopes/handlers.
 
 ```rust,ignore
 meshes.prepare(&target.render_format())?;

@@ -772,12 +772,17 @@ impl TextureRenderer {
         Ok(())
     }
     /// Captures pipeline validation errors before caching a custom material.
+    /// Reuses variants verified by this method; unchecked variants are recreated
+    /// under validation. A failed variant is removed from the cache.
     pub async fn try_prepare_material(
         &mut self,
         b: &TextureBinding,
         m: &TextureMaterial,
         format: &crate::RenderFormat,
     ) -> Result<(), Error> {
+        if !b.graphics.same_device(&self.graphics) || !m.graphics.same_device(&self.graphics) {
+            return Err(Error::DeviceMismatch);
+        }
         let key = PipelineKey {
             material: m.id,
             format: format.single_color()?,
@@ -787,20 +792,25 @@ impl TextureRenderer {
             alpha: b.options.alpha,
             transformed: false,
         };
-        if self.pipelines.contains_key(&key) {
+        if self.pipelines.get(&key).is_some_and(|p| p.is_validated()) {
             return self.prepare_material(b, m, format);
         }
+        // An unchecked handle may be invalid even if synchronous preparation returned Ok.
+        self.pipelines.remove(&key);
         let scope = self
             .graphics
             .device()
             .push_error_scope(wgpu::ErrorFilter::Validation);
         let original = std::mem::take(&mut self.pipelines);
         let result = self.prepare_material(b, m, format);
-        let prepared = std::mem::replace(&mut self.pipelines, original);
+        let mut prepared = std::mem::replace(&mut self.pipelines, original);
         if let Some(e) = scope.pop().await {
             return Err(Error::Validation(e));
         }
         result?;
+        for pipeline in prepared.values_mut() {
+            pipeline.mark_validated();
+        }
         self.pipelines.extend(prepared);
         Ok(())
     }

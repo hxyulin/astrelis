@@ -668,6 +668,10 @@ fn material_pipeline_cache_churn_retains_clones_and_reuses_live_variants() {
             g.create_material(MaterialOptions::new(renderer.default_material().shader()));
         let live = material.clone();
         renderer.prepare_material(&material, &format).unwrap();
+        renderer
+            .try_prepare_material(&material, &format)
+            .await
+            .unwrap();
         drop(material);
         let pipeline = renderer.pipelines.values().next().unwrap().clone();
         for _ in 0..32 {
@@ -749,5 +753,78 @@ fn pipeline_cache_eviction_preserves_mesh_scope_and_recorded_draws() {
             assert_eq!(&bytes[(32 * 64 + x) * 4..][..4], &[255, 0, 0, 255]);
         }
         assert!(validation.pop().await.is_none());
+    });
+}
+
+#[test]
+fn checked_preparation_tracks_validation_provenance_and_eviction() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = MeshRenderer::new(&g);
+        let material =
+            g.create_material(MaterialOptions::new(renderer.default_material().shader()));
+        let invalid = g.create_material(
+            MaterialOptions::new(material.shader()).entry_points("missing_vertex", "fragment_main"),
+        );
+        let format = crate::RenderFormat::color(wgpu::TextureFormat::Rgba8Unorm, 1);
+        let validation = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        renderer.prepare_material(&material, &format).unwrap();
+        assert!(validation.pop().await.is_none());
+        let unchecked = renderer.pipelines.values().next().unwrap().clone();
+        assert!(!unchecked.is_validated());
+        renderer
+            .try_prepare_material(&material, &format)
+            .await
+            .unwrap();
+        let verified = renderer.pipelines.values().next().unwrap().clone();
+        assert!(verified.is_validated());
+        assert_ne!(unchecked, verified); // The unchecked handle was actually revalidated.
+        for _ in 0..3 {
+            renderer.prepare_material(&material, &format).unwrap();
+            renderer
+                .try_prepare_material(&material, &format)
+                .await
+                .unwrap();
+            assert_eq!(renderer.pipelines.values().next().unwrap(), &verified);
+        }
+
+        // Synchronous preparation still returns Ok and reports through the caller's scope.
+        let validation = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        renderer.prepare_material(&invalid, &format).unwrap();
+        assert!(validation.pop().await.is_some());
+        assert_eq!(renderer.pipeline_cache_stats().entries, 2);
+        for _ in 0..2 {
+            assert!(matches!(
+                renderer.try_prepare_material(&invalid, &format).await,
+                Err(Error::Validation(_))
+            ));
+            assert_eq!(renderer.pipeline_cache_stats().entries, 1);
+            assert_eq!(renderer.pipelines.values().next().unwrap(), &verified);
+        }
+        assert_eq!(renderer.prune_pipeline_cache(), 0);
+        assert_eq!(renderer.clear_pipeline_cache(), 1);
+        renderer.prepare_material(&material, &format).unwrap();
+        assert!(!renderer.pipelines.values().next().unwrap().is_validated());
+        renderer
+            .try_prepare_material(&material, &format)
+            .await
+            .unwrap();
+        let recreated = renderer.pipelines.values().next().unwrap().clone();
+        assert!(recreated.is_validated());
+        assert_ne!(verified, recreated);
+        // Pruning treats verified and unchecked variants alike and retains no provenance.
+        renderer
+            .prepare_material(
+                &material,
+                &crate::RenderFormat::color(wgpu::TextureFormat::Rgba8UnormSrgb, 1),
+            )
+            .unwrap();
+        drop(material);
+        assert_eq!(renderer.prune_pipeline_cache(), 2);
+        assert_eq!(
+            renderer.pipeline_cache_stats(),
+            crate::PipelineCacheStats::default()
+        );
+        assert_eq!(renderer.clear_pipeline_cache(), 0);
     });
 }

@@ -757,6 +757,10 @@ fn material_pipeline_cache_churn_retains_clones_and_reuses_live_variants() {
         renderer
             .prepare_material(&binding, &material, &target.render_format())
             .unwrap();
+        renderer
+            .try_prepare_material(&binding, &material, &target.render_format())
+            .await
+            .unwrap();
         drop(material);
         let pipeline = renderer.pipelines.values().next().unwrap().clone();
         for _ in 0..32 {
@@ -846,5 +850,100 @@ fn pipeline_cache_eviction_preserves_prepared_texture_scope_and_deferred_recordi
             near(pixel(&bytes, x, 32), [0, 255, 0, 255]);
         }
         assert!(validation.pop().await.is_none());
+    });
+}
+
+#[test]
+fn checked_preparation_tracks_validation_provenance_and_eviction() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = TextureRenderer::new(&g);
+        let texture = image(&g, 1, 1, &[255; 4]);
+        let binding = renderer
+            .create_binding(texture.view(), TextureBindingOptions::new())
+            .unwrap();
+        let material = g.create_texture_material(TextureMaterialOptions::new());
+        let shader = g.device().create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(
+                "@vertex fn vs() -> @builtin(position) vec4<f32> { return vec4<f32>(0.); } @fragment fn fs() -> @location(0) vec4<f32> { return vec4<f32>(1.); }".into(),
+            ),
+        });
+        let mut options = TextureMaterialOptions::new();
+        options.shader = Some(&shader);
+        options.vertex_entry = "missing_vertex";
+        options.fragment_entry = "fs";
+        let invalid = g.create_texture_material(options);
+        let format = crate::RenderFormat::color(wgpu::TextureFormat::Rgba8Unorm, 1);
+        let validation = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        renderer
+            .prepare_material(&binding, &material, &format)
+            .unwrap();
+        assert!(validation.pop().await.is_none());
+        let unchecked = renderer.pipelines.values().next().unwrap().clone();
+        assert!(!unchecked.is_validated());
+        renderer
+            .try_prepare_material(&binding, &material, &format)
+            .await
+            .unwrap();
+        let verified = renderer.pipelines.values().next().unwrap().clone();
+        assert!(verified.is_validated());
+        assert_ne!(unchecked, verified); // The unchecked handle was actually revalidated.
+        for _ in 0..3 {
+            renderer
+                .prepare_material(&binding, &material, &format)
+                .unwrap();
+            renderer
+                .try_prepare_material(&binding, &material, &format)
+                .await
+                .unwrap();
+            assert_eq!(renderer.pipelines.values().next().unwrap(), &verified);
+        }
+
+        // Synchronous preparation still returns Ok and reports through the caller's scope.
+        let validation = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        renderer
+            .prepare_material(&binding, &invalid, &format)
+            .unwrap();
+        assert!(validation.pop().await.is_some());
+        assert_eq!(renderer.pipeline_cache_stats().entries, 2);
+        for _ in 0..2 {
+            assert!(matches!(
+                renderer
+                    .try_prepare_material(&binding, &invalid, &format)
+                    .await,
+                Err(Error::Validation(_))
+            ));
+            assert_eq!(renderer.pipeline_cache_stats().entries, 1);
+            assert_eq!(renderer.pipelines.values().next().unwrap(), &verified);
+        }
+        assert_eq!(renderer.prune_pipeline_cache(), 0);
+        assert_eq!(renderer.clear_pipeline_cache(), 1);
+        renderer
+            .prepare_material(&binding, &material, &format)
+            .unwrap();
+        assert!(!renderer.pipelines.values().next().unwrap().is_validated());
+        renderer
+            .try_prepare_material(&binding, &material, &format)
+            .await
+            .unwrap();
+        let recreated = renderer.pipelines.values().next().unwrap().clone();
+        assert!(recreated.is_validated());
+        assert_ne!(verified, recreated);
+        // Pruning treats verified and unchecked variants alike and retains no provenance.
+        renderer
+            .prepare_material(
+                &binding,
+                &material,
+                &crate::RenderFormat::color(wgpu::TextureFormat::Rgba8UnormSrgb, 1),
+            )
+            .unwrap();
+        drop(material);
+        assert_eq!(renderer.prune_pipeline_cache(), 2);
+        assert_eq!(
+            renderer.pipeline_cache_stats(),
+            crate::PipelineCacheStats::default()
+        );
+        assert_eq!(renderer.clear_pipeline_cache(), 0);
     });
 }

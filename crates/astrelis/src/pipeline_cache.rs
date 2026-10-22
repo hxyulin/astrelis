@@ -25,6 +25,8 @@ pub(crate) struct CachedPipeline {
     // Observe material clones without retaining their shaders/layouts or requiring
     // per-draw bookkeeping. Draw scopes own pipeline handles independently.
     material: Weak<()>,
+    // Only a successful renderer-owned validation scope proves this pipeline valid.
+    validated: bool,
 }
 
 impl CachedPipeline {
@@ -32,7 +34,17 @@ impl CachedPipeline {
         Self {
             pipeline,
             material: Arc::downgrade(material),
+            validated: false,
         }
+    }
+
+    pub(crate) fn is_validated(&self) -> bool {
+        self.validated
+    }
+
+    /// Call only after pipeline creation and its validation scope both succeed.
+    pub(crate) fn mark_validated(&mut self) {
+        self.validated = true;
     }
 }
 
