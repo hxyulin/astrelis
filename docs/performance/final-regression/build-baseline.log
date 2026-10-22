@@ -1,0 +1,3 @@
+   Compiling astrelis v0.4.0-dev.0 (/private/tmp/astrelis-baseline-bnhSwY/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 6.04s
+  Executable benches/primitives.rs (/Users/hxyulin/dev/projects/astrelis/target/release/deps/primitives-8159e6c74c4df76e)

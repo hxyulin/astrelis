@@ -1,0 +1,206 @@
+{
+  "1": {
+    "warm_static": {
+      "before": {
+        "pages_created": 7,
+        "pages_reused": 420,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      },
+      "after": {
+        "pages_created": 7,
+        "pages_reused": 4620,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      }
+    },
+    "changing_churn": {
+      "before": {
+        "pages_created": 7,
+        "pages_reused": 4620,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      },
+      "after": {
+        "pages_created": 25,
+        "pages_reused": 8820,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 25,
+        "idle_buffer_bytes": 1638400,
+        "idle_staging_capacity_bytes": 1638400,
+        "idle_clip_bindings": 150
+      }
+    },
+    "recovery_static": {
+      "before": {
+        "pages_created": 25,
+        "pages_reused": 8820,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 25,
+        "idle_buffer_bytes": 1638400,
+        "idle_staging_capacity_bytes": 1638400,
+        "idle_clip_bindings": 150
+      },
+      "after": {
+        "pages_created": 25,
+        "pages_reused": 13020,
+        "pages_released": 18,
+        "clip_bindings_created": 300,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      }
+    }
+  },
+  "2": {
+    "warm_static": {
+      "before": {
+        "pages_created": 7,
+        "pages_reused": 420,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      },
+      "after": {
+        "pages_created": 7,
+        "pages_reused": 4620,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      }
+    },
+    "changing_churn": {
+      "before": {
+        "pages_created": 7,
+        "pages_reused": 4620,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      },
+      "after": {
+        "pages_created": 25,
+        "pages_reused": 8820,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 25,
+        "idle_buffer_bytes": 1638400,
+        "idle_staging_capacity_bytes": 1638400,
+        "idle_clip_bindings": 150
+      }
+    },
+    "recovery_static": {
+      "before": {
+        "pages_created": 25,
+        "pages_reused": 8820,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 25,
+        "idle_buffer_bytes": 1638400,
+        "idle_staging_capacity_bytes": 1638400,
+        "idle_clip_bindings": 150
+      },
+      "after": {
+        "pages_created": 25,
+        "pages_reused": 13020,
+        "pages_released": 18,
+        "clip_bindings_created": 300,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      }
+    }
+  },
+  "3": {
+    "warm_static": {
+      "before": {
+        "pages_created": 7,
+        "pages_reused": 420,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      },
+      "after": {
+        "pages_created": 7,
+        "pages_reused": 4620,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      }
+    },
+    "changing_churn": {
+      "before": {
+        "pages_created": 7,
+        "pages_reused": 4620,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      },
+      "after": {
+        "pages_created": 25,
+        "pages_reused": 8820,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 25,
+        "idle_buffer_bytes": 1638400,
+        "idle_staging_capacity_bytes": 1638400,
+        "idle_clip_bindings": 150
+      }
+    },
+    "recovery_static": {
+      "before": {
+        "pages_created": 25,
+        "pages_reused": 8820,
+        "pages_released": 0,
+        "clip_bindings_created": 150,
+        "idle_pages": 25,
+        "idle_buffer_bytes": 1638400,
+        "idle_staging_capacity_bytes": 1638400,
+        "idle_clip_bindings": 150
+      },
+      "after": {
+        "pages_created": 25,
+        "pages_reused": 13020,
+        "pages_released": 18,
+        "clip_bindings_created": 300,
+        "idle_pages": 7,
+        "idle_buffer_bytes": 458752,
+        "idle_staging_capacity_bytes": 458752,
+        "idle_clip_bindings": 150
+      }
+    }
+  }
+}

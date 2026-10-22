@@ -1,5 +1,10 @@
 # Nested rounded clipping: Apple M5 Max / Metal
 
+The repeated final-parent comparison is in
+[the pre-push regression report](final-regression.md), including three alternating
+revision pairs at 100/1,000/10,000 primitives and a comparable scoped-draw slowdown
+that remains unresolved under shared-host noise.
+
 The nested clipping change keeps all transformed rounded boundaries active, adds
 point-renderer coverage, and exposes the same shader interface for custom work.
 Unclipped draws upload no clip data. Their shared disabled binding is cached so

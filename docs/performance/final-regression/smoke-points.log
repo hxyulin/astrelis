@@ -1,0 +1,20 @@
+adapter=AdapterInfo { name: "Apple M5 Max", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; samples=5; warmup=4; GPU pass timestamp feature=true; target=1920x1080 RGBA8 1x
+rejected GPU timestamps: begin=1225664767750958, end=0, completed_us=23210.667
+GPU timestamps disabled after failed calibration; completed_frame_us is synchronized CPU wall time, not GPU pass time
+GPU pass timestamps calibrated=false
+pixel equivalence passed: polyline 256 unchanged
+pixel equivalence passed: polyline 256 append_256
+pixel equivalence passed: polyline 256 replace_all
+pixel equivalence passed: polyline 256 visible_4096
+pixel equivalence passed: markers 256 unchanged
+pixel equivalence passed: markers 256 append_256
+pixel equivalence passed: markers 256 replace_all
+pixel equivalence passed: markers 256 visible_4096
+pixel equivalence passed: polyline 4097 unchanged
+pixel equivalence passed: polyline 4097 append_256
+pixel equivalence passed: polyline 4097 replace_all
+pixel equivalence passed: polyline 4097 visible_4096
+pixel equivalence passed: markers 4097 unchanged
+pixel equivalence passed: markers 4097 append_256
+pixel equivalence passed: markers 4097 replace_all
+pixel equivalence passed: markers 4097 visible_4096

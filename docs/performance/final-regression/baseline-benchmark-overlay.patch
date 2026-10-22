@@ -1,0 +1,25 @@
+diff --git a/crates/astrelis/benches/primitives.rs b/crates/astrelis/benches/primitives.rs
+index 6b6654d..a1e4eb8 100644
+--- a/crates/astrelis/benches/primitives.rs
++++ b/crates/astrelis/benches/primitives.rs
+@@ -36,0 +37 @@ enum Mode {
++    PainterNestedRoundedClipBatch,
+@@ -42 +43 @@ impl Mode {
+-    const CASES: [Self; 15] = [
++    const CASES: [Self; 16] = [
+@@ -55,0 +57 @@ impl Mode {
++        Self::PainterNestedRoundedClipBatch,
+@@ -77,0 +80 @@ impl Mode {
++            Self::PainterNestedRoundedClipBatch => "painter_nested_rounded_clip_shapes_batch",
+@@ -94 +97,3 @@ impl Mode {
+-            Self::PainterRoundedClipBatch => Self::PainterShapesBatch,
++            Self::PainterRoundedClipBatch | Self::PainterNestedRoundedClipBatch => {
++                Self::PainterShapesBatch
++            }
+@@ -298,0 +304,6 @@ impl Work {
++            Mode::PainterNestedRoundedClipBatch => self
++                .painter
++                .begin(&mut p)?
++                .clipped_rounded(Rect::new(-20., -20., 104., 104.), CornerRadii::uniform(12.))?
++                .clipped_rounded(Rect::new(-16., -16., 96., 96.), CornerRadii::uniform(8.))?
++                .draw_shapes(black_box(&self.rectangles))?,

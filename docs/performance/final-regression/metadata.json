@@ -1,0 +1,254 @@
+{
+  "started_utc": "2026-10-22T17:27:18.394004+00:00",
+  "source_commit": "3736db1646612dfd91fe5f824fdd7dfeaca60f19",
+  "baseline_commit": "5e5ea9df12f3539661b8d487a83b907e63641bfa",
+  "toolchain": "rustc 1.99.0 (b940084d7 2026-09-28)\nbinary: rustc\ncommit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4\ncommit-date: 2026-09-28\nhost: aarch64-apple-darwin\nrelease: 1.99.0\nLLVM version: 23.1.1",
+  "cargo": "cargo 1.99.0 (5f94df478 2026-08-27)",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t27.0.1\nBuildVersion:\t\t26A434",
+  "hardware": "      Model Name: MacBook Pro\n      Model Identifier: Mac17,7\n      Chip: Apple M5 Max\n      Total Number of Cores: 18 (6 Super and 12 Performance)\n      Memory: 128 GB",
+  "profile": "Cargo default bench [optimized], no profile overrides; same target directory/dependencies",
+  "environment": {
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "WGPU_BACKEND": null,
+    "WGPU_VALIDATION": null,
+    "CARGO_PROFILE_BENCH_OPT_LEVEL": null
+  },
+  "sha256": {
+    "Cargo.lock": "45929a1d4bee476c092e351ecbbe5dd554dc7d166229dad90d453ecdf1a743e2",
+    "Cargo.toml": "0c5501071d59da7eef7a7bdfc7120c5b4703949419a3c8ccdbd310f3effb5289",
+    "crates/astrelis/Cargo.toml": "2f58f7f39376cde2c41aaf7180cc7ec010f38b108d0b33b13d56d5039b288838",
+    "crates/astrelis/benches/support/clipping.rs": "79f24ee425af1a61df573dc09e62f78f409b5965bb0f00e0d1701dbc75bb8139",
+    "crates/astrelis/benches/text_workloads.rs": "c9891ee2c10257b4e954818a6840593b54b63592ef5e2ca2e477a12feb8b8d8d",
+    "crates/astrelis/benches/brushes.rs": "b10593ded5febefa2910b1728c154f1b67a8ebaf71ea6b0c5a9fcd3e15bc102a",
+    "crates/astrelis/benches/primitives.rs": "c1f81c30ab36a6ea3c304d9678c73a227022a4a44eee6e1a1a3c0615b46c0dc5",
+    "crates/astrelis/benches/glyph_preparation.rs": "856192ea6f623abcfbb15fbf14ac53002e6472793498ef2978a8ee25ed10c79f",
+    "crates/astrelis/benches/text_batches.rs": "70c26e3a0f08ada20948415cd81b39b0ad8d8db89314a556a7dd75c34a0df360",
+    "crates/astrelis/benches/points.rs": "627f63f19df2e2b12d28511fa5fb520682e05b0cae1aea975c14d5e73473510f",
+    "crates/astrelis/benches/image_alpha.rs": "19f6b7fa250fff79efd5900d66008062d297f348d7572dfd3c2327f7b5a4645e",
+    "crates/astrelis/benches/rendering.rs": "ca1e4f5106be8210ef8add18b1fad787f41cd5d499d403d0858f0a5bc08a9789",
+    "crates/astrelis/benches/paths.rs": "5d7a55008fb4682920fc62f2cdca6a7f6bd92292a55421e6fee90a1e5c21ea07",
+    "crates/astrelis/benches/text_rendering.rs": "d6f64d94e055c993c07b3356e12ab323c44233aeffd6d2f970105feb05229151",
+    "crates/astrelis/benches/pipeline_cache.rs": "1c278476f8c3eeb0f72f145559f731d172a54f2f9157c84e40fcf78db0568d9f",
+    "crates/astrelis/benches/rich_text.rs": "148314d681e9049866ca4bb15a92c55aa323c0f0742251f3d31fcf3fac81217e",
+    "crates/astrelis/benches/text_interaction.rs": "b53fd18de169ce9bbaff44b44db0834cfc86be5288b3e2f041f7069a5a40a91d",
+    "crates/astrelis/benches/painter_text.rs": "7eb2173a71840059ae36a615f3507667b1d524764182a6fbc72596797ec9bbe3",
+    "crates/astrelis/benches/store_ops.rs": "d48cb1cce852d10990cf37d0e25ba1de1b302870f5277ecf6763b28b0bd65167",
+    "crates/astrelis/benches/mixed_ui.rs": "6dc67198ed38dc46566c8cc33389248077457a0675a6565d3c670359d803f9c5",
+    "crates/astrelis/benches/text.rs": "d4f9c559e4c90d4c5b834a1345097cebb3456ada53e11c1df9605fadb487d02e",
+    "crates/astrelis/benches/text_distance_fields.rs": "c5b6b3a1aa0003fe993c3d579afaa9fcbac1cc507cc3b47be2d9d0a857a100c1",
+    "crates/astrelis/benches/text_viewport.rs": "57e34d2f83cace0065860118914f0047706c22d42e1c944e54cb24f979636842",
+    "/tmp/astrelis-perf-final-binaries/rendering": "3f1e67dd86481bdb3470943d131c1b06ac795c33a3172423efa458e6aaa2170c",
+    "/tmp/astrelis-perf-final-binaries/paths": "fc4bcfa796b00f5115ca5b4a8aed65983b6815bf1334bc96fec03289e89e62f9",
+    "/tmp/astrelis-perf-final-binaries/primitives-baseline": "3d20db238da557daf0683075de8da9bab10671636ebebd213b232cb1f775bcca",
+    "/tmp/astrelis-perf-final-binaries/primitives": "44f6c1300ec54890e6152c0b9a3218a4d91a594f4aee2855f3d4ff8fa3ba2e82",
+    "/tmp/astrelis-perf-final-binaries/mixed_ui": "949e0787aba2e0a38a7c521f70d3f0d66c6e13c6e847695ac7f4a0d8c5ddb4a7",
+    "/tmp/astrelis-perf-final-binaries/points": "dff2986e778c7a137291f2eea08866bf5de7a667d6d2813ebd71188e25766cb0",
+    "crates/astrelis/tests/fonts/SourceSans3-Regular.otf": "08df266400933d3178d081a45f94a08814c3e55b4b7dd2e0ff69cb1329f13ab6"
+  },
+  "runs": [
+    {
+      "label": "primitives-baseline-1",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/primitives-baseline",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "started_utc": "2026-10-22T17:27:18.825425+00:00",
+      "returncode": 0,
+      "elapsed_s": 14.937219291,
+      "ended_utc": "2026-10-22T17:27:33.765633+00:00"
+    },
+    {
+      "label": "primitives-current-1",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/primitives",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "started_utc": "2026-10-22T17:27:33.766099+00:00",
+      "returncode": 0,
+      "elapsed_s": 13.139061834,
+      "ended_utc": "2026-10-22T17:27:46.905484+00:00"
+    },
+    {
+      "label": "primitives-baseline-2",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/primitives-baseline",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "started_utc": "2026-10-22T17:27:46.905944+00:00",
+      "returncode": 0,
+      "elapsed_s": 12.260798500000003,
+      "ended_utc": "2026-10-22T17:27:59.167028+00:00"
+    },
+    {
+      "label": "primitives-current-2",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/primitives",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "started_utc": "2026-10-22T17:27:59.167642+00:00",
+      "returncode": 0,
+      "elapsed_s": 15.225959832999997,
+      "ended_utc": "2026-10-22T17:28:14.394007+00:00"
+    },
+    {
+      "label": "primitives-baseline-3",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/primitives-baseline",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "started_utc": "2026-10-22T17:28:14.394628+00:00",
+      "returncode": 0,
+      "elapsed_s": 22.130605541,
+      "ended_utc": "2026-10-22T17:28:36.525724+00:00"
+    },
+    {
+      "label": "primitives-current-3",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/primitives",
+        "--counts",
+        "100,1000,10000",
+        "--samples",
+        "25",
+        "--warmup",
+        "5"
+      ],
+      "started_utc": "2026-10-22T17:28:36.526381+00:00",
+      "returncode": 0,
+      "elapsed_s": 18.449782459000005,
+      "ended_utc": "2026-10-22T17:28:54.976604+00:00"
+    },
+    {
+      "label": "mixed-ui-current-1",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/mixed_ui",
+        "--frames",
+        "600",
+        "--warmup",
+        "60",
+        "--in-flight",
+        "3"
+      ],
+      "started_utc": "2026-10-22T17:28:54.977145+00:00",
+      "returncode": 0,
+      "elapsed_s": 2.097799834,
+      "ended_utc": "2026-10-22T17:28:57.075199+00:00"
+    },
+    {
+      "label": "mixed-ui-current-2",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/mixed_ui",
+        "--frames",
+        "600",
+        "--warmup",
+        "60",
+        "--in-flight",
+        "3"
+      ],
+      "started_utc": "2026-10-22T17:28:57.075759+00:00",
+      "returncode": 0,
+      "elapsed_s": 1.6563780829999928,
+      "ended_utc": "2026-10-22T17:28:58.732523+00:00"
+    },
+    {
+      "label": "mixed-ui-current-3",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/mixed_ui",
+        "--frames",
+        "600",
+        "--warmup",
+        "60",
+        "--in-flight",
+        "3"
+      ],
+      "started_utc": "2026-10-22T17:28:58.733161+00:00",
+      "returncode": 0,
+      "elapsed_s": 1.5536943329999957,
+      "ended_utc": "2026-10-22T17:29:00.287201+00:00"
+    },
+    {
+      "label": "smoke-rendering",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/rendering",
+        "--counts",
+        "1,1025",
+        "--samples",
+        "5",
+        "--warmup",
+        "1"
+      ],
+      "started_utc": "2026-10-22T17:29:00.287878+00:00",
+      "returncode": 0,
+      "elapsed_s": 0.3164594590000007,
+      "ended_utc": "2026-10-22T17:29:00.604608+00:00"
+    },
+    {
+      "label": "smoke-paths",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/paths",
+        "--counts",
+        "1,1025",
+        "--samples",
+        "5",
+        "--warmup",
+        "1"
+      ],
+      "started_utc": "2026-10-22T17:29:00.605207+00:00",
+      "returncode": 0,
+      "elapsed_s": 1.3697767079999892,
+      "ended_utc": "2026-10-22T17:29:01.975281+00:00"
+    },
+    {
+      "label": "smoke-points",
+      "command": [
+        "/tmp/astrelis-perf-final-binaries/points",
+        "--counts",
+        "256,4097",
+        "--samples",
+        "5"
+      ],
+      "started_utc": "2026-10-22T17:29:01.975948+00:00",
+      "returncode": 0,
+      "elapsed_s": 0.3663091250000008,
+      "ended_utc": "2026-10-22T17:29:02.342592+00:00"
+    }
+  ],
+  "measurement": "CPU durations only; no GPU timestamps or presentation; validation defaults unchanged",
+  "host_note": "Parent tests/clippy completed before timing. Unrelated Flux workloads and possible upstream integration builds share host; see host-load.jsonl.",
+  "ended_utc": "2026-10-22T17:29:02.347778+00:00",
+  "baseline_checkout": "/tmp/astrelis-baseline-bnhSwY",
+  "current_checkout": "/Users/hxyulin/.t3/worktrees/astrelis/t3-dc6171d9",
+  "build_target_directory": "/Users/hxyulin/dev/projects/astrelis/target",
+  "build_commands": {
+    "current": "CARGO_TARGET_DIR=/Users/hxyulin/dev/projects/astrelis/target cargo bench -p astrelis --locked --no-run --bench primitives --bench mixed_ui --bench rendering --bench paths --bench points",
+    "baseline": "CARGO_TARGET_DIR=/Users/hxyulin/dev/projects/astrelis/target cargo bench -p astrelis --locked --no-run --bench primitives"
+  },
+  "baseline_overlay": "Copy 3736db1:crates/astrelis/benches/primitives.rs verbatim onto 5e5ea9d; retained diff baseline-benchmark-overlay.patch",
+  "baseline_lock_sha256": "45929a1d4bee476c092e351ecbbe5dd554dc7d166229dad90d453ecdf1a743e2",
+  "baseline_primitives_sha256": "c1f81c30ab36a6ea3c304d9678c73a227022a4a44eee6e1a1a3c0615b46c0dc5"
+}

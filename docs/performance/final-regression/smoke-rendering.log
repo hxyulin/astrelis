@@ -1,0 +1,28 @@
+adapter=AdapterInfo { name: "Apple M5 Max", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; os=macos; arch=aarch64; debug_assertions=false; validation=wgpu_defaults
+context_initialization_us=18916.666
+wrapped_resources_us=1818.333
+wrapped_mesh_pipeline_prepare_us=555.583
+wrapped_texture_pipeline_prepare_us=866.959
+raw_mesh_pipeline_prepare_us=104.166
+raw_texture_resources_and_pipeline_us=1329.375; preparation_times_are_single_observations=true
+counts=[1, 1025]; samples=5; warmup=1; gpu_execution_timing=not_measured
+data_preparation_us count=1: 119.708
+checked and measured mesh_same count=1
+checked and measured mesh_alternating count=1
+checked and measured texture_prepared count=1
+checked and measured texture_dynamic count=1
+checked and measured texture_batch count=1
+checked and measured mesh_scoped count=1
+checked and measured texture_prepared_scoped count=1
+checked and measured texture_dynamic_scoped count=1
+checked and measured texture_batch_scoped count=1
+data_preparation_us count=1025: 110.708
+checked and measured mesh_same count=1025
+checked and measured mesh_alternating count=1025
+checked and measured texture_prepared count=1025
+checked and measured texture_dynamic count=1025
+checked and measured texture_batch count=1025
+checked and measured mesh_scoped count=1025
+checked and measured texture_prepared_scoped count=1025
+checked and measured texture_dynamic_scoped count=1025
+checked and measured texture_batch_scoped count=1025

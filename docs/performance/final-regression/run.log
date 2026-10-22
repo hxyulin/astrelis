@@ -1,0 +1,24 @@
+2026-10-22T17:27:18.828172+00:00 starting primitives-baseline-1
+2026-10-22T17:27:33.766051+00:00 finished primitives-baseline-1: exit=0, 14.94s
+2026-10-22T17:27:33.766296+00:00 starting primitives-current-1
+2026-10-22T17:27:46.905895+00:00 finished primitives-current-1: exit=0, 13.14s
+2026-10-22T17:27:46.906105+00:00 starting primitives-baseline-2
+2026-10-22T17:27:59.167581+00:00 finished primitives-baseline-2: exit=0, 12.26s
+2026-10-22T17:27:59.167896+00:00 starting primitives-current-2
+2026-10-22T17:28:14.394544+00:00 finished primitives-current-2: exit=0, 15.23s
+2026-10-22T17:28:14.394911+00:00 starting primitives-baseline-3
+2026-10-22T17:28:36.526329+00:00 finished primitives-baseline-3: exit=0, 22.13s
+2026-10-22T17:28:36.526646+00:00 starting primitives-current-3
+2026-10-22T17:28:54.977096+00:00 finished primitives-current-3: exit=0, 18.45s
+2026-10-22T17:28:54.977357+00:00 starting mixed-ui-current-1
+2026-10-22T17:28:57.075714+00:00 finished mixed-ui-current-1: exit=0, 2.10s
+2026-10-22T17:28:57.076090+00:00 starting mixed-ui-current-2
+2026-10-22T17:28:58.733111+00:00 finished mixed-ui-current-2: exit=0, 1.66s
+2026-10-22T17:28:58.733443+00:00 starting mixed-ui-current-3
+2026-10-22T17:29:00.287831+00:00 finished mixed-ui-current-3: exit=0, 1.55s
+2026-10-22T17:29:00.288118+00:00 starting smoke-rendering
+2026-10-22T17:29:00.605160+00:00 finished smoke-rendering: exit=0, 0.32s
+2026-10-22T17:29:00.605457+00:00 starting smoke-paths
+2026-10-22T17:29:01.975903+00:00 finished smoke-paths: exit=0, 1.37s
+2026-10-22T17:29:01.976211+00:00 starting smoke-points
+2026-10-22T17:29:02.347435+00:00 finished smoke-points: exit=0, 0.37s

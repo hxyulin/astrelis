@@ -1,5 +1,9 @@
 # Sustained mixed UI workload
 
+Three repeated 600-frame-per-phase runs on final parent `3736db1`, including tails
+and allocation/recovery counters, are retained in
+[the pre-push regression report](final-regression.md).
+
 Run the application-owned headless benchmark in release mode:
 
 ```sh
