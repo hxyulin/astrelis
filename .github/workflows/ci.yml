@@ -101,3 +101,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Includes the three MSAA/scissor cases excluded only on lavapipe above.
       - run: cargo test --workspace --locked -- --nocapture
+      # Harness-free benchmarks compile raw shaders at runtime. Compilation and
+      # unit tests alone cannot detect mismatched reference pipeline interfaces.
+      - name: Benchmark pixel-equivalence smoke checks
+        run: |
+          cargo bench -p astrelis --locked --bench rendering -- --counts 1,1025 --samples 5 --warmup 1
+          cargo bench -p astrelis --locked --bench paths -- --counts 1,1025 --samples 5 --warmup 1
+          cargo bench -p astrelis --locked --bench points -- --counts 256,4097 --samples 5
+          cargo bench -p astrelis --locked --bench mixed_ui -- --frames 8 --warmup 2 --in-flight 3
