@@ -137,7 +137,8 @@ impl<'a> MaterialOptions<'a> {
 /// [`crate::MeshRenderer::draw_with_material`]. A material retains its shader and
 /// pipeline layout, independently of windows, targets, or a particular renderer.
 /// Clones share GPU handles and the identity used by each renderer's pipeline cache.
-/// Create a new material to change shader or render state.
+/// Create a new material to change shader or render state. After the last clone is
+/// dropped, [`crate::MeshRenderer::prune_pipeline_cache`] can reclaim its cached variants.
 ///
 /// Buffers, textures, bind groups, and their updates remain application-owned.
 /// Bind the groups required by this material with
@@ -148,6 +149,7 @@ impl<'a> MaterialOptions<'a> {
 #[derive(Clone, Debug)]
 pub struct Material {
     pub(crate) id: u64,
+    pub(crate) lifetime: std::sync::Arc<()>,
     pub(crate) device: wgpu::Device,
     pub(crate) instance: wgpu::Instance,
     pub(crate) shader: wgpu::ShaderModule,
@@ -181,6 +183,7 @@ impl Material {
             });
         Self {
             id,
+            lifetime: std::sync::Arc::new(()),
             device: graphics.device().clone(),
             instance: graphics.instance().clone(),
             shader: options.shader.clone(),

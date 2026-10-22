@@ -93,3 +93,7 @@ harness = false
 [[bench]]
 name = "text_viewport"
 harness = false
+
+[[bench]]
+name = "pipeline_cache"
+harness = false

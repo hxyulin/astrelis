@@ -741,3 +741,110 @@ fn straight_alpha_with_uniform_footprint_alpha_matches_premultiplied_filtering()
         assert!(scope.pop().await.is_none());
     });
 }
+
+#[test]
+fn material_pipeline_cache_churn_retains_clones_and_reuses_live_variants() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = TextureRenderer::new(&g);
+        let target = output(&g, 1);
+        let texture = image(&g, 1, 1, &[255; 4]);
+        let binding = renderer
+            .create_binding(texture.view(), TextureBindingOptions::new())
+            .unwrap();
+        let material = g.create_texture_material(TextureMaterialOptions::new());
+        let live = material.clone();
+        renderer
+            .prepare_material(&binding, &material, &target.render_format())
+            .unwrap();
+        drop(material);
+        let pipeline = renderer.pipelines.values().next().unwrap().clone();
+        for _ in 0..32 {
+            for _ in 0..4 {
+                let transient = g.create_texture_material(TextureMaterialOptions::new());
+                renderer
+                    .prepare_material(&binding, &transient, &target.render_format())
+                    .unwrap();
+                renderer
+                    .prepare_material(
+                        &binding,
+                        &transient,
+                        &crate::RenderFormat::color(wgpu::TextureFormat::Rgba8UnormSrgb, 1),
+                    )
+                    .unwrap();
+            }
+            assert_eq!(
+                renderer.pipeline_cache_stats(),
+                crate::PipelineCacheStats {
+                    entries: 9,
+                    live_entries: 1,
+                    stale_entries: 8,
+                }
+            );
+            assert_eq!(renderer.prune_pipeline_cache(), 8);
+            renderer
+                .prepare_material(&binding, &live, &target.render_format())
+                .unwrap();
+            renderer
+                .try_prepare_material(&binding, &live, &target.render_format())
+                .await
+                .unwrap();
+            assert_eq!(renderer.pipelines.values().next().unwrap(), &pipeline);
+        }
+        drop(live);
+        assert_eq!(renderer.prune_pipeline_cache(), 1);
+        assert_eq!(
+            renderer.pipeline_cache_stats(),
+            crate::PipelineCacheStats::default()
+        );
+        assert_eq!(renderer.pipelines.capacity(), 0);
+        renderer.prepare(&binding, &target.render_format()).unwrap();
+        assert_eq!(renderer.prune_pipeline_cache(), 0);
+        assert_eq!(renderer.clear_pipeline_cache(), 1);
+        assert_eq!(renderer.clear_pipeline_cache(), 0);
+        renderer.prepare(&binding, &target.render_format()).unwrap();
+    });
+}
+
+#[test]
+fn pipeline_cache_eviction_preserves_prepared_texture_scope_and_deferred_recording() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let validation = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut renderer = TextureRenderer::new(&g);
+        let texture = image(&g, 1, 1, &[0, 255, 0, 255]);
+        let binding = renderer
+            .create_binding(texture.view(), TextureBindingOptions::new())
+            .unwrap();
+        let draws = renderer
+            .prepare_draws(&[TextureDraw::default()], [64., 64.])
+            .unwrap();
+        let mut target = output(&g, 1);
+        let format = target.render_format();
+        let mut recording = target.begin_frame().unwrap();
+        {
+            let mut pass = recording.render_pass().begin().unwrap();
+            let material = g.create_texture_material(TextureMaterialOptions::new());
+            let mut scope = renderer
+                .bind_prepared_with_material(&mut pass, &binding, &material, &draws)
+                .unwrap();
+            scope.pass().set_scissor_rect(0, 0, 32, 64).unwrap();
+            scope.draw().unwrap();
+            drop(material);
+            assert_eq!(renderer.prune_pipeline_cache(), 1);
+            renderer.prepare(&binding, &format).unwrap();
+            assert_eq!(renderer.clear_pipeline_cache(), 1);
+            scope.pass().set_scissor_rect(32, 0, 32, 64).unwrap();
+            scope.draw().unwrap();
+        }
+        drop(renderer); // Deferred recording must own everything needed for submission.
+        recording.finish().unwrap();
+        let bytes = pixels(&g, &mut target, |frame| {
+            drop(frame.render_pass().load_all().begin().unwrap());
+        });
+        for x in [16, 48] {
+            near(pixel(&bytes, x, 32), [0, 255, 0, 255]);
+        }
+        assert!(validation.pop().await.is_none());
+    });
+}

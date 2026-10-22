@@ -34,6 +34,27 @@ text.prepare(&target.render_format())?;
 textures.prepare(&image, &target.render_format())?;
 ```
 
+`MeshRenderer` and `TextureRenderer` expose `pipeline_cache_stats()` with total,
+live-material, and stale-material variant counts. Material clones share a lifetime:
+`prune_pipeline_cache()` removes variants only after the last clone is dropped,
+and returns the number removed. Call it after unloading/replacing materials or at
+a periodic maintenance point to keep churn bounded. Reclamation is explicit;
+without maintenance, stale variants remain cached until renderer destruction.
+`clear_pipeline_cache()` removes all variants, including live/default materials,
+and returns the number removed. Both release unused cache storage. Subsequent
+preparation or drawing recreates cleared variants.
+
+These operations release cache handles without submitting or waiting for GPU
+work. Held mesh/texture prepared scopes, raw wgpu commands, and pending frame
+recordings retain the handles they need and remain valid. A dynamic texture scope
+borrows renderer scratch storage, so maintenance waits until that scope ends.
+GPU allocation destruction can occur later, after outstanding handles and GPU
+work are released. Counts describe cache entries, not total GPU memory or shader,
+layout, binding, or upload resources. Statistics/pruning scan the cache only when
+explicitly requested; normal draws retain their constant-time cache lookup.
+Shared internal mesh caches used by text, paths, points, and primitives continue
+to retain their renderer-owned materials and reuse their prepared pipelines.
+
 The old mesh `(color_format, sample_count)` arguments and `prepare_for_format`
 method are removed. Supplying a complete format avoids accidentally preparing a
 color-only pipeline for a pass with depth/stencil storage.

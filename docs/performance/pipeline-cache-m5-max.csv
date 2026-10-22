@@ -1,0 +1,9 @@
+renderer,operation,median_ns_per_variant,p95_ns_per_variant
+mesh,warm_prepare,36.59,69.82
+mesh,warm_prepare_with_16_stale,36.58,570.57
+mesh,material_create_prepare_drop,55338.56,112460.94
+mesh,prune_per_stale_variant,940.12,2861.94
+texture,warm_prepare,50.26,58.16
+texture,warm_prepare_with_16_stale,50.23,322.35
+texture,material_create_prepare_drop,164893.25,5147437.50
+texture,prune_per_stale_variant,1338.56,330109.38

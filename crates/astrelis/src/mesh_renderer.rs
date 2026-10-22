@@ -2,8 +2,10 @@ use std::collections::{HashMap, hash_map::Entry};
 
 use crate::{Error, GraphicsContext, Material, MaterialOptions, Mesh, RenderPass};
 
-pub(crate) type Pipelines =
-    HashMap<(u64, wgpu::TextureFormat, u32, Option<wgpu::TextureFormat>), wgpu::RenderPipeline>;
+pub(crate) type Pipelines = HashMap<
+    (u64, wgpu::TextureFormat, u32, Option<wgpu::TextureFormat>),
+    crate::pipeline_cache::CachedPipeline,
+>;
 
 /// A device-bound renderer for indexed triangle meshes, with optional materials.
 ///
@@ -16,7 +18,9 @@ pub(crate) type Pipelines =
 /// Renderers own no windows or frames. Independent renderers can share a pass;
 /// frame acquisition, pass configuration, submission, and presentation belong to
 /// the application. Use [`Self::prepare`] or [`Self::prepare_material`] during
-/// loading to create pipelines before the first draw that needs them.
+/// loading to create pipelines before the first draw that needs them. Use
+/// [`Self::prune_pipeline_cache`] after material churn, or [`Self::clear_pipeline_cache`]
+/// to explicitly release all cached variants. Draws never scan for dropped materials.
 #[derive(Debug)]
 pub struct MeshRenderer {
     graphics: GraphicsContext,
@@ -25,6 +29,32 @@ pub struct MeshRenderer {
 }
 
 impl MeshRenderer {
+    /// Counts cached variants of live and dropped materials. Scans the cache.
+    pub fn pipeline_cache_stats(&self) -> crate::PipelineCacheStats {
+        crate::pipeline_cache::stats(&self.pipelines)
+    }
+
+    /// Releases cached variants whose material and all its clones were dropped.
+    ///
+    /// Returns the number removed and releases unused cache storage. Call at an
+    /// application-chosen maintenance point to bound material churn. This scans
+    /// the cache; draws never scan it. Live materials retain their prepared variants.
+    /// Held draw scopes and recorded commands retain independent pipeline handles
+    /// and remain valid. GPU destruction may wait for those handles and GPU work.
+    pub fn prune_pipeline_cache(&mut self) -> usize {
+        crate::pipeline_cache::prune(&mut self.pipelines)
+    }
+
+    /// Releases all cache handles and storage, returning the number removed.
+    ///
+    /// Held scopes and recorded commands remain valid. Future draws or preparation
+    /// recreate evicted variants, including variants of the default material.
+    pub fn clear_pipeline_cache(&mut self) -> usize {
+        let removed = self.pipelines.len();
+        self.pipelines = HashMap::new();
+        removed
+    }
+
     /// Creates a renderer with the default colored-mesh material and empty cache.
     pub fn new(graphics: &GraphicsContext) -> Self {
         let shader = graphics
@@ -315,6 +345,14 @@ impl MeshRenderer {
             None
         }
         .ok_or(Error::ExpectedSingleColor)?;
+        if self.pipelines.contains_key(&(
+            material.id,
+            color,
+            format.sample_count,
+            format.depth_stencil,
+        )) {
+            return self.prepare_material(material, format);
+        }
         let scope = self
             .graphics
             .device()
@@ -499,7 +537,7 @@ pub(crate) fn pipeline<'cache>(
         .map(|l| Some(l.as_wgpu()))
         .collect();
     profiling::scope!("astrelis::wgpu::create_render_pipeline");
-    Ok(entry.insert(
+    Ok(entry.insert(crate::pipeline_cache::CachedPipeline::new(
         graphics
             .device()
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -536,7 +574,8 @@ pub(crate) fn pipeline<'cache>(
                 multiview_mask: None,
                 cache: None,
             }),
-    ))
+        &material.lifetime,
+    )))
 }
 
 #[cfg(test)]

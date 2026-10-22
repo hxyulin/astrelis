@@ -1,0 +1,18 @@
+rustc 1.99.0 (b940084d7 2026-09-28)
+binary: rustc
+commit-hash: b940084d7eb6a299eb4bfeb8e34901bc051e7ac4
+commit-date: 2026-09-28
+host: aarch64-apple-darwin
+release: 1.99.0
+LLVM version: 23.1.1
+ProductName:		macOS
+ProductVersion:		27.0.1
+BuildVersion:		26A434
+Command: cargo bench -p astrelis --bench pipeline_cache --locked
+CPU/GPU: Apple M5 Max; Metal
+Samples: 20; warm lookups/sample: 10000; churn batch: 16
+Base commit: 5488b9b8010ac04c2eeee28cf9e6be7d890ae9f7
+1c278476f8c3eeb0f72f145559f731d172a54f2f9157c84e40fcf78db0568d9f  crates/astrelis/benches/pipeline_cache.rs
+5fff34a57779755f8e6bed7f70c4284cbe2f83ca24fa095b494a9a6d06a6429c  crates/astrelis/src/pipeline_cache.rs
+ee4a271ac731b693f9482e884018621d14b8d48a8d07238c42e38e98a8e89366  crates/astrelis/src/mesh_renderer.rs
+842ee21f51315ed085ee43cdc4e19c2216fe7c0c40b264a544f1e39c91e043ec  crates/astrelis/src/texture_renderer.rs

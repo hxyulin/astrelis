@@ -504,9 +504,12 @@ impl<'a> TextureMaterialOptions<'a> {
     }
 }
 /// Reusable texture shading settings, independent of targets and image bindings.
+/// Clones share a cache identity and lifetime. After the last clone is dropped,
+/// [`TextureRenderer::prune_pipeline_cache`] can reclaim its cached variants.
 #[derive(Clone, Debug)]
 pub struct TextureMaterial {
     id: u64,
+    lifetime: Arc<()>,
     graphics: GraphicsContext,
     blend: Option<wgpu::BlendState>,
     write_mask: wgpu::ColorWrites,
@@ -523,6 +526,7 @@ impl TextureMaterial {
         static ID: AtomicU64 = AtomicU64::new(0);
         Self {
             id: ID.fetch_add(1, Ordering::Relaxed),
+            lifetime: Arc::new(()),
             graphics: g.clone(),
             blend: o.blend,
             write_mask: o.write_mask,
@@ -549,6 +553,9 @@ struct PipelineKey {
 /// Independent textured-rectangle renderer. Records explicit draw order into
 /// application-owned passes. Instance pages are leased per recording and uploaded
 /// once per page at finish; image bindings are reusable across changing draws.
+/// Use [`Self::prune_pipeline_cache`] after material churn, or
+/// [`Self::clear_pipeline_cache`] to release all variants. Draws never scan for
+/// dropped materials.
 #[derive(Debug)]
 pub struct TextureRenderer {
     graphics: GraphicsContext,
@@ -558,10 +565,36 @@ pub struct TextureRenderer {
     nearest_sampler: wgpu::Sampler,
     linear_sampler: wgpu::Sampler,
     material: Arc<TextureMaterial>,
-    pipelines: HashMap<PipelineKey, wgpu::RenderPipeline>,
+    pipelines: HashMap<PipelineKey, crate::pipeline_cache::CachedPipeline>,
     parameters: Vec<Parameters>,
 }
 impl TextureRenderer {
+    /// Counts cached variants of live and dropped materials. Scans the cache.
+    pub fn pipeline_cache_stats(&self) -> crate::PipelineCacheStats {
+        crate::pipeline_cache::stats(&self.pipelines)
+    }
+
+    /// Releases cached variants whose material and all its clones were dropped.
+    ///
+    /// Returns the number removed and releases unused cache storage. Call at an
+    /// application-chosen maintenance point to bound material churn. This scans
+    /// the cache; draws never scan it. Live materials retain their prepared variants.
+    /// Held draw scopes and recorded commands retain independent pipeline handles
+    /// and remain valid. GPU destruction may wait for those handles and GPU work.
+    pub fn prune_pipeline_cache(&mut self) -> usize {
+        crate::pipeline_cache::prune(&mut self.pipelines)
+    }
+
+    /// Releases all cache handles and storage, returning the number removed.
+    ///
+    /// Held scopes and recorded commands remain valid. Future draws or preparation
+    /// recreate evicted variants, including variants of the default material.
+    pub fn clear_pipeline_cache(&mut self) -> usize {
+        let removed = self.pipelines.len();
+        self.pipelines = HashMap::new();
+        removed
+    }
+
     /// Creates built-in shader, layouts, reusable samplers, and an empty pipeline cache.
     pub fn new(g: &GraphicsContext) -> Self {
         Self::with_options(g, crate::PipelineOptions::default())
@@ -745,6 +778,18 @@ impl TextureRenderer {
         m: &TextureMaterial,
         format: &crate::RenderFormat,
     ) -> Result<(), Error> {
+        let key = PipelineKey {
+            material: m.id,
+            format: format.single_color()?,
+            count: format.sample_count,
+            depth_stencil: format.depth_stencil,
+            filter: b.options.filter,
+            alpha: b.options.alpha,
+            transformed: false,
+        };
+        if self.pipelines.contains_key(&key) {
+            return self.prepare_material(b, m, format);
+        }
         let scope = self
             .graphics
             .device()
@@ -1311,7 +1356,10 @@ impl TextureRenderer {
                         multiview_mask: None,
                         cache: None,
                     });
-            Ok(entry.insert(pipeline))
+            Ok(entry.insert(crate::pipeline_cache::CachedPipeline::new(
+                pipeline,
+                &m.lifetime,
+            )))
         }
     }
 }

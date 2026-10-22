@@ -452,6 +452,7 @@ mod mesh_renderer;
 mod painter;
 mod pass;
 mod path;
+mod pipeline_cache;
 mod pipeline_options;
 mod point_renderer;
 mod points;
@@ -487,6 +488,7 @@ pub use path::{
     FillRule, LineJoin, Path, PathBuilder, PathDraw, PathDrawSession, PathOptions, PathRenderer,
     PathStroke, PreparedPath,
 };
+pub use pipeline_cache::PipelineCacheStats;
 pub use pipeline_options::PipelineOptions;
 pub use point_renderer::{
     MarkerDraw, MarkerDrawSession, MarkerRenderer, MarkerShape, PolylineDraw, PolylineDrawSession,

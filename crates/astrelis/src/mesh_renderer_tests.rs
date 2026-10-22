@@ -654,3 +654,100 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
         }
     });
 }
+
+#[test]
+fn material_pipeline_cache_churn_retains_clones_and_reuses_live_variants() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut renderer = MeshRenderer::new(&g);
+        let target = g
+            .create_framebuffer(crate::FramebufferOptions::new(64, 64))
+            .unwrap();
+        let format = target.render_format();
+        let material =
+            g.create_material(MaterialOptions::new(renderer.default_material().shader()));
+        let live = material.clone();
+        renderer.prepare_material(&material, &format).unwrap();
+        drop(material);
+        let pipeline = renderer.pipelines.values().next().unwrap().clone();
+        for _ in 0..32 {
+            for _ in 0..4 {
+                let transient = g.create_material(MaterialOptions::new(live.shader()));
+                renderer.prepare_material(&transient, &format).unwrap();
+                renderer
+                    .prepare_material(
+                        &transient,
+                        &crate::RenderFormat::color(wgpu::TextureFormat::Rgba8UnormSrgb, 1),
+                    )
+                    .unwrap();
+            }
+            assert_eq!(
+                renderer.pipeline_cache_stats(),
+                crate::PipelineCacheStats {
+                    entries: 9,
+                    live_entries: 1,
+                    stale_entries: 8,
+                }
+            );
+            assert_eq!(renderer.prune_pipeline_cache(), 8);
+            renderer.prepare_material(&live, &format).unwrap();
+            renderer.try_prepare_material(&live, &format).await.unwrap();
+            assert_eq!(renderer.pipelines.values().next().unwrap(), &pipeline);
+            assert_eq!(renderer.pipeline_cache_stats().entries, 1);
+        }
+        drop(live);
+        assert_eq!(renderer.prune_pipeline_cache(), 1);
+        assert_eq!(
+            renderer.pipeline_cache_stats(),
+            crate::PipelineCacheStats::default()
+        );
+        assert_eq!(renderer.pipelines.capacity(), 0);
+        renderer.prepare(&format).unwrap();
+        assert_eq!(renderer.pipeline_cache_stats().live_entries, 1);
+        assert_eq!(renderer.prune_pipeline_cache(), 0); // Renderer owns the default material.
+        assert_eq!(renderer.clear_pipeline_cache(), 1);
+        assert_eq!(renderer.clear_pipeline_cache(), 0);
+        renderer.prepare(&format).unwrap();
+    });
+}
+
+#[test]
+fn pipeline_cache_eviction_preserves_mesh_scope_and_recorded_draws() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let validation = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut renderer = MeshRenderer::new(&g);
+        let mesh = quad(&g, [1.0, 0.0, 0.0, 1.0]);
+        let bytes = pixels(&g, |encoder, view| {
+            let mut pass =
+                pass(&g, encoder, view, wgpu::LoadOp::Clear(wgpu::Color::BLACK)).unwrap();
+            let material =
+                g.create_material(MaterialOptions::new(renderer.default_material().shader()));
+            let mut scope = renderer
+                .bind_with_material(&mut pass, &mesh, &material)
+                .unwrap();
+            scope.pass().set_scissor_rect(0, 0, 32, 64).unwrap();
+            scope.draw();
+            drop(material);
+            assert_eq!(renderer.prune_pipeline_cache(), 1);
+            // Recreate then clear a cache entry while the original scope is held.
+            renderer
+                .prepare(&crate::RenderFormat {
+                    colors: vec![Some(wgpu::TextureFormat::Rgba8Unorm)],
+                    sample_count: 1,
+                    depth_stencil: None,
+                })
+                .unwrap();
+            assert_eq!(renderer.clear_pipeline_cache(), 1);
+            scope.pass().set_scissor_rect(32, 0, 32, 64).unwrap();
+            scope.draw();
+            drop(scope);
+            drop(pass); // Commands exist before submission, with an empty cache.
+            assert_eq!(renderer.pipeline_cache_stats().entries, 0);
+        });
+        for x in [16, 48] {
+            assert_eq!(&bytes[(32 * 64 + x) * 4..][..4], &[255, 0, 0, 255]);
+        }
+        assert!(validation.pop().await.is_none());
+    });
+}
