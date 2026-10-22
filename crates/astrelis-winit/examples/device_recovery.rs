@@ -145,6 +145,9 @@ impl Handler for Demo {
                 PhysicalKey::Code(KeyCode::KeyD) => {
                     if let Some(graphics) = &self.graphics {
                         graphics.device().destroy();
+                        // On-demand windows may have no further GPU work to drain
+                        // a deferred loss callback. Wake recovery without a wait.
+                        let _ = graphics.device().poll(wgpu::PollType::Poll);
                     }
                 }
                 PhysicalKey::Code(KeyCode::Escape) => cx.close_window(id)?,
