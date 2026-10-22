@@ -50,7 +50,7 @@ fn path_vertex(
 }
 
 fn shade(input: Output) -> vec4<f32> {
-    let clip = clip_coverage(input.clip, input.clip_radii);
+    let clip = rounded_clip_coverage(input.position.xy);
     let alpha = input.color.a * clamp(input.coverage, 0.0, 1.0) * clip;
     return vec4(input.color.rgb * alpha, alpha);
 }

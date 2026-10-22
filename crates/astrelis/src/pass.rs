@@ -464,10 +464,12 @@ pub struct RenderPass<'frame> {
     vertex_other: Vec<Option<(wgpu::Buffer, std::ops::Range<u64>)>>,
     bound_index: Option<(wgpu::Buffer, std::ops::Range<u64>, wgpu::IndexFormat)>,
     group_zero: Option<wgpu::BindGroup>,
+    group_one: Option<wgpu::BindGroup>,
     uploads: Option<&'frame mut crate::uploads::DrawUploads>,
     color_formats: Vec<Option<wgpu::TextureFormat>>,
     additional_colors: Vec<wgpu::Texture>,
-    rounded_clip: Option<crate::RoundedClip>,
+    rounded_clips: Vec<crate::RoundedClip>,
+    clip_stack_upload: Option<wgpu::BindGroup>,
     // The active clip's record for the current viewport size, uploaded on first use.
     clip_upload: Option<(wgpu::Buffer, std::ops::Range<u64>)>,
 }
@@ -567,10 +569,12 @@ impl<'frame> RenderPass<'frame> {
             vertex_other: Vec::new(),
             bound_index: None,
             group_zero: None,
+            group_one: None,
             uploads,
             color_formats: vec![Some(format)],
             additional_colors: Vec::new(),
-            rounded_clip: None,
+            rounded_clips: Vec::new(),
+            clip_stack_upload: None,
             clip_upload: None,
         };
         pass.apply_raster_state();
@@ -764,6 +768,7 @@ impl<'frame> RenderPass<'frame> {
             vertex_other: Vec::new(),
             bound_index: None,
             group_zero: None,
+            group_one: None,
             uploads: Some(uploads),
             color_formats: descriptor
                 .colors
@@ -780,7 +785,8 @@ impl<'frame> RenderPass<'frame> {
                 })
                 .chain(descriptor.depth_stencil.map(|a| a.view.texture().clone()))
                 .collect(),
-            rounded_clip: None,
+            rounded_clips: Vec::new(),
+            clip_stack_upload: None,
             clip_upload: None,
         };
         pass.apply_raster_state();
@@ -853,13 +859,20 @@ impl<'frame> RenderPass<'frame> {
         group: &wgpu::BindGroup,
         offsets: &[wgpu::DynamicOffset],
     ) {
-        if index == 0 && offsets.is_empty() {
-            if self.group_zero.as_ref() == Some(group) {
-                return;
+        let tracked = match index {
+            0 => Some(&mut self.group_zero),
+            1 => Some(&mut self.group_one),
+            _ => None,
+        };
+        if let Some(tracked) = tracked {
+            if offsets.is_empty() {
+                if tracked.as_ref() == Some(group) {
+                    return;
+                }
+                *tracked = Some(group.clone());
+            } else {
+                *tracked = None;
             }
-            self.group_zero = Some(group.clone());
-        } else if index == 0 {
-            self.group_zero = None;
         }
         self.flush();
         self.inner.set_bind_group(index, group, offsets);
@@ -896,7 +909,8 @@ impl<'frame> RenderPass<'frame> {
     ) -> Result<(), Error> {
         let viewport = [x, y, width, height, min_depth, max_depth];
         validate_viewport(self.graphics.device(), viewport)?;
-        if self.viewport[2..4] != viewport[2..4] {
+        if self.viewport[..4] != viewport[..4] {
+            self.clip_stack_upload = None;
             self.clip_upload = None;
         }
         self.raster_dirty |= self.viewport != viewport;
@@ -928,10 +942,10 @@ impl<'frame> RenderPass<'frame> {
     }
 
     /// Selects an anti-aliased rounded-rectangle clip for subsequent built-in 2D draws,
-    /// or removes it with `None`. Geometry is relative to the current viewport, like
+    /// replacing the entire stack, or removes it with `None`. Geometry is relative to the current viewport, like
     /// pixel-space draws. The scissor is unchanged; see [`crate::RoundedClip`] for
     /// which renderers evaluate the clip. Changing it creates no pipeline; the first
-    /// draw under a new clip or viewport size uploads one 48-byte record.
+    /// draw under a new clip or viewport uploads the stack. Unclipped draws upload nothing.
     ///
     /// # Errors
     ///
@@ -941,21 +955,88 @@ impl<'frame> RenderPass<'frame> {
         if let Some(clip) = &clip {
             clip.validate()?;
         }
-        if self.rounded_clip != clip {
-            self.rounded_clip = clip;
+        self.set_rounded_clips(clip.as_slice())
+    }
+
+    /// Returns the innermost rounded clip, if any. Use [`Self::rounded_clips`]
+    /// to inspect the complete intersection.
+    pub fn rounded_clip(&self) -> Option<crate::RoundedClip> {
+        self.rounded_clips.last().copied()
+    }
+
+    /// Returns all active rounded clips, from outermost to innermost.
+    pub fn rounded_clips(&self) -> &[crate::RoundedClip] {
+        &self.rounded_clips
+    }
+
+    /// Replaces the analytic intersection. Invalid clips or a stack longer than
+    /// the device's [`crate::GraphicsContext::rounded_clip_capacity`] return an error without changing state.
+    /// Does not alter the scissor, attachments, stencil policy, or draw order.
+    pub fn set_rounded_clips(&mut self, clips: &[crate::RoundedClip]) -> Result<(), Error> {
+        if clips.len() > self.graphics.rounded_clip_capacity() {
+            return Err(Error::ClipStackFull);
+        }
+        for clip in clips {
+            clip.validate()?;
+        }
+        if self.rounded_clips != clips {
+            self.rounded_clips.clear();
+            self.rounded_clips.extend_from_slice(clips);
             self.clip_upload = None;
+            self.clip_stack_upload = None;
         }
         Ok(())
     }
 
-    /// Returns the rounded clip applied by built-in 2D shading, if any.
-    pub fn rounded_clip(&self) -> Option<crate::RoundedClip> {
-        self.rounded_clip
+    /// Binds the complete analytic intersection at group one for custom shaders
+    /// using [`crate::GraphicsContext::rounded_clip_shader`] and the context's rounded clip layout.
+    /// Call after changing clips/viewport or interleaving other work. Custom work
+    /// owns its pipeline and other bindings; raw commands do not apply this
+    /// coverage automatically. No clips binds shared immutable data with no upload.
+    pub fn bind_rounded_clips(&mut self) {
+        let group = if self.rounded_clips.is_empty() {
+            self.graphics
+                .no_clip_stack
+                .get_or_init(|| {
+                    use wgpu::util::DeviceExt;
+                    let capacity = self.graphics.rounded_clip_capacity();
+                    if capacity == 0 {
+                        return self.graphics.clip_group(None);
+                    }
+                    let buffer = self.graphics.device().create_buffer_init(
+                        &wgpu::util::BufferInitDescriptor {
+                            label: Some("Astrelis disabled rounded stack"),
+                            contents: &crate::clip::stack_bytes(&[], [0.; 6], capacity),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        },
+                    );
+                    self.graphics.clip_group(Some((&buffer, 0)))
+                })
+                .clone()
+        } else {
+            if self.clip_stack_upload.is_none() {
+                let bytes = crate::clip::stack_bytes(
+                    &self.rounded_clips,
+                    self.viewport,
+                    self.graphics.rounded_clip_capacity(),
+                );
+                let alignment = self
+                    .graphics
+                    .device()
+                    .limits()
+                    .min_uniform_buffer_offset_alignment as u64;
+                let (buffer, range) = self.upload_instances(&bytes, alignment);
+                self.clip_stack_upload =
+                    Some(self.graphics.clip_group(Some((&buffer, range.start))));
+            }
+            self.clip_stack_upload.clone().unwrap()
+        };
+        self.set_bind_group(1, &group, &[]);
     }
 
     // Binds the active clip record, or the shared disabled record, at `slot`.
     pub(crate) fn bind_clip(&mut self, slot: u32) {
-        let Some(clip) = self.rounded_clip else {
+        let Some(clip) = self.rounded_clip() else {
             let graphics = self.graphics;
             self.set_vertex_buffer(slot, graphics.no_clip(), 0..crate::clip::SIZE);
             return;
@@ -1072,6 +1153,7 @@ impl<'frame> RenderPass<'frame> {
         self.vertex_other.clear();
         self.bound_index = None;
         self.group_zero = None;
+        self.group_one = None;
         &mut self.inner
     }
 

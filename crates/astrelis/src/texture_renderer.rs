@@ -202,13 +202,18 @@ pub struct TextureDrawSession<'draw, 'frame> {
     group: wgpu::BindGroup,
     parameters: &'draw mut Vec<Parameters>,
     dirty: bool,
+    builtin_clip: bool,
 }
 impl<'draw, 'frame> TextureDrawSession<'draw, 'frame> {
     /// Validates and records one changing rectangle through reusable upload pages.
     pub fn draw(&mut self, draw: TextureDraw) -> Result<(), Error> {
         let parameters = draw.parameters(self.pass.viewport_size())?;
         self.restore();
-        record_parameters(self.pass, std::slice::from_ref(&parameters));
+        record_parameters(
+            self.pass,
+            std::slice::from_ref(&parameters),
+            self.builtin_clip,
+        );
         Ok(())
     }
     /// Validates an entire slice before recording instanced batches in input order.
@@ -223,7 +228,7 @@ impl<'draw, 'frame> TextureDrawSession<'draw, 'frame> {
             return Ok(());
         }
         self.restore();
-        record_parameters(self.pass, self.parameters);
+        record_parameters(self.pass, self.parameters, self.builtin_clip);
         Ok(())
     }
     /// Binds immutable instance data for repeated draws without uploads or per-draw resource checks.
@@ -246,6 +251,7 @@ impl<'draw, 'frame> TextureDrawSession<'draw, 'frame> {
             pass: self.pass,
             pipeline: self.pipeline.clone(),
             group: self.group.clone(),
+            builtin_clip: self.builtin_clip,
             draws,
             dirty: false,
         })
@@ -279,6 +285,7 @@ pub struct PreparedTextureDrawSession<'draw, 'frame> {
     group: wgpu::BindGroup,
     draws: &'draw PreparedTextureDraw,
     dirty: bool,
+    builtin_clip: bool,
 }
 impl<'draw, 'frame> PreparedTextureDrawSession<'draw, 'frame> {
     /// Records the bound instances without recurring uploads or pipeline lookup.
@@ -296,6 +303,9 @@ impl<'draw, 'frame> PreparedTextureDrawSession<'draw, 'frame> {
             self.dirty = false;
         }
         self.pass.bind_clip(2);
+        if self.builtin_clip {
+            self.pass.bind_rounded_clips();
+        }
         self.pass.draw(0..6, 0..self.draws.count);
         Ok(())
     }
@@ -317,7 +327,10 @@ fn validate_prepared_viewport(
     }
     Ok(())
 }
-fn record_parameters(pass: &mut RenderPass<'_>, parameters: &[Parameters]) {
+fn record_parameters(pass: &mut RenderPass<'_>, parameters: &[Parameters], builtin_clip: bool) {
+    if builtin_clip {
+        pass.bind_rounded_clips();
+    }
     pass.bind_clip(2);
     for chunk in parameters.chunks(1024) {
         let first = pass.bind_instances(0, bytemuck::cast_slice(chunk), 64);
@@ -445,8 +458,12 @@ pub struct TextureMaterialOptions<'a> {
     pub depth_stencil: Option<wgpu::DepthStencilState>,
     /// Optional custom shader. Uses the four vec4 instance attributes documented
     /// by [`TextureDraw`], and image/sampler at group zero bindings zero/one.
-    /// Locations seven to nine carry the pass's [`crate::RoundedClip`] record; a
-    /// custom shader may ignore them, in which case only the scissor clips it.
+    /// Locations seven to nine carry only the innermost [`crate::RoundedClip`].
+    /// For nested intersections, prepend [`GraphicsContext::rounded_clip_shader`], declare
+    /// the context's rounded clip layout at group one, multiply premultiplied output
+    /// by `rounded_clip_coverage(fragment_position.xy)`, and call
+    /// [`RenderPass::bind_rounded_clips`] before drawing. Without explicit shader
+    /// integration only the scissor clips custom output.
     pub shader: Option<&'a wgpu::ShaderModule>,
     /// Vertex entry point for a custom shader.
     pub vertex_entry: &'a str,
@@ -565,7 +582,7 @@ impl TextureRenderer {
             shader: device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Astrelis textures"),
                 source: wgpu::ShaderSource::Wgsl(
-                    crate::clip::shader(include_str!("texture.wgsl")).into(),
+                    crate::clip::shader(g, include_str!("texture.wgsl")).into(),
                 ),
             }),
             nearest: binding_layout(device, false),
@@ -849,6 +866,7 @@ impl TextureRenderer {
         pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
         pass.set_vertex_buffer(1, &buffer, range);
         pass.bind_clip(2);
+        pass.bind_rounded_clips();
         pass.draw(0..6, 0..draws.count);
         Ok(())
     }
@@ -868,6 +886,9 @@ impl TextureRenderer {
         self.setup_draw(pass, binding, material)?;
         pass.set_vertex_buffer(0, &draws.buffer, 0..draws.buffer.size());
         pass.bind_clip(2);
+        if material.shader.is_none() {
+            pass.bind_rounded_clips();
+        }
         pass.draw(0..6, 0..draws.count);
         Ok(())
     }
@@ -903,6 +924,7 @@ impl TextureRenderer {
             pipeline,
             group,
             parameters: &mut self.parameters,
+            builtin_clip: material.shader.is_none(),
             dirty: false,
         })
     }
@@ -941,6 +963,7 @@ impl TextureRenderer {
             pass,
             pipeline,
             group,
+            builtin_clip: material.shader.is_none(),
             draws,
             dirty: false,
         })
@@ -996,7 +1019,7 @@ impl TextureRenderer {
             return Ok(());
         }
         self.setup_draw(pass, b, m)?;
-        record_parameters(pass, &self.parameters);
+        record_parameters(pass, &self.parameters, m.shader.is_none());
         Ok(())
     }
     fn bind_resources(
@@ -1195,7 +1218,12 @@ impl TextureRenderer {
                 TextureFilter::Nearest => &self.nearest,
                 TextureFilter::Linear => &self.linear,
             })];
-            layouts.extend(m.layouts.iter().map(|v| v.as_ref()));
+            let rounded_layout = self.graphics.rounded_clip_layout();
+            if m.shader.is_none() {
+                layouts.push(Some(&rounded_layout));
+            } else {
+                layouts.extend(m.layouts.iter().map(|v| v.as_ref()));
+            }
             let layout =
                 self.graphics
                     .device()

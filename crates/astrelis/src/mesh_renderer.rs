@@ -121,6 +121,9 @@ impl MeshRenderer {
     /// restores its pipeline and geometry bindings and applies the pass's chosen
     /// viewport and scissor. Pipelines are created lazily unless prepared earlier.
     /// Any number of renderers can contribute in application-defined order.
+    /// Default mesh shading applies only scissor clipping. Rounded intersections
+    /// require a custom material using [`GraphicsContext::rounded_clip_shader`]
+    /// and [`RenderPass::bind_rounded_clips`], or an application stencil mask.
     ///
     /// # Errors
     ///

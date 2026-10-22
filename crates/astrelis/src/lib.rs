@@ -465,7 +465,7 @@ pub use attachments::{
     RenderColorAttachment, RenderDepthStencilAttachment, RenderFormat, RenderPassDescriptor,
 };
 pub use brush::{Brush, BrushKind, BrushOptions, GradientSpread, GradientStop};
-pub use clip::RoundedClip;
+pub use clip::{MAX_ROUNDED_CLIPS, RoundedClip};
 pub use context::GraphicsContext;
 pub mod text;
 pub use drawing::{

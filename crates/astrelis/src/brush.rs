@@ -480,7 +480,10 @@ pub(crate) fn material(
         options.mesh(
             crate::MaterialOptions::new(&shader)
                 .vertex_layouts(layouts)
-                .bind_group_layouts(&[Some(&layout(graphics.device()))])
+                .bind_group_layouts(&[
+                    Some(&layout(graphics.device())),
+                    Some(&graphics.rounded_clip_layout()),
+                ])
                 .entry_points(
                     "vertex_brush",
                     if options.writes_attachment() {

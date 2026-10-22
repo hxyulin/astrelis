@@ -39,7 +39,7 @@ fn solid_coverage(uv: vec2<f32>) -> f32 {
 }
 fn shade_fragment_main(input: Output) -> vec4<f32> {
     let texel = textureSample(atlas, atlas_sampler, input.uv);
-    let clip = clip_coverage(input.clip, input.clip_radii);
+    let clip = rounded_clip_coverage(input.position.xy);
     let solid = solid_coverage(input.uv);
     if input.kind == 0.0 || input.kind == 3.0 {
         let coverage = select(texel.r, solid, input.kind == 3.0);
@@ -57,7 +57,7 @@ fn shade_fragment_mtsdf(input: Output) -> vec4<f32> {
     // accounting for rotation, reflection, and anisotropic affine scaling.
     let distance_width = max(length(vec2(dpdx(distance), dpdy(distance))), 0.000001);
     let coverage = clamp(distance / distance_width + 0.5, 0.0, 1.0);
-    let alpha = coverage * input.color.a * clip_coverage(input.clip, input.clip_radii);
+    let alpha = coverage * input.color.a * rounded_clip_coverage(input.position.xy);
     return vec4(input.color.rgb * alpha, alpha);
 }
 

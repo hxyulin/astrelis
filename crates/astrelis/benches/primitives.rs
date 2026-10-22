@@ -34,12 +34,13 @@ enum Mode {
     PainterOutlinesBatch,
     PainterClippedMixed,
     PainterRoundedClipBatch,
+    PainterNestedRoundedClipBatch,
     Shadows,
     ShadowsBatch,
     PainterShadowsBatch,
 }
 impl Mode {
-    const CASES: [Self; 15] = [
+    const CASES: [Self; 16] = [
         Self::ShapesScoped,
         Self::ShapesBatch,
         Self::LinesScoped,
@@ -53,6 +54,7 @@ impl Mode {
         Self::PainterOutlinesBatch,
         Self::PainterClippedMixed,
         Self::PainterRoundedClipBatch,
+        Self::PainterNestedRoundedClipBatch,
         Self::ShadowsBatch,
         Self::PainterShadowsBatch,
     ];
@@ -75,6 +77,7 @@ impl Mode {
             Self::PainterOutlinesBatch => "painter_fills_outlines_batch",
             Self::PainterClippedMixed => "painter_clipped_mixed",
             Self::PainterRoundedClipBatch => "painter_rounded_clip_shapes_batch",
+            Self::PainterNestedRoundedClipBatch => "painter_nested_rounded_clip_shapes_batch",
             Self::Shadows => "shadows_individual",
             Self::ShadowsBatch => "shadows_batch",
             Self::PainterShadowsBatch => "painter_shadows_batch",
@@ -91,7 +94,9 @@ impl Mode {
             // Scoped clips replace raw scissor calls; a rounded clip that encloses
             // the target leaves pixels unchanged while paying for its evaluation.
             Self::PainterClippedMixed => Self::PainterMixed,
-            Self::PainterRoundedClipBatch => Self::PainterShapesBatch,
+            Self::PainterRoundedClipBatch | Self::PainterNestedRoundedClipBatch => {
+                Self::PainterShapesBatch
+            }
             Self::ShadowsBatch => Self::Shadows,
             Self::PainterShadowsBatch => Self::ShadowsBatch,
             _ => Self::Mixed,
@@ -294,6 +299,12 @@ impl Work {
             Mode::PainterRoundedClipBatch => self
                 .painter
                 .begin(&mut p)?
+                .clipped_rounded(Rect::new(-16., -16., 96., 96.), CornerRadii::uniform(8.))?
+                .draw_shapes(black_box(&self.rectangles))?,
+            Mode::PainterNestedRoundedClipBatch => self
+                .painter
+                .begin(&mut p)?
+                .clipped_rounded(Rect::new(-20., -20., 104., 104.), CornerRadii::uniform(12.))?
                 .clipped_rounded(Rect::new(-16., -16., 96., 96.), CornerRadii::uniform(8.))?
                 .draw_shapes(black_box(&self.rectangles))?,
             Mode::Shadows => {

@@ -161,7 +161,7 @@ fn shade(input:Output) -> vec4<f32> {
             if (flags&2u)!=0u { coverage*=clamp((hi-input.local.x)/footprint.x+0.5,0.0,1.0); }
         }
     }
-    let alpha=input.color.a*clamp(coverage,0.0,1.0);
+    let alpha=input.color.a*clamp(coverage,0.0,1.0)*rounded_clip_coverage(input.position.xy);
     return vec4(input.color.rgb*alpha,alpha);
 }
 @fragment fn fragment_main(input:Output) -> @location(0) vec4<f32> { return shade(input); }

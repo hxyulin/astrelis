@@ -395,7 +395,9 @@ impl Renderer {
                     .device()
                     .create_shader_module(wgpu::ShaderModuleDescriptor {
                         label: Some("Astrelis dense points"),
-                        source: wgpu::ShaderSource::Wgsl(include_str!("points.wgsl").into()),
+                        source: wgpu::ShaderSource::Wgsl(
+                            crate::clip::shader(&self.graphics, include_str!("points.wgsl")).into(),
+                        ),
                     });
             let layout = VertexLayout {
                 stride: 80,
@@ -411,9 +413,10 @@ impl Renderer {
                     self.options.mesh(
                         MaterialOptions::new(&shader)
                             .vertex_layouts(&[layout])
-                            .bind_group_layouts(&[Some(&crate::points::layout(
-                                self.graphics.device(),
-                            ))])
+                            .bind_group_layouts(&[
+                                Some(&crate::points::layout(self.graphics.device())),
+                                Some(&self.graphics.rounded_clip_layout()),
+                            ])
                             .entry_points(
                                 if self.markers {
                                     "marker_vertex"
@@ -490,6 +493,7 @@ impl Session<'_, '_> {
         self.pass.apply_raster_state();
         self.pass.set_pipeline(&self.pipeline);
         self.pass.set_bind_group(0, &self.points.group, &[]);
+        self.pass.bind_rounded_clips();
         let first = self.pass.bind_instances(0, bytemuck::bytes_of(&p), 80);
         self.pass.draw(0..vertices, first..first + 1);
     }

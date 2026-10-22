@@ -143,7 +143,7 @@ Two pieces of wrapped pass state clip built-in drawing. The scissor is a physica
 rectangle that bounds rasterization for every renderer, including raw wgpu work. The
 optional `RoundedClip` is an anti-aliased rounded rectangle, given in clip-local units
 with a transform to viewport-relative pixels, and evaluated in the fragment shaders of
-shapes, lines, paths, text and built-in image shading:
+shapes, lines, paths, text, built-in images, polylines and markers:
 
 ```rust,ignore
 pass.set_scissor_rect(x, y, width, height)?;
@@ -157,21 +157,53 @@ session transform, intersect the scissor with the current one, clamp it to the
 attachment, and restore the parent's state when the child drops. An empty intersection
 records draws that produce no fragments; it is not an error.
 
-The rounded clip is analytic rather than a stencil mask. The renderers read one
-48-byte record per draw at stride zero: an affine map from viewport-normalized position
-to clip-local units, the half size and four radii. The vertex shader interpolates the
-clip-local position and the fragment shader multiplies coverage by a rounded-box
-distance filtered over about one pixel. This needs no depth/stencil attachment, mask
-pass, pipeline variant or reference bookkeeping, works on single-sampled targets, and
-gives fractional edge coverage where a stencil test is binary per sample. Without a
-rounded clip the renderers bind a shared, immutable disabled record, so ordinary drawing
-uploads nothing extra; a new clip uploads its record once per clip and viewport size.
+Rounded clips form an analytic intersection. Every transformed parent boundary
+remains active; scopes restore the entire intersection, including after changes
+through `pass()`. `set_rounded_clip` replaces the stack with zero or one clip;
+`set_rounded_clips(&[...])` replaces the complete stack, and `rounded_clips()` reads
+it in outermost-first order. A stack above `graphics.rounded_clip_capacity()` returns
+`Error::ClipStackFull` before changing clipping or scissors. The capacity is at most
+`MAX_ROUNDED_CLIPS` (64), and is smaller when application-selected
+buffer/uniform limits require it. No clips are silently truncated. Zero capacity
+retains unclipped rendering and rejects nonempty clip stacks.
 
-Limitations: only the innermost rounded clip is evaluated, so a nested rounded clip
-replaces its parent's corners (the scissors still intersect). Meshes, polylines and
-markers ignore it and are clipped by the scissor only; custom texture shaders receive
-the record at locations seven to nine and may evaluate it themselves. Use a stencil
-mask through `PipelineOptions` when arbitrary nested shapes must clip each other.
+Shapes, lines, paths, text, built-in images, polylines and markers all evaluate the
+same intersection, at 1x or with MSAA. Each boundary uses a rounded-box distance
+filtered over roughly one pixel. Coverage is the minimum of these filtered values,
+so identical nested clips do not darken their shared edge. This is an analytic
+coverage approximation, including under shear, rather than exact pixel-area integration.
+No stencil attachment, offscreen mask, extra pass, or clipped pipeline variant is
+needed. Group one belongs to clipping for these built-ins; group zero still belongs
+to the image/atlas/brush/point renderer where applicable. Unclipped draws bind shared
+immutable data and upload nothing extra. A changed nonempty stack uploads a uniform
+of `16 + 48 * capacity` bytes
+(3,088 bytes at the default capacity) once on first use, invalidated by viewport
+origin/size changes. The existing
+48-byte innermost vertex record remains available for custom texture shader compatibility.
+
+Meshes and custom shaders require explicit coverage integration; an arbitrary
+application shader cannot be rewritten automatically. For the full intersection:
+
+1. Prepend `graphics.rounded_clip_shader()` to the custom WGSL.
+2. Put `graphics.rounded_clip_layout()` at group one in the material layouts
+   (`[None, Some(&clip_layout)]` for a mesh with no other groups). Custom texture
+   material extra layouts start at group one, after the image at group zero.
+3. In fragment uniform control flow, before discard, multiply **premultiplied** output
+   by `rounded_clip_coverage(position.xy)`, using fragment `@builtin(position)`.
+4. Call `pass.bind_rounded_clips()` before drawing, again after clip/viewport changes
+   or interleaving other work. The application owns the pipeline, resources and order.
+
+Default mesh shading and custom shaders that do not opt in receive only scissor
+clipping. Legacy texture locations seven through nine describe only the innermost
+clip; they cannot represent an intersection. Raw `as_wgpu()` remains unrestricted;
+it does not automatically evaluate analytic clipping. Wrapped built-in draws restore
+their clip binding and raster state after raw access. Applications needing arbitrary
+mask shapes can instead use their own stencil attachment/materials as in
+[`examples/stencil.rs`](../crates/astrelis/examples/stencil.rs): write a mask with
+color writes disabled and test it through `PipelineOptions`/mesh materials. Scheduling,
+attachment allocation, stencil references and draw order remain application-owned.
+Stencil is binary per sample; use an application texture mask when custom soft
+coverage cannot be integrated into the shader.
 
 ## Brushes on retained and analytic geometry
 

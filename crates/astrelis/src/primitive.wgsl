@@ -182,7 +182,7 @@ fn shade_fragment_main(input: Output) -> vec4<f32> {
     if kind == 9u && radius > 0.0 {
         coverage = shadow_coverage(input.local, half_size, input.radii, radius);
     }
-    let alpha = input.color.a * coverage * clip_coverage(input.clip, input.clip_radii);
+    let alpha = input.color.a * coverage * rounded_clip_coverage(input.position.xy);
     return vec4(input.color.rgb * alpha, alpha);
 }
 

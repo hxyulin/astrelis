@@ -191,7 +191,7 @@ impl PathRenderer {
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Astrelis paths"),
                 source: wgpu::ShaderSource::Wgsl(
-                    crate::clip::shader(include_str!("path.wgsl")).into(),
+                    crate::clip::shader(graphics, include_str!("path.wgsl")).into(),
                 ),
             });
         let layouts = [
@@ -214,6 +214,7 @@ impl PathRenderer {
         let material = graphics.create_material(
             options.mesh(
                 MaterialOptions::new(&shader)
+                    .bind_group_layouts(&[None, Some(&graphics.rounded_clip_layout())])
                     .vertex_layouts(&layouts)
                     .entry_points(
                         "vertex_main",
@@ -319,7 +320,7 @@ impl PathRenderer {
                 &self.graphics,
                 &self.material,
                 &self.material.vertex_layouts,
-                &crate::clip::shader(include_str!("path.wgsl")),
+                &crate::clip::shader(&self.graphics, include_str!("path.wgsl")),
                 include_str!("brush.wgsl"),
             )?);
         }
@@ -571,6 +572,7 @@ fn record(
         path.indices
     };
     pass.bind_clip(2);
+    pass.bind_rounded_clips();
     for chunk in parameters.chunks(capacity) {
         let first = pass.bind_instances(1, bytemuck::cast_slice(chunk), 64);
         pass.draw_instances(

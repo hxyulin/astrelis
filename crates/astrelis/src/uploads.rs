@@ -214,7 +214,9 @@ impl DrawUploads {
                     size: length
                         .max(64 * 1024)
                         .min(graphics.device().limits().max_buffer_size),
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    usage: wgpu::BufferUsages::VERTEX
+                        | wgpu::BufferUsages::UNIFORM
+                        | wgpu::BufferUsages::COPY_DST,
                     mapped_at_creation: false,
                 });
                 let bytes = Vec::with_capacity(buffer.size() as usize);

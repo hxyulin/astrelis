@@ -370,10 +370,16 @@ let mut scrolled = list.transformed(Transform2D::translation(0., -scroll))?;
 scrolled.draw_text(&rows, TextDraw::new([28., 56.]))?;
 ```
 
-The rounded clip is wrapped pass state (`pass.set_rounded_clip`), so direct renderers
-honour it too. Shapes, lines, paths, text and built-in image shading evaluate it; meshes,
-polylines and markers are limited by the scissor only. Only the innermost rounded clip
-is evaluated, intersected with every enclosing scissor. See the
+Rounded clips are wrapped pass state: direct renderers share the entire intersection,
+including polylines and markers. Every nested parent corner remains active under its
+own transform. `pass.set_rounded_clip` replaces the stack; `set_rounded_clips` replaces
+it with an explicit intersection. Exceeding `graphics.rounded_clip_capacity()`
+(at most 64) returns
+`Error::ClipStackFull` without changing state. Custom mesh/image shaders can opt in
+through `graphics.rounded_clip_shader()`, `graphics.rounded_clip_layout()` and
+`pass.bind_rounded_clips()`, or use application-owned stencil/texture masks.
+Default meshes and custom shaders need that explicit integration for rounded
+boundaries; their scissor still applies. See the
 [clipping contract](renderer-api.md#clipping).
 
 ## Scoped drawing

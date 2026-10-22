@@ -728,7 +728,7 @@ impl TextRenderer {
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Astrelis text"),
                 source: wgpu::ShaderSource::Wgsl(
-                    crate::clip::shader(include_str!("text.wgsl")).into(),
+                    crate::clip::shader(g, include_str!("text.wgsl")).into(),
                 ),
             });
         let layouts = [
@@ -750,7 +750,7 @@ impl TextRenderer {
             options.pipeline.mesh(
                 MaterialOptions::new(&shader)
                     .vertex_layouts(&layouts)
-                    .bind_group_layouts(&[Some(&layout)])
+                    .bind_group_layouts(&[Some(&layout), Some(&g.rounded_clip_layout())])
                     .entry_points(
                         "vertex_main",
                         if options.pipeline.writes_attachment() {
@@ -765,7 +765,7 @@ impl TextRenderer {
             options.pipeline.mesh(
                 MaterialOptions::new(&shader)
                     .vertex_layouts(&layouts)
-                    .bind_group_layouts(&[Some(&layout)])
+                    .bind_group_layouts(&[Some(&layout), Some(&g.rounded_clip_layout())])
                     .entry_points(
                         "vertex_main",
                         if options.pipeline.writes_attachment() {
@@ -1405,6 +1405,7 @@ impl TextRenderer {
         pass.set_vertex_buffer(1, &draw_buffer, range);
         let base = (text.data.buffer_range.start / 48) as u32;
         pass.bind_clip(2);
+        pass.bind_rounded_clips();
         let mut previous = None;
         for batch in &text.data.batches {
             let field = batch.page.kind == Kind::Mtsdf;

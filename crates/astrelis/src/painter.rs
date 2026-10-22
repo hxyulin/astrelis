@@ -295,17 +295,17 @@ pub struct PaintSession<'draw, 'frame> {
     // Parent clip state, restored when a clipping child drops.
     restore: Option<SavedClip>,
 }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 struct SavedClip {
     scissor: [u32; 4],
-    rounded: Option<crate::RoundedClip>,
+    rounded: Vec<crate::RoundedClip>,
 }
 impl Drop for PaintSession<'_, '_> {
     fn drop(&mut self) {
         if let Some(saved) = self.restore.take() {
             self.pass.restore_scissor(saved.scissor);
             // The saved clip was validated when it was set.
-            let _ = self.pass.set_rounded_clip(saved.rounded);
+            let _ = self.pass.set_rounded_clips(&saved.rounded);
         }
     }
 }
@@ -482,18 +482,19 @@ impl<'frame> PaintSession<'_, 'frame> {
     /// including custom work.
     pub fn clipped(&mut self, rect: Rect) -> Result<PaintSession<'_, 'frame>, Error> {
         let scissor = self.clip_scissor(rect)?;
-        Ok(self.clip_child(scissor, None))
+        self.clip_child(scissor, None)
     }
     /// Lends a child clipped to a rounded rectangle in this session's local pixel
     /// units, with anti-aliased edges that follow the session transform exactly,
     /// including rotation. The scissor is narrowed as in [`Self::clipped`], and the
-    /// [`crate::RoundedClip`] is evaluated by shapes, lines, paths, text and built-in
-    /// image shading; meshes, polylines and markers are limited by the scissor only.
-    ///
-    /// Only the innermost rounded clip is evaluated: a nested rounded clip replaces
-    /// its parent's corners while the scissors still intersect, and a nested
-    /// [`Self::clipped`] keeps the parent's rounded clip. Zero radii give an exact,
-    /// anti-aliased rectangle clip. Both are restored when the child drops.
+    /// [`crate::RoundedClip`] intersection is evaluated by shapes, lines, paths,
+    /// text, images, polylines and markers. Mesh/custom shaders use the explicit
+    /// [`RenderPass::bind_rounded_clips`] interface or application stencil masks.
+    /// Every nested rounded boundary remains active under its own transform.
+    /// Zero radii give an exact anti-aliased rectangle. Dropping the child restores
+    /// the full parent intersection. Exceeding the device's
+    /// [`GraphicsContext::rounded_clip_capacity`] returns
+    /// [`Error::ClipStackFull`] without changing the scissor or clip stack.
     pub fn clipped_rounded(
         &mut self,
         rect: Rect,
@@ -502,28 +503,29 @@ impl<'frame> PaintSession<'_, 'frame> {
         let clip = crate::RoundedClip::new(rect, radii).transform(self.transform);
         clip.validate()?;
         let scissor = self.clip_scissor(rect)?;
-        Ok(self.clip_child(scissor, Some(clip)))
+        self.clip_child(scissor, Some(clip))
     }
     fn clip_child(
         &mut self,
         scissor: [u32; 4],
         rounded: Option<crate::RoundedClip>,
-    ) -> PaintSession<'_, 'frame> {
+    ) -> Result<PaintSession<'_, 'frame>, Error> {
         let saved = SavedClip {
             scissor: self.pass.scissor_rect(),
-            rounded: self.pass.rounded_clip(),
+            rounded: self.pass.rounded_clips().to_vec(),
         };
-        self.pass.restore_scissor(scissor);
-        if rounded.is_some() {
-            // Validated by the caller.
-            let _ = self.pass.set_rounded_clip(rounded);
+        if let Some(clip) = rounded {
+            let mut clips = saved.rounded.clone();
+            clips.push(clip);
+            self.pass.set_rounded_clips(&clips)?;
         }
-        PaintSession {
+        self.pass.restore_scissor(scissor);
+        Ok(PaintSession {
             painter: self.painter,
             pass: self.pass,
             transform: self.transform,
             restore: Some(saved),
-        }
+        })
     }
     fn clip_scissor(&self, rect: Rect) -> Result<[u32; 4], Error> {
         let bounds = self.transform.transform_bounds(rect);

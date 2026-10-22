@@ -50,7 +50,7 @@ struct Output {
 fn tinted(color: vec4<f32>, input: Output) -> vec4<f32> {
     let tint = input.tint;
     let result = vec4(color.rgb * tint.rgb * tint.a, color.a * tint.a);
-    return result * clip_coverage(input.clip, input.clip_radii);
+    return result * rounded_clip_coverage(input.position.xy);
 }
 fn shade_fragment_straight(input: Output) -> vec4<f32> {
     let color = textureSample(image, image_sampler, input.uv);

@@ -324,7 +324,7 @@ impl PrimitiveRenderer {
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Astrelis solid primitives"),
                 source: wgpu::ShaderSource::Wgsl(
-                    crate::clip::shader(include_str!("primitive.wgsl")).into(),
+                    crate::clip::shader(g, include_str!("primitive.wgsl")).into(),
                 ),
             });
         let layout=VertexLayout {stride:STRIDE,step_mode:wgpu::VertexStepMode::Instance,
@@ -335,6 +335,7 @@ impl PrimitiveRenderer {
             material: g.create_material(
                 options.mesh(
                     MaterialOptions::new(&shader)
+                        .bind_group_layouts(&[None, Some(&g.rounded_clip_layout())])
                         .vertex_layouts(&layouts)
                         .entry_points(
                             "vertex_main",
@@ -385,7 +386,7 @@ impl PrimitiveRenderer {
                 &self.graphics,
                 &self.material,
                 &[layout, crate::clip::layout(8)],
-                &crate::clip::shader(include_str!("primitive.wgsl")),
+                &crate::clip::shader(&self.graphics, include_str!("primitive.wgsl")),
                 include_str!("primitive_brush.wgsl"),
             )?);
         }
@@ -517,6 +518,7 @@ impl<'frame> Session<'_, 'frame> {
 }
 fn record<T: Pod>(pass: &mut RenderPass<'_>, parameters: &[T], capacity: usize) {
     pass.bind_clip(1);
+    pass.bind_rounded_clips();
     let stride = std::mem::size_of::<T>() as u64;
     for chunk in parameters.chunks(capacity) {
         let first = pass.bind_instances(0, bytemuck::cast_slice(chunk), stride);

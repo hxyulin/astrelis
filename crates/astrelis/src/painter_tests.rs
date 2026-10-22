@@ -1081,7 +1081,7 @@ fn rounded_clips_apply_to_every_built_in_2d_renderer_with_antialiased_edges() {
         let clip = Rect::new(8., 6., 50., 52.);
         let radius = 14.;
         type Draw<'a> = Box<dyn Fn(&mut PaintSession<'_, '_>) + 'a>;
-        let draws: [(&str, Draw<'_>); 6] = [
+        let draws: [(&str, Draw<'_>); 8] = [
             ("shape", Box::new(|s| s.fill_rect(full, RED).unwrap())),
             (
                 "line",
@@ -1106,6 +1106,23 @@ fn rounded_clips_apply_to_every_built_in_2d_renderer_with_antialiased_edges() {
                 }),
             ),
             (
+                "brush line",
+                Box::new(|s| {
+                    s.draw_line_with_brush(
+                        &brush,
+                        LineDraw::new([0., 32.], [64., 32.], [1.; 4]).width(64.),
+                    )
+                    .unwrap()
+                }),
+            ),
+            (
+                "brush path",
+                Box::new(|s| {
+                    s.draw_path_with_brush(&square, &brush, crate::PathDraw::new([1.; 4]))
+                        .unwrap()
+                }),
+            ),
+            (
                 "text",
                 Box::new(|s| s.draw_text(&text, TextDraw::new([-2., -6.])).unwrap()),
             ),
@@ -1118,7 +1135,13 @@ fn rounded_clips_apply_to_every_built_in_2d_renderer_with_antialiased_edges() {
             let clipped = pixels(&g, &mut t, |f| {
                 let mut p = f.render_pass().begin().unwrap();
                 let mut paint = painter.begin(&mut p).unwrap();
-                let mut child = paint
+                let mut outer = paint
+                    .clipped_rounded(
+                        Rect::new(0., 0., 48., 64.),
+                        crate::CornerRadii::uniform(22.),
+                    )
+                    .unwrap();
+                let mut child = outer
                     .clipped_rounded(clip, crate::CornerRadii::uniform(radius))
                     .unwrap();
                 draw(&mut child);
@@ -1126,7 +1149,12 @@ fn rounded_clips_apply_to_every_built_in_2d_renderer_with_antialiased_edges() {
             let (mut partial, mut removed) = (0, 0);
             for y in 0..64 {
                 for x in 0..64 {
-                    let d = rounded_distance(x, y, clip, radius);
+                    let d = rounded_distance(x, y, clip, radius).max(rounded_distance(
+                        x,
+                        y,
+                        Rect::new(0., 0., 48., 64.),
+                        22.,
+                    ));
                     let (a, b) = (pixel(&unclipped, x, y), pixel(&clipped, x, y));
                     if d < -1. {
                         assert_eq!(a, b, "{name} inside at {x},{y}");
@@ -1176,7 +1204,7 @@ fn rounded_clips_nest_restore_follow_rotation_and_apply_to_direct_renderers() {
                         inner.fill_rect(full, RED).unwrap();
                     }
                     {
-                        // A nested rounded clip replaces the corners but keeps the scissor.
+                        // Both rounded boundaries survive the nested intersection.
                         let mut inner = card
                             .clipped_rounded(Rect::new(16., 0., 32., 32.), crate::CornerRadii::ZERO)
                             .unwrap();
@@ -1220,11 +1248,11 @@ fn rounded_clips_nest_restore_follow_rotation_and_apply_to_direct_renderers() {
             ));
             assert!(p.rounded_clip().is_some());
         });
-        // The red half keeps the card's top-left corner; green's corner is sharp.
+        // Both halves keep the parent card corners.
         assert_eq!(pixel(&bytes, 0, 0), [0; 4]);
         assert_eq!(pixel(&bytes, 8, 16), [255, 0, 0, 255]);
-        assert_eq!(pixel(&bytes, 31, 0), [0, 255, 0, 255]);
-        assert_eq!(pixel(&bytes, 31, 31), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 31, 0), [0; 4]);
+        assert_eq!(pixel(&bytes, 31, 31), [0; 4]);
         assert_eq!(pixel(&bytes, 33, 16), [0; 4]);
         // Diamond: inside its scissor bounds, but outside the rotated square.
         assert_eq!(pixel(&bytes, 48, 32), [0, 0, 255, 255]);
@@ -1353,5 +1381,400 @@ fn layer_formats_composite_nearest_sampled_layers_like_direct_painting() {
             assert!(worst <= 2, "{format:?}: layer differs by {worst}");
         }
         assert!(scope.pop().await.is_none());
+    });
+}
+
+#[test]
+fn intersecting_rounded_clips_match_transformed_pixel_oracle_for_points_and_msaa() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut painter = Painter::new(&g);
+        let mut points = g
+            .create_point_buffer(crate::PointBufferOptions::new(2))
+            .unwrap();
+        points
+            .replace(&[
+                crate::Point2D::new([-100., 24.]),
+                crate::Point2D::new([100., 24.]),
+            ])
+            .unwrap();
+        let parent = Rect::new(2., 2., 45., 44.);
+        let child = Rect::new(8., 4., 36., 40.);
+        let transform = Transform2D::rotation(0.28).then(Transform2D::translation(9., 0.));
+        let inverse = transform.invert().unwrap();
+        for samples in [1, 4] {
+            let mut t = g
+                .create_framebuffer(
+                    FramebufferOptions::new(64, 64).sample_count(samples).usage(
+                        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    ),
+                )
+                .unwrap();
+            painter.prepare(&t.render_format()).unwrap();
+            painter.prepare_points(&t.render_format()).unwrap();
+            for kind in 0..3 {
+                let bytes = pixels(&g, &mut t, |f| {
+                    let mut pass = f.render_pass().begin().unwrap();
+                    pass.set_viewport(3., 5., 60., 58., 0., 1.).unwrap();
+                    let mut paint = painter.begin(&mut pass).unwrap();
+                    let mut outer = paint
+                        .clipped_rounded(parent, crate::CornerRadii::uniform(17.))
+                        .unwrap();
+                    let mut rotated = outer.transformed(transform).unwrap();
+                    let mut inner = rotated
+                        .clipped_rounded(child, crate::CornerRadii::uniform(13.))
+                        .unwrap();
+                    assert_eq!(inner.pass().rounded_clips().len(), 2);
+                    // Raw raster changes do not bypass wrapped state on the next draw.
+                    inner.pass().as_wgpu().set_scissor_rect(0, 0, 1, 1);
+                    match kind {
+                        0 => inner
+                            .fill_rect(Rect::new(-100., -100., 200., 200.), RED)
+                            .unwrap(),
+                        1 => inner
+                            .draw_polyline(
+                                &points,
+                                crate::PolylineDraw::new(RED).width_pixels(180.),
+                            )
+                            .unwrap(),
+                        _ => inner
+                            .draw_markers(
+                                &points,
+                                crate::MarkerDraw::new(RED).radius_pixels(300.).range(0..1),
+                            )
+                            .unwrap(),
+                    }
+                });
+                let mut inside = 0;
+                let mut removed_parent_corner = 0;
+                let mut removed_child_corner = 0;
+                let mut partial = 0;
+                for y in 0..64 {
+                    for x in 0..64 {
+                        let px = x as f32 + 0.5 - 3.;
+                        let py = y as f32 + 0.5 - 5.;
+                        let [cx, cy] = inverse.transform_point([px, py]);
+                        let distance = |x: f32, y: f32, r: Rect, radius: f32| {
+                            let qx = (x - r.x - r.width * 0.5).abs() - r.width * 0.5 + radius;
+                            let qy = (y - r.y - r.height * 0.5).abs() - r.height * 0.5 + radius;
+                            qx.max(0.).hypot(qy.max(0.)) + qx.max(qy).min(0.) - radius
+                        };
+                        let a = distance(px, py, parent, 17.);
+                        let b = distance(cx, cy, child, 13.);
+                        let pixel = pixel(&bytes, x, y);
+                        if a.max(b) < -1.5 {
+                            assert_eq!(
+                                pixel,
+                                [255, 0, 0, 255],
+                                "{samples}x kind {kind} inside {x},{y}"
+                            );
+                            inside += 1;
+                        }
+                        if a.max(b) > 1.5 {
+                            assert_eq!(
+                                pixel, [0; 4],
+                                "{samples}x kind {kind} outside {x},{y}: {a},{b}"
+                            );
+                        }
+                        if a > 1.5 && b < -1.5 {
+                            removed_parent_corner += 1;
+                        }
+                        if b > 1.5 && a < -1.5 {
+                            removed_child_corner += 1;
+                        }
+                        if pixel[3] > 0 && pixel[3] < 255 {
+                            partial += 1;
+                        }
+                    }
+                }
+                assert!(
+                    inside > 200
+                        && removed_parent_corner > 0
+                        && removed_child_corner > 0
+                        && partial > 20,
+                    "{samples}x kind {kind}: {inside}/{removed_parent_corner}/{removed_child_corner}/{partial}"
+                );
+            }
+        }
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn rounded_stack_restoration_and_capacity_errors_are_atomic() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let mut t = target(&g);
+        let mut painter = Painter::new(&g);
+        let clip = crate::RoundedClip::new(
+            Rect::new(0., 0., 32., 32.),
+            crate::CornerRadii::uniform(12.),
+        );
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut pass = f.render_pass().begin().unwrap();
+            pass.set_rounded_clips(&vec![clip; crate::MAX_ROUNDED_CLIPS])
+                .unwrap();
+            let mut paint = painter.begin(&mut pass).unwrap();
+            let scissor = paint.pass().scissor_rect();
+            assert!(matches!(
+                paint.clipped_rounded(Rect::new(8., 8., 8., 8.), crate::CornerRadii::ZERO),
+                Err(Error::ClipStackFull)
+            ));
+            assert_eq!(
+                paint.pass().rounded_clips(),
+                vec![clip; crate::MAX_ROUNDED_CLIPS]
+            );
+            assert_eq!(paint.pass().scissor_rect(), scissor);
+            assert!(matches!(
+                paint
+                    .pass()
+                    .set_rounded_clips(&vec![clip; crate::MAX_ROUNDED_CLIPS + 1]),
+                Err(Error::ClipStackFull)
+            ));
+            let invalid = crate::RoundedClip::new(
+                Rect::new(0., 0., 1., 1.),
+                crate::CornerRadii::uniform(-1.),
+            );
+            assert!(matches!(
+                paint.pass().set_rounded_clips(&[clip, invalid]),
+                Err(Error::InvalidClip)
+            ));
+            {
+                let mut child = paint.clipped(Rect::new(0., 0., 16., 32.)).unwrap();
+                child.pass().set_rounded_clip(None).unwrap();
+                child.fill_rect(Rect::new(0., 0., 64., 64.), RED).unwrap();
+            }
+            assert_eq!(paint.pass().rounded_clips().len(), crate::MAX_ROUNDED_CLIPS);
+            paint
+                .fill_rect(Rect::new(16., 0., 48., 64.), GREEN)
+                .unwrap();
+        });
+        assert_eq!(pixel(&bytes, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&bytes, 31, 0), [0; 4]);
+        assert_eq!(pixel(&bytes, 20, 16), [0, 255, 0, 255]);
+        assert_eq!(pixel(&bytes, 40, 16), [0; 4]);
+    });
+}
+
+#[test]
+fn custom_mesh_shader_consumes_complete_rounded_intersection() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g);
+        let shader = g.device().create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("custom mesh with analytic intersection"),
+            source: wgpu::ShaderSource::Wgsl(format!("{}\n{}", g.rounded_clip_shader(), r#"
+                @vertex fn vertex_main(@location(0) position:vec3<f32>, @location(1) color:vec4<f32>) -> @builtin(position) vec4<f32> {
+                    return vec4(position,1.0);
+                }
+                @fragment fn fragment_main(@builtin(position) position:vec4<f32>) -> @location(0) vec4<f32> {
+                    let alpha = rounded_clip_coverage(position.xy);
+                    return vec4(alpha,0.0,0.0,alpha);
+                }
+            "#).into()),
+        });
+        let material = g.create_material(
+            crate::MaterialOptions::new(&shader)
+                .bind_group_layouts(&[None, Some(&g.rounded_clip_layout())]),
+        );
+        let mesh = g
+            .create_mesh(
+                &[
+                    Vertex::new([-1., -1., 0.], RED),
+                    Vertex::new([3., -1., 0.], RED),
+                    Vertex::new([-1., 3., 0.], RED),
+                ],
+                &[0, 1, 2],
+            )
+            .unwrap();
+        let mut meshes = MeshRenderer::new(&g);
+        let mut painter = Painter::new(&g);
+        let clips = [
+            crate::RoundedClip::new(
+                Rect::new(0., 0., 48., 48.),
+                crate::CornerRadii::uniform(20.),
+            ),
+            crate::RoundedClip::new(
+                Rect::new(16., 0., 48., 48.),
+                crate::CornerRadii::uniform(20.),
+            ),
+        ];
+        let expected = pixels(&g, &mut t, |f| {
+            let mut pass = f.render_pass().begin().unwrap();
+            pass.set_rounded_clips(&clips).unwrap();
+            painter
+                .begin(&mut pass)
+                .unwrap()
+                .fill_rect(Rect::new(0., 0., 64., 64.), RED)
+                .unwrap();
+        });
+        let actual = pixels(&g, &mut t, |f| {
+            let mut pass = f.render_pass().begin().unwrap();
+            pass.set_rounded_clips(&clips).unwrap();
+            pass.bind_rounded_clips();
+            meshes
+                .draw_with_material(&mut pass, &mesh, &material)
+                .unwrap();
+            // Clear and rebind after another renderer used its own bindings.
+            pass.set_rounded_clip(None).unwrap();
+            painter
+                .begin(&mut pass)
+                .unwrap()
+                .fill_rect(Rect::new(60., 60., 4., 4.), RED)
+                .unwrap();
+            pass.set_rounded_clips(&clips).unwrap();
+            pass.bind_rounded_clips();
+            pass.as_wgpu().set_scissor_rect(0, 0, 64, 64); // raw access remains available
+        });
+        for y in 0..60 {
+            for x in 0..64 {
+                assert_eq!(pixel(&expected, x, y), pixel(&actual, x, y), "{x},{y}");
+            }
+        }
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn rounded_clip_binding_tracks_viewport_changes_and_raw_group_overrides() {
+    pollster::block_on(async {
+        let g = GraphicsContext::headless().await.unwrap();
+        let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+        let mut t = target(&g);
+        let mut painter = Painter::new(&g);
+        let clip = crate::RoundedClip::new(
+            Rect::new(0., 0., 24., 24.),
+            crate::CornerRadii::uniform(12.),
+        );
+        let disabled = g.device().create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: crate::clip::stack_size(g.rounded_clip_capacity()),
+            usage: wgpu::BufferUsages::UNIFORM,
+            mapped_at_creation: false,
+        });
+        let disabled_group = g.clip_group(Some((&disabled, 0)));
+        let bytes = pixels(&g, &mut t, |f| {
+            let mut pass = f.render_pass().begin().unwrap();
+            pass.set_rounded_clips(&[clip, clip]).unwrap();
+            for (x, y, w, h, color) in [
+                (0., 0., 24., 24., RED),
+                (32., 0., 24., 24., GREEN),
+                (0., 32., 32., 24., BLUE),
+            ] {
+                pass.set_viewport(x, y, w, h, 0., 1.).unwrap();
+                // A raw group-one replacement must not fool the wrapped binding cache.
+                pass.as_wgpu().set_bind_group(1, &disabled_group, &[]);
+                painter
+                    .begin(&mut pass)
+                    .unwrap()
+                    .fill_rect(Rect::new(0., 0., 64., 64.), color)
+                    .unwrap();
+            }
+        });
+        for (x, y, color) in [
+            (0, 0, [255, 0, 0, 255]),
+            (32, 0, [0, 255, 0, 255]),
+            (0, 32, [0, 0, 255, 255]),
+        ] {
+            assert_eq!(pixel(&bytes, x + 12, y + 12), color);
+            assert_eq!(pixel(&bytes, x, y), [0; 4]);
+            assert_eq!(pixel(&bytes, x + 23, y + 23), [0; 4]);
+        }
+        // Repeating a boundary up to the checked limit preserves fractional edges.
+        let mut images = Vec::new();
+        for count in [1, crate::MAX_ROUNDED_CLIPS] {
+            images.push(pixels(&g, &mut t, |f| {
+                let mut pass = f.render_pass().begin().unwrap();
+                pass.set_rounded_clips(&vec![clip; count]).unwrap();
+                painter
+                    .begin(&mut pass)
+                    .unwrap()
+                    .fill_rect(Rect::new(0., 0., 64., 64.), RED)
+                    .unwrap();
+            }));
+        }
+        assert_eq!(images[0], images[1]);
+        assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn rounded_clip_capacity_respects_application_uniform_limits() {
+    pollster::block_on(async {
+        let base = GraphicsContext::headless().await.unwrap();
+        for uniforms in [0, 1] {
+            let (device, queue) = base
+                .adapter()
+                .request_device(&wgpu::DeviceDescriptor {
+                    required_limits: wgpu::Limits {
+                        max_buffer_size: 256,
+                        max_uniform_buffer_binding_size: 128,
+                        max_uniform_buffers_per_shader_stage: uniforms,
+                        max_storage_buffer_binding_size: 128,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let g = GraphicsContext::from_wgpu(
+                base.instance().clone(),
+                base.adapter().clone(),
+                device,
+                queue,
+            );
+            let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+            let capacity = if uniforms == 0 { 0 } else { 2 };
+            assert_eq!(g.rounded_clip_capacity(), capacity);
+            let mut t = g
+                .create_framebuffer(
+                    FramebufferOptions::new(8, 1).usage(
+                        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    ),
+                )
+                .unwrap();
+            let mut painter = Painter::new(&g);
+            let clip = crate::RoundedClip::new(
+                Rect::new(2., -4., 8., 8.),
+                crate::CornerRadii::uniform(12.),
+            );
+            let bytes = pixels(&g, &mut t, |f| {
+                let mut pass = f.render_pass().begin().unwrap();
+                painter
+                    .begin(&mut pass)
+                    .unwrap()
+                    .draw_shape(
+                        ShapeDraw::rect(Rect::new(7., 0., 1., 1.), BLUE)
+                            .antialiasing(crate::EdgeAntialiasing::None),
+                    )
+                    .unwrap();
+                assert!(matches!(
+                    pass.set_rounded_clips(&vec![clip; capacity + 1]),
+                    Err(Error::ClipStackFull)
+                ));
+                pass.set_rounded_clips(&vec![clip; capacity]).unwrap();
+                painter
+                    .begin(&mut pass)
+                    .unwrap()
+                    .draw_shape(
+                        ShapeDraw::rect(Rect::new(0., 0., 6., 1.), RED)
+                            .antialiasing(crate::EdgeAntialiasing::None),
+                    )
+                    .unwrap();
+            });
+            assert_eq!(pixel(&bytes, 7, 0), [0, 0, 255, 255]);
+            assert_eq!(pixel(&bytes, 4, 0), [255, 0, 0, 255]);
+            assert_eq!(
+                pixel(&bytes, 0, 0),
+                if capacity == 0 {
+                    [255, 0, 0, 255]
+                } else {
+                    [0; 4]
+                }
+            );
+            assert!(errors.pop().await.is_none());
+        }
     });
 }

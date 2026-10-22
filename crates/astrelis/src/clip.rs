@@ -10,13 +10,13 @@ use bytemuck::{Pod, Zeroable};
 /// invertible affine transform is supported, so rotated and scaled clips stay exact.
 /// Coverage is filtered over about one pixel at the boundary, independently of MSAA,
 /// and multiplies the output of shapes, lines, paths, text and built-in image shading.
-/// Custom texture shaders receive the clip record at locations seven to nine and may
-/// evaluate it the same way. Meshes, polylines and markers ignore it; the pass
-/// scissor still applies to them.
-///
-/// Only one rounded clip is active at a time. Set the pass scissor to the clip's
-/// bounds as well, so fragments outside it are not shaded at all.
-/// [`crate::PaintSession::clipped_rounded`] does both and restores the parent's clip.
+/// Nested clips intersect, including their transformed rounded corners. Built-in
+/// polylines and markers use the same coverage. Meshes and custom shaders opt in
+/// with [`crate::GraphicsContext::rounded_clip_shader`], [`crate::GraphicsContext::rounded_clip_layout`] and
+/// [`crate::RenderPass::bind_rounded_clips`], or use application-owned stencil masks.
+/// [`crate::PaintSession::clipped_rounded`] also intersects the scissor and restores
+/// the entire parent stack. The device exposes a checked
+/// [`crate::GraphicsContext::rounded_clip_capacity`], at most [`MAX_ROUNDED_CLIPS`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RoundedClip {
     /// Clip rectangle in clip-local units.
@@ -102,6 +102,103 @@ pub(crate) fn layout(first: u32) -> crate::VertexLayout {
 }
 
 /// Prepends the shared clip functions to a built-in shader.
-pub(crate) fn shader(base: &str) -> String {
-    format!("{}\n{base}", include_str!("clip.wgsl"))
+pub(crate) fn shader(graphics: &crate::GraphicsContext, base: &str) -> String {
+    format!(
+        "{}\n{}\n{base}",
+        include_str!("clip.wgsl"),
+        graphics.rounded_clip_shader()
+    )
+}
+
+/// Upper bound on simultaneous analytic rounded clips. The enabled device limits
+/// may lower [`crate::GraphicsContext::rounded_clip_capacity`]. Exceeding that
+/// capacity returns [`Error::ClipStackFull`] without changing pass state.
+pub const MAX_ROUNDED_CLIPS: usize = 64;
+
+pub(crate) fn stack_size(capacity: usize) -> u64 {
+    16 + SIZE * capacity as u64
+}
+
+pub(crate) fn stack_bytes(clips: &[RoundedClip], viewport: [f32; 6], capacity: usize) -> Vec<u8> {
+    let mut bytes = vec![0; stack_size(capacity) as usize];
+    let header = [viewport[0], viewport[1], clips.len() as f32, 0.];
+    bytes[..16].copy_from_slice(bytemuck::bytes_of(&header));
+    for (chunk, clip) in bytes[16..]
+        .as_chunks_mut::<{ SIZE as usize }>()
+        .0
+        .iter_mut()
+        .zip(clips)
+    {
+        chunk.copy_from_slice(bytemuck::bytes_of(&clip.record([1., 1.])));
+    }
+    bytes
+}
+
+impl crate::GraphicsContext {
+    /// Maximum simultaneous rounded clips on this device, capped at
+    /// [`MAX_ROUNDED_CLIPS`]. Smaller application-selected buffer/uniform limits
+    /// reduce the capacity. Zero means analytic clipping is unavailable; unclipped
+    /// drawing still works. Excess clips return [`Error::ClipStackFull`].
+    pub fn rounded_clip_capacity(&self) -> usize {
+        let limits = self.device().limits();
+        if limits.max_uniform_buffers_per_shader_stage == 0 {
+            return 0;
+        }
+        let bytes = limits
+            .max_buffer_size
+            .min(limits.max_uniform_buffer_binding_size);
+        ((bytes.saturating_sub(16) / SIZE) as usize).min(MAX_ROUNDED_CLIPS)
+    }
+
+    /// WGSL for custom fragment shaders, sized for this device's enabled limits.
+    /// Pair with [`Self::rounded_clip_layout`] at group one, binding zero, and
+    /// [`crate::RenderPass::bind_rounded_clips`]. Multiply premultiplied fragment
+    /// output by `rounded_clip_coverage(position.xy)`, using fragment
+    /// `@builtin(position)`. Call before discard in uniform control flow.
+    pub fn rounded_clip_shader(&self) -> String {
+        let capacity = self.rounded_clip_capacity();
+        if capacity == 0 {
+            return "fn rounded_clip_coverage(position: vec2<f32>) -> f32 { return 1.0; }".into();
+        }
+        include_str!("clip_stack.wgsl").replace(
+            "array<RoundedClipRecord, 64>",
+            &format!("array<RoundedClipRecord, {capacity}>"),
+        )
+    }
+
+    /// Uniform layout for [`Self::rounded_clip_shader`] at shader group one.
+    /// Compatible layouts may be retained and reused across custom materials.
+    pub fn rounded_clip_layout(&self) -> wgpu::BindGroupLayout {
+        let capacity = self.rounded_clip_capacity();
+        let entries = (capacity > 0).then(|| wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: std::num::NonZeroU64::new(stack_size(capacity)),
+            },
+            count: None,
+        });
+        self.device()
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Astrelis rounded clip stack"),
+                entries: entries.as_slice(),
+            })
+    }
+    pub(crate) fn clip_group(&self, buffer: Option<(&wgpu::Buffer, u64)>) -> wgpu::BindGroup {
+        let entry = buffer.map(|(buffer, offset)| wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer,
+                offset,
+                size: std::num::NonZeroU64::new(stack_size(self.rounded_clip_capacity())),
+            }),
+        });
+        self.device().create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Astrelis rounded clips"),
+            layout: &self.rounded_clip_layout(),
+            entries: entry.as_slice(),
+        })
+    }
 }

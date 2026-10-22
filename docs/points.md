@@ -81,6 +81,9 @@ overlap and blend repeatedly. Use PathRenderer when exact translucent stroke uni
 matters. Marker overlaps also blend in logical sample order. Analytic coverage is
 available with or without target MSAA; hard edges remain selectable. PipelineOptions
 supports the shared blend/depth/stencil policies and coverage-aware stencil writing.
+Both point renderers evaluate the complete rounded clip intersection, including
+transformed parent corners and scope restoration, just like shapes and paths.
+Clipping reserves group one; point storage remains at group zero.
 There is no per-point color/radius or custom point shader in this milestone.
 
 Direct `draw` and `bind(pass, points)` scopes coexist with raw/custom rendering.
