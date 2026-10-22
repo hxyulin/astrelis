@@ -110,6 +110,20 @@ pub(crate) fn shader(graphics: &crate::GraphicsContext, base: &str) -> String {
     )
 }
 
+// Built-ins share the capability policy, including shaders that also need a
+// fragment uniform in group zero. Never leave a placeholder group one when disabled.
+pub(crate) fn layouts<'a>(
+    graphics: &crate::GraphicsContext,
+    first: Option<&'a wgpu::BindGroupLayout>,
+    clip: &'a wgpu::BindGroupLayout,
+) -> Vec<Option<&'a wgpu::BindGroupLayout>> {
+    if graphics.rounded_clip_capacity() > 0 {
+        vec![first, Some(clip)]
+    } else {
+        first.into_iter().map(Some).collect()
+    }
+}
+
 /// Upper bound on simultaneous analytic rounded clips. The enabled device limits
 /// may lower [`crate::GraphicsContext::rounded_clip_capacity`]. Exceeding that
 /// capacity returns [`Error::ClipStackFull`] without changing pass state.
@@ -137,11 +151,15 @@ pub(crate) fn stack_bytes(clips: &[RoundedClip], viewport: [f32; 6], capacity: u
 impl crate::GraphicsContext {
     /// Maximum simultaneous rounded clips on this device, capped at
     /// [`MAX_ROUNDED_CLIPS`]. Smaller application-selected buffer/uniform limits
-    /// reduce the capacity. Zero means analytic clipping is unavailable; unclipped
+    /// reduce the capacity. Fewer than two bind groups or two fragment uniform
+    /// buffers disables clipping (one uniform is reserved for brushes).
+    /// Zero means analytic clipping is unavailable; unclipped
     /// drawing still works. Excess clips return [`Error::ClipStackFull`].
     pub fn rounded_clip_capacity(&self) -> usize {
         let limits = self.device().limits();
-        if limits.max_uniform_buffers_per_shader_stage == 0 {
+        // Reserve one fragment uniform for brush resources so every built-in
+        // renderer can use the same clipping capability and shader interface.
+        if limits.max_bind_groups < 2 || limits.max_uniform_buffers_per_shader_stage < 2 {
             return 0;
         }
         let bytes = limits
@@ -155,6 +173,8 @@ impl crate::GraphicsContext {
     /// [`crate::RenderPass::bind_rounded_clips`]. Multiply premultiplied fragment
     /// output by `rounded_clip_coverage(position.xy)`, using fragment
     /// `@builtin(position)`. Call before discard in uniform control flow.
+    /// At zero capacity this returns constant coverage with no resource declarations;
+    /// omit group one from the pipeline layout in that case.
     pub fn rounded_clip_shader(&self) -> String {
         let capacity = self.rounded_clip_capacity();
         if capacity == 0 {
@@ -168,6 +188,8 @@ impl crate::GraphicsContext {
 
     /// Uniform layout for [`Self::rounded_clip_shader`] at shader group one.
     /// Shared by clones of this context; may be retained and reused across custom materials.
+    /// At zero capacity this is an empty layout. Omit it from pipeline layouts,
+    /// particularly on devices that support only one bind group.
     pub fn rounded_clip_layout(&self) -> wgpu::BindGroupLayout {
         self.clip_layout
             .get_or_init(|| {

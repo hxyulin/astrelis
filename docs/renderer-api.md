@@ -191,8 +191,12 @@ through `pass()`. `set_rounded_clip` replaces the stack with zero or one clip;
 it in outermost-first order. A stack above `graphics.rounded_clip_capacity()` returns
 `Error::ClipStackFull` before changing clipping or scissors. The capacity is at most
 `MAX_ROUNDED_CLIPS` (64), and is smaller when application-selected
-buffer/uniform limits require it. No clips are silently truncated. Zero capacity
-retains unclipped rendering and rejects nonempty clip stacks.
+buffer limits require it. Fewer than two bind groups or two fragment uniform buffers
+per shader stage disables analytic clipping for all built-ins. This shared policy
+reserves one uniform for brushes so renderer interleaving has a consistent
+clip interface. No clips are silently truncated. Zero capacity retains unclipped
+rendering (subject to each renderer's own limits), omits group one from built-in
+layouts and bindings, and rejects nonempty clip stacks.
 
 Shapes, lines, paths, text, built-in images, polylines and markers all evaluate the
 same intersection, at 1x or with MSAA. Each boundary uses a rounded-box distance
@@ -202,7 +206,8 @@ coverage approximation, including under shear, rather than exact pixel-area inte
 No stencil attachment, offscreen mask, extra pass, or clipped pipeline variant is
 needed. Group one belongs to clipping for these built-ins; group zero still belongs
 to the image/atlas/brush/point renderer where applicable. Unclipped draws bind shared
-immutable data and upload nothing extra. A changed nonempty stack uploads a uniform
+immutable data and upload nothing extra when clipping is supported. A changed
+nonempty stack uploads a uniform
 of `16 + 48 * capacity` bytes
 (3,088 bytes at the default capacity) once on first use, invalidated by viewport
 origin/size changes. The existing
@@ -215,6 +220,10 @@ application shader cannot be rewritten automatically. For the full intersection:
 2. Put `graphics.rounded_clip_layout()` at group one in the material layouts
    (`[None, Some(&clip_layout)]` for a mesh with no other groups). Custom texture
    material extra layouts start at group one, after the image at group zero.
+   When capacity is zero, omit the clip layout entirely: the generated WGSL returns
+   constant coverage without resources, and `bind_rounded_clips()` is a no-op.
+   `rounded_clip_layout()` returns an empty layout in that case; inserting it at
+   group one would still exceed a one-group device's limit.
 3. In fragment uniform control flow, before discard, multiply **premultiplied** output
    by `rounded_clip_coverage(position.xy)`, using fragment `@builtin(position)`.
 4. Call `pass.bind_rounded_clips()` before drawing, again after clip/viewport changes

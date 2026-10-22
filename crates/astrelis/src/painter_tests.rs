@@ -1704,7 +1704,7 @@ fn rounded_clip_binding_tracks_viewport_changes_and_raw_group_overrides() {
 fn rounded_clip_capacity_respects_application_uniform_limits() {
     pollster::block_on(async {
         let base = GraphicsContext::headless().await.unwrap();
-        for uniforms in [0, 1] {
+        for uniforms in [0, 1, 2] {
             let (device, queue) = base
                 .adapter()
                 .request_device(&wgpu::DeviceDescriptor {
@@ -1726,7 +1726,7 @@ fn rounded_clip_capacity_respects_application_uniform_limits() {
                 queue,
             );
             let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
-            let capacity = if uniforms == 0 { 0 } else { 2 };
+            let capacity = if uniforms < 2 { 0 } else { 2 };
             assert_eq!(g.rounded_clip_capacity(), capacity);
             let mut t = g
                 .create_framebuffer(
@@ -1840,5 +1840,249 @@ fn warm_clip_bindings_preserve_pixels_and_unsubmitted_recording_isolation() {
         assert_eq!(before.clip_bindings_created, after.clip_bindings_created);
         assert!(after.pages_reused > before.pages_reused);
         assert!(errors.pop().await.is_none());
+    });
+}
+
+#[test]
+fn imported_restricted_devices_preserve_unclipped_draws_and_custom_clip_api() {
+    pollster::block_on(async {
+        let base = GraphicsContext::headless().await.unwrap();
+        // Exercise independent group/uniform restrictions, including devices where
+        // brushes have exactly their original one-uniform budget.
+        for (groups, uniforms) in [(1, 0), (1, 1), (1, 2), (4, 0), (4, 1)] {
+            let (device, queue) = base
+                .adapter()
+                .request_device(&wgpu::DeviceDescriptor {
+                    required_limits: wgpu::Limits {
+                        max_bind_groups: groups,
+                        max_uniform_buffers_per_shader_stage: uniforms,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let g = GraphicsContext::from_wgpu(
+                base.instance().clone(),
+                base.adapter().clone(),
+                device,
+                queue,
+            );
+            let errors = g.device().push_error_scope(wgpu::ErrorFilter::Validation);
+            assert_eq!(g.rounded_clip_capacity(), 0);
+            let mut t = target(&g);
+            let mut painter = Painter::new(&g);
+            let format = t.render_format();
+            painter.prepare(&format).unwrap();
+            if uniforms > 0 {
+                painter.prepare_brush(&format).unwrap();
+            }
+            painter.prepare_points(&format).unwrap();
+            let texture = g.create_texture(TextureOptions::new(1, 1)).unwrap();
+            texture.write(&[255; 4]).unwrap();
+            let image = painter
+                .create_image_binding(texture.view(), TextureBindingOptions::new())
+                .unwrap();
+            painter.prepare_image(&image, &format).unwrap();
+            let brush = (uniforms > 0).then(|| {
+                g.create_brush(crate::BrushOptions::solid([0., 0., 1., 1.]))
+                    .unwrap()
+            });
+            let mut points = g
+                .create_point_buffer(crate::PointBufferOptions::new(2))
+                .unwrap();
+            points
+                .replace(&[
+                    crate::Point2D::new([0., 32.]),
+                    crate::Point2D::new([64., 32.]),
+                ])
+                .unwrap();
+            let mut builder = crate::Path::builder();
+            builder
+                .move_to([0., 0.])
+                .line_to([64., 0.])
+                .line_to([64., 64.])
+                .line_to([0., 64.])
+                .close();
+            let square = painter
+                .prepare_path(&builder.build().unwrap(), crate::PathOptions::new())
+                .unwrap();
+            let mut fonts = crate::TextSystem::new();
+            fonts
+                .load_font(include_bytes!("../tests/fonts/SourceSans3-Regular.otf"))
+                .unwrap();
+            let mut buffer = crate::TextBuffer::new();
+            buffer
+                .set_text(
+                    "MMMM\nMMMM",
+                    crate::TextStyle::new()
+                        .family("Source Sans 3")
+                        .font_size(40.)
+                        .line_height(34.),
+                )
+                .unwrap();
+            let text = painter
+                .prepare_text(
+                    &buffer.layout(&mut fonts).unwrap(),
+                    TextRasterOptions::new(),
+                )
+                .unwrap();
+            let full = Rect::new(0., 0., 64., 64.);
+            type Draw<'a> = Box<dyn Fn(&mut PaintSession<'_, '_>) + 'a>;
+            let draws: [(&str, Draw<'_>); 10] = [
+                ("shape", Box::new(|s| s.fill_rect(full, RED).unwrap())),
+                (
+                    "line",
+                    Box::new(|s| {
+                        s.draw_line(LineDraw::new([0., 32.], [64., 32.], GREEN).width(64.))
+                            .unwrap()
+                    }),
+                ),
+                (
+                    "image",
+                    Box::new(|s| s.draw_image(&image, TextureDraw::new(full)).unwrap()),
+                ),
+                (
+                    "path",
+                    Box::new(|s| s.draw_path(&square, crate::PathDraw::new(BLUE)).unwrap()),
+                ),
+                (
+                    "brush",
+                    Box::new(|s| {
+                        s.draw_shape_with_brush(
+                            brush.as_ref().unwrap(),
+                            ShapeDraw::rect(full, [1.; 4]),
+                        )
+                        .unwrap()
+                    }),
+                ),
+                (
+                    "brush line",
+                    Box::new(|s| {
+                        s.draw_line_with_brush(
+                            brush.as_ref().unwrap(),
+                            LineDraw::new([0., 32.], [64., 32.], [1.; 4]).width(64.),
+                        )
+                        .unwrap()
+                    }),
+                ),
+                (
+                    "brush path",
+                    Box::new(|s| {
+                        s.draw_path_with_brush(
+                            &square,
+                            brush.as_ref().unwrap(),
+                            crate::PathDraw::new([1.; 4]),
+                        )
+                        .unwrap()
+                    }),
+                ),
+                (
+                    "polyline",
+                    Box::new(|s| {
+                        s.draw_polyline(&points, crate::PolylineDraw::new(RED).width_pixels(32.))
+                            .unwrap()
+                    }),
+                ),
+                (
+                    "markers",
+                    Box::new(|s| {
+                        s.draw_markers(&points, crate::MarkerDraw::new(RED).radius_pixels(48.))
+                            .unwrap()
+                    }),
+                ),
+                (
+                    "text",
+                    Box::new(|s| s.draw_text(&text, TextDraw::new([-2., -6.])).unwrap()),
+                ),
+            ];
+
+            for (name, draw) in &draws {
+                if uniforms == 0 && name.starts_with("brush") {
+                    continue;
+                }
+                let bytes = pixels(&g, &mut t, |f| {
+                    let mut pass = f.render_pass().begin().unwrap();
+                    pass.set_scissor_rect(0, 0, 64, 64).unwrap();
+                    let clip = crate::RoundedClip::new(
+                        Rect::new(0., 0., 1., 1.),
+                        crate::CornerRadii::uniform(0.),
+                    );
+                    assert!(matches!(
+                        pass.set_rounded_clip(Some(clip)),
+                        Err(Error::ClipStackFull)
+                    ));
+                    assert!(matches!(
+                        pass.set_rounded_clips(&[clip]),
+                        Err(Error::ClipStackFull)
+                    ));
+                    assert!(pass.rounded_clips().is_empty());
+                    pass.set_rounded_clips(&[]).unwrap();
+                    // Also exercise the public custom binding API on a device
+                    // where set_bind_group(1) itself would be invalid.
+                    pass.bind_rounded_clips();
+                    let mut paint = painter.begin(&mut pass).unwrap();
+                    assert!(matches!(
+                        paint.clipped_rounded(
+                            Rect::new(0., 0., 1., 1.),
+                            crate::CornerRadii::uniform(0.)
+                        ),
+                        Err(Error::ClipStackFull)
+                    ));
+                    assert!(paint.pass().rounded_clips().is_empty());
+                    draw(&mut paint);
+                });
+                assert!(
+                    bytes.as_chunks::<4>().0.iter().filter(|p| p[3] > 0).count() > 100,
+                    "groups={groups} uniforms={uniforms} renderer={name}: empty or unexpectedly clipped"
+                );
+                if *name != "text" {
+                    assert_eq!(pixel(&bytes, 32, 32)[3], 255, "{name}");
+                }
+            }
+            // Public custom shader integration follows the documented capacity
+            // branch: omit group one entirely when no analytic clips are available.
+            let clip_layout = g.rounded_clip_layout();
+            let layouts = if g.rounded_clip_capacity() > 0 {
+                vec![None, Some(&clip_layout)]
+            } else {
+                vec![]
+            };
+            let shader = g.device().create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("custom clip fallback"),
+                source: wgpu::ShaderSource::Wgsl(format!("{}\n{}", g.rounded_clip_shader(), r#"
+                    @vertex fn vs(@location(0) p:vec3<f32>) -> @builtin(position) vec4<f32> { return vec4(p,1.0); }
+                    @fragment fn fs(@builtin(position) p:vec4<f32>) -> @location(0) vec4<f32> { return vec4(0.0, rounded_clip_coverage(p.xy), 0.0, 1.0); }
+                "#).into()),
+            });
+            let material = g.create_material(
+                crate::MaterialOptions::new(&shader)
+                    .entry_points("vs", "fs")
+                    .bind_group_layouts(&layouts),
+            );
+            let mesh = g
+                .create_mesh(
+                    &[
+                        Vertex::new([-1., -1., 0.], RED),
+                        Vertex::new([3., -1., 0.], RED),
+                        Vertex::new([-1., 3., 0.], RED),
+                    ],
+                    &[0, 1, 2],
+                )
+                .unwrap();
+            let mut meshes = MeshRenderer::new(&g);
+            let bytes = pixels(&g, &mut t, |f| {
+                let mut pass = f.render_pass().begin().unwrap();
+                pass.bind_rounded_clips();
+                meshes
+                    .draw_with_material(&mut pass, &mesh, &material)
+                    .unwrap();
+            });
+            assert_eq!(pixel(&bytes, 32, 32), [0, 255, 0, 255]);
+            assert!(
+                errors.pop().await.is_none(),
+                "groups={groups} uniforms={uniforms}"
+            );
+        }
     });
 }

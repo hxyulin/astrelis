@@ -1004,16 +1004,17 @@ impl<'frame> RenderPass<'frame> {
     /// Call after changing clips/viewport or interleaving other work. Custom work
     /// owns its pipeline and other bindings; raw commands do not apply this
     /// coverage automatically. No clips binds shared immutable data with no upload.
+    /// At zero clip capacity this does nothing; omit group one from custom pipelines.
     pub fn bind_rounded_clips(&mut self) {
+        if self.graphics.rounded_clip_capacity() == 0 {
+            return;
+        }
         let group = if self.rounded_clips.is_empty() {
             self.graphics
                 .no_clip_stack
                 .get_or_init(|| {
                     use wgpu::util::DeviceExt;
                     let capacity = self.graphics.rounded_clip_capacity();
-                    if capacity == 0 {
-                        return self.graphics.clip_group(None);
-                    }
                     let buffer = self.graphics.device().create_buffer_init(
                         &wgpu::util::BufferInitDescriptor {
                             label: Some("Astrelis disabled rounded stack"),

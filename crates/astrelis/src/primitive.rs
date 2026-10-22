@@ -335,7 +335,11 @@ impl PrimitiveRenderer {
             material: g.create_material(
                 options.mesh(
                     MaterialOptions::new(&shader)
-                        .bind_group_layouts(&[None, Some(&g.rounded_clip_layout())])
+                        .bind_group_layouts(&crate::clip::layouts(
+                            g,
+                            None,
+                            &g.rounded_clip_layout(),
+                        ))
                         .vertex_layouts(&layouts)
                         .entry_points(
                             "vertex_main",

@@ -413,10 +413,11 @@ impl Renderer {
                     self.options.mesh(
                         MaterialOptions::new(&shader)
                             .vertex_layouts(&[layout])
-                            .bind_group_layouts(&[
+                            .bind_group_layouts(&crate::clip::layouts(
+                                &self.graphics,
                                 Some(&crate::points::layout(self.graphics.device())),
-                                Some(&self.graphics.rounded_clip_layout()),
-                            ])
+                                &self.graphics.rounded_clip_layout(),
+                            ))
                             .entry_points(
                                 if self.markers {
                                     "marker_vertex"

@@ -1275,7 +1275,9 @@ impl TextureRenderer {
             })];
             let rounded_layout = self.graphics.rounded_clip_layout();
             if m.shader.is_none() {
-                layouts.push(Some(&rounded_layout));
+                if self.graphics.rounded_clip_capacity() > 0 {
+                    layouts.push(Some(&rounded_layout));
+                }
             } else {
                 layouts.extend(m.layouts.iter().map(|v| v.as_ref()));
             }

@@ -214,7 +214,11 @@ impl PathRenderer {
         let material = graphics.create_material(
             options.mesh(
                 MaterialOptions::new(&shader)
-                    .bind_group_layouts(&[None, Some(&graphics.rounded_clip_layout())])
+                    .bind_group_layouts(&crate::clip::layouts(
+                        graphics,
+                        None,
+                        &graphics.rounded_clip_layout(),
+                    ))
                     .vertex_layouts(&layouts)
                     .entry_points(
                         "vertex_main",

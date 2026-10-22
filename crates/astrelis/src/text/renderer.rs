@@ -750,7 +750,11 @@ impl TextRenderer {
             options.pipeline.mesh(
                 MaterialOptions::new(&shader)
                     .vertex_layouts(&layouts)
-                    .bind_group_layouts(&[Some(&layout), Some(&g.rounded_clip_layout())])
+                    .bind_group_layouts(&crate::clip::layouts(
+                        g,
+                        Some(&layout),
+                        &g.rounded_clip_layout(),
+                    ))
                     .entry_points(
                         "vertex_main",
                         if options.pipeline.writes_attachment() {
@@ -765,7 +769,11 @@ impl TextRenderer {
             options.pipeline.mesh(
                 MaterialOptions::new(&shader)
                     .vertex_layouts(&layouts)
-                    .bind_group_layouts(&[Some(&layout), Some(&g.rounded_clip_layout())])
+                    .bind_group_layouts(&crate::clip::layouts(
+                        g,
+                        Some(&layout),
+                        &g.rounded_clip_layout(),
+                    ))
                     .entry_points(
                         "vertex_main",
                         if options.pipeline.writes_attachment() {

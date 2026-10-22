@@ -47,3 +47,25 @@ Raw evidence: [baseline CSV](nested-clipping-metal-baseline.csv),
 [current CSV](nested-clipping-metal-current.csv),
 [current log](nested-clipping-metal-current.log). Logs retain adapter details and
 all output-equivalence results. CSV includes median/p95 recording and CPU totals.
+
+## Restricted imported devices
+
+The integration repair disables analytic clipping when the enabled device has
+fewer than two bind groups or two fragment uniform buffers per stage, reserving
+one uniform for brushes. Capacity zero omits group one from built-in layouts,
+WGSL and draw bindings. Nonempty clip requests still fail atomically. Unclipped
+points retain their original one-group storage-buffer requirement.
+
+Reran the command above on the same Apple M5 Max / Metal, macOS 27.0.1 (26A434),
+arm64, rustc 1.99.0 and wgpu 30.0.1, with 12 samples and 3 warm-up pairs.
+All 32 workload/count pixel equivalence checks passed. The previous current-run
+and repair recording medians at 1,000 shapes were 39.729 → 47.001 µs for
+unclipped Painter batches, 59.062 → 36.876 µs with one rounded clip, and
+59.084 → 49.541 µs with two clips.
+These short runs overlapped other compilation/test work and do not establish a
+performance change. GPU execution timing was not measured. The benchmark uses
+ordinary device limits; imported-device pixel/error-scope regressions separately
+cover one bind group and zero/one fragment uniforms, plus ordinary-device nesting.
+
+Raw evidence: [repair CSV](restricted-clipping-metal.csv) and
+[repair log](restricted-clipping-metal.log).

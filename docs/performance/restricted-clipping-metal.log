@@ -1,0 +1,151 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.26
+   Compiling libm v0.2.16
+   Compiling bitflags v2.13.2
+   Compiling cfg_aliases v0.2.2
+   Compiling objc2-encode v4.1.0
+   Compiling libc v0.2.190
+   Compiling autocfg v1.5.1
+   Compiling objc2 v0.6.4
+   Compiling once_cell v1.21.4
+   Compiling arrayvec v0.7.8
+   Compiling thiserror v2.0.21
+   Compiling cfg-if v1.0.5
+   Compiling foldhash v0.2.0
+   Compiling log v0.4.34
+   Compiling zerocopy v0.8.59
+   Compiling equivalent v1.0.2
+   Compiling rustc-hash v1.1.0
+   Compiling smallvec v1.16.2
+   Compiling naga v30.0.1
+   Compiling raw-window-handle v0.6.2
+   Compiling hashbrown v0.17.1
+   Compiling parking_lot_core v0.9.12
+   Compiling unicode-width v0.2.2
+   Compiling bit-vec v0.9.1
+   Compiling objc-sys v0.3.5
+   Compiling static_assertions v1.1.0
+   Compiling scopeguard v1.2.0
+   Compiling wgpu-hal v30.0.1
+   Compiling version_check v0.9.5
+   Compiling libloading v0.8.9
+   Compiling lock_api v0.4.14
+   Compiling profiling v1.0.18
+   Compiling num-traits v0.2.19
+   Compiling wgpu-core v30.0.1
+   Compiling core-foundation-sys v0.8.7
+   Compiling litrs v1.0.0
+   Compiling bit-set v0.10.0
+   Compiling codespan-reporting v0.13.1
+   Compiling wgpu v30.0.1
+   Compiling objc2 v0.5.2
+   Compiling bitflags v1.3.2
+   Compiling dispatch v0.2.0
+   Compiling yazi v0.2.1
+   Compiling foreign-types-shared v0.3.1
+   Compiling tinyvec v1.13.3
+   Compiling zeno v0.3.3
+   Compiling slotmap v1.1.1
+   Compiling winit v0.30.13
+   Compiling smol_str v0.3.6
+   Compiling self_cell v1.3.0
+   Compiling rangemap v1.8.0
+   Compiling pin-project-lite v0.2.17
+   Compiling unicode-script v0.5.8
+   Compiling unicode-bidi v0.3.18
+   Compiling syn v3.0.6
+   Compiling syn v2.0.119
+   Compiling rustc-hash v2.1.3
+   Compiling document-features v0.2.12
+   Compiling linebender_resource_handle v0.1.1
+   Compiling tracing-core v0.1.36
+   Compiling float_next_after v1.0.0
+   Compiling unicode-segmentation v1.13.3
+   Compiling unicode-linebreak v0.1.5
+   Compiling sys-locale v0.3.2
+   Compiling bymsdfgen-core v0.1.1
+   Compiling cursor-icon v1.2.0
+   Compiling smol_str v0.2.2
+   Compiling dpi v0.1.2
+   Compiling pollster v0.4.0
+   Compiling indexmap v2.14.2
+   Compiling tracing v0.1.44
+   Compiling memmap2 v0.9.11
+   Compiling core-foundation v0.9.4
+   Compiling parking_lot v0.12.5
+   Compiling core_maths v0.1.1
+   Compiling block2 v0.5.1
+   Compiling core-graphics-types v0.1.3
+   Compiling ttf-parser v0.25.1
+   Compiling objc2-foundation v0.2.2
+   Compiling objc2-core-foundation v0.3.2
+   Compiling block2 v0.6.2
+   Compiling euclid v0.22.14
+   Compiling lyon_geom v1.0.19
+   Compiling objc2-foundation v0.3.2
+   Compiling objc2-core-graphics v0.3.2
+   Compiling lyon_path v1.0.19
+   Compiling bytemuck_derive v1.12.1
+   Compiling thiserror-impl v2.0.21
+   Compiling foreign-types-macros v0.2.4
+   Compiling zerocopy-derive v0.8.59
+   Compiling lyon_tessellation v1.0.22
+   Compiling foreign-types v0.5.0
+   Compiling core-graphics v0.23.2
+   Compiling fontdb v0.23.0
+   Compiling bytemuck v1.25.2
+   Compiling font-types v0.12.6
+   Compiling naga-types v30.0.1
+   Compiling font-types v0.11.3
+   Compiling wgpu-types v30.0.1
+   Compiling read-fonts v0.37.0
+   Compiling read-fonts v0.41.0
+   Compiling objc2-app-kit v0.2.2
+   Compiling objc2-metal v0.3.2
+   Compiling objc2-quartz-core v0.3.2
+   Compiling half v2.7.1
+   Compiling raw-window-metal v1.1.0
+   Compiling harfrust v0.5.2
+   Compiling skrifa v0.40.0
+   Compiling skrifa v0.44.0
+   Compiling swash v0.2.10
+   Compiling wgpu-naga-bridge v30.0.1
+   Compiling wgpu-core-deps-apple v30.0.1
+   Compiling cosmic-text v0.19.0
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-06d86df1/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 1m 37s
+     Running benches/primitives.rs (target/release/deps/primitives-8159e6c74c4df76e)
+adapter=AdapterInfo { name: "Apple M5 Max", vendor: 0, device: 0, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "", driver_info: "", backend: Metal, subgroup_min_size: 4, subgroup_max_size: 64, transient_saves_memory: Some(true), limit_bucket: None }; samples=12; warmup=3; counts=[100, 1000]; gpu_execution_timing=not_measured; reference=direct_astrelis_renderers
+pixel equivalence passed: shapes_scoped count=100
+pixel equivalence passed: shapes_batch count=100
+pixel equivalence passed: lines_scoped count=100
+pixel equivalence passed: lines_batch count=100
+pixel equivalence passed: mixed_scoped count=100
+pixel equivalence passed: painter_mixed count=100
+pixel equivalence passed: painter_shapes_batch count=100
+pixel equivalence passed: painter_lines_batch count=100
+pixel equivalence passed: fills_outlines_scoped count=100
+pixel equivalence passed: fills_outlines_batch count=100
+pixel equivalence passed: painter_fills_outlines_batch count=100
+pixel equivalence passed: painter_clipped_mixed count=100
+pixel equivalence passed: painter_rounded_clip_shapes_batch count=100
+pixel equivalence passed: painter_nested_rounded_clip_shapes_batch count=100
+pixel equivalence passed: shadows_batch count=100
+pixel equivalence passed: painter_shadows_batch count=100
+pixel equivalence passed: shapes_scoped count=1000
+pixel equivalence passed: shapes_batch count=1000
+pixel equivalence passed: lines_scoped count=1000
+pixel equivalence passed: lines_batch count=1000
+pixel equivalence passed: mixed_scoped count=1000
+pixel equivalence passed: painter_mixed count=1000
+pixel equivalence passed: painter_shapes_batch count=1000
+pixel equivalence passed: painter_lines_batch count=1000
+pixel equivalence passed: fills_outlines_scoped count=1000
+pixel equivalence passed: fills_outlines_batch count=1000
+pixel equivalence passed: painter_fills_outlines_batch count=1000
+pixel equivalence passed: painter_clipped_mixed count=1000
+pixel equivalence passed: painter_rounded_clip_shapes_batch count=1000
+pixel equivalence passed: painter_nested_rounded_clip_shapes_batch count=1000
+pixel equivalence passed: shadows_batch count=1000
+pixel equivalence passed: painter_shadows_batch count=1000

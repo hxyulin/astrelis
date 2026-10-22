@@ -304,7 +304,7 @@ pub(crate) fn check_support(graphics: &GraphicsContext) -> Result<(), Error> {
         .flags
         .contains(wgpu::DownlevelFlags::VERTEX_STORAGE)
         || l.max_storage_buffers_per_shader_stage < 1
-        || l.max_bind_groups < 2
+        || l.max_bind_groups < 1
         || l.max_storage_buffer_binding_size < 8
         || l.max_buffer_size < 80
         || l.max_vertex_attributes < 5
