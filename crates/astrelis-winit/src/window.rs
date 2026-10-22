@@ -7,6 +7,31 @@ use winit::{
     window::{Window, WindowId},
 };
 
+// Device invalidation is independent of OS suspension. Only explicit successful
+// replacement clears it, including when replacement happens while suspended.
+#[derive(Default)]
+struct DeviceLifecycle {
+    active: bool,
+    invalidated: bool,
+}
+impl DeviceLifecycle {
+    fn unavailable(&self, observed_loss: bool) -> bool {
+        self.invalidated || observed_loss
+    }
+    fn suspend(&mut self) {
+        self.active = false;
+    }
+    fn resume(&mut self) {
+        self.active = true;
+    }
+    fn invalidate(&mut self) {
+        self.invalidated = true;
+    }
+    fn replaced(&mut self) {
+        self.invalidated = false;
+    }
+}
+
 /// Changes from a native event, useful for invalidating an application-owned loop.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WindowUpdate {
@@ -39,7 +64,7 @@ pub struct WindowContext {
     settings: SurfaceSettings,
     supported_samples: Vec<u32>,
     generation: u64,
-    active: bool,
+    lifecycle: DeviceLifecycle,
     visible: bool,
     occluded: bool,
     pub(crate) defer_show: bool,
@@ -65,6 +90,9 @@ impl WindowContext {
         window: Arc<Window>,
         settings: SurfaceSettings,
     ) -> Result<Self, WindowError> {
+        if graphics.is_device_lost() {
+            return Err(WindowError::DeviceUnavailable);
+        }
         let metrics = WindowMetrics::from_window(&window)?;
         let target = graphics.create_surface(
             window.clone(),
@@ -93,7 +121,10 @@ impl WindowContext {
             settings,
             supported_samples,
             generation: 1,
-            active: true,
+            lifecycle: DeviceLifecycle {
+                active: true,
+                invalidated: false,
+            },
             visible,
             occluded: false,
             defer_show: false,
@@ -131,7 +162,8 @@ impl WindowContext {
     }
     /// Cached native eligibility, without attempting swapchain acquisition.
     pub fn can_present(&self) -> bool {
-        self.active
+        self.lifecycle.active
+            && !self.device_unavailable()
             && self.visible
             && !self.occluded
             && self.metrics.has_area()
@@ -167,7 +199,9 @@ impl WindowContext {
         if let Some(metrics) = next
             && metrics_changed
         {
-            if let Some(target) = &mut self.target {
+            if !self.device_unavailable()
+                && let Some(target) = &mut self.target
+            {
                 let size = metrics.physical_size();
                 target.resize(size.width, size.height)?;
             }
@@ -193,20 +227,24 @@ impl WindowContext {
     /// Releases presentation resources while preserving device and settings.
     /// Repeated calls are harmless.
     pub fn suspend(&mut self) {
-        self.active = false;
+        self.lifecycle.suspend();
         self.target = None;
         self.invalidated = true;
         self.availability_invalidated = true;
     }
     /// Restores presentation after suspension; repeated active calls are harmless.
     pub fn resume(&mut self) -> Result<(), WindowError> {
-        if self.target.is_none() {
+        if !self.device_unavailable() && self.target.is_none() {
             self.recreate()?;
         }
-        self.active = true;
+        self.lifecycle.resume();
         Ok(())
     }
     pub(crate) fn recreate(&mut self) -> Result<(), WindowError> {
+        if self.device_unavailable() {
+            self.invalidate_device();
+            return Ok(());
+        }
         // Drop first: some backends cannot create two swapchains for one window.
         self.target = None;
         let metrics = WindowMetrics::from_window(&self.window)?;
@@ -223,12 +261,84 @@ impl WindowContext {
         self.availability_invalidated = true;
         Ok(())
     }
-    /// Changes MSAA now or queues a validated setting while suspended.
+    /// Whether presentation is blocked until an explicit device replacement.
+    /// OS resume, resize, exposure and redraw requests cannot clear this state.
+    pub fn device_unavailable(&self) -> bool {
+        self.lifecycle.unavailable(self.graphics.is_device_lost())
+    }
+
+    /// Drops the surface and blocks recovery on this device, preserving settings.
+    /// Call for every window sharing a lost device before rebuilding resources.
+    /// Repeated calls are harmless; [`Self::resume`] cannot undo this operation.
+    pub fn invalidate_device(&mut self) {
+        self.lifecycle.invalidate();
+        self.target = None;
+        self.invalidated = true;
+        self.availability_invalidated = true;
+    }
+
+    /// Installs an application-created replacement and recreates presentation.
+    ///
+    /// Invalidates first. Failure leaves the old device blocked with no target;
+    /// the caller chooses whether and when to retry. Suspended windows retain the
+    /// replacement but defer surface creation until resume. Rebuild application
+    /// resources before allowing another render callback. No hook is invoked.
+    /// A replacement must be a different device and must not be reported lost.
+    pub fn replace_graphics(&mut self, graphics: &GraphicsContext) -> Result<(), WindowError> {
+        self.invalidate_device();
+        let replacement = self.prepare_graphics(graphics)?;
+        self.install_graphics(graphics, replacement);
+        Ok(())
+    }
+
+    pub(crate) fn prepare_graphics(
+        &self,
+        graphics: &GraphicsContext,
+    ) -> Result<Option<(RenderTarget<'static>, WindowMetrics)>, WindowError> {
+        if graphics.is_device_lost() || graphics.same_device(&self.graphics) {
+            return Err(WindowError::InvalidReplacementDevice);
+        }
+        if !self.lifecycle.active {
+            return Ok(None);
+        }
+        let metrics = WindowMetrics::from_window(&self.window)?;
+        let target = graphics.create_surface(
+            self.window.clone(),
+            self.settings.surface_options(metrics.physical_size()),
+        )?;
+        Ok(Some((target, metrics)))
+    }
+
+    pub(crate) fn install_graphics(
+        &mut self,
+        graphics: &GraphicsContext,
+        replacement: Option<(RenderTarget<'static>, WindowMetrics)>,
+    ) {
+        self.graphics = graphics.clone();
+        self.lifecycle.replaced();
+        // Counts from the old adapter must never validate pending settings.
+        self.supported_samples.clear();
+        if let Some((target, metrics)) = replacement {
+            self.format = target.render_format();
+            self.supported_samples = target.supported_sample_counts().to_vec();
+            self.target = Some(target);
+            self.metrics = metrics;
+            self.generation = self.generation.saturating_add(1);
+        }
+        self.invalidated = true;
+        self.availability_invalidated = true;
+    }
+
+    /// Changes MSAA now or queues a cached-supported setting while suspended/lost.
+    /// Single sampling can always be queued; replacement revalidates other counts.
     /// Rejection leaves both live attachments and recovery settings unchanged.
     pub fn set_sample_count(&mut self, count: u32) -> Result<(), WindowError> {
+        if self.device_unavailable() {
+            self.invalidate_device();
+        }
         if let Some(target) = &mut self.target {
             target.set_sample_count(count)?;
-        } else if !self.supported_samples.contains(&count) {
+        } else if count != 1 && !self.supported_samples.contains(&count) {
             return Err(astrelis::Error::UnsupportedSampleCount {
                 format: self.format.colors[0].expect("surface color"),
                 count,
@@ -345,6 +455,65 @@ fn rescaled_size(size: PhysicalSize<u32>, from: f64, to: f64) -> PhysicalSize<u3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_loss_survives_os_resume_and_failed_replacement() {
+        let mut state = DeviceLifecycle {
+            active: true,
+            invalidated: false,
+        };
+        assert!(!state.unavailable(false));
+        // The backend flag blocks before the event-loop message is processed.
+        assert!(state.unavailable(true));
+        state.invalidate();
+        state.invalidate();
+        for _ in 0..3 {
+            state.suspend();
+            state.resume();
+            assert!(state.unavailable(false));
+        }
+        // Failed staging never calls replaced, so the loss remains sticky.
+        state.suspend();
+        assert!(state.unavailable(false));
+        state.replaced();
+        assert!(!state.active);
+        assert!(!state.unavailable(false));
+        state.resume();
+        assert!(state.active);
+        assert!(!state.unavailable(false));
+        assert!(state.unavailable(true)); // replacement can itself be lost
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    #[test]
+    fn shared_loss_blocks_continuous_windows_and_expired_retries() {
+        use crate::{RedrawMode, scheduler::Schedule};
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        let mut windows = [DeviceLifecycle::default(), DeviceLifecycle::default()];
+        for state in &mut windows {
+            state.resume();
+            let mut schedule = Schedule::default();
+            schedule.mode(RedrawMode::Continuous);
+            schedule.retry(now, Duration::from_millis(16));
+            schedule.at(now);
+            state.invalidate();
+            for tick in 0..5 {
+                state.suspend();
+                state.resume();
+                schedule.availability_changed();
+                schedule.invalidate(); // OS exposure/resize cannot bypass loss
+                let at = now + Duration::from_secs(tick);
+                schedule.advance(at);
+                let eligible = state.active && !state.unavailable(false);
+                assert!(!schedule.request_native(at, eligible));
+                assert_eq!(schedule.wake(eligible), None);
+            }
+            state.replaced();
+            schedule.availability_changed();
+            assert!(schedule.request_native(now + Duration::from_secs(6), true));
+        }
+    }
 
     #[test]
     fn scale_changes_preserve_logical_size() {

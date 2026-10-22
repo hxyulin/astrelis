@@ -71,7 +71,10 @@
 //! Retryable acquisition is paced; known occlusion, zero size, and suspension wait
 //! for availability. Renderers and settings belong to the application and targets,
 //! respectively. The runner introduces no default pass, clear color, or explicit GPU completion wait.
-//! Device loss and asynchronous initialization cancellation remain application policy.
+//! Device loss notification uses `GraphicsContext::set_device_lost_callback` and a
+//! native proxy. `AppContext::invalidate_graphics` blocks shared windows until an
+//! explicit `AppContext::replace_graphics`; applications request devices and rebuild
+//! resources. See the `device_recovery` example. Async cancellation remains app policy.
 
 mod error;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]

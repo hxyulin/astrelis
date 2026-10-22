@@ -13,6 +13,10 @@ pub enum WindowError {
     Metrics(crate::InvalidWindowMetrics),
     /// Register windows during an active application lifecycle, after resume.
     Inactive,
+    /// Device loss blocks GPU operations until application replacement.
+    DeviceUnavailable,
+    /// Replacement must use a different device that has not been reported lost.
+    InvalidReplacementDevice,
     /// This native window is already registered.
     AlreadyManaged(WindowId),
 }
@@ -23,6 +27,10 @@ impl fmt::Display for WindowError {
             Self::Graphics(e) => write!(f, "window graphics failed: {e}"),
             Self::Metrics(e) => e.fmt(f),
             Self::Inactive => f.write_str("window registration requires an active application"),
+            Self::DeviceUnavailable => f.write_str("device unavailable; replace graphics first"),
+            Self::InvalidReplacementDevice => {
+                f.write_str("replacement must be a different live device")
+            }
             Self::AlreadyManaged(id) => write!(f, "window {id:?} is already managed"),
         }
     }

@@ -50,6 +50,9 @@ impl WindowContext {
 
     pub fn process_event(&mut self, event: &WindowEvent)
         -> Result<WindowUpdate, WindowError>;
+    pub fn device_unavailable(&self) -> bool;
+    pub fn invalidate_device(&mut self);
+    pub fn replace_graphics(&mut self, graphics: &GraphicsContext) -> Result<(), WindowError>;
     pub fn suspend(&mut self);
     pub fn resume(&mut self) -> Result<(), WindowError>;
     pub fn set_sample_count(&mut self, count: u32) -> Result<(), WindowError>;
@@ -130,6 +133,9 @@ impl<Message: 'static> AppContext<'_, Message> {
         -> Result<WindowId, WindowError>;
     pub fn window(&self, id: WindowId) -> Option<&WindowContext>;
     pub fn window_mut(&mut self, id: WindowId) -> Option<&mut WindowContext>;
+    pub fn invalidate_graphics(&mut self, graphics: &GraphicsContext);
+    pub fn replace_graphics(&mut self, old: &GraphicsContext, replacement: &GraphicsContext)
+        -> Result<(), WindowError>;
 
     pub fn request_redraw(&mut self, id: WindowId) -> Result<(), UnknownWindow>;
     pub fn request_redraw_at(&mut self, id: WindowId, at: Instant)
@@ -323,8 +329,63 @@ failures are returned as structured RunError with window/callback context.
 Handler errors terminate the runner and retain the original error as a source.
 Before finish, any acquired recording is abandoned. Errors in submitted/shutdown
 do not roll back earlier successful submissions. The first failure is returned; a shutdown-hook failure
-is primary only if no earlier failure exists. Device-loss/resource reconstruction
-is an application recovery policy beyond this surface-recovery V1.
+is primary only if no earlier failure exists. Device replacement follows the explicit
+application policy described below; surface recovery never requests a new device.
+
+## Device loss and shared-device replacement
+
+[`device_recovery.rs`](../crates/astrelis-winit/examples/device_recovery.rs) is a
+complete two-window example. Run `cargo run -p astrelis-winit --example device_recovery`;
+press D to call the raw device's `destroy()` and exercise notification/rebuild.
+It permits one replacement per run and exits on another loss or initialization
+failure. This is an example policy, not a library retry rule.
+
+1. Install `GraphicsContext::set_device_lost_callback` before GPU work. Forward
+   reason/message plus an application generation through `AppContext::proxy()`.
+   The bridge sets a permanent loss flag shared by context clones before invoking
+   the callback. Do not capture the context/device in the closure: the device owns
+   it. Do not operate native windows from a backend callback.
+2. In `user_event`, discard stale generations and call `cx.invalidate_graphics(&old)`.
+   All windows sharing the old device lose their surfaces and become ineligible.
+   Resize, exposure, deadlines, Continuous redraw and OS resume cannot restart
+   acquisition. Independently adopted devices remain usable. The bridge's flag
+   also blocks presentation before delivery of the user event; acquisition/submission
+   errors observed with that flag set block the shared windows instead of retrying
+   surface recovery. The runner performs one nonblocking device poll on such errors
+   to deliver deferred native loss callbacks before classifying the failure. An already recording frame may finish before notification.
+3. Drop application GPU resources and request a new context using a surviving
+   window for adapter compatibility. Preserve custom instance settings, device
+   features and limits with `GraphicsContext::request` or `from_wgpu` as needed.
+   Initialization can be asynchronous: return while windows remain blocked, then
+   forward completion through the proxy and reject stale results. The example
+   chooses synchronous initialization for a small desktop app.
+4. Rebuild application meshes, renderers, textures, bindings and other resources
+   from application models. Install a loss callback for the replacement generation,
+   then call `cx.replace_graphics(&old, &replacement)` before returning to rendering.
+   All affected surfaces are staged before any window switches. On failure they
+   remain blocked on the old context; no automatic retry is scheduled. Successful
+   replacement also updates the device used for future managed windows. Settings,
+   visibility and OS suspension survive; suspended windows create surfaces on resume.
+   Surface generations advance when a new surface is installed. `window_created`
+   is not repeated; the next `prepare` receives the replacement render format.
+
+Application-owned loops use `WindowContext::invalidate_device` and
+`replace_graphics` for each affected window, pausing the entire group until every
+replacement succeeds. The runner provides the staged group operation. A replacement
+must be a different device, with no loss reported through the bridge. Device health
+can change after validation; subsequent loss requires another application decision.
+Requested attachment settings are revalidated against the replacement adapter;
+unsupported settings return an error rather than silently falling back. Single
+sampling can be queued with `set_sample_count(1)` while blocked to choose an
+explicit MSAA fallback; other queued counts use cached support and are checked again
+on the replacement device.
+
+The raw device remains available. Native wgpu has one loss callback: installing a
+raw callback replaces the bridge and bypasses its flag. Separately calling `from_wgpu`
+on the same raw device creates independent tracking; use context clones when sharing
+notification state. Custom loops should perform a nonblocking device poll on GPU
+failures to deliver deferred native notifications. With raw callbacks, explicitly
+invalidate every affected window on notification. The library does not poll devices or reconstruct arbitrary resources.
 
 ## Consumer example
 
@@ -416,7 +477,7 @@ from application preparation, recording and OS presentation latency.
 ## Validation performed
 
 The workspace passes unit/GPU tests and compiled rustdoc examples. The integration
-has eight policy/scheduler regression tests, strict native Clippy checks, and a
+has policy/scheduler regression tests, strict native Clippy checks, and a
 wasm library compile check. The wasm check covers low-level/configuration helpers;
 the desktop runner/handler/context are intentionally not exported on that target.
 
@@ -436,6 +497,18 @@ and last-window shutdown. A compile-only external consumer installs an AccessKit
 adapter with the actual typed AppContext proxy and a Box<dyn Error> handler; no
 private message envelope or RXUI changes were needed. Native runtime validation
 was performed on macOS/Metal, not Windows or Linux.
+
+Device-replacement validation additionally exercised native destruction on
+macOS/Metal (Apple M5 Max): the deferred loss callback reached the typed proxy,
+a same-device replacement failed with both windows still blocked, repeated
+suspend/resume could not unblock them, both surfaces switched to a new device,
+application-rebuilt resources submitted offscreen, and a later managed window
+used the replacement default. This used a temporary consumer of the public API.
+Window presentation after replacement was not verified: acquisition reported
+occlusion in that session. Headless regression tests cover callback flag ordering,
+clone sharing, deferred notification classification, handler-error preservation,
+and lifecycle/scheduler blocking. The three lavapipe-excluded pixel tests also
+passed locally on Metal. Remote CI jobs were not executed as part of this change.
 
 See [lifecycle performance and measurement boundaries](performance/winit.md) for
 matched native prepared-frame timings, isolated scheduling costs, raw artifacts,

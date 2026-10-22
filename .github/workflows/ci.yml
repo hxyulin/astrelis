@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      macos_gpu:
+        description: Run full tests on the trusted self-hosted macOS Metal GPU runner
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -56,3 +62,42 @@ jobs:
       - run: cargo check --workspace --all-targets --locked
         env:
           RUSTUP_TOOLCHAIN: ${{ steps.msrv.outputs.version }}
+
+  native:
+    name: Native compilation (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --locked
+
+  wasm:
+    name: WebAssembly libraries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # The native runner/examples are deliberately outside the wasm API.
+      - run: cargo check --workspace --lib --target wasm32-unknown-unknown --locked
+
+  macos-gpu:
+    name: Full tests on macOS Metal hardware
+    # Explicit dispatch keeps untrusted PR code off a persistent hardware runner.
+    # Register a trusted Mac with these labels; no hosted GPU is assumed.
+    if: github.event_name == 'workflow_dispatch' && inputs.macos_gpu
+    runs-on: [self-hosted, macOS, astrelis-gpu]
+    timeout-minutes: 30
+    env:
+      ASTRELIS_REQUIRE_METAL_GPU: '1'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@v2
+      # Includes the three MSAA/scissor cases excluded only on lavapipe above.
+      - run: cargo test --workspace --locked -- --nocapture

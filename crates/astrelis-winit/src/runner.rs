@@ -64,6 +64,7 @@ struct State {
     windows: HashMap<WindowId, ManagedWindow>,
     operations: VecDeque<Operation>,
     graphics: Option<GraphicsContext>,
+    graphics_invalidated: bool,
     active: bool,
     had_window: bool,
     options: RunnerOptions,
@@ -120,6 +121,15 @@ impl<Message: 'static> AppContext<'_, Message> {
         if !self.state.active || self.event_loop.exiting() {
             return Err(WindowError::Inactive);
         }
+        if self.state.graphics_invalidated
+            || self
+                .state
+                .graphics
+                .as_ref()
+                .is_some_and(GraphicsContext::is_device_lost)
+        {
+            return Err(WindowError::DeviceUnavailable);
+        }
         let visible = attributes.visible;
         attributes.visible = false;
         let window = Arc::new(self.event_loop.create_window(attributes)?);
@@ -167,6 +177,68 @@ impl<Message: 'static> AppContext<'_, Message> {
             .filter(|w| !w.closing)
             .map(|w| &mut w.context)
     }
+    /// Blocks all managed windows sharing `graphics`, including queued closes.
+    /// Their dirty state is retained without acquisition/recovery retries. Call on
+    /// the event-loop thread after forwarding wgpu's loss callback through a proxy.
+    pub fn invalidate_graphics(&mut self, graphics: &GraphicsContext) {
+        if self
+            .state
+            .graphics
+            .as_ref()
+            .is_some_and(|g| g.same_device(graphics))
+        {
+            self.state.graphics_invalidated = true;
+        }
+        for window in self.state.windows.values_mut() {
+            if window.context.graphics().same_device(graphics) {
+                window.context.invalidate_device();
+            }
+        }
+    }
+
+    /// Replaces a shared device across its managed windows and the creation default.
+    ///
+    /// All affected surfaces are dropped first. New surfaces are staged before any
+    /// window switches device. On failure every affected window remains blocked on
+    /// the old device; the application can retry later or exit. Suspended windows
+    /// defer surface creation until resume. Independent adopted devices are untouched.
+    /// Rebuild meshes/renderers and other application resources before returning
+    /// from the callback; `window_created` is not repeated. No device is requested
+    /// and no resource is reconstructed by this method.
+    pub fn replace_graphics(
+        &mut self,
+        old: &GraphicsContext,
+        replacement: &GraphicsContext,
+    ) -> Result<(), WindowError> {
+        self.invalidate_graphics(old);
+        if old.same_device(replacement) || replacement.is_device_lost() {
+            return Err(WindowError::InvalidReplacementDevice);
+        }
+        let staged = self
+            .state
+            .windows
+            .iter()
+            .filter(|(_, w)| w.context.graphics().same_device(old))
+            .map(|(id, w)| Ok((*id, w.context.prepare_graphics(replacement)?)))
+            .collect::<Result<Vec<_>, WindowError>>()?;
+        for (id, target) in staged {
+            let window = self.state.windows.get_mut(&id).expect("staged window");
+            window.context.install_graphics(replacement, target);
+            window.schedule.recoveries = 0;
+            window.schedule.availability_changed();
+        }
+        if self
+            .state
+            .graphics
+            .as_ref()
+            .is_some_and(|g| g.same_device(old))
+        {
+            self.state.graphics = Some(replacement.clone());
+            self.state.graphics_invalidated = false;
+        }
+        Ok(())
+    }
+
     /// Invalidates this window, also probing acquisition-level suspension.
     pub fn request_redraw(&mut self, id: WindowId) -> Result<(), UnknownWindow> {
         self.state.get_mut(id)?.schedule.invalidate();
@@ -263,6 +335,7 @@ impl<Message: 'static> Runner<Message> {
                 windows: HashMap::new(),
                 operations: VecDeque::new(),
                 graphics: self.graphics,
+                graphics_invalidated: false,
                 active: false,
                 had_window: false,
                 options: self.options,
@@ -276,6 +349,20 @@ impl<Message: 'static> Runner<Message> {
         } else {
             result.map_err(RunError::EventLoop)
         }
+    }
+}
+
+// Native wgpu can defer loss notification until polling. Drain callbacks once on
+// a GPU failure before classifying it; never wait or mask an application failure.
+fn reported_device_loss(graphics: &GraphicsContext, error: &RunError) -> bool {
+    if matches!(
+        error,
+        RunError::Acquisition { .. } | RunError::Submission { .. }
+    ) {
+        let _ = graphics.device().poll(astrelis::wgpu::PollType::Poll);
+        graphics.is_device_lost()
+    } else {
+        false
     }
 }
 
@@ -428,6 +515,27 @@ impl<H: Handler> Driver<'_, H> {
             }
             Err(source) => Err(RunError::Acquisition { window: id, source }),
         };
+        // Device loss is not a surface retry: leave policy to the queued user event.
+        if outcome.as_ref().err().is_some_and(|error| {
+            reported_device_loss(self.state.windows[&id].context.graphics(), error)
+        }) {
+            let graphics = self.state.windows[&id].context.graphics().clone();
+            if self
+                .state
+                .graphics
+                .as_ref()
+                .is_some_and(|g| g.same_device(&graphics))
+            {
+                self.state.graphics_invalidated = true;
+            }
+            for window in self.state.windows.values_mut() {
+                if window.context.graphics().same_device(&graphics) {
+                    window.context.invalidate_device();
+                    window.schedule.unavailable();
+                }
+            }
+            return;
+        }
         match outcome {
             Ok(submission) => {
                 if let Some(trace) = self
@@ -681,6 +789,31 @@ impl<H: Handler> ApplicationHandler<H::Message> for Driver<'_, H> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn deferred_loss_is_drained_before_classifying_acquisition_but_never_masks_handler_errors() {
+        let graphics = pollster::block_on(GraphicsContext::headless()).unwrap();
+        let (send, receive) = std::sync::mpsc::channel();
+        graphics.set_device_lost_callback(move |reason, _| {
+            send.send(reason).unwrap();
+        });
+        graphics.device().destroy();
+        let acquisition = RunError::Acquisition {
+            window: WindowId::dummy(),
+            source: FrameError::Validation,
+        };
+        assert!(reported_device_loss(&graphics, &acquisition));
+        assert_eq!(
+            receive.try_recv().unwrap(),
+            astrelis::wgpu::DeviceLostReason::Destroyed
+        );
+        let handler = RunError::Handler {
+            callback: Callback::Render,
+            window: Some(WindowId::dummy()),
+            source: std::io::Error::other("application failure during loss").into(),
+        };
+        assert!(!reported_device_loss(&graphics, &handler));
+    }
+
     #[test]
     fn reject_unpaced_retries_and_unbounded_recovery_configuration() {
         assert!(RunnerOptions::default().validate().is_ok());

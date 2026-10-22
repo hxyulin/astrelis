@@ -62,6 +62,35 @@ borrowing rules.
 For a visible change, run the examples it affects on your platform and compare
 before and after. Include the backend and GPU when you report the result.
 
+## Platform CI and Metal hardware
+
+CI retains Linux Clippy, tests, docs and MSRV checks. Native macOS/Windows jobs
+compile all workspace targets; a separate `wasm32-unknown-unknown` job checks both
+libraries (the desktop runner is excluded from the wasm API). Reproduce with:
+
+```sh
+cargo check --workspace --all-targets --locked
+rustup target add wasm32-unknown-unknown
+cargo check --workspace --lib --target wasm32-unknown-unknown --locked
+```
+
+The Linux lavapipe job excludes three MSAA/scissor pixel regressions. To run the
+full suite on Metal, register a trusted self-hosted Mac with the `self-hosted`,
+`macOS`, and `astrelis-gpu` labels, Rust/rustup, and a usable Metal GPU/driver.
+Dispatch CI on a reviewed revision with the `macos_gpu` input enabled. The job
+checks that the selected adapter is a Metal integrated/discrete GPU and runs
+`cargo test --workspace --locked -- --nocapture` without those exclusions.
+The adapter details appear in the log. A missing or software adapter fails the
+hardware assertion. Local equivalent:
+
+```sh
+ASTRELIS_REQUIRE_METAL_GPU=1 cargo test --workspace --locked -- --nocapture
+```
+
+Hardware execution is opt-in because persistent runners must not execute
+untrusted pull-request code. Registering the runner and dispatching the job are
+infrastructure steps; adding the workflow does not demonstrate a hardware run.
+
 ## Performance changes
 
 Benchmarks live in each crate's `benches/` and run headless, for example:

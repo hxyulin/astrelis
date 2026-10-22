@@ -27,6 +27,7 @@ pub struct GraphicsContext {
     queue: wgpu::Queue,
     pub(crate) submission_lock: std::sync::Arc<std::sync::Mutex<()>>,
     pub(crate) upload_pool: crate::uploads::UploadPool,
+    device_lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
     no_clip: std::sync::Arc<std::sync::OnceLock<wgpu::Buffer>>,
 }
 
@@ -59,7 +60,8 @@ impl GraphicsContext {
                 })
         })
     }
-    pub(crate) fn same_device(&self, other: &Self) -> bool {
+    /// Whether contexts share the same wgpu instance and device, including raw imports.
+    pub fn same_device(&self, other: &Self) -> bool {
         self.instance == other.instance && self.device == other.device
     }
 
@@ -255,7 +257,40 @@ impl GraphicsContext {
             upload_pool: Default::default(),
             submission_lock: Default::default(),
             no_clip: Default::default(),
+            device_lost: Default::default(),
         }
+    }
+
+    /// Installs an application-owned notification bridge for device loss.
+    ///
+    /// Marks this context and its clones lost before invoking `callback`. Forward
+    /// the notification to your event loop (for example with a winit proxy), then
+    /// request a replacement device and rebuild your resources there. The callback
+    /// must not capture this context or its device: that creates an ownership cycle.
+    /// It may run on a backend thread; do not perform window operations in it.
+    ///
+    /// On native backends this replaces wgpu's single device-loss callback. Replacing
+    /// it through the raw device bypasses this tracking. Install once before GPU work;
+    /// independently imported contexts do not share the tracking flag. No polling,
+    /// redraw scheduling, device replacement, or resource rebuilding is performed.
+    /// Native callbacks may be deferred until device polling; custom loops should
+    /// use a nonblocking raw `device().poll(wgpu::PollType::Poll)` on GPU failures.
+    pub fn set_device_lost_callback(
+        &self,
+        callback: impl Fn(wgpu::DeviceLostReason, String) + Send + 'static,
+    ) {
+        let lost = self.device_lost.clone();
+        self.device
+            .set_device_lost_callback(move |reason, message| {
+                lost.store(true, std::sync::atomic::Ordering::Release);
+                callback(reason, message);
+            });
+    }
+
+    /// Whether the callback installed by [`Self::set_device_lost_callback`] fired.
+    /// This is a permanent flag for this device, not a backend poll or health probe.
+    pub fn is_device_lost(&self) -> bool {
+        self.device_lost.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Returns the wgpu instance for adapter discovery and custom surface creation.
@@ -276,5 +311,55 @@ impl GraphicsContext {
     /// Returns the shared wgpu queue for uploads, submission, and callbacks.
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loss_callback_marks_all_clones_before_notification() {
+        let graphics = pollster::block_on(GraphicsContext::headless()).unwrap();
+        let clone = graphics.clone();
+        let (send, receive) = std::sync::mpsc::channel();
+        // Capture only the flag, never the device/context itself.
+        let lost = graphics.device_lost.clone();
+        graphics.set_device_lost_callback(move |reason, message| {
+            send.send((
+                reason,
+                message,
+                lost.load(std::sync::atomic::Ordering::Acquire),
+            ))
+            .unwrap();
+        });
+        assert!(graphics.same_device(&clone));
+        assert!(!clone.is_device_lost());
+        graphics.device().destroy();
+        let _ = graphics.device().poll(wgpu::PollType::Poll);
+        let (reason, _, already_lost) = receive
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(reason, wgpu::DeviceLostReason::Destroyed);
+        assert!(already_lost);
+        assert!(clone.is_device_lost());
+        let replacement = pollster::block_on(GraphicsContext::headless()).unwrap();
+        assert!(!graphics.same_device(&replacement));
+        assert!(!replacement.is_device_lost());
+    }
+
+    #[test]
+    fn required_metal_hardware_is_available() {
+        if std::env::var_os("ASTRELIS_REQUIRE_METAL_GPU").is_none() {
+            return;
+        }
+        let graphics = pollster::block_on(GraphicsContext::headless()).unwrap();
+        let info = graphics.adapter().get_info();
+        eprintln!("Hardware CI adapter: {info:?}");
+        assert_eq!(info.backend, wgpu::Backend::Metal);
+        assert!(matches!(
+            info.device_type,
+            wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::DiscreteGpu
+        ));
     }
 }
