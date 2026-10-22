@@ -97,3 +97,7 @@ harness = false
 [[bench]]
 name = "pipeline_cache"
 harness = false
+
+[[bench]]
+name = "mixed_ui"
+harness = false
