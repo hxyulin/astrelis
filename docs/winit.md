@@ -185,9 +185,11 @@ can keep an adopted native window alive. window_closed lets the application rele
 its own per-window state/handles.
 
 RunnerOptions initially contains exit_on_last_window (true), retry_delay (16 ms)
-and maximum consecutive surface recoveries (3). Last-window exit applies after a
+and maximum_consecutive_surface_recoveries (3 fast attempts before backoff). Last-window exit applies after a
 managed window has existed; a background/no-window app can opt out. Recovery counts
-reset after successful presentation. Zero retry delay and zero recovery limit are
+reset after successful presentation. The recovery field retains its original name,
+but now selects the number of attempts at retry_delay, not a terminal limit. Zero
+retry delay and zero fast-attempt count are
 rejected at startup rather than enabling a busy retry loop.
 
 ## Handler
@@ -263,7 +265,7 @@ tracking or the next redraw after a successful submission, with mutable context
 available again. It reports queued GPU work and a presentation request; actual OS
 display completion is outside that callback. An error
 drops the recording without managed submission/presentation. A successful render
-must clear the surface; returning Ok without initializing it stops the runner with
+must clear the surface; returning Ok without initializing it reports
 a Render handler error carrying UninitializedFrame, since presenting would show
 undefined contents. Use PrepareAction::Skip to draw nothing. During render,
 schedule via a proxy/native redraw request or schedule the next deadline in
@@ -322,15 +324,82 @@ there is no per-draw scheduling lookup or layout work. RenderFormat clones occur
 only when compatibility changes; native window queries occur on lifecycle updates.
 
 Retry keeps the window dirty and schedules bounded-frequency acquisition attempts.
-Suspended waits for availability/redraw triggers. SurfaceLost drops the old target,
-recreates with saved settings, invalidates and schedules a retry; recurring loss
-beyond the recovery limit is terminal. Validation, recreation and submission
-failures are returned as structured RunError with window/callback context.
-Handler errors terminate the runner and retain the original error as a source.
-Before finish, any acquired recording is abandoned. Errors in submitted/shutdown
-do not roll back earlier successful submissions. The first failure is returned; a shutdown-hook failure
-is primary only if no earlier failure exists. Device replacement follows the explicit
-application policy described below; surface recovery never requests a new device.
+Suspended waits for availability/redraw triggers. SurfaceLost schedules replacement
+from the window with saved settings, including presentation latency. After the fast
+attempt count, the delay doubles up to max(retry_delay, 1 second). Both acquisition
+loss and failed recreation (including resume) reach Handler::error; their default
+action is Continue.
+Retries continue while the window exists and is available. Closing, suspension,
+zero size and occlusion stop acquisition attempts; successful submission resets the
+loss count. A failed recreation remains eligible for paced recovery even though
+there is no target. Repeated loss can outlast a compositor/driver transition, so a
+fixed small retry count is not evidence of an unrecoverable error.
+
+Handler::error(&mut self, &mut AppContext, &RunError) -> ErrorAction is additive.
+ErrorAction::Exit retains the first failure for Runner::run; ErrorAction::Continue
+skips failed work. Default policy exits for application callbacks, acquisition
+validation and submission errors. Override it to continue after prepare/render
+failures or a transient validation/internal diagnostic. Failed prepare/render/finish
+work is retried after retry_delay, including OnDemand windows. Returning Skip from
+prepare still waits for an invalidation. Errors in submitted cannot undo submission;
+continuing paces the next attempt. Lifecycle/input failures are also reported, but
+continuing does not replay the callback or roll back application mutations.
+
+Astrelis installs device-loss and uncaptured-error callbacks, logs diagnostics via
+the log facade, and keeps a bounded queue shared by GraphicsContext clones. The
+runner polls the device without waiting and drains diagnostics before rendering and
+before sleeping. While any managed window exists, idle diagnostic delivery is
+checked at least every 100 ms, including for minimized/suspended windows. This adds
+an idle wake, not a redraw. Shared-device diagnostics identify the window whose
+context drained them; they apply to every resource on that device. Core/custom-loop
+users call GraphicsContext::take_gpu_events() regularly and drive device progress.
+All uncaptured errors are logged; at most 64 nonfatal diagnostics are retained,
+and a fatal diagnostic has reserved storage even when that queue is full.
+
+With the default diagnostic bridge, device loss and out-of-memory are fatal
+(RunError::can_continue returns false), even if the handler requests Continue. The handler is notified before clean
+shutdown and Runner::run returns RunError::Graphics. Installing
+`GraphicsContext::set_device_lost_callback` explicitly replaces device-loss
+queue delivery with the application bridge described below; uncaptured-error
+diagnostics, including fatal out-of-memory, remain enabled. This avoids
+silently trying to reuse invalid application resources. To restart, create a fresh
+GraphicsContext and rebuild all surfaces, framebuffers, renderers/Painter/text
+atlases, prepared text/draw geometry, meshes, textures, buffers, materials, bind
+groups, pipelines and custom GPU resources. CPU models, text layouts and font
+sources can be retained and used to upload again. Native windows may be retained
+by external Arc owners and adopted into a new runner/event loop when supported by
+the platform; rebuilding an event loop in-process is platform dependent. Automatic
+device/resource reconstruction is not provided.
+
+GraphicsContext::from_wgpu replaces existing device error/loss callbacks with
+Astrelis reporting; application error scopes still capture matching scoped errors.
+Installing another callback through the raw device replaces Astrelis reporting.
+The library installs no logger or subscriber; applications select a log backend.
+
+SurfaceSettings::desired_maximum_frame_latency(n) and the matching SurfaceOptions
+builder select desired queued frames next to present_mode. The default is 2,
+matching wgpu's previous default; zero becomes one and wgpu clamps to supported
+values. One can reduce queued latency but may serialize CPU/GPU work. Settings
+survive resize, replacement and suspension.
+
+Enable the opt-in gles feature on astrelis or astrelis-winit to compile wgpu/gles.
+Runner-created contexts pass the event loop's OwnedDisplayHandle into the wgpu
+instance descriptor. Wgpu 30 requires this for GLES presentation, especially on
+Wayland; Vulkan/Metal/DX12 ignore it. For custom async initialization use
+WindowContext::with_display(window, settings, event_loop.owned_display_handle()).
+WindowContext::new and GraphicsContext::with_surface retain their signatures and
+create instances without a display; use with_display or
+GraphicsContext::with_surface_instance with a display-configured instance for
+native GLES. Additional surfaces must use that same display connection.
+
+Astrelis-created instances use InstanceDescriptor::with_env (WGPU_BACKEND and
+backend-specific options). Adapter requests use WGPU_POWER_PREF; native requests
+also honour WGPU_ADAPTER_NAME with a case-insensitive substring match, restricted
+to surface-compatible adapters. A requested name without a match returns
+Error::RequestedAdapterNotFound instead of panicking or choosing another adapter.
+Caller-created instances preserve their configuration; GraphicsContext::request
+still applies adapter environment selection. Runtime GLES on X11/Wayland requires
+Linux driver validation in addition to a build with the feature enabled.
 
 ## Device loss and shared-device replacement
 
@@ -385,7 +454,8 @@ raw callback replaces the bridge and bypasses its flag. Separately calling `from
 on the same raw device creates independent tracking; use context clones when sharing
 notification state. Custom loops should perform a nonblocking device poll on GPU
 failures to deliver deferred native notifications. With raw callbacks, explicitly
-invalidate every affected window on notification. The library does not poll devices or reconstruct arbitrary resources.
+invalidate every affected window on notification. The runner also polls devices without waiting for diagnostic delivery. Custom loops
+choose their own progress policy; neither path reconstructs arbitrary resources.
 
 ## Consumer example
 

@@ -83,6 +83,26 @@ impl WindowContext {
         .await?;
         Self::from_target(graphics, window, settings, target)
     }
+    /// Selects graphics using a native display connection, required for GLES presentation.
+    pub async fn with_display(
+        window: Arc<Window>,
+        settings: SurfaceSettings,
+        display: winit::event_loop::OwnedDisplayHandle,
+    ) -> Result<Self, WindowError> {
+        let metrics = WindowMetrics::from_window(&window)?;
+        let instance = astrelis::wgpu::Instance::new(
+            astrelis::wgpu::InstanceDescriptor::new_with_display_handle(Box::new(display))
+                .with_env(),
+        );
+        let (graphics, target) = GraphicsContext::with_surface_instance(
+            &instance,
+            window.clone(),
+            settings.surface_options(metrics.physical_size()),
+        )
+        .await?;
+        Self::from_target(graphics, window, settings, target)
+    }
+
     /// Creates another window surface on an explicitly selected/shared device.
     /// Incompatible surfaces fail rather than silently selecting another device.
     pub fn with_graphics(
@@ -162,12 +182,14 @@ impl WindowContext {
     }
     /// Cached native eligibility, without attempting swapchain acquisition.
     pub fn can_present(&self) -> bool {
+        self.can_recover() && self.target.is_some()
+    }
+    pub(crate) fn can_recover(&self) -> bool {
         self.lifecycle.active
             && !self.device_unavailable()
             && self.visible
             && !self.occluded
             && self.metrics.has_area()
-            && self.target.is_some()
     }
     /// Updates cached resize/DPI/occlusion state before forwarding a native event.
     /// Unchanged size notifications do not replace attachments.
@@ -233,11 +255,12 @@ impl WindowContext {
         self.availability_invalidated = true;
     }
     /// Restores presentation after suspension; repeated active calls are harmless.
+    /// A failed recreation leaves the lifecycle active, with no presentation target.
     pub fn resume(&mut self) -> Result<(), WindowError> {
+        self.lifecycle.resume();
         if !self.device_unavailable() && self.target.is_none() {
             self.recreate()?;
         }
-        self.lifecycle.resume();
         Ok(())
     }
     pub(crate) fn recreate(&mut self) -> Result<(), WindowError> {
@@ -495,7 +518,13 @@ mod tests {
             state.resume();
             let mut schedule = Schedule::default();
             schedule.mode(RedrawMode::Continuous);
-            schedule.retry(now, Duration::from_millis(16));
+            // Surface recovery may already be deep into backoff when the device dies.
+            for _ in 0..10 {
+                schedule.lost(3);
+            }
+            let delay = schedule.recovery_delay(Duration::from_millis(16), 3);
+            assert_eq!(delay, Duration::from_secs(1));
+            schedule.retry(now, delay);
             schedule.at(now);
             state.invalidate();
             for tick in 0..5 {
@@ -510,7 +539,12 @@ mod tests {
                 assert_eq!(schedule.wake(eligible), None);
             }
             state.replaced();
+            schedule.recoveries = 0;
             schedule.availability_changed();
+            assert_eq!(
+                schedule.recovery_delay(Duration::from_millis(16), 3),
+                Duration::from_millis(16)
+            );
             assert!(schedule.request_native(now + Duration::from_secs(6), true));
         }
     }

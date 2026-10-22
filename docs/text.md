@@ -259,9 +259,10 @@ Preparing B must not alter a retained A or commands already recorded from A. Atl
 regions are leased by prepared resources and independent recordings. Cache eviction,
 clear, growth and reuse must honor those leases, then recycle storage only when
 queue ordering or completion makes it safe. New pages avoid silently changing the
-UVs or texture dimensions of retained allocations. Document memory budgets and an
-explicit failure when space cannot be reclaimed safely, rather than an implicit
-blocking wait in a draw. Keep CPU raster caches bounded too.
+UVs or texture dimensions of retained allocations. Memory budgets are bounded;
+when every page is leased, omit glyphs that require new space and report their
+indices, without blocking a draw or invalidating existing text. Keep CPU raster
+caches bounded too.
 
 Glyph cache identity includes font source/face and applicable instance settings,
 glyph ID, physical raster size, raster phase, and raster settings. Later distance
@@ -378,21 +379,25 @@ quarter in one pass; a full page budget reclaims the least recently used unlease
 page. Each page counts the cache entries pointing into it, so neither path scans
 the cache per glyph.
 
-`AtlasFull` is recoverable and never waits. The renderer and earlier prepared texts
-stay valid; drop obsolete texts and drive queue/device progress, then retry.
+When all pages are leased, preparation succeeds with the glyphs that fit and
+omits glyphs requiring new space. `PreparedText::skipped_glyphs()` reports their
+layout indices (also used for glyphs without an image). A warning is logged when
+atlas pressure begins. `PreparedText::atlas_full()` distinguishes pressure from
+blank/unsupported glyphs so callers can schedule a retry. Omitted glyphs are not cached as blank: prepare again after
+dropping obsolete texts and driving queue/device progress to restore them. Keep
+layout metrics and hit testing unchanged. No texture is overwritten while leased,
+no blocking GPU wait is introduced, and allocation stays inside the page budget.
+`TextRenderError::AtlasFull` is handled inside synchronous
+preparation; incremental worker commits retain it as a retryable error. Invalid options, oversized glyphs and invalid raster data still error.
+
 `trim()` releases every unleased page with its cache entries and reports a
-`TextTrim { pages, atlas_bytes, cached_glyphs }`; it is also the way to return
-atlas memory when text goes idle. `set_max_pages(n)` raises (or lowers) the budget
-at runtime; `options()` reports it:
+`TextTrim { pages, atlas_bytes, cached_glyphs }`; use it to return atlas memory when
+text goes idle. `set_max_pages(n)` changes the budget; `options()` reports it.
+Retained incomplete text stays incomplete until the caller prepares it again:
 
 ```rust
-let prepared = match renderer.prepare_text(&layout, raster) {
-    Err(TextRenderError::AtlasFull) => {
-        renderer.trim();
-        renderer.prepare_text(&layout, raster)?
-    }
-    result => result?,
-};
+let prepared = renderer.prepare_text(&layout, raster)?;
+let needs_retry = prepared.atlas_full();
 ```
 
 Preparation failures may populate caches but never invalidate earlier prepared text.
@@ -448,7 +453,8 @@ A layout owns its font sources; Painter does not own TextSystem or TextBuffer.
 composes the draw transform with the session transform, including the draw origin,
 then delegates validation, clipping, viewport conversion, batching, and allocation
 leases to TextRenderer. Prepared text from another renderer on the same device is
-usable. Resource preparation returns `TextRenderError` for raster/atlas failures.
+usable. Resource preparation returns `TextRenderError` for invalid raster/options or oversized
+glyphs; atlas pressure produces incomplete prepared text with `atlas_full()` set.
 Pipeline preparation and drawing return the common `Error`; failed draws cannot
 report atlas exhaustion or font rasterization failures.
 
@@ -524,7 +530,7 @@ frame CPU separately. See the [batched preparation report](performance/text-batc
 The [screen-sized workload baseline](performance/text-workloads.md) extends the
 initial repeated-glyph measurements with visible paragraphs, hundreds of labels,
 ordered coverage/color page changes, content updates, 1,822 distinct shaped glyph
-keys, and raster-size churn with explicit AtlasFull recovery. Readbacks verify visible
+keys, and raster-size churn with bounded atlas reclamation. Readbacks verify visible
 output. Optional timestamps are checked for completeness; local Metal results were
 unreliable and are withheld rather than treated as GPU execution measurements.
 The [quality gallery](performance/text-quality.md) captures 1x/2x DPI and 1x/4x MSAA
@@ -607,3 +613,15 @@ text to validate arbitrary selection endpoints, though it builds cells/rectangle
 only for retained lines. `measure()` still evaluates a full snapshot; use the
 viewport snapshot's exact `size()` for scroll bounds without invoking it.
 See [viewport measurements](performance/text-viewport.md) for reproducible costs.
+
+### Worker commits under atlas pressure
+
+Synchronous `prepare_text` omits new images when all atlas pages are leased and
+sets `PreparedText::atlas_full()`. Incremental `commit_glyphs` instead returns
+`TextRenderError::AtlasFull` with the failed key still pending. Earlier committed
+keys retain their leases; `finish_glyph_upload` returns `PreparationIncomplete`
+until every key commits. Release obsolete text and drive device progress, trim,
+or raise `max_pages`, then retry with an explicit upload budget. Synchronous
+omissions are never cached as blank glyphs and cannot poison later worker commits.
+Finalization uses only the upload's resolved images, even after cache eviction;
+it never generates missing glyphs or silently switches to partial output.

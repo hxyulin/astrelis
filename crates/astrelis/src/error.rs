@@ -8,6 +8,8 @@ use std::{error, fmt};
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
+    /// No compatible adapter matched WGPU_ADAPTER_NAME.
+    RequestedAdapterNotFound(String),
     /// Point capacity must be nonzero.
     InvalidPointCapacity,
     /// Point storage exceeds buffer/binding or draw-index limits.
@@ -290,6 +292,7 @@ impl fmt::Display for Error {
             Self::InvalidPathDraw => f.write_str("path color/transform/bounds must be finite and alpha in 0..=1"),
             Self::InvalidAttachments => f.write_str("pass attachments must have compatible formats, dimensions, and samples"),
             Self::ExpectedSingleColor => f.write_str("this renderer requires a single color output at slot zero"),
+            Self::RequestedAdapterNotFound(name) => write!(f, "no compatible adapter matched {name:?}"),
             Self::Validation(error) => write!(f, "GPU validation failed: {error}"),
             Self::InvalidGeometry => f.write_str("invalid geometry layout, buffer size, or draw range"),
             Self::InvalidTextureSize { width, height, max } => write!(f, "texture size {width}x{height} must be nonzero and fit {max}"),

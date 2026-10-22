@@ -22,6 +22,9 @@ pub struct SurfaceOptions {
     /// and `AutoNoVsync` let wgpu pick a supported mode; other modes must be offered by
     /// the surface.
     pub present_mode: wgpu::PresentMode,
+    /// Desired queued frame count, clamped by wgpu to backend support. Default 2.
+    /// Values below one are raised to one; one may serialize CPU and GPU work.
+    pub desired_maximum_frame_latency: u32,
     /// How the compositor blends the window with what is behind it, default `Auto`
     /// (opaque where offered). Transparent windows need `PreMultiplied` or
     /// `PostMultiplied`; non-`Auto` modes must be offered by the surface.
@@ -37,6 +40,7 @@ impl SurfaceOptions {
             depth_stencil_format: None,
             depth_stencil_usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             present_mode: wgpu::PresentMode::Fifo,
+            desired_maximum_frame_latency: 2,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
         }
     }
@@ -44,6 +48,12 @@ impl SurfaceOptions {
     /// Selects presentation pacing, for example `Mailbox` or `AutoNoVsync` for low latency.
     pub const fn present_mode(mut self, mode: wgpu::PresentMode) -> Self {
         self.present_mode = mode;
+        self
+    }
+
+    /// Selects the desired queued frame count. Values below one become one.
+    pub const fn desired_maximum_frame_latency(mut self, latency: u32) -> Self {
+        self.desired_maximum_frame_latency = latency;
         self
     }
 
@@ -148,6 +158,7 @@ impl<'window> RenderTarget<'window> {
             depth_stencil_format,
             depth_stencil_usage,
             present_mode,
+            desired_maximum_frame_latency,
             alpha_mode,
         } = options;
         validate_size(graphics, width, height)?;
@@ -159,6 +170,7 @@ impl<'window> RenderTarget<'window> {
             .get_default_config(graphics.adapter(), width.max(1), height.max(1))
             .ok_or(Error::UnsupportedSurface)?;
         validate_presentation(&capabilities, present_mode, alpha_mode)?;
+        configuration.desired_maximum_frame_latency = desired_maximum_frame_latency.max(1);
         let view_formats = graphics
             .adapter()
             .get_downlevel_capabilities()

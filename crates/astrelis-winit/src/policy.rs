@@ -87,6 +87,7 @@ pub struct SurfaceSettings {
     depth_stencil_format: Option<wgpu::TextureFormat>,
     depth_stencil_usage: wgpu::TextureUsages,
     present_mode: wgpu::PresentMode,
+    desired_maximum_frame_latency: u32,
     alpha_mode: wgpu::CompositeAlphaMode,
 }
 impl Default for SurfaceSettings {
@@ -102,6 +103,7 @@ impl SurfaceSettings {
             depth_stencil_format: None,
             depth_stencil_usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             present_mode: wgpu::PresentMode::Fifo,
+            desired_maximum_frame_latency: 2,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
         }
     }
@@ -110,6 +112,14 @@ impl SurfaceSettings {
     #[must_use]
     pub const fn present_mode(mut self, mode: wgpu::PresentMode) -> Self {
         self.present_mode = mode;
+        self
+    }
+
+    /// Selects desired queued frames, retained across recovery. Default 2.
+    /// See [`SurfaceOptions::desired_maximum_frame_latency`].
+    #[must_use]
+    pub const fn desired_maximum_frame_latency(mut self, latency: u32) -> Self {
+        self.desired_maximum_frame_latency = latency;
         self
     }
 
@@ -151,6 +161,7 @@ impl SurfaceSettings {
             depth_stencil_format: self.depth_stencil_format,
             depth_stencil_usage: self.depth_stencil_usage,
             present_mode: self.present_mode,
+            desired_maximum_frame_latency: self.desired_maximum_frame_latency,
             alpha_mode: self.alpha_mode,
         }
     }
@@ -203,9 +214,12 @@ mod tests {
         assert_eq!(defaults, SurfaceOptions::new(4, 3));
         let options = SurfaceSettings::new()
             .present_mode(wgpu::PresentMode::Mailbox)
+            .desired_maximum_frame_latency(1)
             .alpha_mode(wgpu::CompositeAlphaMode::PreMultiplied)
             .surface_options(PhysicalSize::new(4, 3));
         assert_eq!(options.present_mode, wgpu::PresentMode::Mailbox);
+        assert_eq!(defaults.desired_maximum_frame_latency, 2);
+        assert_eq!(options.desired_maximum_frame_latency, 1);
         assert_eq!(options.alpha_mode, wgpu::CompositeAlphaMode::PreMultiplied);
     }
 }

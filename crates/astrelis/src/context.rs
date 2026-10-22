@@ -3,6 +3,55 @@ use crate::{
     SurfaceOptions, Texture, TextureOptions, Vertex,
 };
 
+/// Asynchronous device failure reported without invoking wgpu's panic handler.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum GpuEvent {
+    /// The device cannot be used again. All device-owned resources must be rebuilt.
+    DeviceLost {
+        /// Backend reason, including explicit destruction.
+        reason: wgpu::DeviceLostReason,
+        /// Backend diagnostic.
+        message: String,
+    },
+    /// Validation diagnostic outside an application error scope.
+    Validation(String),
+    /// Internal backend diagnostic outside an application error scope.
+    Internal(String),
+    /// The device exhausted memory. Continuing on this device is unsafe.
+    OutOfMemory(String),
+}
+impl std::fmt::Display for GpuEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DeviceLost { reason, message } => {
+                write!(f, "device lost ({reason:?}): {message}")
+            }
+            Self::Validation(message) => write!(f, "GPU validation: {message}"),
+            Self::Internal(message) => write!(f, "GPU internal error: {message}"),
+            Self::OutOfMemory(message) => write!(f, "GPU out of memory: {message}"),
+        }
+    }
+}
+impl std::error::Error for GpuEvent {}
+
+#[derive(Debug, Default)]
+struct GpuEvents {
+    // Bound diagnostics during repeated validation failures, preserving device loss.
+    errors: std::collections::VecDeque<GpuEvent>,
+    lost: Option<GpuEvent>,
+}
+impl GpuEvents {
+    fn push(&mut self, event: GpuEvent) {
+        log::error!("{event}");
+        match event {
+            GpuEvent::DeviceLost { .. } | GpuEvent::OutOfMemory(_) => self.lost = Some(event),
+            _ if self.errors.len() < 64 => self.errors.push_back(event),
+            _ => {}
+        }
+    }
+}
+
 /// Shared wgpu initialization and GPU resources for one or more render targets.
 ///
 /// A context owns a [`wgpu::Instance`], a selected [`wgpu::Adapter`], and its
@@ -21,6 +70,7 @@ use crate::{
 /// queries. Use [`Self::from_wgpu`] for application-controlled device configuration.
 #[derive(Clone, Debug)]
 pub struct GraphicsContext {
+    events: std::sync::Arc<std::sync::Mutex<GpuEvents>>,
     instance: wgpu::Instance,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
@@ -83,6 +133,8 @@ impl GraphicsContext {
     /// dimension creates a suspended target. Window creation and event handling
     /// remain application-owned. Target creation validates MSAA and caches usable
     /// counts before returning; unsupported requests do not fall back implicitly.
+    /// Astrelis-created instances honour wgpu environment options. Native GLES
+    /// presentation requires [`Self::with_surface_instance`] with a display handle.
     /// Passing an owned handle such as `Arc<Window>` allows a `'static` target;
     /// passing a borrowed window ties the target's lifetime to that borrow.
     ///
@@ -95,11 +147,25 @@ impl GraphicsContext {
         window: impl Into<wgpu::SurfaceTarget<'window>>,
         options: SurfaceOptions,
     ) -> Result<(Self, RenderTarget<'window>), Error> {
-        let instance = wgpu::Instance::default();
+        Self::with_surface_instance(
+            &wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env()),
+            window,
+            options,
+        )
+        .await
+    }
+
+    /// Initializes a surface on a caller-configured instance, selecting a compatible adapter.
+    /// For native GLES presentation, supply an instance with its display handle.
+    pub async fn with_surface_instance<'window>(
+        instance: &wgpu::Instance,
+        window: impl Into<wgpu::SurfaceTarget<'window>>,
+        options: SurfaceOptions,
+    ) -> Result<(Self, RenderTarget<'window>), Error> {
         let surface = instance
             .create_surface(window)
             .map_err(Error::CreateSurface)?;
-        let graphics = Self::request(&instance, Some(&surface)).await?;
+        let graphics = Self::request(instance, Some(&surface)).await?;
         let target = RenderTarget::surface(&graphics, surface, options)?;
         Ok((graphics, target))
     }
@@ -115,7 +181,11 @@ impl GraphicsContext {
     ///
     /// Returns an error if no suitable adapter or device can be created.
     pub async fn headless() -> Result<Self, Error> {
-        Self::request(&wgpu::Instance::default(), None).await
+        Self::request(
+            &wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle().with_env()),
+            None,
+        )
+        .await
     }
 
     /// Creates and configures another surface using this context's device.
@@ -215,6 +285,8 @@ impl GraphicsContext {
     /// Pass `Some(&surface)` to select an adapter compatible with an existing
     /// surface created by this instance; `None` selects without presentation
     /// constraints. This is the initialization path for custom instance settings.
+    /// Uses WGPU_POWER_PREF and, on native platforms, WGPU_ADAPTER_NAME.
+    /// An unmatched explicit adapter name returns an error without a fallback.
     ///
     /// # Errors
     ///
@@ -223,13 +295,40 @@ impl GraphicsContext {
         instance: &wgpu::Instance,
         surface: Option<&wgpu::Surface<'_>>,
     ) -> Result<Self, Error> {
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                compatible_surface: surface,
-                ..Default::default()
-            })
-            .await
-            .map_err(Error::Adapter)?;
+        let options = wgpu::RequestAdapterOptions {
+            compatible_surface: surface,
+            power_preference: wgpu::PowerPreference::from_env().unwrap_or_default(),
+            ..Default::default()
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        let selected = if let Ok(name) = std::env::var("WGPU_ADAPTER_NAME") {
+            Some(
+                instance
+                    .enumerate_adapters(wgpu::Backends::all())
+                    .await
+                    .into_iter()
+                    .find(|a| {
+                        a.get_info()
+                            .name
+                            .to_lowercase()
+                            .contains(&name.to_lowercase())
+                            && surface.is_none_or(|s| a.is_surface_supported(s))
+                    })
+                    .ok_or(Error::RequestedAdapterNotFound(name))?,
+            )
+        } else {
+            None
+        };
+        #[cfg(target_arch = "wasm32")]
+        let selected: Option<wgpu::Adapter> = None;
+        let adapter = if let Some(adapter) = selected {
+            adapter
+        } else {
+            instance
+                .request_adapter(&options)
+                .await
+                .map_err(Error::Adapter)?
+        };
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("Astrelis device"),
@@ -245,13 +344,39 @@ impl GraphicsContext {
     /// The caller must supply the instance that created the adapter, the adapter
     /// that created the device, and the queue returned with that device. Optional
     /// features and device limits remain under the application's control.
+    /// Installs Astrelis diagnostics, replacing existing device error/loss callbacks.
+    /// Application error scopes still take precedence for scoped errors.
     pub fn from_wgpu(
         instance: wgpu::Instance,
         adapter: wgpu::Adapter,
         device: wgpu::Device,
         queue: wgpu::Queue,
     ) -> Self {
+        let events = std::sync::Arc::new(std::sync::Mutex::new(GpuEvents::default()));
+        let uncaptured = events.clone();
+        device.on_uncaptured_error(std::sync::Arc::new(move |error| {
+            let message = error.to_string();
+            let event = match error {
+                wgpu::Error::Validation { .. } => GpuEvent::Validation(message),
+                wgpu::Error::Internal { .. } => GpuEvent::Internal(message),
+                wgpu::Error::OutOfMemory { .. } => GpuEvent::OutOfMemory(message),
+            };
+            uncaptured
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(event);
+        }));
+        let device_lost = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = device_lost.clone();
+        let lost = events.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            flag.store(true, std::sync::atomic::Ordering::Release);
+            lost.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(GpuEvent::DeviceLost { reason, message });
+        });
         Self {
+            events,
             instance,
             adapter,
             device,
@@ -259,7 +384,7 @@ impl GraphicsContext {
             upload_pool: Default::default(),
             submission_lock: Default::default(),
             no_clip: Default::default(),
-            device_lost: Default::default(),
+            device_lost,
             no_clip_stack: Default::default(),
             clip_layout: Default::default(),
         }
@@ -273,6 +398,9 @@ impl GraphicsContext {
     /// must not capture this context or its device: that creates an ownership cycle.
     /// It may run on a backend thread; do not perform window operations in it.
     ///
+    /// Replaces default device-loss queue delivery with this application bridge, so
+    /// the runner leaves recovery to your callback instead of exiting on that event.
+    /// Uncaptured-error diagnostics (including fatal out-of-memory) remain enabled.
     /// On native backends this replaces wgpu's single device-loss callback. Replacing
     /// it through the raw device bypasses this tracking. Install once before GPU work;
     /// independently imported contexts do not share the tracking flag. No polling,
@@ -287,14 +415,25 @@ impl GraphicsContext {
         self.device
             .set_device_lost_callback(move |reason, message| {
                 lost.store(true, std::sync::atomic::Ordering::Release);
+                log::error!("device lost ({reason:?}): {message}");
                 callback(reason, message);
             });
     }
 
-    /// Whether the callback installed by [`Self::set_device_lost_callback`] fired.
+    /// Whether the default or application device-loss callback fired.
     /// This is a permanent flag for this device, not a backend poll or health probe.
     pub fn is_device_lost(&self) -> bool {
         self.device_lost.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Drains pending diagnostics shared by all clones, with fatal diagnostics first.
+    /// Custom loops should poll this regularly, including while presentation is idle.
+    /// At most 64 uncaptured errors are retained; all errors are logged immediately.
+    pub fn take_gpu_events(&self) -> Vec<GpuEvent> {
+        let mut events = self.events.lock().unwrap_or_else(|e| e.into_inner());
+        let mut result: Vec<_> = events.lost.take().into_iter().collect();
+        result.extend(events.errors.drain(..));
+        result
     }
 
     /// Returns the wgpu instance for adapter discovery and custom surface creation.
@@ -339,6 +478,20 @@ mod tests {
         });
         assert!(graphics.same_device(&clone));
         assert!(!clone.is_device_lost());
+        // Installing the loss bridge must preserve the remote uncaptured-error policy.
+        let _invalid = graphics.device().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Astrelis explicit loss bridge diagnostics"),
+            size: 4,
+            usage: wgpu::BufferUsages::empty(),
+            mapped_at_creation: false,
+        });
+        graphics.device().poll(wgpu::PollType::Poll).unwrap();
+        assert!(
+            clone
+                .take_gpu_events()
+                .iter()
+                .any(|e| matches!(e, GpuEvent::Validation(_)))
+        );
         graphics.device().destroy();
         let _ = graphics.device().poll(wgpu::PollType::Poll);
         let (reason, _, already_lost) = receive
@@ -347,6 +500,8 @@ mod tests {
         assert_eq!(reason, wgpu::DeviceLostReason::Destroyed);
         assert!(already_lost);
         assert!(clone.is_device_lost());
+        // The explicit bridge owns loss policy, while validation diagnostics remain.
+        assert!(graphics.take_gpu_events().is_empty());
         let replacement = pollster::block_on(GraphicsContext::headless()).unwrap();
         assert!(!graphics.same_device(&replacement));
         assert!(!replacement.is_device_lost());
@@ -365,5 +520,54 @@ mod tests {
             info.device_type,
             wgpu::DeviceType::IntegratedGpu | wgpu::DeviceType::DiscreteGpu
         ));
+    }
+
+    #[test]
+    fn diagnostics_are_bounded_and_reserve_fatal_delivery() {
+        let mut events = GpuEvents::default();
+        for _ in 0..100 {
+            events.push(GpuEvent::Validation("bad frame".into()));
+        }
+        events.push(GpuEvent::OutOfMemory("allocation".into()));
+        assert_eq!(events.errors.len(), 64);
+        assert!(matches!(events.lost, Some(GpuEvent::OutOfMemory(_))));
+        events.push(GpuEvent::DeviceLost {
+            reason: wgpu::DeviceLostReason::Destroyed,
+            message: "destroyed".into(),
+        });
+        assert!(matches!(events.lost, Some(GpuEvent::DeviceLost { .. })));
+    }
+
+    #[test]
+    fn uncaptured_validation_and_device_loss_are_reported_without_panicking() {
+        pollster::block_on(async {
+            let graphics = GraphicsContext::headless().await.unwrap();
+            let clone = graphics.clone();
+            // Empty usages are invalid; this must use our callback rather than panic.
+            let _invalid = graphics.device().create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Astrelis diagnostics test"),
+                size: 4,
+                usage: wgpu::BufferUsages::empty(),
+                mapped_at_creation: false,
+            });
+            graphics.device().poll(wgpu::PollType::Poll).unwrap();
+            assert!(
+                clone
+                    .take_gpu_events()
+                    .iter()
+                    .any(|e| matches!(e, GpuEvent::Validation(_)))
+            );
+            assert!(graphics.take_gpu_events().is_empty());
+            graphics.device().destroy();
+            graphics.device().poll(wgpu::PollType::Poll).unwrap();
+            assert!(clone.is_device_lost());
+            assert!(graphics.take_gpu_events().iter().any(|e| matches!(
+                e,
+                GpuEvent::DeviceLost {
+                    reason: wgpu::DeviceLostReason::Destroyed,
+                    ..
+                }
+            )));
+        });
     }
 }

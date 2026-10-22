@@ -71,7 +71,8 @@
 //! Retryable acquisition is paced; known occlusion, zero size, and suspension wait
 //! for availability. Renderers and settings belong to the application and targets,
 //! respectively. The runner introduces no default pass, clear color, or explicit GPU completion wait.
-//! Device loss notification uses `GraphicsContext::set_device_lost_callback` and a
+//! Default GPU diagnostics reach `Handler::error`; queued loss ends the run cleanly.
+//! Application-controlled device loss notification uses `GraphicsContext::set_device_lost_callback` and a
 //! native proxy. `AppContext::invalidate_graphics` blocks shared windows until an
 //! explicit `AppContext::replace_graphics`; applications request devices and rebuild
 //! resources. See the `device_recovery` example. Async cancellation remains app policy.
@@ -96,7 +97,7 @@ mod window;
 pub use astrelis;
 pub use error::{Callback, RunError, UnknownWindow, WindowError};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-pub use handler::{Handler, PrepareAction};
+pub use handler::{ErrorAction, Handler, PrepareAction};
 pub use policy::{CloseResponse, InvalidWindowMetrics, RedrawMode, SurfaceSettings, WindowMetrics};
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub use runner::{AppContext, Runner, RunnerOptions};

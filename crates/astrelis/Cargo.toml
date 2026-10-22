@@ -9,7 +9,11 @@ authors.workspace = true
 repository.workspace = true
 readme = "../../README.md"
 
+[features]
+gles = ["wgpu/gles"]
+
 [dependencies]
+log.workspace = true
 bytemuck.workspace = true
 profiling.workspace = true
 cosmic-text.workspace = true

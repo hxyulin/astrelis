@@ -102,3 +102,30 @@ fn recovery_counter_cannot_wrap_even_at_maximum_limit() {
     assert!(s.lost(u32::MAX));
     assert!(!s.lost(u32::MAX));
 }
+
+#[test]
+fn persistent_surface_loss_backs_off_but_stays_schedulable() {
+    let mut schedule = Schedule::default();
+    let now = Instant::now();
+    let base = Duration::from_millis(16);
+    for attempt in 1..=100 {
+        schedule.lost(3);
+        let delay = schedule.recovery_delay(base, 3);
+        if attempt <= 3 {
+            assert_eq!(delay, base);
+        }
+        if attempt > 9 {
+            assert_eq!(delay, Duration::from_secs(1));
+        }
+        schedule.retry(now, delay);
+        schedule.invalidate();
+        assert!(!schedule.request_native(now, true));
+        assert!(!schedule.request_native(now + delay, false));
+        assert!(schedule.request_native(now + delay, true));
+        schedule.begin_redraw();
+    }
+    schedule.submitted();
+    assert_eq!(schedule.recovery_delay(base, 3), base);
+    schedule.recoveries = u32::MAX;
+    assert_eq!(schedule.recovery_delay(Duration::MAX, 3), Duration::MAX);
+}
