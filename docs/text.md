@@ -537,3 +537,73 @@ and representation metadata. The
 [distance-field report](performance/text-distance-fields.md) records preparation cost
 and fill comparisons before adding effects. PreparedText::raster_options() is replaced
 by preparation() and raster_scale().
+
+## Visible document snapshots
+
+`TextBuffer::layout_viewport(&mut system, y_start..y_end)` builds an immutable
+`TextLayout` containing only visual lines whose line boxes intersect that half-open
+document Y range. Filtering happens before Astrelis copies glyphs, retains selected
+fonts or creates decoration rectangles. Pass this snapshot directly to
+`prepare_text`, `prepare_texts` or `request_glyphs`; those APIs generate geometry and
+raster work only for retained glyphs. No fully generated GPU payload is clipped to
+implement this API. `layout()` continues to return the complete document.
+
+```rust
+use astrelis::{TextBuffer, TextStyle, TextSystem};
+let mut fonts = TextSystem::new();
+fonts.load_font(include_bytes!("../crates/astrelis/tests/fonts/SourceSans3-Regular.otf"))?;
+let mut document = TextBuffer::new();
+document.set_text(&"log entry\n".repeat(10_000), TextStyle::new())?;
+document.set_width(Some(800.))?;
+let scroll_y = 12_000.;
+let height = 600.;
+let overscan = 44.;
+let visible = document.layout_viewport(
+    &mut fonts, scroll_y - overscan..scroll_y + height + overscan)?;
+let total_height = visible.size()[1]; // exact, including offscreen lines
+assert!(visible.lines().len() < visible.total_line_count());
+// Prepare visible, then draw at [origin_x, origin_y - scroll_y].
+// Hit test using [pointer_x - origin_x, pointer_y - origin_y + scroll_y].
+# Ok::<(), astrelis::TextError>(())
+```
+
+Applications own scroll position, overscan, clipping, redraws, worker cancellation,
+resource lifetimes and draw order. Ranges are finite and ordered; negative ranges
+and overscroll are allowed and never clamped. Empty or fully off-document ranges
+retain no lines or glyphs but still return the exact total size. Clamp scroll to
+`0..=(total_height - viewport_height).max(0.)` if that is the application's policy.
+This is vertical line culling: a selected long unwrapped line retains all its glyphs.
+Ink and decorations may exceed their line boxes; use overscan and the existing
+pass clip/scissor APIs to handle that deliberately.
+
+All positions stay in document units. `text()`, paragraph indices, source clusters
+and interaction positions use original whole-buffer UTF-8 offsets, including
+CR/LF/CRLF/LFCR endings. `size()` and `total_line_count()` describe the full document;
+`line_range()` maps retained lines to full visual-line indices. Glyph, decoration
+and caret line indices index the snapshot's own `lines()` slice. `visual_line_source(index)`
+preserves the logical extent of a wrapped line even when neighbors are absent.
+The last full and last viewport snapshots have separate caches; an identical
+viewport evaluation returns the same Arc, and old snapshots survive edits.
+Positions belong to their source snapshot; applications remap selections after edits.
+
+Hit testing, grapheme boundaries, ligature carets and bidi affinity follow the full
+layout contract. Hit tests clamp to retained lines. A caret outside retained content
+returns `None`; at a viewport edge, an unavailable wrap/bidi affinity can fall back
+to the retained side. Visual navigation stops at retained edges. Selection endpoints
+are validated against whole-document grapheme/atomic paragraph-break boundaries,
+but rectangles cover retained lines only. Missing-glyph reports likewise cover
+retained lines. Scroll/re-evaluate to request geometry elsewhere.
+
+This is **bounded snapshot and preparation geometry**, with **exact total size**,
+not an O(visible) document engine. A cold seek shapes and reflows every paragraph;
+backend shaped glyphs and wrapped runs remain retained for the full document.
+Scrolling scans paragraph offsets and all visual-line metrics, then copies only
+selected lines. Width, wrapping, font or metric changes can require full reflow;
+a content edit reshapes the complete changed paragraph. In particular a long single
+paragraph still incurs full paragraph shaping/reflow, and an unwrapped one cannot
+benefit from vertical culling. Source validation and rich-span processing also
+visit the document. The lazy interaction index currently segments the full source
+text to validate arbitrary selection endpoints, though it builds cells/rectangles
+only for retained lines. `measure()` still evaluates a full snapshot; use the
+viewport snapshot's exact `size()` for scroll bounds without invoking it.
+See [viewport measurements](performance/text-viewport.md) for reproducible costs.

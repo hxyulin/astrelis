@@ -1,0 +1,4 @@
+   Compiling astrelis v0.4.0-dev.0 (/Users/hxyulin/.t3/worktrees/astrelis/t3-683690e5/crates/astrelis)
+    Finished `bench` profile [optimized] target(s) in 11.97s
+     Running benches/text_viewport.rs (target/release/deps/text_viewport-0a2bea5232741f48)
+cpu_wall_times_us; samples=3; warmup=1; width=640; viewport=440; fonts=embedded; no_gpu; full_and_view_use_independent_buffers

@@ -124,6 +124,13 @@ pub struct TextLine {
 
 /// Immutable CPU layout snapshot returned as `Arc<TextLayout>`.
 ///
+/// [`super::TextBuffer::layout_viewport`] retains only intersecting visual lines.
+/// Text offsets and positions remain document-relative; size and total line count
+/// describe the full document. Missing glyph reports cover retained lines only.
+/// Interaction returns geometry only for retained content; hit testing clamps to
+/// retained lines and caret affinity can fall back at viewport edges. Selection
+/// validates whole-document boundaries but emits only retained rectangles.
+///
 /// Retains text and selected font instances independently of its buffer/system.
 /// Measurement uses advances and line boxes, not rasterized ink. Width is the
 /// maximum line advance; height includes all line boxes, including a trailing empty
@@ -133,6 +140,10 @@ pub struct TextLine {
 /// it retains no backend buffer and requires no fonts/GPU after layout evaluation.
 #[derive(Debug)]
 pub struct TextLayout {
+    pub(crate) line_sources: Vec<Range<usize>>,
+    pub(crate) viewport: Option<Range<f32>>,
+    pub(crate) line_offset: usize,
+    pub(crate) total_lines: usize,
     pub(crate) system_id: u64,
     pub(crate) text: Arc<str>,
     pub(crate) style: TextStyle,
@@ -146,6 +157,28 @@ pub struct TextLayout {
         OnceLock<Result<Box<super::interaction::Interaction>, super::TextError>>,
 }
 impl TextLayout {
+    /// Requested document Y range, or `None` for a full layout. Only intersecting
+    /// line boxes have glyph/decoration geometry. Ink can extend past line boxes.
+    pub fn viewport(&self) -> Option<Range<f32>> {
+        self.viewport.clone()
+    }
+    /// Indices of retained lines in the full layout. Empty snapshots return `0..0`.
+    /// Glyph, decoration and caret line indices instead index this snapshot's lines.
+    pub fn line_range(&self) -> Range<usize> {
+        self.line_offset..self.line_offset + self.lines.len()
+    }
+    /// Logical byte extent assigned to a retained visual line, including omitted
+    /// wrap whitespace. Unlike [`TextLine::source`], this covers the wrapped portion,
+    /// preserving interaction when adjacent lines are outside the viewport.
+    /// The index is local to this snapshot. Returns `None` for an absent line.
+    pub fn visual_line_source(&self, line_index: usize) -> Option<Range<usize>> {
+        self.line_sources.get(line_index).cloned()
+    }
+    /// Exact number of visual lines in the document, including offscreen lines.
+    pub fn total_line_count(&self) -> usize {
+        self.total_lines
+    }
+
     /// Original UTF-8 content, preserving explicit line endings.
     pub fn text(&self) -> &str {
         &self.text
@@ -158,7 +191,7 @@ impl TextLayout {
     pub fn glyphs(&self) -> &[TextGlyph] {
         &self.glyphs
     }
-    /// All visual line boxes, including empty lines.
+    /// Retained visual line boxes, including empty lines; all lines for full layouts.
     pub fn lines(&self) -> &[TextLine] {
         &self.lines
     }

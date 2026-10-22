@@ -89,3 +89,7 @@ harness = false
 [[bench]]
 name = "glyph_preparation"
 harness = false
+
+[[bench]]
+name = "text_viewport"
+harness = false

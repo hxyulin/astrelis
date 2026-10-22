@@ -1,0 +1,16 @@
+Date: 2026-10-23 Asia/Hong_Kong
+Host: axiom, Apple M5 Max, aarch64-apple-darwin
+OS: Darwin 27.0.0, kernel xnu-13432.1.9~1/RELEASE_ARM64_T6050
+Compiler: rustc 1.99.0 (b940084d7 2026-09-28), LLVM 23.1.1
+Base commit: 2aa231b
+Command: cargo bench -p astrelis --bench text_viewport --locked
+Profile: release, default Cargo settings
+Fonts: repository SourceSans3-Regular.otf and NotoSansArabic.ttf
+Backend: CPU cosmic-text 0.19.0; no GPU initialization in benchmark
+Samples: 1 discarded warmup followed by 3 measured samples per case
+Ordering: full cold, viewport cold, 20 distinct scroll evaluations, full edit, viewport edit
+Viewport: 440 local units high; width constraint 640; line height 22
+Cold: fresh TextBuffer; shared font system already loaded, font caches may be warm
+Edit: insert one ASCII character at middle character boundary, same paragraph count
+Environment: shared development host with concurrent builds; timings are noisy wall times
+GPU regression: headless wgpu Metal on Apple M5 Max, matching framebuffer readbacks

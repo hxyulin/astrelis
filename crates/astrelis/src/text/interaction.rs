@@ -100,11 +100,10 @@ impl Interaction {
                 .collect()
         };
         // Preserve the backend's paired LFCR paragraph break as one boundary too.
-        let breaks: Vec<_> = layout
-            .lines
-            .windows(2)
-            .filter(|p| p[0].paragraph_index != p[1].paragraph_index)
-            .map(|p| p[0].source.end..p[1].source.start)
+        let breaks: Vec<_> = super::cosmic::LineIter::new(layout.text())
+            .filter_map(|(range, ending)| {
+                (ending.as_str().len() > 1).then_some(range.end..range.end + ending.as_str().len())
+            })
             .collect();
         let mut b = 0;
         boundaries.retain(|&i| {
@@ -158,27 +157,11 @@ impl Interaction {
                     combined.push(g);
                 }
             }
-            let first = combined
-                .first()
-                .map_or(line.source.start, |g| boundaries[g.begin]);
-            let begin = if line_index == 0
-                || layout.lines[line_index - 1].paragraph_index != line.paragraph_index
-            {
-                line.source.start
-            } else {
-                first
-            };
-            let end = layout
-                .lines
-                .get(line_index + 1)
-                .filter(|n| n.paragraph_index == line.paragraph_index)
-                .and_then(|n| {
-                    layout.glyphs[n.glyph_range.clone()]
-                        .iter()
-                        .map(|g| g.cluster.start)
-                        .min()
-                })
-                .unwrap_or(line.source.end);
+            let raw_begin = layout.line_sources[line_index].start;
+            let begin = boundaries[boundaries
+                .partition_point(|&b| b <= raw_begin)
+                .saturating_sub(1)];
+            let end = layout.line_sources[line_index].end;
             let mut offset = begin;
             let mut trailing = combined
                 .first()
@@ -313,7 +296,9 @@ impl TextLayout {
     /// Ordinary layout/rendering never builds it. No shaping, rasterization or GPU
     /// upload occurs. Construction sorts clusters and per-line visual stops, with
     /// O(text + glyphs) retained storage. The index belongs to this immutable
-    /// snapshot; initialization is safe to call concurrently.
+    /// snapshot; initialization is safe to call concurrently. Viewport snapshots
+    /// still segment the full source for boundary validation, but build cells only
+    /// for retained lines.
     /// Ligature interiors divide the advance evenly between extended graphemes;
     /// font-specific GDEF ligature caret positions are not used in this milestone.
     pub fn prepare_interaction(&self) -> Result<(), TextError> {

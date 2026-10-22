@@ -5,7 +5,7 @@ use super::{
     span::{Segment, paragraph_attrs, segments},
 };
 use crate::Rect;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, ops::Range, sync::Arc};
 
 /// Retained UTF-8 text and paragraph constraints, evaluated explicitly on the CPU.
 ///
@@ -38,6 +38,7 @@ pub struct TextBuffer {
     text_dirty: bool,
     layout_dirty: bool,
     cached: Option<Arc<TextLayout>>,
+    viewport_cached: Option<Arc<TextLayout>>,
     // Sizes at other widths for the current snapshot, most recent last.
     measured: Vec<(Option<u32>, [f32; 2])>,
 }
@@ -71,8 +72,13 @@ impl TextBuffer {
             text_dirty: true,
             layout_dirty: true,
             cached: None,
+            viewport_cached: None,
             measured: Vec::new(),
         }
+    }
+    #[cfg(test)]
+    pub(super) fn has_full_snapshot(&self) -> bool {
+        self.cached.is_some()
     }
     /// Current original content; explicit line ending bytes are preserved.
     pub fn text(&self) -> &str {
@@ -209,9 +215,60 @@ impl TextBuffer {
     /// with nonempty paragraph content returns `NoFonts` before backend shaping.
     /// A previous snapshot remains valid if evaluation fails.
     pub fn layout(&mut self, system: &mut TextSystem) -> Result<Arc<TextLayout>, TextError> {
+        self.evaluate(system, None)
+    }
+    /// Builds glyphs, decorations and interaction line boxes only for visual lines
+    /// intersecting the half-open document Y range `visible`. Coordinates and UTF-8
+    /// offsets remain document-relative; [`TextLayout::size`] is the exact full size.
+    /// Pass overscan in `visible` to retain lines whose ink extends past their boxes.
+    /// Empty or out-of-document ranges produce no lines. Scroll is never clamped.
+    ///
+    /// This bounds snapshot/GPU geometry, not backend shaping storage or reflow:
+    /// cold evaluation shapes all paragraphs for exact size, scrolling scans line
+    /// metrics, and edits reshape complete changed paragraphs (including long single
+    /// paragraphs). The last full and last visible snapshots are cached separately.
+    /// No GPU work or scheduling occurs. Use the result with ordinary renderer or
+    /// worker glyph preparation APIs, and apply translation/scissoring when drawing.
+    ///
+    /// ```
+    /// use astrelis::{TextBuffer, TextStyle, TextSystem};
+    /// let mut fonts = TextSystem::new();
+    /// let mut document = TextBuffer::new();
+    /// document.set_text(&"\n".repeat(1000), TextStyle::new())?;
+    /// let visible = document.layout_viewport(&mut fonts, 220.0..440.0)?;
+    /// assert_eq!(visible.line_range(), 10..20);
+    /// assert_eq!(visible.total_line_count(), 1001);
+    /// assert_eq!(visible.size()[1], 1001.0 * 22.0);
+    /// # Ok::<(), astrelis::TextError>(())
+    /// ```
+    pub fn layout_viewport(
+        &mut self,
+        system: &mut TextSystem,
+        visible: Range<f32>,
+    ) -> Result<Arc<TextLayout>, TextError> {
+        if !visible.start.is_finite() || !visible.end.is_finite() || visible.start > visible.end {
+            return Err(TextError::InvalidViewport);
+        }
+        self.evaluate(system, Some(visible))
+    }
+    fn evaluate(
+        &mut self,
+        system: &mut TextSystem,
+        visible: Option<Range<f32>>,
+    ) -> Result<Arc<TextLayout>, TextError> {
         let source = (system.id, system.generation);
-        if self.evaluated_system == Some(source) && !self.layout_dirty && !self.text_dirty {
-            return Ok(self.cached.as_ref().unwrap().clone());
+        let changed = self.evaluated_system != Some(source) || self.layout_dirty || self.text_dirty;
+        if !changed {
+            let cached = if visible.is_some() {
+                &self.viewport_cached
+            } else {
+                &self.cached
+            };
+            if let Some(layout) = cached
+                && layout.viewport == visible
+            {
+                return Ok(layout.clone());
+            }
         }
         profiling::scope!("astrelis::TextBuffer::layout");
         if system.backend.db().is_empty() && self.text.chars().any(|c| c != '\r' && c != '\n') {
@@ -252,12 +309,23 @@ impl TextBuffer {
                 self.shaping,
                 &self.segments,
             );
-        } else {
+        } else if changed {
             for line in &mut self.backend.lines {
                 line.set_align(self.align.backend());
             }
         }
-        let mut layout = if system.backend.db().is_empty() {
+        let options = SnapshotOptions {
+            minimum: self.minimum_line_metrics,
+            viewport: visible.clone(),
+            glyph_capacity: if visible.is_none() {
+                self.cached
+                    .as_ref()
+                    .map_or(0, |layout| layout.glyphs().len().min(self.text.len()))
+            } else {
+                0
+            },
+        };
+        let layout = if system.backend.db().is_empty() {
             // cosmic-text requests a default face even for empty paragraphs.
             // Blank text needs only line boxes and must work without a font.
             blank_snapshot(
@@ -267,58 +335,32 @@ impl TextBuffer {
                 self.style.clone(),
                 self.align,
                 self.width,
+                options,
             )?
         } else {
-            self.backend.shape_until_scroll(&mut system.backend, false);
+            if changed {
+                self.backend.shape_until_scroll(&mut system.backend, false);
+            }
             snapshot(
                 &self.backend,
                 system,
                 self.text.clone(),
                 self.style.clone(),
                 &self.segments,
-                self.cached
-                    .as_ref()
-                    .map_or(0, |layout| layout.glyphs().len().min(self.text.len())),
+                options,
             )?
         };
-        if let Some(minimum) = self.minimum_line_metrics {
-            let mut top = 0.;
-            let mut deltas = Vec::with_capacity(layout.lines.len());
-            for line in &mut layout.lines {
-                let ascent = line.ascent.max(minimum.ascent);
-                let descent = line.descent.max(minimum.descent);
-                let height = line.height.max(minimum.height);
-                let baseline = top + (height - ascent - descent) * 0.5 + ascent;
-                let delta = baseline - line.baseline;
-                if !baseline.is_finite() || !(top + height).is_finite() {
-                    return Err(TextError::LayoutOverflow);
-                }
-                for glyph in &mut layout.glyphs[line.glyph_range.clone()] {
-                    glyph.position[1] += delta;
-                    glyph.advance_origin[1] += delta;
-                    if !glyph.position[1].is_finite() || !glyph.advance_origin[1].is_finite() {
-                        return Err(TextError::LayoutOverflow);
-                    }
-                }
-                deltas.push(delta);
-                line.top = top;
-                line.baseline = baseline;
-                line.ascent = ascent;
-                line.descent = descent;
-                line.height = height;
-                top += height;
-            }
-            for decoration in &mut layout.decorations {
-                decoration.rect.y += deltas[decoration.line_index];
-                if !decoration.rect.y.is_finite() || !decoration.rect.bottom().is_finite() {
-                    return Err(TextError::LayoutOverflow);
-                }
-            }
-            layout.size[1] = top;
-        }
         let layout = Arc::new(layout);
-        self.cached = Some(layout.clone());
-        self.measured.clear();
+        if changed {
+            self.cached = None;
+            self.viewport_cached = None;
+            self.measured.clear();
+        }
+        if visible.is_some() {
+            self.viewport_cached = Some(layout.clone());
+        } else {
+            self.cached = Some(layout.clone());
+        }
         self.evaluated_system = Some(source);
         self.text_dirty = false;
         self.layout_dirty = false;
@@ -488,6 +530,12 @@ fn update_paragraphs(
     buffer.set_scroll(cosmic::Scroll::default());
 }
 
+struct SnapshotOptions {
+    glyph_capacity: usize,
+    minimum: Option<TextLineMetrics>,
+    viewport: Option<Range<f32>>,
+}
+
 fn blank_snapshot(
     buffer: &cosmic::Buffer,
     system_id: u64,
@@ -495,29 +543,47 @@ fn blank_snapshot(
     style: TextStyle,
     align: TextAlign,
     width: Option<f32>,
+    options: SnapshotOptions,
 ) -> Result<TextLayout, TextError> {
-    let mut lines = Vec::with_capacity(buffer.lines.len());
+    let SnapshotOptions {
+        minimum, viewport, ..
+    } = options;
+    let mut lines = Vec::new();
+    let mut line_offset = 0;
+    let mut line_sources = Vec::new();
     let mut offset = 0;
     let mut top = 0.;
     for (paragraph_index, line) in buffer.lines.iter().enumerate() {
-        let height = style.line_height;
-        let baseline = top + height / 2.;
+        let (baseline, ascent, descent, height) = adjusted_metrics(
+            top,
+            top + style.line_height / 2.,
+            style.line_height / 2.,
+            style.line_height / 2.,
+            style.line_height,
+            minimum,
+        );
         if !baseline.is_finite() || !(top + height).is_finite() {
             return Err(TextError::LayoutOverflow);
         }
-        lines.push(TextLine {
-            paragraph_index,
-            source: offset..offset,
-            glyph_range: 0..0,
-            top,
-            baseline,
-            ascent: baseline - top,
-            descent: top + height - baseline,
-            height,
-            width: 0.,
-            left: empty_anchor(align, width, false),
-            rtl: false,
-        });
+        if selected(&viewport, top, height) {
+            if lines.is_empty() {
+                line_offset = paragraph_index;
+            }
+            line_sources.push(offset..offset);
+            lines.push(TextLine {
+                paragraph_index,
+                source: offset..offset,
+                glyph_range: 0..0,
+                top,
+                baseline,
+                ascent,
+                descent,
+                height,
+                width: 0.,
+                left: empty_anchor(align, width, false),
+                rtl: false,
+            });
+        }
         offset += line.ending().as_str().len();
         top += height;
     }
@@ -533,6 +599,10 @@ fn blank_snapshot(
         decorations: Vec::new(),
         size: [0., top],
         interaction: Default::default(),
+        viewport,
+        line_sources,
+        line_offset,
+        total_lines: buffer.lines.len(),
     })
 }
 
@@ -542,8 +612,13 @@ fn snapshot(
     text: Arc<str>,
     style: TextStyle,
     segments: &[Segment],
-    glyph_capacity: usize,
+    options: SnapshotOptions,
 ) -> Result<TextLayout, TextError> {
+    let SnapshotOptions {
+        minimum,
+        viewport,
+        glyph_capacity,
+    } = options;
     // Glyph metadata is the index of its segment plus one; zero is the buffer style.
     let color = |metadata: usize| metadata.checked_sub(1).and_then(|i| segments.get(i)?.color);
     // Match the backend's explicit CR/LF/CRLF/LFCR splitting exactly, including a
@@ -560,18 +635,28 @@ fn snapshot(
         text,
         style,
         glyphs: Vec::with_capacity(glyph_capacity),
-        lines: Vec::with_capacity(buffer.lines.len()),
+        lines: if viewport.is_none() {
+            Vec::with_capacity(buffer.lines.len())
+        } else {
+            Vec::new()
+        },
         fonts: Vec::new(),
         missing: Vec::new(),
         decorations: Vec::new(),
         size: [0., 0.],
         interaction: Default::default(),
+        viewport,
+        line_offset: 0,
+        line_sources: Vec::new(),
+        total_lines: 0,
     };
     let mut font_indices = HashMap::new();
     let mut last_font = None;
     // Runs are emitted in order for every layout line of every paragraph.
     let mut layout_line = (usize::MAX, 0);
-    for run in buffer.layout_runs() {
+    let mut runs = buffer.layout_runs().peekable();
+    let mut top = 0.;
+    while let Some(run) = runs.next() {
         layout_line = if layout_line.0 == run.line_i {
             (run.line_i, layout_line.1 + 1)
         } else {
@@ -592,6 +677,29 @@ fn snapshot(
         .any(|v| !v.is_finite())
         {
             return Err(TextError::LayoutOverflow);
+        }
+        let (baseline, ascent, descent, height) = adjusted_metrics(
+            top,
+            run.line_y,
+            metrics.0,
+            metrics.1,
+            run.line_height,
+            minimum,
+        );
+        if !baseline.is_finite() || !(top + height).is_finite() {
+            return Err(TextError::LayoutOverflow);
+        }
+        output.size[0] = output.size[0].max(run.line_w);
+        output.size[1] = top + height;
+        let line_top = top;
+        top += height;
+        let global_line = output.total_lines;
+        output.total_lines += 1;
+        if !selected(&output.viewport, line_top, height) {
+            continue;
+        }
+        if output.lines.is_empty() {
+            output.line_offset = global_line;
         }
         let line_index = output.lines.len();
         let glyph_start = output.glyphs.len();
@@ -642,7 +750,7 @@ fn snapshot(
                 glyph.font_size * glyph.x_offset,
                 -glyph.font_size * glyph.y_offset,
             ];
-            let advance_origin = [glyph.x, run.line_y + glyph.y];
+            let advance_origin = [glyph.x, baseline + glyph.y];
             left = left.min(glyph.x.min(glyph.x + glyph.w));
             let position = [advance_origin[0] + offset[0], advance_origin[1] + offset[1]];
             if position
@@ -706,7 +814,7 @@ fn snapshot(
                     // Offsets are the top of the line above the baseline, in EM.
                     let rect = Rect::new(
                         left,
-                        run.line_y - metrics.offset * size,
+                        baseline - metrics.offset * size,
                         right - left,
                         metrics.thickness * size,
                     );
@@ -726,17 +834,30 @@ fn snapshot(
                 }
             }
         }
-        output.size[0] = output.size[0].max(run.line_w);
-        output.size[1] = output.size[1].max(run.line_top + run.line_height);
+        let begin = if layout_line.1 == 0 {
+            paragraph.start
+        } else {
+            run.glyphs
+                .iter()
+                .map(|g| paragraph.start + g.start)
+                .min()
+                .unwrap_or(paragraph.start)
+        };
+        let end = runs
+            .peek()
+            .filter(|next| next.line_i == run.line_i)
+            .and_then(|next| next.glyphs.iter().map(|g| paragraph.start + g.start).min())
+            .unwrap_or(paragraph.end);
+        output.line_sources.push(begin..end);
         output.lines.push(TextLine {
             paragraph_index: run.line_i,
             source: paragraph.clone(),
             glyph_range: glyph_start..output.glyphs.len(),
-            top: run.line_top,
-            baseline: run.line_y,
-            ascent: metrics.0,
-            descent: metrics.1,
-            height: run.line_height,
+            top: line_top,
+            baseline,
+            ascent,
+            descent,
+            height,
             width: run.line_w,
             left: if left.is_finite() {
                 left
@@ -771,5 +892,34 @@ fn empty_anchor(align: TextAlign, width: Option<f32>, rtl: bool) -> f32 {
         TextAlign::Start if rtl => width,
         TextAlign::End if !rtl => width,
         _ => 0.,
+    }
+}
+
+fn selected(viewport: &Option<Range<f32>>, top: f32, height: f32) -> bool {
+    viewport
+        .as_ref()
+        .is_none_or(|v| v.start < v.end && top < v.end && top + height > v.start)
+}
+
+fn adjusted_metrics(
+    top: f32,
+    baseline: f32,
+    ascent: f32,
+    descent: f32,
+    height: f32,
+    minimum: Option<TextLineMetrics>,
+) -> (f32, f32, f32, f32) {
+    if let Some(minimum) = minimum {
+        let ascent = ascent.max(minimum.ascent);
+        let descent = descent.max(minimum.descent);
+        let height = height.max(minimum.height);
+        (
+            top + (height - ascent - descent) * 0.5 + ascent,
+            ascent,
+            descent,
+            height,
+        )
+    } else {
+        (baseline, ascent, descent, height)
     }
 }

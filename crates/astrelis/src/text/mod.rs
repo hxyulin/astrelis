@@ -8,7 +8,9 @@
 //! and returns an immutable, shared [`TextLayout`]; an unchanged buffer returns
 //! the same snapshot without reshaping. Width/wrap/alignment changes retain shaped
 //! runs. Content edits retain matching leading/trailing paragraphs and reshape the
-//! changed paragraphs; snapshots still traverse the full document. Snapshots own
+//! changed paragraphs. [`TextBuffer::layout_viewport`] copies only visible visual
+//! lines into snapshots and GPU preparation, with exact total size; backend reflow
+//! and scrolling metric scans still visit the document. Snapshots own
 //! their source text and font references, so they survive later
 //! edits, font loading, and dropping the system. No GPU initialization is required.
 //!
@@ -161,6 +163,8 @@ pub enum TextError {
     InvalidStyle,
     /// Width must be finite and nonnegative, or `None` for unconstrained width.
     InvalidWidth,
+    /// Viewport endpoints must be finite and ordered.
+    InvalidViewport,
     /// Nonempty content requires at least one usable font.
     NoFonts,
     /// Selected font data cannot be loaded or parsed.
@@ -178,6 +182,7 @@ impl std::fmt::Display for TextError {
         f.write_str(match self {
             Self::InvalidFont => "font data contains no usable faces",
             Self::InvalidStyle => "text metrics must be positive and finite, weight in 1..=1000, tracking finite, and feature tags printable ASCII",
+            Self::InvalidViewport => "text viewport must use finite ordered endpoints",
             Self::InvalidWidth => "text width must be finite and nonnegative",
             Self::NoFonts => "load a font before laying out nonempty text",
             Self::FontUnavailable => "selected font data is unavailable or invalid",
@@ -194,3 +199,6 @@ mod tests;
 
 #[cfg(test)]
 mod interaction_tests;
+
+#[cfg(test)]
+mod viewport_tests;
