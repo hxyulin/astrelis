@@ -196,8 +196,13 @@ impl<'window> RenderTarget<'window> {
             depth_stencil_usage,
         )?;
         validate_sample_count(format, sample_count, &supported_sample_counts)?;
-        let multisample_view =
-            create_multisample_view(graphics, format, [width, height], sample_count);
+        let multisample_view = create_multisample_view(
+            graphics,
+            configuration.format,
+            format,
+            [width, height],
+            sample_count,
+        );
         let mut target = SurfaceTarget {
             surface,
             graphics: graphics.clone(),
@@ -283,6 +288,7 @@ impl<'window> RenderTarget<'window> {
         target.size = [width, height];
         target.multisample_view = create_multisample_view(
             &target.graphics,
+            target.configuration.format,
             target.format,
             target.size,
             target.sample_count,
@@ -402,8 +408,13 @@ impl<'window> RenderTarget<'window> {
             return Ok(());
         }
         validate_sample_count(format, count, &target.supported_sample_counts)?;
-        target.multisample_view =
-            create_multisample_view(&target.graphics, format, target.size, count);
+        target.multisample_view = create_multisample_view(
+            &target.graphics,
+            target.configuration.format,
+            format,
+            target.size,
+            count,
+        );
         target.depth_stencil = crate::depth_stencil::allocate(
             &target.graphics,
             target.size,
@@ -569,6 +580,7 @@ pub(crate) fn sample_counts(usable: wgpu::TextureFormatFeatures) -> Vec<u32> {
 pub(crate) fn create_multisample_view(
     graphics: &GraphicsContext,
     format: wgpu::TextureFormat,
+    view_format: wgpu::TextureFormat,
     [width, height]: [u32; 2],
     sample_count: u32,
 ) -> Option<wgpu::TextureView> {
@@ -587,9 +599,19 @@ pub(crate) fn create_multisample_view(
         dimension: wgpu::TextureDimension::D2,
         format,
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        view_formats: &[],
+        // Match the resolve destination's storage and view formats. WebGPU
+        // canvases use linear storage with sRGB views. Mixing sRGB MSAA storage
+        // with a linear resolve texture can lose sRGB encoding in browser backends.
+        view_formats: if format == view_format {
+            &[]
+        } else {
+            std::slice::from_ref(&view_format)
+        },
     });
-    Some(texture.create_view(&Default::default()))
+    Some(texture.create_view(&wgpu::TextureViewDescriptor {
+        format: Some(view_format),
+        ..Default::default()
+    }))
 }
 
 impl SurfaceTarget<'_> {

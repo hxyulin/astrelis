@@ -1,0 +1,14 @@
+{
+  "name": "astrelis-web-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "sh build.sh",
+    "serve": "python3 -m http.server 8080 --bind 127.0.0.1",
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "pngjs": "7.0.0"
+  }
+}

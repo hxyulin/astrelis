@@ -491,16 +491,20 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
                 graphics.device().features().contains(native_feature)
             );
             assert!(
-                crate::target::create_multisample_view(&graphics, format, [64, 64], 1).is_none()
+                crate::target::create_multisample_view(&graphics, format, format, [64, 64], 1)
+                    .is_none()
             );
             assert!(
-                crate::target::create_multisample_view(&graphics, format, [0, 64], 4).is_none()
+                crate::target::create_multisample_view(&graphics, format, format, [0, 64], 4)
+                    .is_none()
             );
             assert!(
-                crate::target::create_multisample_view(&graphics, format, [64, 0], 4).is_none()
+                crate::target::create_multisample_view(&graphics, format, format, [64, 0], 4)
+                    .is_none()
             );
             let resized =
-                crate::target::create_multisample_view(&graphics, format, [32, 48], 4).unwrap();
+                crate::target::create_multisample_view(&graphics, format, format, [32, 48], 4)
+                    .unwrap();
             assert_eq!(
                 resized.texture().size(),
                 wgpu::Extent3d {
@@ -528,8 +532,13 @@ fn multisampling_resolves_edges_and_preserves_samples_across_passes() {
             let mut first = MeshRenderer::new(&graphics);
             let mut second = MeshRenderer::new(&graphics);
             for &count in &counts {
-                let multisample_view =
-                    crate::target::create_multisample_view(&graphics, format, [64, 64], count);
+                let multisample_view = crate::target::create_multisample_view(
+                    &graphics,
+                    format,
+                    format,
+                    [64, 64],
+                    count,
+                );
                 fn attachment<'view>(
                     view: &'view wgpu::TextureView,
                     multisample_view: Option<&'view wgpu::TextureView>,

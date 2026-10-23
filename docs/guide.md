@@ -2,6 +2,7 @@
 
 This guide tours the `astrelis` rendering API and the optional `astrelis-winit`
 integration crate. Each section links to the detailed contract and measurements.
+For browser setup and a runnable canvas example, see [Astrelis for the web](web.md).
 
 Applications own windows, event loops, draw order, and scheduling. `GraphicsContext`
 handles GPU initialization and resource creation. Independent renderers record

@@ -436,6 +436,10 @@
 //! All standalone examples own their windows and event handling. The library
 //! reexports its exact [`wgpu`] version for application-controlled GPU work.
 
+// Browser wgpu handles are !Send/!Sync. Keep the same shared ownership types
+// as native builds; Arc does not imply crossing threads on this target.
+#![cfg_attr(target_arch = "wasm32", allow(clippy::arc_with_non_send_sync))]
+
 mod attachments;
 mod brush;
 mod clip;

@@ -66,7 +66,10 @@ before and after. Include the backend and GPU when you report the result.
 
 CI retains Linux Clippy, tests, docs and MSRV checks. Native macOS/Windows jobs
 compile all workspace targets; a separate `wasm32-unknown-unknown` job checks both
-libraries (the desktop runner is excluded from the wasm API). Reproduce with:
+libraries and the web example (the desktop runner is excluded from the wasm API).
+It also builds wasm bindings and runs Chromium WebGPU pixel and interaction tests
+at 1× and 2× device pixel ratios. See the [web guide](docs/web.md) for browser
+test setup. Reproduce compilation with:
 
 ```sh
 cargo check --workspace --all-targets --locked

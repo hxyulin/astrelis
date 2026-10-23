@@ -1,7 +1,7 @@
 # Text fixtures
 
-These unmodified fonts are embedded only in tests, the headless text example, and
-the CPU benchmark. The library does not embed fonts or implicitly discover system
+These unmodified fonts are embedded in tests, examples (including the web example),
+and benchmarks. The library does not embed fonts or implicitly discover system
 fonts. Both fonts use the SIL Open Font License 1.1; their accompanying license
 files retain the upstream copyright and reserved-name declarations.
 

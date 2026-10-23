@@ -8,6 +8,7 @@
 </p>
 <p align="center">
   <a href="docs/guide.md">Guide</a> ·
+  <a href="docs/web.md">Web</a> ·
   <a href="crates/astrelis/examples">Examples</a> ·
   <a href="docs/performance">Performance</a> ·
   <a href="CONTRIBUTING.md">Contributing</a>
@@ -59,8 +60,9 @@ implementation is tagged [`v0.3`](https://github.com/hxyulin/astrelis/tree/v0.3)
 and kept on the `legacy-v0.3` branch.
 
 Supported backends are Metal, Vulkan, DX12 and WebGPU. The `astrelis-winit`
-runner targets macOS, Windows and Linux; browser and mobile event loops are not
-implemented yet.
+runner targets macOS, Windows and Linux. Browser applications can render directly
+to an HTML canvas with their own event loop; see the [web example and guide](docs/web.md).
+The runner does not implement browser or mobile event loops.
 
 ## Getting started
 
@@ -73,7 +75,7 @@ astrelis = { git = "https://github.com/hxyulin/astrelis" }
 astrelis-winit = { git = "https://github.com/hxyulin/astrelis" } # optional
 ```
 
-Each example is a single file you can copy. It handles its own window, resize,
+Each native example is a single file you can copy. It handles its own window, resize,
 redraw scheduling and surface loss, with no shared support module:
 
 ```sh
@@ -100,6 +102,7 @@ complete set.
 | [Points](docs/points.md) | Dense chart contracts |
 | [Text](docs/text.md) and [distance fields](docs/text-distance-fields.md) | Layout, rendering and scalable text |
 | [Window lifecycle](docs/winit.md) | `astrelis-winit` contexts, the runner and redraw scheduling |
+| [Web](docs/web.md) | WebGPU canvas example, wasm builds, browser integration and tests |
 | [Foundation criteria](docs/foundation.md) | The API and performance bar each feature has to meet |
 
 `cargo doc --workspace --open` builds the API reference.

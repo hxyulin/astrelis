@@ -1,2 +1,7 @@
 /target/
 /.DS_Store
+/examples/web/pkg/
+/examples/web/SourceSans3-OFL.md
+/examples/web/node_modules/
+/examples/web/test-results/
+/examples/web/playwright-report/

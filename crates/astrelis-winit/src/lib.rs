@@ -77,6 +77,8 @@
 //! explicit `AppContext::replace_graphics`; applications request devices and rebuild
 //! resources. See the `device_recovery` example. Async cancellation remains app policy.
 
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+pub mod drag;
 mod error;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 mod handler;

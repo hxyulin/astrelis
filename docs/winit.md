@@ -5,6 +5,12 @@ Status: implemented. `WindowContext` is available for application-owned loops;
 Windows, and Linux. The crate provides standalone triangle, two-window, and custom
 loop examples. RXUI adaptation is deliberately deferred for this milestone.
 
+The desktop-only [`drag` primitives](native-drag.md) provide coordinate mapping,
+observable drag tracking and a native-host capture contract. The winit-only
+backend does not advertise authoritative cross-window targeting or capture-loss
+notification; the `native_drag` two-window example measures geometry/events and
+does not perform automatic docking.
+
 ## Boundary and ownership
 
 Astrelis remains a rendering library without a winit runtime dependency.
@@ -167,6 +173,7 @@ with an existing context or executor. Pending async windows and stale completion
 results remain the caller's responsibility until adoption. A browser spawn API and
 runner-managed asynchronous GPU initialization need a separate lifecycle design;
 native run is not advertised as a browser/mobile event-loop implementation.
+For a browser-owned canvas and async initialization, see [Astrelis for the web](web.md).
 
 Creating a managed window forces it hidden through initialization. Once the
 current callback returns, window_created runs with native window and GPU context
@@ -549,7 +556,9 @@ from application preparation, recording and OS presentation latency.
 The workspace passes unit/GPU tests and compiled rustdoc examples. The integration
 has policy/scheduler regression tests, strict native Clippy checks, and a
 wasm library compile check. The wasm check covers low-level/configuration helpers;
-the desktop runner/handler/context are intentionally not exported on that target.
+the desktop runner/handler are intentionally not exported on that target.
+The low-level `WindowContext` is exported. A separate direct-canvas example and
+Chromium WebGPU regression suite are described in the [web guide](web.md).
 
 A temporary native consumer exercised two shared-device windows, preparation and
 submission invalidations, idle OnDemand, Continuous, Skip, deadline coalescing,

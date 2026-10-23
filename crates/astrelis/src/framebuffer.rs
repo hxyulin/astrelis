@@ -509,6 +509,7 @@ fn allocate(graphics: &GraphicsContext, options: FramebufferOptions) -> Option<A
         multisample_view: target::create_multisample_view(
             graphics,
             options.format,
+            options.format,
             options.size,
             options.sample_count,
         ),

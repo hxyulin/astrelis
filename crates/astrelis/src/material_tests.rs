@@ -159,7 +159,7 @@ fn materials_bind_dynamic_uniforms_and_reuse_prepared_pipelines() {
             .unwrap();
         let prepared_msaa = renderer.pipelines.clone();
         let msaa_view =
-            crate::target::create_multisample_view(&graphics, format, [64, 64], 4).unwrap();
+            crate::target::create_multisample_view(&graphics, format, format, [64, 64], 4).unwrap();
         let multisampled = pixels(&graphics, |encoder, view| {
             let mut pass = RenderPass::new(
                 encoder,
