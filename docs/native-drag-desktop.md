@@ -61,6 +61,31 @@ A native down can be consumed only once. Missing up, deactivation, source key
 loss, closure, destruction, or monitor failure invalidates the lease. Source
 liveness is checked again even after native release but before polling.
 
+AppKit's global [`pressedMouseButtons`](https://developer.apple.com/documentation/appkit/nsevent/pressedmousebuttons) state can report up before its queued
+`LeftMouseUp` reaches the local monitor. A mask-up sample now starts a fixed
+500 ms wait for that native event, keeping public state `Held`. Repeated polls,
+older queued drag events, and later mask-held samples cannot renew or clear the
+deadline. Only an observed matching native up can set `Released`; a missing or
+late up cancels once with no drop. Explicit native liveness loss still cancels
+immediately, including during this wait. Fresh native down retires the old
+gesture and deadline, preserving the new press across old-lease cleanup.
+
+The grace period is a bounded cancellation policy, not proof that AppKit's queue
+has drained. A backlog longer than the bound may still cancel conservatively.
+This fixes a confirmed event-ordering bug; its role in a reported physical
+second-tab preview without transfer still needs post-fix verification. A
+controlled RXUI baseline reproduction stalled its main thread for about 60 ms,
+queued native drag/up, then resumed: the old adapter emitted `Lost` without
+`Released`. Fake-clock tests cover that ordering and the timeout/loss boundaries;
+the RXUI owner runs the matching native integration test separately.
+
+Set `ASTRELIS_NATIVE_DRAG_TRACE=1` (or `RXUI_DOCK_TRACE=1`) to log pending-up
+start, observed release, and terminal loss reasons. `pending-native-up-timeout`
+distinguishes missing/late up from `native-liveness`, `monitor-failure`, Escape,
+or an invalid native up. Liveness diagnostics include application activity,
+notification flags, and source availability. Tracing adds no native hooks and
+is disabled unless one of those variables is present.
+
 `NSWindow.windowNumberAtPoint:belowWindowWithWindowNumber:` selects the frontmost
 native input window, including foreign windows. Unknown window numbers block
 registered destinations. An owned window's native content view is identity-matched
@@ -119,7 +144,7 @@ mbx check --workspace --all-targets --all-features --target x86_64-unknown-linux
 mbx check --workspace --lib --all-features --target wasm32-unknown-unknown --locked
 ```
 
-The macOS native crate has five passing regressions; winit has 26 passing unit
+The macOS native crate has 14 passing regressions; winit has 26 passing unit
 tests and two passing doctests. Its 11 X11 server tests stay ignored in this run
 (their prior real-server validation is described in the X11 notes). Eight Windows
 unit tests plus one ignored interactive native test are compiled, not executed.

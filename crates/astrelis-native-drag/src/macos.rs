@@ -22,8 +22,23 @@ use std::{
         Weak,
         atomic::{AtomicBool, Ordering},
     },
+    time::{Duration, Instant},
 };
 use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+// Global button state can lead the delivered event stream. Give an already
+// acquired gesture time to receive its native up; this is a cancellation bound,
+// never evidence that a release occurred. Polls must not move the deadline.
+const NATIVE_UP_GRACE: Duration = Duration::from_millis(500);
+
+fn trace(args: fmt::Arguments<'_>) {
+    if std::env::var_os("ASTRELIS_NATIVE_DRAG_TRACE").is_some()
+        || std::env::var_os("RXUI_DOCK_TRACE").is_some()
+    {
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr().lock(), "Astrelis native drag: {args}");
+    }
+}
 
 struct Observer(Retained<ProtocolObject<dyn NSObjectProtocol>>);
 impl Drop for Observer {
@@ -69,16 +84,19 @@ struct State {
     phase: Option<CaptureState>,
     last_down: Option<WindowId>,
     release_target: Option<Target>,
+    pending_up_deadline: Option<Instant>,
     signals: Vec<Signal>,
 }
 impl State {
     fn phase(&self) -> CaptureState {
         self.phase.unwrap_or(CaptureState::Idle)
     }
-    fn lost(&mut self) {
+    fn lost(&mut self, reason: &'static str) {
         // Uncertainty also retires a native down not yet adopted by a lease.
         self.last_down = None;
+        self.pending_up_deadline = None;
         if let CaptureState::Held(source) | CaptureState::Released(source) = self.phase() {
+            trace(format_args!("lost source={source:?} reason={reason}"));
             self.phase = Some(CaptureState::Lost(source));
             self.signals.retain(
                 |signal| !matches!(signal, Signal::Released { source: id, .. } if *id == source),
@@ -94,13 +112,76 @@ impl State {
         self.last_down = None;
         true
     }
-    fn validate_capture(&mut self, live: bool, primary_held: bool) {
-        if matches!(
+    fn validate_capture(&mut self, live: bool, primary_held: bool, now: Instant) {
+        if !matches!(
             self.phase(),
             CaptureState::Held(_) | CaptureState::Released(_)
-        ) && (!live || (matches!(self.phase(), CaptureState::Held(_)) && !primary_held))
+        ) {
+            return;
+        }
+        if !live {
+            self.lost("native-liveness");
+            return;
+        }
+        if !matches!(self.phase(), CaptureState::Held(_)) {
+            return;
+        }
+        if let Some(deadline) = self.pending_up_deadline {
+            // A later global Held sample is not a fresh native down. It must
+            // neither rearm this press nor extend/cancel its pending-up deadline.
+            if now >= deadline {
+                self.lost("pending-native-up-timeout");
+            }
+        } else if !primary_held {
+            self.pending_up_deadline = Some(now + NATIVE_UP_GRACE);
+            trace(format_args!(
+                "pending native up source={:?} grace_ms={}",
+                self.phase(),
+                NATIVE_UP_GRACE.as_millis()
+            ));
+        }
+    }
+    fn observed_up(&mut self, source: WindowId, target: Target, position: [f64; 2], now: Instant) {
+        let CaptureState::Held(expected) = self.phase() else {
+            return;
+        };
+        if expected != source {
+            self.lost("native-up-source-mismatch");
+            return;
+        }
+        if self
+            .pending_up_deadline
+            .is_some_and(|deadline| now >= deadline)
         {
-            self.lost();
+            self.lost("pending-native-up-timeout");
+            return;
+        }
+        // Only the actual native-up path can produce Released. A mask sample,
+        // timeout or later button state can never complete this gesture.
+        self.pending_up_deadline = None;
+        self.last_down = None;
+        self.release_target = Some(target);
+        self.phase = Some(CaptureState::Released(source));
+        self.signals.push(Signal::Released { source, position });
+        trace(format_args!(
+            "released source={source:?} reason=observed-native-up target={target:?}"
+        ));
+    }
+    fn native_down(&mut self, source: Option<WindowId>) {
+        self.lost("new-native-down");
+        self.last_down = source;
+    }
+    fn end_capture(&mut self, id: WindowId) {
+        if matches!(self.phase(), CaptureState::Held(s) | CaptureState::Released(s) | CaptureState::Lost(s) if s == id)
+        {
+            self.phase = None;
+            self.release_target = None;
+            self.pending_up_deadline = None;
+            self.signals.retain(|event| match event {
+                Signal::Motion { source, .. }
+                | Signal::Released { source, .. }
+                | Signal::Lost { source } => *source != id,
+            });
         }
     }
     fn source_live(&self, id: WindowId) -> bool {
@@ -114,8 +195,19 @@ impl State {
                 .windows
                 .get(&source)
                 .is_none_or(|r| r.lost.load(Ordering::Acquire));
-            let live = !app_lost && app.isActive() && self.source_live(source) && !native_lost;
-            self.validate_capture(live, NSEvent::pressedMouseButtons() & 1 != 0);
+            let active = app.isActive();
+            let source_live = self.source_live(source);
+            let live = !app_lost && active && source_live && !native_lost;
+            if !live {
+                trace(format_args!(
+                    "liveness source={source:?} app_lost={app_lost} active={active} source_live={source_live} source_notified={native_lost}"
+                ));
+            }
+            self.validate_capture(
+                live,
+                NSEvent::pressedMouseButtons() & 1 != 0,
+                Instant::now(),
+            );
         }
     }
     fn point_in_view(r: &Registration, screen: NSPoint) -> [f64; 2] {
@@ -179,13 +271,13 @@ impl State {
         let kind = event.r#type();
         if kind == NSEventType::LeftMouseDown {
             // A new native down cannot belong to the still-held old gesture.
-            self.lost();
-            self.last_down = event.window(mtm).and_then(|window| {
+            let source = event.window(mtm).and_then(|window| {
                 self.windows
                     .iter()
                     .find(|(_, r)| r.native.windowNumber() == window.windowNumber())
                     .map(|(&id, _)| id)
             });
+            self.native_down(source);
             if let Some(source) = self.last_down
                 && let Some(registration) = self.windows.get(&source)
             {
@@ -199,8 +291,12 @@ impl State {
             }
             return;
         };
-        // Native up comes before pressedMouseButtons can be used as a loss probe.
+        // Process the observed native up without consulting current button state:
+        // global state is independent of this queued event. Explicit loss still
+        // cancels immediately, and an established pending-up deadline is bounded.
         if kind == NSEventType::LeftMouseUp {
+            // Bound waiting for the up's observation, not later hit-test work.
+            let observed_at = Instant::now();
             let source_matches = event.window(mtm).is_some_and(|w| {
                 self.windows
                     .get(&source)
@@ -215,7 +311,7 @@ impl State {
                     .get(&source)
                     .is_none_or(|r| r.lost.load(Ordering::Acquire))
             {
-                self.lost();
+                self.lost("invalid-native-up-liveness-or-source");
                 self.last_down = None;
                 return;
             }
@@ -225,11 +321,9 @@ impl State {
                 .convertPointToScreen(event.locationInWindow());
             let target = self.target(screen, mtm);
             if let Some(position) = self.physical(source, screen) {
-                self.release_target = Some(target);
-                self.phase = Some(CaptureState::Released(source));
-                self.signals.push(Signal::Released { source, position });
+                self.observed_up(source, target, position, observed_at);
             } else {
-                self.lost();
+                self.lost("invalid-source-coordinates");
             }
             self.last_down = None;
             return;
@@ -251,11 +345,11 @@ impl State {
                     self.signals.push(Signal::Motion { source, position });
                 }
             } else {
-                self.lost();
+                self.lost("invalid-source-coordinates");
             }
         }
         if kind == NSEventType::KeyDown && event.keyCode() == 53 {
-            self.lost();
+            self.lost("escape");
         }
     }
 }
@@ -326,7 +420,7 @@ impl Adapter {
         let app = NSApplication::sharedApplication(self.mtm);
         let mut state = self.state.borrow_mut();
         if self.callback_failed.swap(false, Ordering::AcqRel) {
-            state.lost();
+            state.lost("monitor-failure");
         }
         state.refresh(&app, self.app_lost.load(Ordering::Acquire));
     }
@@ -412,24 +506,16 @@ impl Adapter {
         state.signals.clear();
         assert!(state.consume_press(id)); // Acquisition consumes the native down.
         state.release_target = None;
+        state.pending_up_deadline = None;
         state.phase = Some(CaptureState::Held(id));
         Ok(())
     }
     pub(crate) fn end_capture(&mut self, id: WindowId) {
-        let mut state = self.state.borrow_mut();
-        if matches!(state.phase(),CaptureState::Held(s)|CaptureState::Released(s)|CaptureState::Lost(s) if s==id)
-        {
-            // AppKit owns the mouse-down tracking sequence. We only end our lease;
-            // never synthesize mouse-up or terminate a newer OS mouse sequence.
-            state.phase = None;
-            state.release_target = None;
-            state.signals.retain(|e| match e {
-                Signal::Motion { source, .. }
-                | Signal::Released { source, .. }
-                | Signal::Lost { source } => *source != id,
-            });
-        }
+        // AppKit owns the mouse-down tracking sequence. Only end our lease;
+        // preserve a newer native down's eligibility and never synthesize up.
+        self.state.borrow_mut().end_capture(id);
     }
+
     pub(crate) fn capture_state(&mut self) -> CaptureState {
         self.refresh();
         self.state.borrow().phase()
@@ -488,7 +574,7 @@ mod tests {
             last_down: Some(id),
             ..State::default()
         };
-        state.lost();
+        state.lost("test-explicit-loss");
         state.phase = None; // End the lost lease.
         assert!(!state.consume_press(id)); // Holding the button cannot rearm it.
         state.last_down = Some(id); // Only another native down permits a new lease.
@@ -506,11 +592,11 @@ mod tests {
             }],
             ..State::default()
         };
-        state.validate_capture(false, false);
+        state.validate_capture(false, false, Instant::now());
         assert_eq!(state.phase(), CaptureState::Lost(id));
         assert_eq!(state.release_target, None);
         assert_eq!(state.signals, vec![Signal::Lost { source: id }]);
-        state.validate_capture(false, false);
+        state.validate_capture(false, false, Instant::now());
         assert_eq!(state.signals.len(), 1);
     }
     #[test]
@@ -520,11 +606,164 @@ mod tests {
             phase: Some(CaptureState::Released(id)),
             ..State::default()
         };
-        state.validate_capture(true, false);
+        state.validate_capture(true, false, Instant::now());
         assert_eq!(state.phase(), CaptureState::Released(id));
         state.phase = Some(CaptureState::Held(id));
-        state.validate_capture(true, false);
-        assert_eq!(state.phase(), CaptureState::Lost(id));
+        state.validate_capture(true, false, Instant::now());
+        assert_eq!(state.phase(), CaptureState::Held(id));
+        assert!(state.pending_up_deadline.is_some());
+    }
+    fn held() -> State {
+        State {
+            phase: Some(CaptureState::Held(source())),
+            ..State::default()
+        }
+    }
+    #[test]
+    fn queued_up_survives_polls_and_older_drag_after_global_release() {
+        let now = Instant::now();
+        let mut state = held();
+        // Wake/global mask sees physical up ahead of AppKit's queued drag/up.
+        state.validate_capture(true, false, now);
+        let deadline = state.pending_up_deadline.unwrap();
+        // The older queued drag takes the same refresh path as every poll.
+        for ms in [8, 16, 60, 120] {
+            state.validate_capture(true, false, now + Duration::from_millis(ms));
+            assert_eq!(state.phase(), CaptureState::Held(source()));
+            assert_eq!(state.pending_up_deadline, Some(deadline));
+            assert!(state.signals.is_empty()); // The mask never authorizes Up.
+        }
+        state.observed_up(
+            source(),
+            Target::Foreign,
+            [-20., 35.],
+            now + Duration::from_millis(128),
+        );
+        assert_eq!(state.phase(), CaptureState::Released(source()));
+        assert_eq!(state.release_target, Some(Target::Foreign));
+        assert_eq!(state.pending_up_deadline, None);
+        assert_eq!(
+            state.signals,
+            [Signal::Released {
+                source: source(),
+                position: [-20., 35.]
+            }]
+        );
+        // Subsequent mask-up polls and duplicate native Ups cannot change it.
+        state.validate_capture(true, false, now + NATIVE_UP_GRACE * 2);
+        state.observed_up(
+            source(),
+            Target::NoWindow,
+            [0., 0.],
+            now + NATIVE_UP_GRACE * 2,
+        );
+        assert_eq!(state.release_target, Some(Target::Foreign));
+        assert_eq!(state.signals.len(), 1);
+    }
+    #[test]
+    fn pending_up_deadline_is_immutable_even_if_global_mask_returns_held() {
+        let now = Instant::now();
+        let mut state = held();
+        state.validate_capture(true, false, now);
+        let deadline = now + NATIVE_UP_GRACE;
+        for (ms, mask) in [(8, false), (100, true), (240, false), (499, true)] {
+            state.validate_capture(true, mask, now + Duration::from_millis(ms));
+            assert_eq!(state.pending_up_deadline, Some(deadline));
+            assert_eq!(state.phase(), CaptureState::Held(source()));
+        }
+        state.validate_capture(true, true, deadline);
+        assert_eq!(state.phase(), CaptureState::Lost(source()));
+        assert_eq!(state.signals, [Signal::Lost { source: source() }]);
+    }
+    #[test]
+    fn missing_native_up_expires_once_and_cannot_revive() {
+        let now = Instant::now();
+        let mut state = held();
+        state.validate_capture(true, false, now);
+        state.validate_capture(true, false, now + NATIVE_UP_GRACE);
+        state.validate_capture(true, true, now + NATIVE_UP_GRACE * 2);
+        state.validate_capture(false, false, now + NATIVE_UP_GRACE * 3);
+        state.observed_up(
+            source(),
+            Target::Foreign,
+            [1., 2.],
+            now + NATIVE_UP_GRACE * 3,
+        );
+        assert_eq!(state.phase(), CaptureState::Lost(source()));
+        assert_eq!(state.signals, [Signal::Lost { source: source() }]);
+        assert_eq!(state.release_target, None);
+        assert_eq!(state.pending_up_deadline, None);
+        assert!(!state.consume_press(source()));
+    }
+    #[test]
+    fn observed_up_after_deadline_without_intervening_poll_is_rejected() {
+        let now = Instant::now();
+        let mut state = held();
+        state.validate_capture(true, false, now);
+        state.observed_up(source(), Target::NoWindow, [1., 2.], now + NATIVE_UP_GRACE);
+        assert_eq!(state.phase(), CaptureState::Lost(source()));
+        assert_eq!(state.signals, [Signal::Lost { source: source() }]);
+    }
+    #[test]
+    fn explicit_liveness_loss_during_grace_is_immediate() {
+        let now = Instant::now();
+        let mut state = held();
+        state.validate_capture(true, false, now);
+        state.validate_capture(false, true, now + Duration::from_millis(1));
+        assert_eq!(state.phase(), CaptureState::Lost(source()));
+        state.observed_up(
+            source(),
+            Target::Foreign,
+            [1., 2.],
+            now + Duration::from_millis(2),
+        );
+        assert_eq!(state.signals, [Signal::Lost { source: source() }]);
+        assert_eq!(state.release_target, None);
+    }
+    #[test]
+    fn mismatched_native_up_during_grace_cannot_release_source() {
+        let now = Instant::now();
+        let mut state = held();
+        state.validate_capture(true, false, now);
+        state.observed_up(WindowId::from(8_u64), Target::Foreign, [1., 2.], now);
+        assert_eq!(state.phase(), CaptureState::Lost(source()));
+        assert_eq!(state.signals, [Signal::Lost { source: source() }]);
+    }
+    #[test]
+    fn fresh_native_down_before_old_cleanup_retires_deadline_preserves_eligibility() {
+        let now = Instant::now();
+        for next in [source(), WindowId::from(8_u64)] {
+            let mut state = held();
+            state.validate_capture(true, false, now);
+            state.native_down(Some(next));
+            assert_eq!(state.phase(), CaptureState::Lost(source()));
+            assert_eq!(state.pending_up_deadline, None);
+            state.end_capture(source());
+            assert_eq!(state.phase(), CaptureState::Idle);
+            assert!(state.consume_press(next));
+            assert!(!state.consume_press(next));
+            assert!(state.signals.is_empty());
+        }
+    }
+    #[test]
+    fn removing_destination_cannot_clear_source_pending_deadline() {
+        let now = Instant::now();
+        let mut state = held();
+        state.validate_capture(true, false, now);
+        state.end_capture(WindowId::from(8_u64));
+        assert_eq!(state.pending_up_deadline, Some(now + NATIVE_UP_GRACE));
+        state.validate_capture(true, false, now + NATIVE_UP_GRACE);
+        assert_eq!(state.phase(), CaptureState::Lost(source()));
+    }
+    #[test]
+    fn held_button_without_up_sample_does_not_start_a_deadline() {
+        let now = Instant::now();
+        let mut state = held();
+        state.validate_capture(true, true, now);
+        state.validate_capture(true, true, now + Duration::from_secs(60));
+        assert_eq!(state.phase(), CaptureState::Held(source()));
+        assert_eq!(state.pending_up_deadline, None);
+        assert!(state.signals.is_empty());
     }
     #[test]
     fn adapter_rejects_non_main_thread() {
