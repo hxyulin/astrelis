@@ -12,12 +12,14 @@ publish = false
 [features]
 gles = ["astrelis/gles"]
 x11-drag = ["dep:x11rb"]
+desktop-drag = ["dep:astrelis-native-drag"]
 
 [dependencies]
 log.workspace = true
 astrelis = { path = "../astrelis", version = "0.4.0-dev.0" }
 profiling.workspace = true
 winit.workspace = true
+astrelis-native-drag = { path = "../astrelis-native-drag", optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 pollster.workspace = true
@@ -37,3 +39,7 @@ workspace = true
 [[example]]
 name = "native_drag_x11"
 required-features = ["x11-drag"]
+
+[[example]]
+name = "native_drag_desktop"
+required-features = ["desktop-drag"]

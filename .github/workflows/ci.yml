@@ -75,6 +75,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets --locked
 
+      - run: cargo clippy -p astrelis-winit --features desktop-drag --all-targets --locked -- -D warnings
+      # State/ownership regressions only; interactive native tests stay ignored.
+      - run: cargo test -p astrelis-native-drag --locked
+
   wasm:
     name: WebAssembly and WebGPU browser tests
     runs-on: ubuntu-latest

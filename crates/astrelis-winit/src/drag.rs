@@ -17,6 +17,9 @@ use winit::{
 #[cfg(feature = "x11-drag")]
 pub mod x11;
 
+#[cfg(feature = "desktop-drag")]
+pub mod desktop;
+
 /// Coordinate convention shared by geometry snapshots on one desktop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopSpace {
@@ -172,7 +175,7 @@ pub enum NativeDragTarget {
     },
 }
 
-/// Application-provided native integration boundary. Astrelis ships no OS host.
+/// Native integration boundary, implemented by opt-in platform hosts.
 ///
 /// Implementations must not advertise guarantees they cannot supply. In
 /// particular, rectangle iteration, focus, `CursorEntered`, and `Occluded(false)`
@@ -191,8 +194,10 @@ pub trait NativeDragHost {
     /// Acquire unconstrained pointer capture after the initiating button press.
     /// On error, clean up any partially acquired resources before returning.
     fn acquire_capture(&mut self, source: WindowId) -> Result<(), Self::Error>;
-    /// Release capture and resources. Called once after successful acquisition,
-    /// including on guard drop. Must be harmless after native capture was lost.
+    /// End the host's capture lease and resources. Called once after successful
+    /// acquisition, including guard drop. Must be harmless after capture loss.
+    /// When adopting framework-owned native button capture, preserve its lifetime
+    /// and any other button/gesture sharing it; end only this drag's observation.
     fn release_capture(&mut self, source: WindowId);
     /// Resolve the *current* pointer using native stacking/occlusion and current
     /// destination geometry. Must return Unavailable after unreported capture

@@ -7,7 +7,10 @@ native host; the API does not turn geometry guesses into native guarantees.
 The default backend introduces no unsafe code or platform dependencies. The optional
 [`x11-drag` native host](native-drag-x11.md) now supplies server-tested targeting,
 capture and cancellation for its documented X11 subset. It changes primary-input
-ownership and requires explicit host integration; other platforms remain conservative.
+ownership and requires explicit host integration. The experimental
+[`desktop-drag` AppKit/Win32 adapters](native-drag-desktop.md) connect native
+observation through a small isolated bindings crate; interactive validation is
+still pending for those adapters.
 
 ## Available primitives
 
@@ -87,9 +90,9 @@ demonstrates the contract mechanically; it is not an OS adapter.
 
 | Platform | Geometry via winit | Native targeting / capture limits here |
 | --- | --- | --- |
-| macOS | Per-window scale-normalized desktop points | No safe native targeting/capture adapter supplied. Native AppKit integration would need audited ownership/thread rules and safe bindings. |
-| Windows | Desktop physical pixels, destination DPI conversion | winit implicitly captures mouse buttons, but silent capture theft (`WM_CAPTURECHANGED`) only clears internal state, with no public cancellation event. Focus loss cannot detect every theft. No explicit capture/authoritative target adapter supplied. |
-| X11 | Desktop physical pixels when native queries succeed | An implicit button grab is not this crate's explicit capture/loss contract. No X server stacking/input-region/foreign-occlusion query adapter supplied. |
+| macOS | Per-window scale-normalized desktop points | Optional experimental `desktop-drag`: native input targeting, AppKit primary tracking and monitor/notification cancellation. Two-window registration smoke passed; actual drag and mixed-DPI validation pending. |
+| Windows | Desktop physical pixels, destination DPI conversion | Optional experimental `desktop-drag`: subclasses observe release/loss before winit processing and adopt winit capture. Windows 10 PMv2/per-monitor-aware subset; cross-checked, native execution pending. |
+| X11 | Desktop physical pixels when native queries succeed | Optional `x11-drag` host supplies server-tested targeting/capture for its documented standalone X11, primary-button subset. A separate native input bridge is required. |
 | Wayland | General global window positions unavailable; `from_window` returns `None` | winit offers neither general global targeting nor compositor DnD initiation for arbitrary application payloads. A capable compositor/host protocol integration is required; local rectangles cannot repair this. |
 
 Focus, creation order, `CursorEntered`, and `WindowEvent::Occluded(false)` do not
