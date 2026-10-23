@@ -134,6 +134,7 @@ dependencies = [
  "pollster",
  "profiling",
  "winit",
+ "x11rb",
 ]
 
 [[package]]

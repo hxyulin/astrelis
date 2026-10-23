@@ -98,6 +98,23 @@ jobs:
       - run: npm test
         working-directory: examples/web
 
+  x11-drag:
+    name: Native X11 drag host
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb xauth
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p astrelis-winit --features x11-drag --all-targets --locked -- -D warnings
+      - name: Real X server drag regressions
+        run: >-
+          xvfb-run -a -s "-screen 0 1024x768x24 -nolisten tcp -noreset" sh -c
+          'ASTRELIS_X11_TEST_DISPLAY="$DISPLAY" cargo test -p astrelis-winit --features x11-drag --locked --lib drag::x11 -- --ignored'
+      - name: Two-window native drag smoke
+        run: >-
+          xvfb-run -a -s "-screen 0 1024x768x24 -nolisten tcp -noreset" sh -c
+          'ASTRELIS_X11_TEST_DISPLAY="$DISPLAY" cargo run -p astrelis-winit --features x11-drag --example native_drag_x11 --locked -- --smoke'
+
   macos-gpu:
     name: Full tests on macOS Metal hardware
     # Explicit dispatch keeps untrusted PR code off a persistent hardware runner.

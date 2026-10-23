@@ -4,7 +4,10 @@
 policy, previews, and panel transfer. **Reliable automatic cross-window native
 routing is not implemented by the winit-only backend.** Applications can supply a
 native host; the API does not turn geometry guesses into native guarantees.
-No unsafe code, platform dependencies, or toolchain changes are introduced.
+The default backend introduces no unsafe code or platform dependencies. The optional
+[`x11-drag` native host](native-drag-x11.md) now supplies server-tested targeting,
+capture and cancellation for its documented X11 subset. It changes primary-input
+ownership and requires explicit host integration; other platforms remain conservative.
 
 ## Available primitives
 

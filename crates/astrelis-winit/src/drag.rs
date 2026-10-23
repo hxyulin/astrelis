@@ -14,6 +14,9 @@ use winit::{
     window::{Window, WindowId},
 };
 
+#[cfg(feature = "x11-drag")]
+pub mod x11;
+
 /// Coordinate convention shared by geometry snapshots on one desktop.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DesktopSpace {
@@ -180,6 +183,11 @@ pub trait NativeDragHost {
     type Error;
     /// Actual guarantees available on the current display connection.
     fn capabilities(&self) -> NativeDragCapabilities;
+    /// Whether this host supports the initiating button. Defaults to all buttons;
+    /// a primary-only native backend must reject other buttons before capture.
+    fn supports_button(&self, _button: MouseButton) -> bool {
+        true
+    }
     /// Acquire unconstrained pointer capture after the initiating button press.
     /// On error, clean up any partially acquired resources before returning.
     fn acquire_capture(&mut self, source: WindowId) -> Result<(), Self::Error>;
@@ -344,7 +352,7 @@ impl<'a, H: NativeDragHost> CapturedDrag<'a, H> {
         source: WindowId,
         button: MouseButton,
     ) -> Result<Self, DragStartError<H::Error>> {
-        if !host.capabilities().reliable_routing() {
+        if !host.capabilities().reliable_routing() || !host.supports_button(button) {
             return Err(DragStartError::Unsupported);
         }
         host.acquire_capture(source)

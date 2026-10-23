@@ -102,6 +102,7 @@ complete set.
 | [Points](docs/points.md) | Dense chart contracts |
 | [Text](docs/text.md) and [distance fields](docs/text-distance-fields.md) | Layout, rendering and scalable text |
 | [Window lifecycle](docs/winit.md) | `astrelis-winit` contexts, the runner and redraw scheduling |
+| [Native drag](docs/native-drag.md) | Drag mechanics and opt-in [X11 host](docs/native-drag-x11.md), with platform limits |
 | [Web](docs/web.md) | WebGPU canvas example, wasm builds, browser integration and tests |
 | [Foundation criteria](docs/foundation.md) | The API and performance bar each feature has to meet |
 

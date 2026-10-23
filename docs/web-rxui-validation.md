@@ -1,5 +1,10 @@
 # RXUI browser validation — 2026-10-23
 
+This records the browser investigation before the optional X11 backend was added.
+Subsequent [native X11 host work](native-drag-x11.md) passed real-server capture
+and targeting tests; it still needs an RXUI primary-input bridge. The failed
+macOS GPU-window smoke below remains a separate, unchanged validation result.
+
 ## Result and source revisions
 
 RXUI runs in an actual browser/WebAssembly runtime through its `rendering`

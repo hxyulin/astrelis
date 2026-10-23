@@ -11,6 +11,7 @@ publish = false
 
 [features]
 gles = ["astrelis/gles"]
+x11-drag = ["dep:x11rb"]
 
 [dependencies]
 log.workspace = true
@@ -20,6 +21,7 @@ winit.workspace = true
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 pollster.workspace = true
+x11rb = { version = "0.13.2", optional = true, features = ["shape", "xtest"] }
 
 [[bench]]
 name = "lifecycle"
@@ -31,3 +33,7 @@ harness = false
 
 [lints]
 workspace = true
+
+[[example]]
+name = "native_drag_x11"
+required-features = ["x11-drag"]
